@@ -17,7 +17,11 @@
       "Bash(copy:*)",
       "Bash(timeout /t 15 /nobreak)",
       "Bash(git init:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$(cat <<''EOF''\nInitial commit: Aesta Management App\n\nComplete construction site management application with:\n- Company and site dashboards\n- Attendance tracking and work logs\n- Laborer and team management\n- Contracts and payments tracking\n- Expense and salary management\n- Client payment plans and tracking\n- Construction phases management\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")",
+      "Bash(git remote add:*)",
+      "Bash(git branch:*)",
+      "Bash(git push:*)"
     ],
     "deny": [],
     "ask": []

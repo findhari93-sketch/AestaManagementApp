@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Box,
   Button,
@@ -11,7 +11,6 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
-  IconButton,
   LinearProgress,
   MenuItem,
   Paper,
@@ -31,15 +30,8 @@ import {
   FormControl,
   InputLabel,
   Tooltip,
-  alpha,
 } from "@mui/material";
-import {
-  Add,
-  CloudUpload,
-  ReceiptLong,
-  AccessTime,
-  Timeline,
-} from "@mui/icons-material";
+import { Add, ReceiptLong, AccessTime, Timeline } from "@mui/icons-material";
 import { createBrowserClient } from "@supabase/ssr";
 import PageHeader from "@/components/layout/PageHeader";
 import { useSite } from "@/contexts/SiteContext";
@@ -52,6 +44,9 @@ import type {
 import SitePaymentPlanDrawer, {
   type SitePlanUpdatePayload,
 } from "@/components/payments/SitePaymentPlanDrawer";
+import FileUploader, {
+  type UploadedFile,
+} from "@/components/common/FileUploader";
 
 export default function ClientPaymentTracking() {
   const supabase = createBrowserClient<Database>(
@@ -72,14 +67,9 @@ export default function ClientPaymentTracking() {
     message: "",
     severity: "success" as "success" | "error" | "warning" | "info",
   });
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const [uploadingReceipt, setUploadingReceipt] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
-  const [selectedReceiptFile, setSelectedReceiptFile] = useState<File | null>(
+  const [uploadedReceipt, setUploadedReceipt] = useState<UploadedFile | null>(
     null
   );
-  const [receiptDragActive, setReceiptDragActive] = useState(false);
-  const [receiptError, setReceiptError] = useState<string | null>(null);
   const [planDrawerOpen, setPlanDrawerOpen] = useState(false);
   const [planSource, setPlanSource] = useState<"site" | "client" | null>(null);
   const [siteContractValue, setSiteContractValue] = useState(0);
@@ -110,19 +100,7 @@ export default function ClientPaymentTracking() {
     amount: 0,
     transaction_reference: "",
     notes: "",
-    receipt_url: "",
   });
-
-  const formatFileSize = (size: number) => {
-    if (!size) return "0 B";
-    const units = ["B", "KB", "MB", "GB"];
-    const i = Math.min(
-      Math.floor(Math.log(size) / Math.log(1024)),
-      units.length - 1
-    );
-    const value = size / Math.pow(1024, i);
-    return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[i]}`;
-  };
 
   // Fetch shared payment plan (site milestones first, fallback to client plan)
   const fetchPlanAndPhases = useCallback(async () => {
@@ -373,58 +351,6 @@ export default function ClientPaymentTracking() {
     }
   };
 
-  const validateReceiptFile = (file: File) => {
-    const allowedTypes = ["application/pdf", "image/png", "image/jpeg"];
-    if (!allowedTypes.includes(file.type)) {
-      return "Only PDF, PNG, or JPG files are allowed.";
-    }
-    const maxSize = 15 * 1024 * 1024; // 15MB
-    if (file.size > maxSize) {
-      return "File size must be 15MB or less.";
-    }
-    return null;
-  };
-
-  // Upload receipt to storage (optional)
-  const uploadReceipt = async (file: File) => {
-    const validationError = validateReceiptFile(file);
-    if (validationError) {
-      setReceiptError(validationError);
-      throw new Error(validationError);
-    }
-
-    setUploadingReceipt(true);
-    setUploadProgress(10);
-    try {
-      const ext = file.name.split(".").pop();
-      const fileName = `${
-        selectedSiteId || "site"
-      }_client_payment_${Date.now()}.${ext}`;
-      const filePath = `${selectedSiteId || "site"}/${fileName}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from("client-payment-receipts")
-        .upload(filePath, file, {
-          cacheControl: "3600",
-          upsert: true,
-        });
-      if (uploadError) throw uploadError;
-
-      const {
-        data: { publicUrl },
-      } = supabase.storage
-        .from("client-payment-receipts")
-        .getPublicUrl(filePath);
-
-      setUploadProgress(100);
-      setReceiptError(null);
-      return publicUrl;
-    } finally {
-      setUploadingReceipt(false);
-      setTimeout(() => setUploadProgress(0), 1200);
-    }
-  };
-
   // Record Payment
   const handleRecordPayment = async () => {
     if (!selectedSiteId || !paymentForm.amount || paymentForm.amount <= 0) {
@@ -437,13 +363,6 @@ export default function ClientPaymentTracking() {
     }
 
     try {
-      let receiptUrl = paymentForm.receipt_url;
-      const fileToUpload =
-        selectedReceiptFile || fileInputRef.current?.files?.[0];
-      if (fileToUpload) {
-        receiptUrl = await uploadReceipt(fileToUpload);
-      }
-
       const { error } = await supabase.from("client_payments").insert({
         site_id: selectedSiteId,
         payment_date: paymentForm.payment_date,
@@ -452,7 +371,7 @@ export default function ClientPaymentTracking() {
         transaction_reference: paymentForm.transaction_reference || null,
         notes: paymentForm.notes || null,
         is_verified: true,
-        receipt_url: receiptUrl || null,
+        receipt_url: uploadedReceipt?.url || null,
       } as any);
 
       if (error) throw error;
@@ -469,11 +388,8 @@ export default function ClientPaymentTracking() {
         amount: 0,
         transaction_reference: "",
         notes: "",
-        receipt_url: "",
       });
-      setSelectedReceiptFile(null);
-      setReceiptError(null);
-      if (fileInputRef.current) fileInputRef.current.value = "";
+      setUploadedReceipt(null);
       fetchPayments();
     } catch (err: any) {
       setSnackbar({
@@ -1072,9 +988,7 @@ export default function ClientPaymentTracking() {
         open={paymentDialogOpen}
         onClose={() => {
           setPaymentDialogOpen(false);
-          setSelectedReceiptFile(null);
-          setReceiptError(null);
-          if (fileInputRef.current) fileInputRef.current.value = "";
+          setUploadedReceipt(null);
         }}
         maxWidth="sm"
         fullWidth
@@ -1143,194 +1057,36 @@ export default function ClientPaymentTracking() {
                 setPaymentForm({ ...paymentForm, notes: e.target.value })
               }
             />
-            <Box>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/png,image/jpeg,application/pdf"
-                style={{ display: "none" }}
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (!file) return;
-                  const err = validateReceiptFile(file);
-                  if (err) {
-                    setReceiptError(err);
-                    setSelectedReceiptFile(null);
-                    return;
-                  }
-                  setReceiptError(null);
-                  setSelectedReceiptFile(file);
-                  setPaymentForm({ ...paymentForm, receipt_url: file.name });
-                }}
-              />
-
-              <Paper
-                elevation={0}
-                onDragOver={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  setReceiptDragActive(true);
-                }}
-                onDragLeave={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  setReceiptDragActive(false);
-                }}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  setReceiptDragActive(false);
-                  const file = e.dataTransfer.files?.[0];
-                  if (!file) return;
-                  const err = validateReceiptFile(file);
-                  if (err) {
-                    setReceiptError(err);
-                    setSelectedReceiptFile(null);
-                    return;
-                  }
-                  setReceiptError(null);
-                  setSelectedReceiptFile(file);
-                  setPaymentForm({ ...paymentForm, receipt_url: file.name });
-                }}
-                sx={(theme) => ({
-                  p: 2,
-                  border: "2px dashed",
-                  borderColor: receiptDragActive
-                    ? "primary.main"
-                    : selectedReceiptFile
-                    ? "success.main"
-                    : "divider",
-                  borderRadius: 2,
-                  bgcolor: receiptDragActive
-                    ? alpha(theme.palette.primary.main, 0.08)
-                    : selectedReceiptFile
-                    ? alpha(theme.palette.success.main, 0.05)
-                    : "background.default",
-                  transition: "all 0.2s ease",
-                })}
-              >
-                {uploadingReceipt ? (
-                  <Stack alignItems="center" spacing={1}>
-                    <CircularProgress
-                      size={32}
-                      variant={uploadProgress ? "determinate" : "indeterminate"}
-                      value={uploadProgress || undefined}
-                    />
-                    <Typography variant="body2" color="text.secondary">
-                      Uploading... {uploadProgress ? `${uploadProgress}%` : ""}
-                    </Typography>
-                  </Stack>
-                ) : selectedReceiptFile ? (
-                  <Stack direction="row" spacing={2} alignItems="center">
-                    <Box
-                      sx={(theme) => ({
-                        p: 1.2,
-                        borderRadius: 1,
-                        bgcolor: alpha(theme.palette.success.main, 0.12),
-                        display: "inline-flex",
-                      })}
-                    >
-                      <CloudUpload color="success" />
-                    </Box>
-                    <Box sx={{ flex: 1, minWidth: 0 }}>
-                      <Typography
-                        variant="body2"
-                        fontWeight={600}
-                        noWrap
-                        title={selectedReceiptFile.name}
-                      >
-                        {selectedReceiptFile.name}
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        {formatFileSize(selectedReceiptFile.size)}
-                      </Typography>
-                    </Box>
-                    <Stack direction="row" spacing={1}>
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        onClick={() => fileInputRef.current?.click()}
-                      >
-                        Replace
-                      </Button>
-                      <Button
-                        size="small"
-                        color="error"
-                        onClick={() => {
-                          setSelectedReceiptFile(null);
-                          setPaymentForm({ ...paymentForm, receipt_url: "" });
-                          setReceiptError(null);
-                          if (fileInputRef.current)
-                            fileInputRef.current.value = "";
-                        }}
-                      >
-                        Remove
-                      </Button>
-                    </Stack>
-                  </Stack>
-                ) : (
-                  <Stack alignItems="center" spacing={1}>
-                    <CloudUpload
-                      sx={{
-                        fontSize: 36,
-                        color: receiptDragActive
-                          ? "primary.main"
-                          : "action.disabled",
-                      }}
-                    />
-                    <Typography variant="body2" fontWeight={600} align="center">
-                      {receiptDragActive
-                        ? "Drop your receipt here"
-                        : "Drag & drop receipt (PDF/PNG/JPG)"}
-                    </Typography>
-                    <Typography
-                      variant="caption"
-                      color="text.secondary"
-                      align="center"
-                    >
-                      or
-                    </Typography>
-                    <Button
-                      size="small"
-                      variant="outlined"
-                      onClick={() => fileInputRef.current?.click()}
-                    >
-                      Browse files
-                    </Button>
-                    <Typography
-                      variant="caption"
-                      color="text.secondary"
-                      align="center"
-                    >
-                      Max 15MB • PNG, JPG, PDF
-                    </Typography>
-                  </Stack>
-                )}
-              </Paper>
-              {receiptError && (
-                <Alert severity="error" sx={{ mt: 1 }}>
-                  {receiptError}
-                </Alert>
-              )}
-            </Box>
+            <FileUploader
+              supabase={supabase}
+              bucketName="client-payment-receipts"
+              folderPath={selectedSiteId || "uploads"}
+              fileNamePrefix="receipt"
+              accept="all"
+              maxSizeMB={15}
+              label="Payment Receipt (optional)"
+              helperText="PDF, PNG, JPG • Max 15MB"
+              uploadOnSelect={true}
+              value={uploadedReceipt}
+              onUpload={(file) => setUploadedReceipt(file)}
+              onRemove={() => setUploadedReceipt(null)}
+              onError={(error) =>
+                setSnackbar({ open: true, message: error, severity: "error" })
+              }
+              compact
+            />
           </Stack>
         </DialogContent>
         <DialogActions>
           <Button
             onClick={() => {
               setPaymentDialogOpen(false);
-              setSelectedReceiptFile(null);
-              setReceiptError(null);
-              if (fileInputRef.current) fileInputRef.current.value = "";
+              setUploadedReceipt(null);
             }}
           >
             Cancel
           </Button>
-          <Button
-            onClick={handleRecordPayment}
-            variant="contained"
-            disabled={uploadingReceipt}
-          >
+          <Button onClick={handleRecordPayment} variant="contained">
             Record Payment
           </Button>
         </DialogActions>
