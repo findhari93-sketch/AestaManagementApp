@@ -112,6 +112,9 @@ export default function CompanySitesPage() {
   const [siteMilestones, setSiteMilestones] = useState<
     Record<string, SitePaymentMilestone[]>
   >({});
+  const [sitePayments, setSitePayments] = useState<
+    Record<string, { total: number; count: number }>
+  >({});
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingSite, setEditingSite] = useState<Site | null>(null);
@@ -195,24 +198,45 @@ export default function CompanySitesPage() {
       const ids = siteIds && siteIds.length > 0 ? siteIds : [];
       if (!ids.length) {
         setSiteMilestones({});
+        setSitePayments({});
         return;
       }
 
       try {
-        const { data, error } = await supabase
-          .from("site_payment_milestones")
-          .select("*")
-          .in("site_id", ids)
-          .order("sequence_order", { ascending: true });
+        const [milestonesRes, paymentsRes] = await Promise.all([
+          supabase
+            .from("site_payment_milestones")
+            .select("*")
+            .in("site_id", ids)
+            .order("sequence_order", { ascending: true }),
+          supabase
+            .from("client_payments")
+            .select("site_id, amount")
+            .in("site_id", ids),
+        ]);
 
-        if (error) throw error;
+        if (milestonesRes.error) throw milestonesRes.error;
 
         const grouped: Record<string, SitePaymentMilestone[]> = {};
-        ((data || []) as SitePaymentMilestone[]).forEach((m) => {
+        ((milestonesRes.data || []) as SitePaymentMilestone[]).forEach((m) => {
           if (!grouped[m.site_id]) grouped[m.site_id] = [];
           grouped[m.site_id].push(m);
         });
         setSiteMilestones(grouped);
+
+        // Group payments by site
+        const paymentsBysite: Record<string, { total: number; count: number }> =
+          {};
+        (
+          (paymentsRes.data || []) as { site_id: string; amount: number }[]
+        ).forEach((p) => {
+          if (!paymentsBysite[p.site_id]) {
+            paymentsBysite[p.site_id] = { total: 0, count: 0 };
+          }
+          paymentsBysite[p.site_id].total += p.amount;
+          paymentsBysite[p.site_id].count += 1;
+        });
+        setSitePayments(paymentsBysite);
       } catch (err: any) {
         console.error("Failed to load site milestones", err.message);
       }
@@ -962,9 +986,29 @@ export default function CompanySitesPage() {
             (sum, m) => sum + (m.amount || 0),
             0
           );
-          const paidCount = milestonesForSite.filter(
-            (m) => m.status === "paid"
-          ).length;
+
+          // Calculate paid phases based on actual client payments
+          const paymentData = sitePayments[siteId] || { total: 0, count: 0 };
+          const totalPaid = paymentData.total;
+          const paidPct =
+            contractValue > 0
+              ? Math.round((totalPaid / contractValue) * 100)
+              : 0;
+
+          // Count how many milestones are covered by cumulative payments
+          let cumulative = 0;
+          let paidCount = 0;
+          const sortedMilestones = [...milestonesForSite].sort(
+            (a, b) => (a.sequence_order || 0) - (b.sequence_order || 0)
+          );
+          for (const m of sortedMilestones) {
+            cumulative += m.amount || 0;
+            if (totalPaid >= cumulative) {
+              paidCount++;
+            } else {
+              break;
+            }
+          }
 
           const tooltipContent = (
             <Box sx={{ fontSize: 10, maxWidth: 280 }}>
@@ -978,8 +1022,13 @@ export default function CompanySitesPage() {
                 variant="caption"
                 sx={{ fontSize: 10, display: "block" }}
               >
-                Total: {plannedPct}% of ₹
-                {(plannedAmount || contractValue).toLocaleString("en-IN")}
+                Total: {plannedPct}% of ₹{contractValue.toLocaleString("en-IN")}
+              </Typography>
+              <Typography
+                variant="caption"
+                sx={{ fontSize: 10, display: "block", color: "#00ff40" }}
+              >
+                Paid: ₹{totalPaid.toLocaleString("en-IN")} ({paidPct}%)
               </Typography>
               {milestonesForSite.length > 0 && (
                 <Box
@@ -1226,7 +1275,14 @@ export default function CompanySitesPage() {
         ),
       },
     ],
-    [canEdit, handleViewPdf, handleDelete, handleOpenDialog, siteMilestones]
+    [
+      canEdit,
+      handleViewPdf,
+      handleDelete,
+      handleOpenDialog,
+      siteMilestones,
+      sitePayments,
+    ]
   );
 
   const stats = useMemo(() => {

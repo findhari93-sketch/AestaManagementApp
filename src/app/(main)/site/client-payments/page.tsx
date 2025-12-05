@@ -11,6 +11,7 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  IconButton,
   LinearProgress,
   MenuItem,
   Paper,
@@ -31,7 +32,14 @@ import {
   InputLabel,
   Tooltip,
 } from "@mui/material";
-import { Add, ReceiptLong, AccessTime, Timeline } from "@mui/icons-material";
+import {
+  Add,
+  ReceiptLong,
+  AccessTime,
+  Timeline,
+  Edit,
+  Delete,
+} from "@mui/icons-material";
 import { createBrowserClient } from "@supabase/ssr";
 import PageHeader from "@/components/layout/PageHeader";
 import { useSite } from "@/contexts/SiteContext";
@@ -78,6 +86,7 @@ export default function ClientPaymentTracking() {
   const [planDialogOpen, setPlanDialogOpen] = useState(false);
   const [phaseDialogOpen, setPhaseDialogOpen] = useState(false);
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
+  const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null);
 
   const [planForm, setPlanForm] = useState({
     plan_name: "",
@@ -395,6 +404,101 @@ export default function ClientPaymentTracking() {
       setSnackbar({
         open: true,
         message: `Error recording payment: ${err.message}`,
+        severity: "error",
+      });
+    }
+  };
+
+  // Edit Payment
+  const handleEditPayment = (payment: ClientPayment) => {
+    setEditingPaymentId(payment.id);
+    setPaymentForm({
+      payment_date: payment.payment_date,
+      payment_mode: payment.payment_mode,
+      amount: payment.amount,
+      transaction_reference: payment.transaction_reference || "",
+      notes: payment.notes || "",
+    });
+    if (payment.receipt_url) {
+      setUploadedReceipt({
+        name: "Existing receipt",
+        size: 0,
+        url: payment.receipt_url,
+      });
+    }
+    setPaymentDialogOpen(true);
+  };
+
+  // Update Payment
+  const handleUpdatePayment = async () => {
+    if (!editingPaymentId || !paymentForm.amount || paymentForm.amount <= 0) {
+      setSnackbar({
+        open: true,
+        message: "Please fill all required fields",
+        severity: "error",
+      });
+      return;
+    }
+
+    try {
+      const { error } = await (supabase.from("client_payments") as any)
+        .update({
+          payment_date: paymentForm.payment_date,
+          payment_mode: paymentForm.payment_mode,
+          amount: paymentForm.amount,
+          transaction_reference: paymentForm.transaction_reference || null,
+          notes: paymentForm.notes || null,
+          receipt_url: uploadedReceipt?.url || null,
+        })
+        .eq("id", editingPaymentId);
+
+      if (error) throw error;
+      setSnackbar({
+        open: true,
+        message: "Payment updated successfully!",
+        severity: "success",
+      });
+
+      setPaymentDialogOpen(false);
+      setEditingPaymentId(null);
+      setPaymentForm({
+        payment_date: new Date().toISOString().split("T")[0],
+        payment_mode: "bank_transfer",
+        amount: 0,
+        transaction_reference: "",
+        notes: "",
+      });
+      setUploadedReceipt(null);
+      fetchPayments();
+    } catch (err: any) {
+      setSnackbar({
+        open: true,
+        message: `Error updating payment: ${err.message}`,
+        severity: "error",
+      });
+    }
+  };
+
+  // Delete Payment
+  const handleDeletePayment = async (paymentId: string) => {
+    if (!confirm("Are you sure you want to delete this payment?")) return;
+
+    try {
+      const { error } = await (supabase.from("client_payments") as any)
+        .delete()
+        .eq("id", paymentId);
+
+      if (error) throw error;
+      setSnackbar({
+        open: true,
+        message: "Payment deleted successfully!",
+        severity: "success",
+      });
+      fetchPayments();
+    } catch (err: any) {
+      setSnackbar({
+        open: true,
+        message: `Error deleting payment: ${err.message}`,
         severity: "error",
       });
     }
@@ -748,6 +852,7 @@ export default function ClientPaymentTracking() {
                 <TableCell>Phase Reached</TableCell>
                 <TableCell>Status</TableCell>
                 <TableCell>Receipt</TableCell>
+                <TableCell>Actions</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -842,6 +947,27 @@ export default function ClientPaymentTracking() {
                             None
                           </Typography>
                         )}
+                      </TableCell>
+                      <TableCell>
+                        <Stack direction="row" spacing={0.5}>
+                          <Tooltip title="Edit">
+                            <IconButton
+                              size="small"
+                              onClick={() => handleEditPayment(payment)}
+                            >
+                              <Edit fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title="Delete">
+                            <IconButton
+                              size="small"
+                              color="error"
+                              onClick={() => handleDeletePayment(payment.id)}
+                            >
+                              <Delete fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        </Stack>
                       </TableCell>
                     </TableRow>
                   );
@@ -988,12 +1114,22 @@ export default function ClientPaymentTracking() {
         open={paymentDialogOpen}
         onClose={() => {
           setPaymentDialogOpen(false);
+          setEditingPaymentId(null);
           setUploadedReceipt(null);
+          setPaymentForm({
+            payment_date: new Date().toISOString().split("T")[0],
+            payment_mode: "bank_transfer",
+            amount: 0,
+            transaction_reference: "",
+            notes: "",
+          });
         }}
         maxWidth="sm"
         fullWidth
       >
-        <DialogTitle>Record Client Payment</DialogTitle>
+        <DialogTitle>
+          {editingPaymentId ? "Edit Payment" : "Record Client Payment"}
+        </DialogTitle>
         <DialogContent sx={{ pt: 2 }}>
           <Stack spacing={2}>
             <TextField
@@ -1081,13 +1217,26 @@ export default function ClientPaymentTracking() {
           <Button
             onClick={() => {
               setPaymentDialogOpen(false);
+              setEditingPaymentId(null);
               setUploadedReceipt(null);
+              setPaymentForm({
+                payment_date: new Date().toISOString().split("T")[0],
+                payment_mode: "bank_transfer",
+                amount: 0,
+                transaction_reference: "",
+                notes: "",
+              });
             }}
           >
             Cancel
           </Button>
-          <Button onClick={handleRecordPayment} variant="contained">
-            Record Payment
+          <Button
+            onClick={
+              editingPaymentId ? handleUpdatePayment : handleRecordPayment
+            }
+            variant="contained"
+          >
+            {editingPaymentId ? "Update Payment" : "Record Payment"}
           </Button>
         </DialogActions>
       </Dialog>

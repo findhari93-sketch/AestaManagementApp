@@ -21,7 +21,8 @@
       "Bash(git commit -m \"$(cat <<''EOF''\nInitial commit: Aesta Management App\n\nComplete construction site management application with:\n- Company and site dashboards\n- Attendance tracking and work logs\n- Laborer and team management\n- Contracts and payments tracking\n- Expense and salary management\n- Client payment plans and tracking\n- Construction phases management\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")",
       "Bash(git remote add:*)",
       "Bash(git branch:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(git commit -m \"$(cat <<''EOF''\nRefactor client payments to use reusable FileUploader component\n\n- Created new FileUploader component for consistent file upload UI\n- Refactored client-payments page to use FileUploader\n- Removed duplicate file upload logic and validation\n- Improved code reusability and maintainability\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")"
     ],
     "deny": [],
     "ask": []
