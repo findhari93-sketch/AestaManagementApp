@@ -158,14 +158,15 @@ export default function LaborersPage() {
       };
 
       if (editingLaborer) {
-        const { error } = await supabase
-          .from("laborers")
+        const { error } = await (supabase.from("laborers") as any)
           .update(payload)
           .eq("id", editingLaborer.id);
         if (error) throw error;
         setSuccess("Laborer updated");
       } else {
-        const { error } = await supabase.from("laborers").insert(payload);
+        const { error } = await (supabase.from("laborers") as any).insert(
+          payload
+        );
         if (error) throw error;
         setSuccess("Laborer added");
       }
@@ -182,8 +183,7 @@ export default function LaborersPage() {
     if (!confirm("Deactivate this laborer?")) return;
     try {
       setLoading(true);
-      await supabase
-        .from("laborers")
+      await (supabase.from("laborers") as any)
         .update({ status: "inactive" })
         .eq("id", id);
       await fetchLaborers();

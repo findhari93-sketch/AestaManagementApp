@@ -208,10 +208,19 @@ export default function AttendanceHistoryPage() {
         advancesQuery = advancesQuery.eq("laborer_id", selectedLaborer);
       }
 
-      const { data: advancesData } = await advancesQuery;
+      const { data: advancesData } = await (advancesQuery as any);
 
       const advancesMap = new Map<string, { advance: number; extra: number }>();
-      advancesData?.forEach((adv) => {
+      (
+        advancesData as
+          | {
+              laborer_id: string;
+              date: string;
+              amount: number;
+              transaction_type: string;
+            }[]
+          | null
+      )?.forEach((adv) => {
         const key = `${adv.laborer_id}_${adv.date}`;
         const existing = advancesMap.get(key) || { advance: 0, extra: 0 };
         if (adv.transaction_type === "advance") {

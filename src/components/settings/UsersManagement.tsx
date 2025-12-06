@@ -148,8 +148,7 @@ export default function UsersManagement() {
       };
 
       if (editingUser) {
-        const { error } = await supabase
-          .from("users")
+        const { error } = await (supabase.from("users") as any)
           .update(userData)
           .eq("id", editingUser.id);
 
@@ -167,7 +166,9 @@ export default function UsersManagement() {
         if (authError) throw authError;
 
         // Create user profile
-        const { error: profileError } = await supabase.from("users").insert({
+        const { error: profileError } = await (
+          supabase.from("users") as any
+        ).insert({
           auth_id: authData.user.id,
           ...userData,
         });

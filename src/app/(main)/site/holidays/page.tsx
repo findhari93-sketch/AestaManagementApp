@@ -96,13 +96,12 @@ export default function HolidaysPage() {
     setLoading(true);
     try {
       if (editingHoliday) {
-        const { error } = await supabase
-          .from("site_holidays")
+        const { error } = await (supabase.from("site_holidays") as any)
           .update({ date: form.date, reason: form.reason })
           .eq("id", editingHoliday.id);
         if (error) throw error;
       } else {
-        const { error } = await supabase.from("site_holidays").insert({
+        const { error } = await (supabase.from("site_holidays") as any).insert({
           site_id: selectedSite.id,
           date: form.date,
           reason: form.reason,

@@ -177,12 +177,11 @@ export default function ExpensesPage() {
       };
 
       if (editingExpense) {
-        await supabase
-          .from("expenses")
+        await (supabase.from("expenses") as any)
           .update(payload)
           .eq("id", editingExpense.id);
       } else {
-        await supabase.from("expenses").insert(payload);
+        await (supabase.from("expenses") as any).insert(payload);
       }
       await fetchExpenses();
       setDialogOpen(false);

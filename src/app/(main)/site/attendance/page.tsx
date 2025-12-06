@@ -1,8 +1,8 @@
-'use client'
+"use client";
 
-export const dynamic = 'force-dynamic'
+export const dynamic = "force-dynamic";
 
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useState, useEffect, useMemo } from "react";
 import {
   Box,
   Button,
@@ -25,115 +25,145 @@ import {
   CardContent,
   Grid,
   Collapse,
-} from '@mui/material'
+} from "@mui/material";
 import {
   Save as SaveIcon,
   ExpandMore as ExpandMoreIcon,
   ExpandLess as ExpandLessIcon,
   CheckCircle as CheckCircleIcon,
-} from '@mui/icons-material'
-import { createClient } from '@/lib/supabase/client'
-import { useAuth } from '@/contexts/AuthContext'
-import { useSite } from '@/contexts/SiteContext'
-import PageHeader from '@/components/layout/PageHeader'
-import type { Laborer, BuildingSection } from '@/types/database.types'
-import dayjs from 'dayjs'
+} from "@mui/icons-material";
+import { createClient } from "@/lib/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
+import { useSite } from "@/contexts/SiteContext";
+import PageHeader from "@/components/layout/PageHeader";
+import type { Laborer, BuildingSection } from "@/types/database.types";
+import dayjs from "dayjs";
 
 interface AttendanceEntry {
-  laborer_id: string
-  laborer_name: string
-  category_name: string
-  role_name: string
-  team_name: string | null
-  daily_rate: number
-  work_days: number
-  section_id: string
-  section_name: string
-  hours_worked: number
-  advance_given: number
-  extra_given: number
-  notes: string
-  isExpanded: boolean
+  laborer_id: string;
+  laborer_name: string;
+  category_name: string;
+  role_name: string;
+  team_name: string | null;
+  daily_rate: number;
+  work_days: number;
+  section_id: string;
+  section_name: string;
+  hours_worked: number;
+  advance_given: number;
+  extra_given: number;
+  notes: string;
+  isExpanded: boolean;
 }
 
 interface DailySummary {
-  category: string
-  count: number
-  workDays: number
-  totalAmount: number
+  category: string;
+  count: number;
+  workDays: number;
+  totalAmount: number;
 }
 
 export default function AttendancePage() {
-  const [date, setDate] = useState(dayjs().format('YYYY-MM-DD'))
-  const [laborers, setLaborers] = useState<any[]>([])
-  const [sections, setSections] = useState<BuildingSection[]>([])
-  const [attendanceEntries, setAttendanceEntries] = useState<AttendanceEntry[]>([])
-  const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
-  const [success, setSuccess] = useState('')
-  const [existingAttendance, setExistingAttendance] = useState<Set<string>>(new Set())
-  const [showSummary, setShowSummary] = useState(false)
+  const [date, setDate] = useState(dayjs().format("YYYY-MM-DD"));
+  const [laborers, setLaborers] = useState<any[]>([]);
+  const [sections, setSections] = useState<BuildingSection[]>([]);
+  const [attendanceEntries, setAttendanceEntries] = useState<AttendanceEntry[]>(
+    []
+  );
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [existingAttendance, setExistingAttendance] = useState<Set<string>>(
+    new Set()
+  );
+  const [showSummary, setShowSummary] = useState(false);
 
-  const { userProfile } = useAuth()
-  const { selectedSite } = useSite()
-  const supabase = createClient()
+  const { userProfile } = useAuth();
+  const { selectedSite } = useSite();
+  const supabase = createClient();
 
-  const canEdit = userProfile?.role === 'admin' || userProfile?.role === 'office' || userProfile?.role === 'site_engineer'
+  const canEdit =
+    userProfile?.role === "admin" ||
+    userProfile?.role === "office" ||
+    userProfile?.role === "site_engineer";
 
   const fetchData = async () => {
-    if (!selectedSite) return
+    if (!selectedSite) return;
 
     try {
-      setLoading(true)
-      setError('')
+      setLoading(true);
+      setError("");
 
       // Fetch active laborers with category and role info
       const { data: laborersData, error: laborersError } = await supabase
-        .from('laborers')
-        .select(`
+        .from("laborers")
+        .select(
+          `
           *,
           teams:team_id (name),
           labor_categories:category_id (name),
           labor_roles:role_id (name)
-        `)
-        .eq('status', 'active')
-        .order('name')
+        `
+        )
+        .eq("status", "active")
+        .order("name");
 
-      if (laborersError) throw laborersError
+      if (laborersError) throw laborersError;
+
+      const typedLaborersData = laborersData as
+        | {
+            id: string;
+            name: string;
+            labor_categories: { name: string } | null;
+            labor_roles: { name: string } | null;
+            teams: { name: string } | null;
+            daily_rate: number;
+          }[]
+        | null;
 
       // Fetch sections for the site
       const { data: sectionsData, error: sectionsError } = await supabase
-        .from('building_sections')
-        .select('*')
-        .eq('site_id', selectedSite.id)
-        .order('name')
+        .from("building_sections")
+        .select("*")
+        .eq("site_id", selectedSite.id)
+        .order("name");
 
-      if (sectionsError) throw sectionsError
+      if (sectionsError) throw sectionsError;
 
-      setLaborers(laborersData || [])
-      setSections(sectionsData || [])
+      const typedSectionsData = sectionsData as BuildingSection[] | null;
+
+      setLaborers(typedLaborersData || []);
+      setSections(typedSectionsData || []);
 
       // Fetch existing attendance for the date
       const { data: existingData, error: existingError } = await supabase
-        .from('daily_attendance')
-        .select('laborer_id')
-        .eq('site_id', selectedSite.id)
-        .eq('date', date)
+        .from("daily_attendance")
+        .select("laborer_id")
+        .eq("site_id", selectedSite.id)
+        .eq("date", date);
 
-      if (existingError) throw existingError
+      if (existingError) throw existingError;
 
-      const existingSet = new Set(existingData?.map(a => a.laborer_id) || [])
-      setExistingAttendance(existingSet)
+      const existingSet = new Set(
+        (existingData as { laborer_id: string }[] | null)?.map(
+          (a) => a.laborer_id
+        ) || []
+      );
+      setExistingAttendance(existingSet);
 
       // Initialize attendance entries
-      if (laborersData && sectionsData && sectionsData.length > 0) {
-        const defaultSection = sectionsData[0]
-        const entries: AttendanceEntry[] = laborersData.map((laborer) => ({
+      if (
+        typedLaborersData &&
+        typedSectionsData &&
+        typedSectionsData.length > 0
+      ) {
+        const defaultSection = typedSectionsData[0];
+        const entries: AttendanceEntry[] = typedLaborersData.map((laborer) => ({
           laborer_id: laborer.id,
           laborer_name: laborer.name,
-          category_name: laborer.labor_categories?.name || 'Unknown',
-          role_name: laborer.labor_roles?.name || 'Unknown',
+          category_name: laborer.labor_categories?.name || "Unknown",
+          role_name: laborer.labor_roles?.name || "Unknown",
           team_name: laborer.teams?.name || null,
           daily_rate: laborer.daily_rate || 0,
           work_days: existingSet.has(laborer.id) ? 0 : 1,
@@ -142,21 +172,21 @@ export default function AttendancePage() {
           hours_worked: 8,
           advance_given: 0,
           extra_given: 0,
-          notes: '',
+          notes: "",
           isExpanded: false,
-        }))
-        setAttendanceEntries(entries)
+        }));
+        setAttendanceEntries(entries);
       }
     } catch (err: any) {
-      setError(err.message)
+      setError(err.message);
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
   useEffect(() => {
-    fetchData()
-  }, [selectedSite, date])
+    fetchData();
+  }, [selectedSite, date]);
 
   const handleWorkDaysChange = (laborerId: string, value: number) => {
     setAttendanceEntries((prev) =>
@@ -165,81 +195,94 @@ export default function AttendancePage() {
           ? {
               ...entry,
               work_days: value,
-              hours_worked: value === 0.5 ? 4 : value === 1 ? 8 : value === 1.5 ? 12 : 16,
+              hours_worked:
+                value === 0.5 ? 4 : value === 1 ? 8 : value === 1.5 ? 12 : 16,
             }
           : entry
       )
-    )
-  }
+    );
+  };
 
   const handleSectionChange = (laborerId: string, sectionId: string) => {
-    const section = sections.find((s) => s.id === sectionId)
+    const section = sections.find((s) => s.id === sectionId);
     setAttendanceEntries((prev) =>
       prev.map((entry) =>
         entry.laborer_id === laborerId
-          ? { ...entry, section_id: sectionId, section_name: section?.name || '' }
+          ? {
+              ...entry,
+              section_id: sectionId,
+              section_name: section?.name || "",
+            }
           : entry
       )
-    )
-  }
+    );
+  };
 
   const handleAdvanceChange = (laborerId: string, value: number) => {
     setAttendanceEntries((prev) =>
       prev.map((entry) =>
-        entry.laborer_id === laborerId ? { ...entry, advance_given: value } : entry
+        entry.laborer_id === laborerId
+          ? { ...entry, advance_given: value }
+          : entry
       )
-    )
-  }
+    );
+  };
 
   const handleExtraChange = (laborerId: string, value: number) => {
     setAttendanceEntries((prev) =>
       prev.map((entry) =>
-        entry.laborer_id === laborerId ? { ...entry, extra_given: value } : entry
+        entry.laborer_id === laborerId
+          ? { ...entry, extra_given: value }
+          : entry
       )
-    )
-  }
+    );
+  };
 
   const handleNotesChange = (laborerId: string, value: string) => {
     setAttendanceEntries((prev) =>
       prev.map((entry) =>
         entry.laborer_id === laborerId ? { ...entry, notes: value } : entry
       )
-    )
-  }
+    );
+  };
 
   const toggleExpanded = (laborerId: string) => {
     setAttendanceEntries((prev) =>
       prev.map((entry) =>
-        entry.laborer_id === laborerId ? { ...entry, isExpanded: !entry.isExpanded } : entry
+        entry.laborer_id === laborerId
+          ? { ...entry, isExpanded: !entry.isExpanded }
+          : entry
       )
-    )
-  }
+    );
+  };
 
   const calculateDailyEarnings = (workDays: number, dailyRate: number) => {
-    return workDays * dailyRate
-  }
+    return workDays * dailyRate;
+  };
 
   const handleSubmit = async () => {
     if (!selectedSite) {
-      setError('Please select a site')
-      return
+      setError("Please select a site");
+      return;
     }
 
     if (!canEdit) {
-      setError('You do not have permission to record attendance')
-      return
+      setError("You do not have permission to record attendance");
+      return;
     }
 
     try {
-      setSaving(true)
-      setError('')
-      setSuccess('')
+      setSaving(true);
+      setError("");
+      setSuccess("");
 
-      const activeEntries = attendanceEntries.filter((entry) => entry.work_days > 0)
+      const activeEntries = attendanceEntries.filter(
+        (entry) => entry.work_days > 0
+      );
 
       if (activeEntries.length === 0) {
-        setError('No attendance entries to save')
-        return
+        setError("No attendance entries to save");
+        return;
       }
 
       const attendanceRecords = activeEntries.map((entry) => ({
@@ -250,120 +293,138 @@ export default function AttendancePage() {
         work_days: entry.work_days,
         hours_worked: entry.hours_worked,
         daily_rate_applied: entry.daily_rate,
-        daily_earnings: calculateDailyEarnings(entry.work_days, entry.daily_rate),
+        daily_earnings: calculateDailyEarnings(
+          entry.work_days,
+          entry.daily_rate
+        ),
         entered_by: userProfile?.id,
-      }))
+      }));
 
-      const laborerIds = activeEntries.map((e) => e.laborer_id)
+      const laborerIds = activeEntries.map((e) => e.laborer_id);
       const { error: deleteError } = await supabase
-        .from('daily_attendance')
+        .from("daily_attendance")
         .delete()
-        .eq('site_id', selectedSite.id)
-        .eq('date', date)
-        .in('laborer_id', laborerIds)
+        .eq("site_id", selectedSite.id)
+        .eq("date", date)
+        .in("laborer_id", laborerIds);
 
-      if (deleteError) throw deleteError
+      if (deleteError) throw deleteError;
 
-      const { error: insertError } = await supabase
-        .from('daily_attendance')
-        .insert(attendanceRecords)
+      const { error: insertError } = await (
+        supabase.from("daily_attendance") as any
+      ).insert(attendanceRecords);
 
-      if (insertError) throw insertError
+      if (insertError) throw insertError;
 
       // Handle advances and extras
       const advanceRecords = activeEntries
         .filter((entry) => entry.advance_given > 0 || entry.extra_given > 0)
         .flatMap((entry) => {
-          const records = []
+          const records = [];
           if (entry.advance_given > 0) {
             records.push({
               laborer_id: entry.laborer_id,
               date: date,
               amount: entry.advance_given,
-              transaction_type: 'advance' as const,
-              payment_mode: 'cash' as const,
+              transaction_type: "advance" as const,
+              payment_mode: "cash" as const,
               reason: entry.notes || null,
               given_by: userProfile?.id,
-              deduction_status: 'pending' as const,
+              deduction_status: "pending" as const,
               deducted_amount: 0,
-            })
+            });
           }
           if (entry.extra_given > 0) {
             records.push({
               laborer_id: entry.laborer_id,
               date: date,
               amount: entry.extra_given,
-              transaction_type: 'extra' as const,
-              payment_mode: 'cash' as const,
+              transaction_type: "extra" as const,
+              payment_mode: "cash" as const,
               reason: entry.notes || null,
               given_by: userProfile?.id,
-              deduction_status: 'deducted' as const,
+              deduction_status: "deducted" as const,
               deducted_amount: entry.extra_given,
-            })
+            });
           }
-          return records
-        })
+          return records;
+        });
 
       if (advanceRecords.length > 0) {
-        const { error: advanceError } = await supabase
-          .from('advances')
-          .insert(advanceRecords)
+        const { error: advanceError } = await (
+          supabase.from("advances") as any
+        ).insert(advanceRecords);
 
-        if (advanceError) throw advanceError
+        if (advanceError) throw advanceError;
       }
 
-      setSuccess(`Attendance saved successfully for ${activeEntries.length} laborer(s)`)
-      setShowSummary(true)
-      await fetchData()
+      setSuccess(
+        `Attendance saved successfully for ${activeEntries.length} laborer(s)`
+      );
+      setShowSummary(true);
+      await fetchData();
     } catch (err: any) {
-      setError(err.message)
+      setError(err.message);
     } finally {
-      setSaving(false)
+      setSaving(false);
     }
-  }
+  };
 
   const stats = useMemo(() => {
-    const present = attendanceEntries.filter((e) => e.work_days > 0).length
+    const present = attendanceEntries.filter((e) => e.work_days > 0).length;
     const totalEarnings = attendanceEntries.reduce(
       (sum, e) => sum + calculateDailyEarnings(e.work_days, e.daily_rate),
       0
-    )
-    const totalAdvance = attendanceEntries.reduce((sum, e) => sum + (e.advance_given || 0), 0)
-    const totalExtra = attendanceEntries.reduce((sum, e) => sum + (e.extra_given || 0), 0)
+    );
+    const totalAdvance = attendanceEntries.reduce(
+      (sum, e) => sum + (e.advance_given || 0),
+      0
+    );
+    const totalExtra = attendanceEntries.reduce(
+      (sum, e) => sum + (e.extra_given || 0),
+      0
+    );
 
-    return { present, totalEarnings, totalAdvance, totalExtra }
-  }, [attendanceEntries])
+    return { present, totalEarnings, totalAdvance, totalExtra };
+  }, [attendanceEntries]);
 
   // Calculate daily summary by category
   const dailySummary = useMemo<DailySummary[]>(() => {
-    const summaryMap = new Map<string, DailySummary>()
+    const summaryMap = new Map<string, DailySummary>();
 
     attendanceEntries
       .filter((e) => e.work_days > 0)
       .forEach((entry) => {
-        const category = entry.category_name
+        const category = entry.category_name;
         const existing = summaryMap.get(category) || {
           category,
           count: 0,
           workDays: 0,
           totalAmount: 0,
-        }
-        existing.count += 1
-        existing.workDays += entry.work_days
-        existing.totalAmount += calculateDailyEarnings(entry.work_days, entry.daily_rate)
-        summaryMap.set(category, existing)
-      })
+        };
+        existing.count += 1;
+        existing.workDays += entry.work_days;
+        existing.totalAmount += calculateDailyEarnings(
+          entry.work_days,
+          entry.daily_rate
+        );
+        summaryMap.set(category, existing);
+      });
 
-    return Array.from(summaryMap.values()).sort((a, b) => b.totalAmount - a.totalAmount)
-  }, [attendanceEntries])
+    return Array.from(summaryMap.values()).sort(
+      (a, b) => b.totalAmount - a.totalAmount
+    );
+  }, [attendanceEntries]);
 
   if (!selectedSite) {
     return (
       <Box>
         <PageHeader title="Attendance Entry" showBack={true} />
-        <Alert severity="warning">Please select a site to record attendance</Alert>
+        <Alert severity="warning">
+          Please select a site to record attendance
+        </Alert>
       </Box>
-    )
+    );
   }
 
   return (
@@ -376,13 +437,13 @@ export default function AttendancePage() {
       />
 
       {error && (
-        <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>
+        <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>
           {error}
         </Alert>
       )}
 
       {success && (
-        <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSuccess('')}>
+        <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSuccess("")}>
           {success}
         </Alert>
       )}
@@ -450,7 +511,7 @@ export default function AttendancePage() {
         <TableContainer>
           <Table size="small">
             <TableHead>
-              <TableRow sx={{ bgcolor: 'action.hover' }}>
+              <TableRow sx={{ bgcolor: "action.hover" }}>
                 <TableCell width={40}></TableCell>
                 <TableCell>Laborer</TableCell>
                 <TableCell>Category / Role</TableCell>
@@ -480,8 +541,15 @@ export default function AttendancePage() {
                   <React.Fragment key={entry.laborer_id}>
                     <TableRow hover>
                       <TableCell>
-                        <IconButton size="small" onClick={() => toggleExpanded(entry.laborer_id)}>
-                          {entry.isExpanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+                        <IconButton
+                          size="small"
+                          onClick={() => toggleExpanded(entry.laborer_id)}
+                        >
+                          {entry.isExpanded ? (
+                            <ExpandLessIcon />
+                          ) : (
+                            <ExpandMoreIcon />
+                          )}
                         </IconButton>
                       </TableCell>
                       <TableCell>
@@ -499,18 +567,23 @@ export default function AttendancePage() {
                       </TableCell>
                       <TableCell>
                         <Typography variant="body2" color="text.secondary">
-                          {entry.team_name || '-'}
+                          {entry.team_name || "-"}
                         </Typography>
                       </TableCell>
                       <TableCell>
-                        <Typography variant="body2">₹{entry.daily_rate}</Typography>
+                        <Typography variant="body2">
+                          ₹{entry.daily_rate}
+                        </Typography>
                       </TableCell>
                       <TableCell>
                         <FormControl size="small" sx={{ minWidth: 100 }}>
                           <Select
                             value={entry.work_days}
                             onChange={(e) =>
-                              handleWorkDaysChange(entry.laborer_id, Number(e.target.value))
+                              handleWorkDaysChange(
+                                entry.laborer_id,
+                                Number(e.target.value)
+                              )
                             }
                             disabled={!canEdit}
                           >
@@ -527,7 +600,10 @@ export default function AttendancePage() {
                           <Select
                             value={entry.section_id}
                             onChange={(e) =>
-                              handleSectionChange(entry.laborer_id, e.target.value)
+                              handleSectionChange(
+                                entry.laborer_id,
+                                e.target.value
+                              )
                             }
                             disabled={!canEdit || entry.work_days === 0}
                           >
@@ -541,7 +617,11 @@ export default function AttendancePage() {
                       </TableCell>
                       <TableCell>
                         <Typography variant="body2" fontWeight={600}>
-                          ₹{calculateDailyEarnings(entry.work_days, entry.daily_rate)}
+                          ₹
+                          {calculateDailyEarnings(
+                            entry.work_days,
+                            entry.daily_rate
+                          )}
                         </Typography>
                       </TableCell>
                       <TableCell align="center">
@@ -557,8 +637,12 @@ export default function AttendancePage() {
                     </TableRow>
                     <TableRow>
                       <TableCell colSpan={9} sx={{ py: 0, borderBottom: 0 }}>
-                        <Collapse in={entry.isExpanded} timeout="auto" unmountOnExit>
-                          <Box sx={{ p: 2, bgcolor: 'action.hover' }}>
+                        <Collapse
+                          in={entry.isExpanded}
+                          timeout="auto"
+                          unmountOnExit
+                        >
+                          <Box sx={{ p: 2, bgcolor: "action.hover" }}>
                             <Grid container spacing={2}>
                               <Grid size={{ xs: 12, md: 3 }}>
                                 <TextField
@@ -568,10 +652,13 @@ export default function AttendancePage() {
                                   size="small"
                                   value={entry.advance_given}
                                   onChange={(e) =>
-                                    handleAdvanceChange(entry.laborer_id, Number(e.target.value))
+                                    handleAdvanceChange(
+                                      entry.laborer_id,
+                                      Number(e.target.value)
+                                    )
                                   }
                                   disabled={!canEdit || entry.work_days === 0}
-                                  slotProps={{ input: { startAdornment: '₹' } }}
+                                  slotProps={{ input: { startAdornment: "₹" } }}
                                 />
                               </Grid>
                               <Grid size={{ xs: 12, md: 3 }}>
@@ -582,10 +669,13 @@ export default function AttendancePage() {
                                   size="small"
                                   value={entry.extra_given}
                                   onChange={(e) =>
-                                    handleExtraChange(entry.laborer_id, Number(e.target.value))
+                                    handleExtraChange(
+                                      entry.laborer_id,
+                                      Number(e.target.value)
+                                    )
                                   }
                                   disabled={!canEdit || entry.work_days === 0}
-                                  slotProps={{ input: { startAdornment: '₹' } }}
+                                  slotProps={{ input: { startAdornment: "₹" } }}
                                 />
                               </Grid>
                               <Grid size={{ xs: 12, md: 6 }}>
@@ -595,7 +685,10 @@ export default function AttendancePage() {
                                   size="small"
                                   value={entry.notes}
                                   onChange={(e) =>
-                                    handleNotesChange(entry.laborer_id, e.target.value)
+                                    handleNotesChange(
+                                      entry.laborer_id,
+                                      e.target.value
+                                    )
                                   }
                                   disabled={!canEdit || entry.work_days === 0}
                                   placeholder="Optional notes"
@@ -614,7 +707,7 @@ export default function AttendancePage() {
         </TableContainer>
 
         {canEdit && attendanceEntries.length > 0 && (
-          <Box sx={{ p: 2, display: 'flex', justifyContent: 'flex-end' }}>
+          <Box sx={{ p: 2, display: "flex", justifyContent: "flex-end" }}>
             <Button
               variant="contained"
               size="large"
@@ -622,7 +715,7 @@ export default function AttendancePage() {
               onClick={handleSubmit}
               disabled={saving || loading}
             >
-              {saving ? 'Saving...' : 'Save Attendance'}
+              {saving ? "Saving..." : "Save Attendance"}
             </Button>
           </Box>
         )}
@@ -632,16 +725,33 @@ export default function AttendancePage() {
       {(showSummary || dailySummary.length > 0) && stats.present > 0 && (
         <Paper sx={{ borderRadius: 3, p: 3 }}>
           <Typography variant="h6" fontWeight={600} sx={{ mb: 2 }}>
-            Daily Summary - {dayjs(date).format('DD MMM YYYY')}
+            Daily Summary - {dayjs(date).format("DD MMM YYYY")}
           </Typography>
           <TableContainer>
             <Table size="small">
               <TableHead>
-                <TableRow sx={{ bgcolor: 'primary.main' }}>
-                  <TableCell sx={{ color: 'white', fontWeight: 600 }}>Category</TableCell>
-                  <TableCell sx={{ color: 'white', fontWeight: 600 }} align="center">Count</TableCell>
-                  <TableCell sx={{ color: 'white', fontWeight: 600 }} align="center">Work Days</TableCell>
-                  <TableCell sx={{ color: 'white', fontWeight: 600 }} align="right">Total Amount</TableCell>
+                <TableRow sx={{ bgcolor: "primary.main" }}>
+                  <TableCell sx={{ color: "white", fontWeight: 600 }}>
+                    Category
+                  </TableCell>
+                  <TableCell
+                    sx={{ color: "white", fontWeight: 600 }}
+                    align="center"
+                  >
+                    Count
+                  </TableCell>
+                  <TableCell
+                    sx={{ color: "white", fontWeight: 600 }}
+                    align="center"
+                  >
+                    Work Days
+                  </TableCell>
+                  <TableCell
+                    sx={{ color: "white", fontWeight: 600 }}
+                    align="right"
+                  >
+                    Total Amount
+                  </TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -661,7 +771,7 @@ export default function AttendancePage() {
                     </TableCell>
                   </TableRow>
                 ))}
-                <TableRow sx={{ bgcolor: 'action.hover' }}>
+                <TableRow sx={{ bgcolor: "action.hover" }}>
                   <TableCell>
                     <Typography variant="body2" fontWeight={700}>
                       TOTAL
@@ -678,8 +788,15 @@ export default function AttendancePage() {
                     </Typography>
                   </TableCell>
                   <TableCell align="right">
-                    <Typography variant="body2" fontWeight={700} color="primary.main">
-                      ₹{dailySummary.reduce((sum, r) => sum + r.totalAmount, 0).toLocaleString()}
+                    <Typography
+                      variant="body2"
+                      fontWeight={700}
+                      color="primary.main"
+                    >
+                      ₹
+                      {dailySummary
+                        .reduce((sum, r) => sum + r.totalAmount, 0)
+                        .toLocaleString()}
                     </Typography>
                   </TableCell>
                 </TableRow>
@@ -689,5 +806,5 @@ export default function AttendancePage() {
         </Paper>
       )}
     </Box>
-  )
+  );
 }

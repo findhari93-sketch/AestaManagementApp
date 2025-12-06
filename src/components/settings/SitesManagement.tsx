@@ -130,15 +130,16 @@ export default function SitesManagement() {
       };
 
       if (editingSite) {
-        const { error } = await supabase
-          .from("sites")
+        const { error } = await (supabase.from("sites") as any)
           .update(siteData)
           .eq("id", editingSite.id);
 
         if (error) throw error;
         setSuccess("Site updated successfully");
       } else {
-        const { error } = await supabase.from("sites").insert(siteData);
+        const { error } = await (supabase.from("sites") as any).insert(
+          siteData
+        );
 
         if (error) throw error;
         setSuccess(

@@ -314,14 +314,15 @@ export default function CompanyContractsPage() {
       };
 
       if (editingContract) {
-        const { error } = await (supabase
-          .from("contracts")
-          .update(contractData) as any)
+        const { error } = await (supabase.from("contracts") as any)
+          .update(contractData)
           .eq("id", editingContract.id);
 
         if (error) throw error;
       } else {
-        const { error } = await supabase.from("contracts").insert(contractData);
+        const { error } = await (supabase.from("contracts") as any).insert(
+          contractData
+        );
 
         if (error) throw error;
       }
@@ -341,7 +342,9 @@ export default function CompanyContractsPage() {
 
     setLoading(true);
     try {
-      const { error } = await supabase.from("contracts").delete().eq("id", id);
+      const { error } = await (supabase.from("contracts") as any)
+        .delete()
+        .eq("id", id);
 
       if (error) throw error;
       await fetchContracts();
@@ -385,7 +388,9 @@ export default function CompanyContractsPage() {
 
     setLoading(true);
     try {
-      const { error } = await supabase.from("contract_payments").insert({
+      const { error } = await (
+        supabase.from("contract_payments") as any
+      ).insert({
         contract_id: selectedContract.id,
         payment_type: paymentForm.payment_type,
         amount: paymentForm.amount,
@@ -401,8 +406,7 @@ export default function CompanyContractsPage() {
       const newTotalPaid =
         (selectedContract.total_paid || 0) + paymentForm.amount;
       if (newTotalPaid >= selectedContract.total_value) {
-        await supabase
-          .from("contracts")
+        await (supabase.from("contracts") as any)
           .update({ status: "completed" })
           .eq("id", selectedContract.id);
       }

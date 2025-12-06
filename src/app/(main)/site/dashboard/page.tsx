@@ -1,8 +1,8 @@
-'use client'
+"use client";
 
-export const dynamic = 'force-dynamic'
+export const dynamic = "force-dynamic";
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect } from "react";
 import {
   Box,
   Card,
@@ -17,7 +17,7 @@ import {
   Button,
   Divider,
   Alert,
-} from '@mui/material'
+} from "@mui/material";
 import {
   People,
   AccountBalanceWallet,
@@ -25,7 +25,7 @@ import {
   CalendarToday,
   Payment,
   ArrowForward,
-} from '@mui/icons-material'
+} from "@mui/icons-material";
 import {
   LineChart,
   Line,
@@ -38,42 +38,42 @@ import {
   Tooltip,
   Legend,
   ResponsiveContainer,
-} from 'recharts'
-import { useSite } from '@/contexts/SiteContext'
-import { useAuth } from '@/contexts/AuthContext'
-import { createClient } from '@/lib/supabase/client'
-import { useRouter } from 'next/navigation'
-import PageHeader from '@/components/layout/PageHeader'
-import dayjs from 'dayjs'
+} from "recharts";
+import { useSite } from "@/contexts/SiteContext";
+import { useAuth } from "@/contexts/AuthContext";
+import { createClient } from "@/lib/supabase/client";
+import { useRouter } from "next/navigation";
+import PageHeader from "@/components/layout/PageHeader";
+import dayjs from "dayjs";
 
 interface DashboardStats {
-  todayLaborers: number
-  todayCost: number
-  weekTotal: number
-  pendingSalaries: number
-  activeLaborers: number
-  pendingPaymentAmount: number
+  todayLaborers: number;
+  todayCost: number;
+  weekTotal: number;
+  pendingSalaries: number;
+  activeLaborers: number;
+  pendingPaymentAmount: number;
 }
 
 interface RecentAttendance {
-  date: string
-  laborer_name: string
-  work_days: number
-  daily_earnings: number
+  date: string;
+  laborer_name: string;
+  work_days: number;
+  daily_earnings: number;
 }
 
 interface PendingSalary {
-  laborer_name: string
-  week_ending: string
-  balance_due: number
-  status: string
+  laborer_name: string;
+  week_ending: string;
+  balance_due: number;
+  status: string;
 }
 
 export default function SiteDashboardPage() {
-  const { selectedSite } = useSite()
-  const { userProfile } = useAuth()
-  const router = useRouter()
-  const supabase = createClient()
+  const { selectedSite } = useSite();
+  const { userProfile } = useAuth();
+  const router = useRouter();
+  const supabase = createClient();
 
   const [stats, setStats] = useState<DashboardStats>({
     todayLaborers: 0,
@@ -82,73 +82,99 @@ export default function SiteDashboardPage() {
     pendingSalaries: 0,
     activeLaborers: 0,
     pendingPaymentAmount: 0,
-  })
-  const [recentAttendance, setRecentAttendance] = useState<RecentAttendance[]>([])
-  const [pendingSalaries, setPendingSalaries] = useState<PendingSalary[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
+  });
+  const [recentAttendance, setRecentAttendance] = useState<RecentAttendance[]>(
+    []
+  );
+  const [pendingSalaries, setPendingSalaries] = useState<PendingSalary[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
-  const [weeklyTrendData, setWeeklyTrendData] = useState<any[]>([])
-  const [expenseBreakdown, setExpenseBreakdown] = useState<any[]>([])
+  const [weeklyTrendData, setWeeklyTrendData] = useState<any[]>([]);
+  const [expenseBreakdown, setExpenseBreakdown] = useState<any[]>([]);
 
   useEffect(() => {
     if (selectedSite) {
-      fetchDashboardData()
+      fetchDashboardData();
     }
-  }, [selectedSite])
+  }, [selectedSite]);
 
   const fetchDashboardData = async () => {
-    if (!selectedSite) return
+    if (!selectedSite) return;
 
     try {
-      setLoading(true)
-      setError('')
+      setLoading(true);
+      setError("");
 
-      const today = dayjs().format('YYYY-MM-DD')
-      const weekStart = dayjs().subtract(7, 'days').format('YYYY-MM-DD')
+      const today = dayjs().format("YYYY-MM-DD");
+      const weekStart = dayjs().subtract(7, "days").format("YYYY-MM-DD");
 
       // Fetch today's attendance
       const { data: todayAttendance, error: todayError } = await supabase
-        .from('daily_attendance')
-        .select('work_days, daily_earnings')
-        .eq('site_id', selectedSite.id)
-        .eq('date', today)
+        .from("daily_attendance")
+        .select("work_days, daily_earnings")
+        .eq("site_id", selectedSite.id)
+        .eq("date", today);
 
-      if (todayError) throw todayError
+      if (todayError) throw todayError;
 
-      const todayLaborers = todayAttendance?.length || 0
-      const todayCost = todayAttendance?.reduce((sum, a) => sum + (a.daily_earnings || 0), 0) || 0
+      const typedTodayAttendance = todayAttendance as
+        | { work_days: number; daily_earnings: number }[]
+        | null;
+
+      const todayLaborers = typedTodayAttendance?.length || 0;
+      const todayCost =
+        typedTodayAttendance?.reduce(
+          (sum, a) => sum + (a.daily_earnings || 0),
+          0
+        ) || 0;
 
       // Fetch week's total
       const { data: weekAttendance, error: weekError } = await supabase
-        .from('daily_attendance')
-        .select('daily_earnings')
-        .eq('site_id', selectedSite.id)
-        .gte('date', weekStart)
-        .lte('date', today)
+        .from("daily_attendance")
+        .select("daily_earnings")
+        .eq("site_id", selectedSite.id)
+        .gte("date", weekStart)
+        .lte("date", today);
 
-      if (weekError) throw weekError
+      if (weekError) throw weekError;
 
-      const weekTotal = weekAttendance?.reduce((sum, a) => sum + (a.daily_earnings || 0), 0) || 0
+      const typedWeekAttendance = weekAttendance as
+        | { daily_earnings: number }[]
+        | null;
+
+      const weekTotal =
+        typedWeekAttendance?.reduce(
+          (sum, a) => sum + (a.daily_earnings || 0),
+          0
+        ) || 0;
 
       // Fetch active laborers count
       const { count: activeLaborers, error: laborersError } = await supabase
-        .from('laborers')
-        .select('id', { count: 'exact', head: true })
-        .eq('status', 'active')
+        .from("laborers")
+        .select("id", { count: "exact", head: true })
+        .eq("status", "active");
 
-      if (laborersError) throw laborersError
+      if (laborersError) throw laborersError;
 
       // Fetch pending salaries
       const { data: pendingSalaryData, error: salaryError } = await supabase
-        .from('salary_periods')
-        .select('balance_due, status')
-        .in('status', ['calculated', 'partial'])
+        .from("salary_periods")
+        .select("balance_due, status")
+        .in("status", ["calculated", "partial"]);
 
-      if (salaryError) throw salaryError
+      if (salaryError) throw salaryError;
 
-      const pendingSalaries = pendingSalaryData?.length || 0
-      const pendingPaymentAmount = pendingSalaryData?.reduce((sum, s) => sum + (s.balance_due || 0), 0) || 0
+      const typedPendingSalaryData = pendingSalaryData as
+        | { balance_due: number; status: string }[]
+        | null;
+
+      const pendingSalaries = typedPendingSalaryData?.length || 0;
+      const pendingPaymentAmount =
+        typedPendingSalaryData?.reduce(
+          (sum, s) => sum + (s.balance_due || 0),
+          0
+        ) || 0;
 
       setStats({
         todayLaborers,
@@ -157,118 +183,137 @@ export default function SiteDashboardPage() {
         pendingSalaries,
         activeLaborers: activeLaborers || 0,
         pendingPaymentAmount,
-      })
+      });
 
       // Fetch recent attendance
       const { data: recentData, error: recentError } = await supabase
-        .from('v_active_attendance')
-        .select('date, laborer_name, work_days, daily_earnings')
-        .eq('site_id', selectedSite.id)
-        .order('date', { ascending: false })
-        .limit(5)
+        .from("v_active_attendance")
+        .select("date, laborer_name, work_days, daily_earnings")
+        .eq("site_id", selectedSite.id)
+        .order("date", { ascending: false })
+        .limit(5);
 
-      if (recentError) throw recentError
-      setRecentAttendance(recentData || [])
+      if (recentError) throw recentError;
+      setRecentAttendance(recentData || []);
 
       // Fetch pending salary details
       const { data: pendingSalaryDetails, error: pendingError } = await supabase
-        .from('v_salary_periods_detailed')
-        .select('laborer_name, week_ending, balance_due, status')
-        .in('status', ['calculated', 'partial'])
-        .order('week_ending', { ascending: false })
-        .limit(5)
+        .from("v_salary_periods_detailed")
+        .select("laborer_name, week_ending, balance_due, status")
+        .in("status", ["calculated", "partial"])
+        .order("week_ending", { ascending: false })
+        .limit(5);
 
-      if (pendingError) throw pendingError
-      setPendingSalaries(pendingSalaryDetails || [])
+      if (pendingError) throw pendingError;
+      setPendingSalaries(pendingSalaryDetails || []);
 
       // Fetch weekly trend data
       const last7Days = Array.from({ length: 7 }, (_, i) => {
-        const date = dayjs().subtract(6 - i, 'days')
-        return date.format('YYYY-MM-DD')
-      })
+        const date = dayjs().subtract(6 - i, "days");
+        return date.format("YYYY-MM-DD");
+      });
 
       const trendData = await Promise.all(
         last7Days.map(async (date) => {
           const { data: dayAttendance } = await supabase
-            .from('daily_attendance')
-            .select('daily_earnings')
-            .eq('site_id', selectedSite.id)
-            .eq('date', date)
+            .from("daily_attendance")
+            .select("daily_earnings")
+            .eq("site_id", selectedSite.id)
+            .eq("date", date);
 
           const { data: dayExpenses } = await supabase
-            .from('expenses')
-            .select('amount')
-            .eq('site_id', selectedSite.id)
-            .eq('date', date)
+            .from("expenses")
+            .select("amount")
+            .eq("site_id", selectedSite.id)
+            .eq("date", date);
+
+          const typedDayAttendance = dayAttendance as
+            | { daily_earnings: number }[]
+            | null;
+          const typedDayExpenses = dayExpenses as { amount: number }[] | null;
 
           return {
-            date: dayjs(date).format('DD MMM'),
-            labor: dayAttendance?.reduce((sum, a) => sum + (a.daily_earnings || 0), 0) || 0,
-            expenses: dayExpenses?.reduce((sum, e) => sum + (e.amount || 0), 0) || 0,
-          }
+            date: dayjs(date).format("DD MMM"),
+            labor:
+              typedDayAttendance?.reduce(
+                (sum, a) => sum + (a.daily_earnings || 0),
+                0
+              ) || 0,
+            expenses:
+              typedDayExpenses?.reduce((sum, e) => sum + (e.amount || 0), 0) ||
+              0,
+          };
         })
-      )
-      setWeeklyTrendData(trendData)
+      );
+      setWeeklyTrendData(trendData);
 
       // Fetch expense breakdown
       const { data: expensesData } = await supabase
-        .from('expenses')
-        .select('module, amount')
-        .eq('site_id', selectedSite.id)
-        .gte('date', dayjs().subtract(30, 'days').format('YYYY-MM-DD'))
+        .from("expenses")
+        .select("module, amount")
+        .eq("site_id", selectedSite.id)
+        .gte("date", dayjs().subtract(30, "days").format("YYYY-MM-DD"));
 
-      const expensesByModule = expensesData?.reduce((acc: any, exp) => {
-        acc[exp.module] = (acc[exp.module] || 0) + exp.amount
-        return acc
-      }, {}) || {}
+      const typedExpensesData = expensesData as
+        | { module: string; amount: number }[]
+        | null;
 
-      const expenseBreakdownData = Object.entries(expensesByModule).map(([module, amount]) => ({
-        name: module.charAt(0).toUpperCase() + module.slice(1),
-        value: amount as number,
-      }))
-      setExpenseBreakdown(expenseBreakdownData)
+      const expensesByModule =
+        typedExpensesData?.reduce((acc: any, exp) => {
+          acc[exp.module] = (acc[exp.module] || 0) + exp.amount;
+          return acc;
+        }, {}) || {};
 
+      const expenseBreakdownData = Object.entries(expensesByModule).map(
+        ([module, amount]) => ({
+          name: module.charAt(0).toUpperCase() + module.slice(1),
+          value: amount as number,
+        })
+      );
+      setExpenseBreakdown(expenseBreakdownData);
     } catch (err: any) {
-      setError(err.message)
+      setError(err.message);
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
   const statsCards = [
     {
       title: "Today's Laborers",
-      value: loading ? '...' : stats.todayLaborers.toString(),
+      value: loading ? "..." : stats.todayLaborers.toString(),
       subtitle: `${stats.activeLaborers} total active`,
       icon: <People sx={{ fontSize: 40 }} />,
-      color: '#1976d2',
-      bgColor: '#e3f2fd',
+      color: "#1976d2",
+      bgColor: "#e3f2fd",
     },
     {
       title: "Today's Cost",
-      value: loading ? '...' : `₹${stats.todayCost.toLocaleString()}`,
-      subtitle: 'Labor expenses',
+      value: loading ? "..." : `₹${stats.todayCost.toLocaleString()}`,
+      subtitle: "Labor expenses",
       icon: <AccountBalanceWallet sx={{ fontSize: 40 }} />,
-      color: '#2e7d32',
-      bgColor: '#e8f5e9',
+      color: "#2e7d32",
+      bgColor: "#e8f5e9",
     },
     {
-      title: 'Week Total',
-      value: loading ? '...' : `₹${stats.weekTotal.toLocaleString()}`,
-      subtitle: 'Last 7 days',
+      title: "Week Total",
+      value: loading ? "..." : `₹${stats.weekTotal.toLocaleString()}`,
+      subtitle: "Last 7 days",
       icon: <TrendingUp sx={{ fontSize: 40 }} />,
-      color: '#9c27b0',
-      bgColor: '#f3e5f5',
+      color: "#9c27b0",
+      bgColor: "#f3e5f5",
     },
     {
-      title: 'Pending Payments',
-      value: loading ? '...' : `₹${stats.pendingPaymentAmount.toLocaleString()}`,
+      title: "Pending Payments",
+      value: loading
+        ? "..."
+        : `₹${stats.pendingPaymentAmount.toLocaleString()}`,
       subtitle: `${stats.pendingSalaries} salary periods`,
       icon: <Payment sx={{ fontSize: 40 }} />,
-      color: '#d32f2f',
-      bgColor: '#ffebee',
+      color: "#d32f2f",
+      bgColor: "#ffebee",
     },
-  ]
+  ];
 
   if (!selectedSite) {
     return (
@@ -278,13 +323,13 @@ export default function SiteDashboardPage() {
           subtitle={`Welcome back, ${userProfile?.name}`}
           showBack={false}
         />
-        <Paper sx={{ p: 4, textAlign: 'center', borderRadius: 3 }}>
+        <Paper sx={{ p: 4, textAlign: "center", borderRadius: 3 }}>
           <Typography variant="h6" color="text.secondary">
             Please select a site to view dashboard
           </Typography>
         </Paper>
       </Box>
-    )
+    );
   }
 
   return (
@@ -298,7 +343,7 @@ export default function SiteDashboardPage() {
       />
 
       {error && (
-        <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError('')}>
+        <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError("")}>
           {error}
         </Alert>
       )}
@@ -309,25 +354,29 @@ export default function SiteDashboardPage() {
           <Grid key={index} size={{ xs: 12, sm: 6, md: 3 }}>
             <Card
               sx={{
-                height: '100%',
+                height: "100%",
                 borderRadius: 3,
-                transition: 'transform 0.2s, box-shadow 0.2s',
-                '&:hover': {
-                  transform: 'translateY(-4px)',
-                  boxShadow: '0 8px 16px rgba(0,0,0,0.1)',
+                transition: "transform 0.2s, box-shadow 0.2s",
+                "&:hover": {
+                  transform: "translateY(-4px)",
+                  boxShadow: "0 8px 16px rgba(0,0,0,0.1)",
                 },
               }}
             >
               <CardContent>
                 <Box
                   sx={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'flex-start',
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "flex-start",
                   }}
                 >
                   <Box sx={{ flex: 1 }}>
-                    <Typography variant="body2" color="text.secondary" gutterBottom>
+                    <Typography
+                      variant="body2"
+                      color="text.secondary"
+                      gutterBottom
+                    >
                       {stat.title}
                     </Typography>
                     <Typography variant="h4" fontWeight={600} sx={{ mb: 0.5 }}>
@@ -358,26 +407,41 @@ export default function SiteDashboardPage() {
       <Grid container spacing={3}>
         {/* Recent Attendance */}
         <Grid size={{ xs: 12, md: 6 }}>
-          <Paper sx={{ p: 3, borderRadius: 3, height: '100%' }}>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+          <Paper sx={{ p: 3, borderRadius: 3, height: "100%" }}>
+            <Box
+              sx={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                mb: 2,
+              }}
+            >
               <Typography variant="h6" fontWeight={600}>
                 Recent Attendance
               </Typography>
               <Button
                 size="small"
                 endIcon={<ArrowForward />}
-                onClick={() => router.push('/site/attendance')}
+                onClick={() => router.push("/site/attendance")}
               >
                 View All
               </Button>
             </Box>
             <Divider sx={{ mb: 2 }} />
             {loading ? (
-              <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', py: 4 }}>
+              <Typography
+                variant="body2"
+                color="text.secondary"
+                sx={{ textAlign: "center", py: 4 }}
+              >
                 Loading...
               </Typography>
             ) : recentAttendance.length === 0 ? (
-              <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', py: 4 }}>
+              <Typography
+                variant="body2"
+                color="text.secondary"
+                sx={{ textAlign: "center", py: 4 }}
+              >
                 No recent attendance records
               </Typography>
             ) : (
@@ -387,15 +451,18 @@ export default function SiteDashboardPage() {
                     key={index}
                     sx={{
                       px: 0,
-                      borderBottom: index < recentAttendance.length - 1 ? '1px solid' : 'none',
-                      borderColor: 'divider',
+                      borderBottom:
+                        index < recentAttendance.length - 1
+                          ? "1px solid"
+                          : "none",
+                      borderColor: "divider",
                     }}
                   >
                     <ListItemText
                       primary={record.laborer_name}
-                      secondary={dayjs(record.date).format('DD MMM YYYY')}
+                      secondary={dayjs(record.date).format("DD MMM YYYY")}
                     />
-                    <Box sx={{ textAlign: 'right' }}>
+                    <Box sx={{ textAlign: "right" }}>
                       <Typography variant="body2" fontWeight={600}>
                         ₹{record.daily_earnings.toLocaleString()}
                       </Typography>
@@ -412,26 +479,41 @@ export default function SiteDashboardPage() {
 
         {/* Pending Salaries */}
         <Grid size={{ xs: 12, md: 6 }}>
-          <Paper sx={{ p: 3, borderRadius: 3, height: '100%' }}>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+          <Paper sx={{ p: 3, borderRadius: 3, height: "100%" }}>
+            <Box
+              sx={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                mb: 2,
+              }}
+            >
               <Typography variant="h6" fontWeight={600}>
                 Pending Salary Payments
               </Typography>
               <Button
                 size="small"
                 endIcon={<ArrowForward />}
-                onClick={() => router.push('/company/salary')}
+                onClick={() => router.push("/company/salary")}
               >
                 View All
               </Button>
             </Box>
             <Divider sx={{ mb: 2 }} />
             {loading ? (
-              <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', py: 4 }}>
+              <Typography
+                variant="body2"
+                color="text.secondary"
+                sx={{ textAlign: "center", py: 4 }}
+              >
                 Loading...
               </Typography>
             ) : pendingSalaries.length === 0 ? (
-              <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', py: 4 }}>
+              <Typography
+                variant="body2"
+                color="text.secondary"
+                sx={{ textAlign: "center", py: 4 }}
+              >
                 No pending salary payments
               </Typography>
             ) : (
@@ -441,23 +523,34 @@ export default function SiteDashboardPage() {
                     key={index}
                     sx={{
                       px: 0,
-                      borderBottom: index < pendingSalaries.length - 1 ? '1px solid' : 'none',
-                      borderColor: 'divider',
+                      borderBottom:
+                        index < pendingSalaries.length - 1
+                          ? "1px solid"
+                          : "none",
+                      borderColor: "divider",
                     }}
                   >
                     <ListItemText
                       primary={salary.laborer_name}
-                      secondary={`Week ending ${dayjs(salary.week_ending).format('DD MMM')}`}
+                      secondary={`Week ending ${dayjs(
+                        salary.week_ending
+                      ).format("DD MMM")}`}
                     />
-                    <Box sx={{ textAlign: 'right' }}>
-                      <Typography variant="body2" fontWeight={600} color="error.main">
+                    <Box sx={{ textAlign: "right" }}>
+                      <Typography
+                        variant="body2"
+                        fontWeight={600}
+                        color="error.main"
+                      >
                         ₹{salary.balance_due.toLocaleString()}
                       </Typography>
                       <Chip
                         label={salary.status.toUpperCase()}
                         size="small"
-                        color={salary.status === 'calculated' ? 'error' : 'warning'}
-                        sx={{ height: 20, fontSize: '0.7rem' }}
+                        color={
+                          salary.status === "calculated" ? "error" : "warning"
+                        }
+                        sx={{ height: 20, fontSize: "0.7rem" }}
                       />
                     </Box>
                   </ListItem>
@@ -479,14 +572,28 @@ export default function SiteDashboardPage() {
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="date" />
                   <YAxis />
-                  <Tooltip formatter={(value: any) => `₹${value.toLocaleString()}`} />
+                  <Tooltip
+                    formatter={(value: any) => `₹${value.toLocaleString()}`}
+                  />
                   <Legend />
-                  <Line type="monotone" dataKey="labor" stroke="#1976d2" strokeWidth={2} name="Labor Cost" />
-                  <Line type="monotone" dataKey="expenses" stroke="#d32f2f" strokeWidth={2} name="Expenses" />
+                  <Line
+                    type="monotone"
+                    dataKey="labor"
+                    stroke="#1976d2"
+                    strokeWidth={2}
+                    name="Labor Cost"
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="expenses"
+                    stroke="#d32f2f"
+                    strokeWidth={2}
+                    name="Expenses"
+                  />
                 </LineChart>
               </ResponsiveContainer>
             ) : (
-              <Box sx={{ textAlign: 'center', py: 4 }}>
+              <Box sx={{ textAlign: "center", py: 4 }}>
                 <Typography variant="body2" color="text.secondary">
                   No data available for the last 7 days
                 </Typography>
@@ -512,18 +619,32 @@ export default function SiteDashboardPage() {
                     outerRadius={80}
                     fill="#8884d8"
                     dataKey="value"
-                    label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                    label={({ name, percent }: any) =>
+                      `${name}: ${((percent || 0) * 100).toFixed(0)}%`
+                    }
                   >
                     {expenseBreakdown.map((entry, index) => {
-                      const colors = ['#1976d2', '#2e7d32', '#ed6c02', '#9c27b0']
-                      return <Cell key={`cell-${index}`} fill={colors[index % colors.length]} />
+                      const colors = [
+                        "#1976d2",
+                        "#2e7d32",
+                        "#ed6c02",
+                        "#9c27b0",
+                      ];
+                      return (
+                        <Cell
+                          key={`cell-${index}`}
+                          fill={colors[index % colors.length]}
+                        />
+                      );
                     })}
                   </Pie>
-                  <Tooltip formatter={(value: any) => `₹${value.toLocaleString()}`} />
+                  <Tooltip
+                    formatter={(value: any) => `₹${value.toLocaleString()}`}
+                  />
                 </PieChart>
               </ResponsiveContainer>
             ) : (
-              <Box sx={{ textAlign: 'center', py: 4 }}>
+              <Box sx={{ textAlign: "center", py: 4 }}>
                 <Typography variant="body2" color="text.secondary">
                   No expenses recorded
                 </Typography>
@@ -544,7 +665,7 @@ export default function SiteDashboardPage() {
                   fullWidth
                   variant="outlined"
                   startIcon={<CalendarToday />}
-                  onClick={() => router.push('/site/attendance')}
+                  onClick={() => router.push("/site/attendance")}
                   sx={{ py: 1.5 }}
                 >
                   Record Attendance
@@ -555,7 +676,7 @@ export default function SiteDashboardPage() {
                   fullWidth
                   variant="outlined"
                   startIcon={<AccountBalanceWallet />}
-                  onClick={() => router.push('/site/expenses')}
+                  onClick={() => router.push("/site/expenses")}
                   sx={{ py: 1.5 }}
                 >
                   Add Expense
@@ -566,7 +687,7 @@ export default function SiteDashboardPage() {
                   fullWidth
                   variant="outlined"
                   startIcon={<People />}
-                  onClick={() => router.push('/company/laborers')}
+                  onClick={() => router.push("/company/laborers")}
                   sx={{ py: 1.5 }}
                 >
                   Manage Laborers
@@ -577,7 +698,7 @@ export default function SiteDashboardPage() {
                   fullWidth
                   variant="outlined"
                   startIcon={<TrendingUp />}
-                  onClick={() => router.push('/site/reports')}
+                  onClick={() => router.push("/site/reports")}
                   sx={{ py: 1.5 }}
                 >
                   View Reports
@@ -588,5 +709,5 @@ export default function SiteDashboardPage() {
         </Grid>
       </Grid>
     </Box>
-  )
+  );
 }

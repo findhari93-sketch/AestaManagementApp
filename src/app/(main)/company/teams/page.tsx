@@ -68,7 +68,7 @@ export default function TeamsPage() {
       if (error) throw error;
 
       const teamsWithCount = await Promise.all(
-        (teamsData || []).map(async (team) => {
+        ((teamsData as any[]) || []).map(async (team: any) => {
           const { count } = await supabase
             .from("laborers")
             .select("*", { count: "exact", head: true })
@@ -76,7 +76,7 @@ export default function TeamsPage() {
           return { ...team, member_count: count || 0 };
         })
       );
-      setTeams(teamsWithCount);
+      setTeams(teamsWithCount as any);
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -124,9 +124,11 @@ export default function TeamsPage() {
       };
 
       if (editingTeam) {
-        await supabase.from("teams").update(payload).eq("id", editingTeam.id);
+        await (supabase.from("teams") as any)
+          .update(payload)
+          .eq("id", editingTeam.id);
       } else {
-        await supabase.from("teams").insert(payload);
+        await (supabase.from("teams") as any).insert(payload);
       }
       setDialogOpen(false);
       await fetchTeams();
@@ -171,8 +173,7 @@ export default function TeamsPage() {
 
   const handleAddMember = async (laborerId: string) => {
     if (!selectedTeam) return;
-    await supabase
-      .from("laborers")
+    await (supabase.from("laborers") as any)
       .update({ team_id: selectedTeam.id })
       .eq("id", laborerId);
     await handleOpenMembers(selectedTeam);
@@ -181,8 +182,7 @@ export default function TeamsPage() {
 
   const handleRemoveMember = async (laborerId: string) => {
     if (!selectedTeam) return;
-    await supabase
-      .from("laborers")
+    await (supabase.from("laborers") as any)
       .update({ team_id: null })
       .eq("id", laborerId);
     await handleOpenMembers(selectedTeam);

@@ -138,7 +138,11 @@ export default function CompanySalaryPage() {
 
       if (laborersError) throw laborersError;
 
-      if (!laborers || laborers.length === 0) {
+      const laborersList = laborers as
+        | { id: string; [key: string]: any }[]
+        | null;
+
+      if (!laborersList || laborersList.length === 0) {
         setError("No active laborers found");
         return;
       }
@@ -146,7 +150,7 @@ export default function CompanySalaryPage() {
       // Process each laborer
       const salaryRecords = [];
 
-      for (const laborer of laborers) {
+      for (const laborer of laborersList) {
         // Fetch attendance for the week
         const { data: attendance, error: attendanceError } = await supabase
           .from("daily_attendance")
@@ -158,10 +162,13 @@ export default function CompanySalaryPage() {
         if (attendanceError) throw attendanceError;
 
         // Calculate totals
+        const attList = attendance as
+          | { work_days: number; daily_earnings: number }[]
+          | null;
         const totalDaysWorked =
-          attendance?.reduce((sum, a) => sum + (a.work_days || 0), 0) || 0;
+          attList?.reduce((sum, a) => sum + (a.work_days || 0), 0) || 0;
         const grossEarnings =
-          attendance?.reduce((sum, a) => sum + (a.daily_earnings || 0), 0) || 0;
+          attList?.reduce((sum, a) => sum + (a.daily_earnings || 0), 0) || 0;
 
         // Fetch advances for the week
         const { data: advances, error: advancesError } = await supabase
@@ -174,8 +181,9 @@ export default function CompanySalaryPage() {
 
         if (advancesError) throw advancesError;
 
+        const advancesList = advances as { amount: number }[] | null;
         const advanceDeductions =
-          advances?.reduce((sum, a) => sum + (a.amount || 0), 0) || 0;
+          advancesList?.reduce((sum, a) => sum + (a.amount || 0), 0) || 0;
 
         // Fetch extras for the week
         const { data: extras, error: extrasError } = await supabase
@@ -188,8 +196,9 @@ export default function CompanySalaryPage() {
 
         if (extrasError) throw extrasError;
 
+        const extrasList = extras as { amount: number }[] | null;
         const extrasAmount =
-          extras?.reduce((sum, e) => sum + (e.amount || 0), 0) || 0;
+          extrasList?.reduce((sum, e) => sum + (e.amount || 0), 0) || 0;
 
         const netPayable = grossEarnings - advanceDeductions + extrasAmount;
 
@@ -226,9 +235,9 @@ export default function CompanySalaryPage() {
       if (deleteError) throw deleteError;
 
       // Insert new salary records
-      const { error: insertError } = await supabase
-        .from("salary_periods")
-        .insert(salaryRecords);
+      const { error: insertError } = await (
+        supabase.from("salary_periods") as any
+      ).insert(salaryRecords);
 
       if (insertError) throw insertError;
 
@@ -260,17 +269,17 @@ export default function CompanySalaryPage() {
       setSuccess("");
 
       // Insert payment record
-      const { error: paymentError } = await supabase
-        .from("salary_payments")
-        .insert({
-          salary_period_id: selectedPeriod.id,
-          amount: paymentForm.amount,
-          payment_date: paymentForm.payment_date,
-          payment_mode: paymentForm.payment_mode,
-          paid_by: userProfile?.id,
-          is_team_payment: false,
-          team_id: null,
-        });
+      const { error: paymentError } = await (
+        supabase.from("salary_payments") as any
+      ).insert({
+        salary_period_id: selectedPeriod.id,
+        amount: paymentForm.amount,
+        payment_date: paymentForm.payment_date,
+        payment_mode: paymentForm.payment_mode,
+        paid_by: userProfile?.id,
+        is_team_payment: false,
+        team_id: null,
+      });
 
       if (paymentError) throw paymentError;
 
@@ -284,8 +293,9 @@ export default function CompanySalaryPage() {
           ? "partial"
           : "calculated";
 
-      const { error: updateError } = await supabase
-        .from("salary_periods")
+      const { error: updateError } = await (
+        supabase.from("salary_periods") as any
+      )
         .update({
           amount_paid: newAmountPaid,
           balance_due: newBalanceDue,

@@ -107,9 +107,12 @@ export default function CompanyDashboardPage() {
 
       if (sitesError) throw sitesError;
 
-      const totalSites = sites?.length || 0;
+      const sitesList = sites as
+        | { id: string; name: string; status: string }[]
+        | null;
+      const totalSites = sitesList?.length || 0;
       const activeSites =
-        sites?.filter((s) => s.status === "active").length || 0;
+        sitesList?.filter((s) => s.status === "active").length || 0;
 
       // Fetch laborers
       const { data: laborers, error: laborersError } = await supabase
@@ -118,9 +121,10 @@ export default function CompanyDashboardPage() {
 
       if (laborersError) throw laborersError;
 
-      const totalLaborers = laborers?.length || 0;
+      const laborersList = laborers as { id: string; status: string }[] | null;
+      const totalLaborers = laborersList?.length || 0;
       const activeLaborers =
-        laborers?.filter((l) => l.status === "active").length || 0;
+        laborersList?.filter((l) => l.status === "active").length || 0;
 
       // Fetch teams
       const { count: totalTeams, error: teamsError } = await supabase
@@ -137,9 +141,10 @@ export default function CompanyDashboardPage() {
 
       if (pendingError) throw pendingError;
 
-      const pendingPayments = pendingData?.length || 0;
+      const pendingList = pendingData as { balance_due: number }[] | null;
+      const pendingPayments = pendingList?.length || 0;
       const pendingPaymentAmount =
-        pendingData?.reduce((sum, p) => sum + (p.balance_due || 0), 0) || 0;
+        pendingList?.reduce((sum, p) => sum + (p.balance_due || 0), 0) || 0;
 
       // Fetch monthly expenses
       const { data: monthlyExpData, error: monthlyError } = await supabase
@@ -150,8 +155,11 @@ export default function CompanyDashboardPage() {
 
       if (monthlyError) throw monthlyError;
 
+      const monthlyExpList = monthlyExpData as
+        | { daily_earnings: number }[]
+        | null;
       const monthlyExpenses =
-        monthlyExpData?.reduce((sum, a) => sum + (a.daily_earnings || 0), 0) ||
+        monthlyExpList?.reduce((sum, a) => sum + (a.daily_earnings || 0), 0) ||
         0;
 
       setStats({
@@ -167,7 +175,7 @@ export default function CompanyDashboardPage() {
 
       // Fetch site-wise summaries
       const summaries: SiteSummary[] = await Promise.all(
-        (sites || [])
+        (sitesList || [])
           .filter((s) => s.status === "active")
           .map(async (site) => {
             const { data: todayAtt } = await supabase
@@ -183,19 +191,24 @@ export default function CompanyDashboardPage() {
               .gte("date", weekStart)
               .lte("date", today);
 
+            const todayList = todayAtt as { daily_earnings: number }[] | null;
+            const weekList = weekAtt as { daily_earnings: number }[] | null;
+
             return {
               id: site.id,
               name: site.name,
               status: site.status,
-              todayLaborers: todayAtt?.length || 0,
+              todayLaborers: todayList?.length || 0,
               todayCost:
-                todayAtt?.reduce(
+                todayList?.reduce(
                   (sum, a) => sum + (a.daily_earnings || 0),
                   0
                 ) || 0,
               weekCost:
-                weekAtt?.reduce((sum, a) => sum + (a.daily_earnings || 0), 0) ||
-                0,
+                weekList?.reduce(
+                  (sum, a) => sum + (a.daily_earnings || 0),
+                  0
+                ) || 0,
             };
           })
       );
