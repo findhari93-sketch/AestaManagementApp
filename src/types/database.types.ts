@@ -39,6 +39,13 @@ export type PaymentType =
 export type DeletionRequestStatus = "pending" | "approved" | "rejected";
 export type AuditAction = "insert" | "update" | "delete";
 
+// Payment Ecosystem Enums
+export type LaborerType = "contract" | "daily_market";
+export type PaymentChannel = "via_site_engineer" | "mesthri_at_office" | "at_office" | "company_direct_online";
+export type SiteEngineerTransactionType = "received_from_company" | "spent_on_behalf" | "used_own_money" | "returned_to_company";
+export type SettlementType = "company_to_engineer" | "engineer_to_company";
+export type RecipientType = "laborer" | "mesthri" | "vendor" | "other";
+
 // Core Tables
 export interface User {
   id: string;
@@ -283,6 +290,9 @@ export interface Laborer {
   joining_date: string;
   deactivation_date: string | null;
   deactivation_reason: string | null;
+  // Payment ecosystem fields
+  laborer_type?: LaborerType; // contract = Mesthri's team, daily_market = hired separately
+  associated_team_id?: string | null; // Which Mesthri's team (optional)
   created_at: string;
   updated_at: string;
 }
@@ -302,9 +312,15 @@ export interface DailyAttendance {
   daily_rate_applied: number;
   daily_earnings: number;
   team_id: string | null;
-  contract_id: string | null;
+  subcontract_id: string | null; // Renamed from contract_id
   entered_by: string;
   is_deleted: boolean;
+  // Payment tracking fields (added for payment ecosystem)
+  is_paid?: boolean;
+  payment_id?: string | null;
+  synced_to_expense?: boolean;
+  recorded_by?: string;
+  recorded_by_user_id?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -328,8 +344,11 @@ export interface DailyLog {
   updated_at: string;
 }
 
-// Contracts
-export interface Contract {
+// Subcontracts (Company ↔ Mesthri/Subcontractors)
+// Note: Renamed from "contracts" to "subcontracts" for clarity
+// "Contract" = Company ↔ Client (client pays company) - stored in clients table
+// "Subcontract" = Company ↔ Mesthri/Subcontractors (company pays them)
+export interface Subcontract {
   id: string;
   contract_type: ContractType;
   team_id: string | null;
@@ -351,9 +370,12 @@ export interface Contract {
   updated_at: string;
 }
 
-export interface ContractMilestone {
+// Backwards compatibility alias
+export type Contract = Subcontract;
+
+export interface SubcontractMilestone {
   id: string;
-  contract_id: string;
+  subcontract_id: string;
   name: string;
   amount: number;
   percentage: number | null;
@@ -362,6 +384,9 @@ export interface ContractMilestone {
   created_at: string;
   updated_at: string;
 }
+
+// Backwards compatibility alias
+export type ContractMilestone = SubcontractMilestone;
 
 // Financial Tables
 export interface Advance {
@@ -396,7 +421,7 @@ export interface Expense {
   site_id: string | null;
   section_id: string | null;
   team_id: string | null;
-  contract_id: string | null;
+  subcontract_id: string | null; // Renamed from contract_id
   vendor_name: string | null;
   description: string | null;
   payment_mode: PaymentMode;
@@ -470,9 +495,9 @@ export interface SalaryPayment {
   created_at: string;
 }
 
-export interface ContractPayment {
+export interface SubcontractPayment {
   id: string;
-  contract_id: string;
+  subcontract_id: string; // Renamed from contract_id
   milestone_id: string | null;
   payment_type: PaymentType;
   amount: number;
@@ -480,7 +505,101 @@ export interface ContractPayment {
   payment_mode: PaymentMode;
   paid_by: string;
   notes: string | null;
+  // New payment ecosystem fields
+  payment_channel?: "via_site_engineer" | "mesthri_at_office" | "company_direct_online";
+  paid_by_user_id?: string | null;
+  period_from_date?: string | null;
+  period_to_date?: string | null;
+  total_salary_for_period?: number | null;
+  balance_after_payment?: number | null;
+  site_engineer_transaction_id?: string | null;
+  recorded_by?: string;
+  recorded_by_user_id?: string | null;
   created_at: string;
+}
+
+// Backwards compatibility alias
+export type ContractPayment = SubcontractPayment;
+
+// ===============================================
+// PAYMENT ECOSYSTEM TABLES
+// ===============================================
+
+// Site Engineer Wallet System (Company Level)
+export interface SiteEngineerTransaction {
+  id: string;
+  user_id: string;
+  transaction_type: SiteEngineerTransactionType;
+  amount: number;
+  transaction_date: string;
+  site_id: string | null; // NULL for received/returned, REQUIRED for spent/own_money
+  description: string | null;
+  recipient_type: RecipientType | null;
+  recipient_id: string | null;
+  payment_mode: PaymentMode;
+  proof_url: string | null;
+  related_attendance_id: string | null;
+  related_subcontract_id: string | null;
+  is_settled: boolean;
+  settled_date: string | null;
+  settled_by: string | null;
+  notes: string | null;
+  recorded_by: string;
+  recorded_by_user_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// Site Engineer Settlements (Reimbursements)
+export interface SiteEngineerSettlement {
+  id: string;
+  site_engineer_id: string;
+  settlement_date: string;
+  amount: number;
+  settlement_type: SettlementType;
+  payment_mode: PaymentMode;
+  proof_url: string | null;
+  transactions_covered: string[]; // Array of transaction IDs being settled
+  notes: string | null;
+  recorded_by: string;
+  recorded_by_user_id: string | null;
+  created_at: string;
+}
+
+// Individual Labor Payments (for daily market laborers paid directly)
+export interface LaborPayment {
+  id: string;
+  laborer_id: string;
+  site_id: string;
+  subcontract_id: string | null; // NULL if general work
+  amount: number;
+  payment_date: string;
+  payment_for_date: string; // Which work day this covers
+  payment_mode: PaymentMode;
+  payment_channel: PaymentChannel;
+  paid_by: string;
+  paid_by_user_id: string | null;
+  site_engineer_transaction_id: string | null;
+  proof_url: string | null;
+  is_under_contract: boolean;
+  attendance_id: string | null;
+  recorded_by: string;
+  recorded_by_user_id: string | null;
+  created_at: string;
+}
+
+// Attendance to Expense Sync Tracking
+export interface AttendanceExpenseSync {
+  id: string;
+  attendance_date: string;
+  site_id: string;
+  expense_id: string | null; // Link to created expense
+  total_laborers: number;
+  total_work_days: number;
+  total_amount: number;
+  synced_by: string;
+  synced_by_user_id: string | null;
+  synced_at: string;
 }
 
 // System Tables
@@ -593,11 +712,14 @@ export interface VSalaryPeriodsDetailed extends SalaryPeriod {
   team_name: string | null;
 }
 
-export interface VContractSummary extends Contract {
+export interface VSubcontractSummary extends Subcontract {
   total_paid: number;
   balance_due: number;
   payment_percentage: number;
 }
+
+// Backwards compatibility alias
+export type VContractSummary = VSubcontractSummary;
 
 // Database interface
 export interface Database {
@@ -662,16 +784,18 @@ export interface Database {
         Insert: Omit<DailyLog, "id" | "created_at" | "updated_at">;
         Update: Partial<Omit<DailyLog, "id" | "created_at" | "updated_at">>;
       };
-      contracts: {
-        Row: Contract;
-        Insert: Omit<Contract, "id" | "created_at" | "updated_at">;
-        Update: Partial<Omit<Contract, "id" | "created_at" | "updated_at">>;
+      // Renamed from 'contracts' to 'subcontracts'
+      subcontracts: {
+        Row: Subcontract;
+        Insert: Omit<Subcontract, "id" | "created_at" | "updated_at">;
+        Update: Partial<Omit<Subcontract, "id" | "created_at" | "updated_at">>;
       };
-      contract_milestones: {
-        Row: ContractMilestone;
-        Insert: Omit<ContractMilestone, "id" | "created_at" | "updated_at">;
+      // Renamed from 'contract_milestones' to 'subcontract_milestones'
+      subcontract_milestones: {
+        Row: SubcontractMilestone;
+        Insert: Omit<SubcontractMilestone, "id" | "created_at" | "updated_at">;
         Update: Partial<
-          Omit<ContractMilestone, "id" | "created_at" | "updated_at">
+          Omit<SubcontractMilestone, "id" | "created_at" | "updated_at">
         >;
       };
       advances: {
@@ -716,10 +840,32 @@ export interface Database {
         Insert: Omit<SalaryPayment, "id" | "created_at">;
         Update: Partial<Omit<SalaryPayment, "id" | "created_at">>;
       };
-      contract_payments: {
-        Row: ContractPayment;
-        Insert: Omit<ContractPayment, "id" | "created_at">;
-        Update: Partial<Omit<ContractPayment, "id" | "created_at">>;
+      // Renamed from 'contract_payments' to 'subcontract_payments'
+      subcontract_payments: {
+        Row: SubcontractPayment;
+        Insert: Omit<SubcontractPayment, "id" | "created_at">;
+        Update: Partial<Omit<SubcontractPayment, "id" | "created_at">>;
+      };
+      // Payment Ecosystem Tables
+      site_engineer_transactions: {
+        Row: SiteEngineerTransaction;
+        Insert: Omit<SiteEngineerTransaction, "id" | "created_at" | "updated_at">;
+        Update: Partial<Omit<SiteEngineerTransaction, "id" | "created_at" | "updated_at">>;
+      };
+      site_engineer_settlements: {
+        Row: SiteEngineerSettlement;
+        Insert: Omit<SiteEngineerSettlement, "id" | "created_at">;
+        Update: Partial<Omit<SiteEngineerSettlement, "id" | "created_at">>;
+      };
+      labor_payments: {
+        Row: LaborPayment;
+        Insert: Omit<LaborPayment, "id" | "created_at">;
+        Update: Partial<Omit<LaborPayment, "id" | "created_at">>;
+      };
+      attendance_expense_sync: {
+        Row: AttendanceExpenseSync;
+        Insert: Omit<AttendanceExpenseSync, "id" | "synced_at">;
+        Update: Partial<Omit<AttendanceExpenseSync, "id" | "synced_at">>;
       };
       deletion_requests: {
         Row: DeletionRequest;
@@ -764,8 +910,9 @@ export interface Database {
       v_salary_periods_detailed: {
         Row: VSalaryPeriodsDetailed;
       };
-      v_contract_summary: {
-        Row: VContractSummary;
+      // Renamed from 'v_contract_summary' to 'v_subcontract_summary'
+      v_subcontract_summary: {
+        Row: VSubcontractSummary;
       };
     };
     Functions: {

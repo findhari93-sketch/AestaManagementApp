@@ -78,6 +78,11 @@ const siteNavItems: NavItem[] = [
     icon: <PaymentIcon />,
     path: "/site/client-payments",
   },
+  {
+    text: "Subcontracts",
+    icon: <DescriptionIcon />,
+    path: "/site/subcontracts",
+  },
   { text: "Site Reports", icon: <AssessmentIcon />, path: "/site/reports" },
 ];
 
@@ -86,11 +91,16 @@ const companyNavItems: NavItem[] = [
   { text: "Dashboard", icon: <DashboardIcon />, path: "/company/dashboard" },
   { text: "Laborers", icon: <PeopleIcon />, path: "/company/laborers" },
   { text: "Teams", icon: <GroupsIcon />, path: "/company/teams" },
-  { text: "Contracts", icon: <DescriptionIcon />, path: "/company/contracts" },
+  { text: "All Subcontracts", icon: <DescriptionIcon />, path: "/company/contracts" },
   {
     text: "Salary & Payments",
     icon: <AccountBalanceWalletIcon />,
     path: "/company/salary",
+  },
+  {
+    text: "Engineer Wallet",
+    icon: <PaymentIcon />,
+    path: "/company/engineer-wallet",
   },
   {
     text: "Sites",

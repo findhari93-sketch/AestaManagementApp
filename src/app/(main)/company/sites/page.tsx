@@ -279,17 +279,17 @@ export default function CompanySitesPage() {
       const sitesWithStats = await Promise.all(
         ((sitesData || []) as Site[]).map(async (site) => {
           const { count: subcontractCount } = await supabase
-            .from("contracts")
+            .from("subcontracts")
             .select("*", { count: "exact", head: true })
             .eq("site_id", site.id);
 
-          const { data: contracts } = await supabase
-            .from("contracts")
+          const { data: subcontracts } = await supabase
+            .from("subcontracts")
             .select("total_value")
             .eq("site_id", site.id);
 
           const totalSubcontractValue =
-            ((contracts || []) as { total_value: number }[])?.reduce(
+            ((subcontracts || []) as { total_value: number }[])?.reduce(
               (sum, c) => sum + (c.total_value || 0),
               0
             ) || 0;
@@ -1116,7 +1116,7 @@ export default function CompanySitesPage() {
         Cell: ({ cell, row }) => (
           <Box>
             <Chip
-              label={`${cell.getValue<number>()} Contracts`}
+              label={`${cell.getValue<number>()} Subcontracts`}
               size="small"
               color="secondary"
               icon={<Assignment />}

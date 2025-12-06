@@ -3,6 +3,7 @@ import "./globals.css";
 import ThemeProvider from "@/components/providers/ThemeProvider";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { SiteProvider } from "@/contexts/SiteContext";
+import QueryProvider from "@/providers/QueryProvider";
 
 export const metadata: Metadata = {
   title: "Aesta Construction Manager",
@@ -17,13 +18,15 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
-        <ThemeProvider>
-          <AuthProvider>
-            <SiteProvider>
-              {children}
-            </SiteProvider>
-          </AuthProvider>
-        </ThemeProvider>
+        <QueryProvider>
+          <ThemeProvider>
+            <AuthProvider>
+              <SiteProvider>
+                {children}
+              </SiteProvider>
+            </AuthProvider>
+          </ThemeProvider>
+        </QueryProvider>
       </body>
     </html>
   );

@@ -86,13 +86,13 @@ export default function CompanySalaryPage() {
       setLoading(true);
       setError("");
 
-      // Try to fetch from view first, fall back to join query
+      // Fetch salary periods with laborer info - use explicit FK hint for team_id
       const { data, error } = await supabase
         .from("salary_periods")
         .select(
           `
           *,
-          laborers(name, phone, teams(name))
+          laborers(name, phone, team:teams!laborers_team_id_fkey(name))
         `
         )
         .order("week_ending", { ascending: false })
@@ -105,7 +105,7 @@ export default function CompanySalaryPage() {
           ...item,
           laborer_name: item.laborers?.name || "Unknown",
           laborer_phone: item.laborers?.phone || null,
-          team_name: item.laborers?.teams?.name || null,
+          team_name: item.laborers?.team?.name || null,
         })
       );
 

@@ -1,8 +1,5 @@
 "use client";
 
-export const dynamic = "force-dynamic";
-
-import { useState, useEffect } from "react";
 import {
   Box,
   Card,
@@ -17,6 +14,7 @@ import {
   Button,
   Divider,
   Alert,
+  Skeleton,
 } from "@mui/material";
 import {
   People,
@@ -41,255 +39,73 @@ import {
 } from "recharts";
 import { useSite } from "@/contexts/SiteContext";
 import { useAuth } from "@/contexts/AuthContext";
-import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import PageHeader from "@/components/layout/PageHeader";
 import dayjs from "dayjs";
-
-interface DashboardStats {
-  todayLaborers: number;
-  todayCost: number;
-  weekTotal: number;
-  pendingSalaries: number;
-  activeLaborers: number;
-  pendingPaymentAmount: number;
-}
-
-interface RecentAttendance {
-  date: string;
-  laborer_name: string;
-  work_days: number;
-  daily_earnings: number;
-}
-
-interface PendingSalary {
-  laborer_name: string;
-  week_ending: string;
-  balance_due: number;
-  status: string;
-}
+import {
+  useDashboardStats,
+  useRecentAttendance,
+  usePendingSalaries,
+  useWeeklyTrendData,
+  useExpenseBreakdown,
+} from "@/hooks/queries/useDashboardData";
+import { useQueryClient } from "@tanstack/react-query";
 
 export default function SiteDashboardPage() {
   const { selectedSite } = useSite();
   const { userProfile } = useAuth();
   const router = useRouter();
-  const supabase = createClient();
+  const queryClient = useQueryClient();
 
-  const [stats, setStats] = useState<DashboardStats>({
-    todayLaborers: 0,
-    todayCost: 0,
-    weekTotal: 0,
-    pendingSalaries: 0,
-    activeLaborers: 0,
-    pendingPaymentAmount: 0,
-  });
-  const [recentAttendance, setRecentAttendance] = useState<RecentAttendance[]>(
-    []
-  );
-  const [pendingSalaries, setPendingSalaries] = useState<PendingSalary[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const siteId = selectedSite?.id;
 
-  const [weeklyTrendData, setWeeklyTrendData] = useState<any[]>([]);
-  const [expenseBreakdown, setExpenseBreakdown] = useState<any[]>([]);
+  // Use React Query hooks for data fetching with caching
+  const {
+    data: stats,
+    isLoading: statsLoading,
+    error: statsError,
+  } = useDashboardStats(siteId);
 
-  useEffect(() => {
-    if (selectedSite) {
-      fetchDashboardData();
-    }
-  }, [selectedSite]);
+  const { data: recentAttendance = [], isLoading: attendanceLoading } =
+    useRecentAttendance(siteId);
 
-  const fetchDashboardData = async () => {
-    if (!selectedSite) return;
+  const { data: pendingSalaries = [], isLoading: salariesLoading } =
+    usePendingSalaries(siteId);
 
-    try {
-      setLoading(true);
-      setError("");
+  const { data: weeklyTrendData = [], isLoading: trendLoading } =
+    useWeeklyTrendData(siteId);
 
-      const today = dayjs().format("YYYY-MM-DD");
-      const weekStart = dayjs().subtract(7, "days").format("YYYY-MM-DD");
+  const { data: expenseBreakdown = [], isLoading: expenseLoading } =
+    useExpenseBreakdown(siteId);
 
-      // Fetch today's attendance
-      const { data: todayAttendance, error: todayError } = await supabase
-        .from("daily_attendance")
-        .select("work_days, daily_earnings")
-        .eq("site_id", selectedSite.id)
-        .eq("date", today);
+  const loading =
+    statsLoading ||
+    attendanceLoading ||
+    salariesLoading ||
+    trendLoading ||
+    expenseLoading;
 
-      if (todayError) throw todayError;
-
-      const typedTodayAttendance = todayAttendance as
-        | { work_days: number; daily_earnings: number }[]
-        | null;
-
-      const todayLaborers = typedTodayAttendance?.length || 0;
-      const todayCost =
-        typedTodayAttendance?.reduce(
-          (sum, a) => sum + (a.daily_earnings || 0),
-          0
-        ) || 0;
-
-      // Fetch week's total
-      const { data: weekAttendance, error: weekError } = await supabase
-        .from("daily_attendance")
-        .select("daily_earnings")
-        .eq("site_id", selectedSite.id)
-        .gte("date", weekStart)
-        .lte("date", today);
-
-      if (weekError) throw weekError;
-
-      const typedWeekAttendance = weekAttendance as
-        | { daily_earnings: number }[]
-        | null;
-
-      const weekTotal =
-        typedWeekAttendance?.reduce(
-          (sum, a) => sum + (a.daily_earnings || 0),
-          0
-        ) || 0;
-
-      // Fetch active laborers count
-      const { count: activeLaborers, error: laborersError } = await supabase
-        .from("laborers")
-        .select("id", { count: "exact", head: true })
-        .eq("status", "active");
-
-      if (laborersError) throw laborersError;
-
-      // Fetch pending salaries
-      const { data: pendingSalaryData, error: salaryError } = await supabase
-        .from("salary_periods")
-        .select("balance_due, status")
-        .in("status", ["calculated", "partial"]);
-
-      if (salaryError) throw salaryError;
-
-      const typedPendingSalaryData = pendingSalaryData as
-        | { balance_due: number; status: string }[]
-        | null;
-
-      const pendingSalaries = typedPendingSalaryData?.length || 0;
-      const pendingPaymentAmount =
-        typedPendingSalaryData?.reduce(
-          (sum, s) => sum + (s.balance_due || 0),
-          0
-        ) || 0;
-
-      setStats({
-        todayLaborers,
-        todayCost,
-        weekTotal,
-        pendingSalaries,
-        activeLaborers: activeLaborers || 0,
-        pendingPaymentAmount,
-      });
-
-      // Fetch recent attendance
-      const { data: recentData, error: recentError } = await supabase
-        .from("v_active_attendance")
-        .select("date, laborer_name, work_days, daily_earnings")
-        .eq("site_id", selectedSite.id)
-        .order("date", { ascending: false })
-        .limit(5);
-
-      if (recentError) throw recentError;
-      setRecentAttendance(recentData || []);
-
-      // Fetch pending salary details
-      const { data: pendingSalaryDetails, error: pendingError } = await supabase
-        .from("v_salary_periods_detailed")
-        .select("laborer_name, week_ending, balance_due, status")
-        .in("status", ["calculated", "partial"])
-        .order("week_ending", { ascending: false })
-        .limit(5);
-
-      if (pendingError) throw pendingError;
-      setPendingSalaries(pendingSalaryDetails || []);
-
-      // Fetch weekly trend data
-      const last7Days = Array.from({ length: 7 }, (_, i) => {
-        const date = dayjs().subtract(6 - i, "days");
-        return date.format("YYYY-MM-DD");
-      });
-
-      const trendData = await Promise.all(
-        last7Days.map(async (date) => {
-          const { data: dayAttendance } = await supabase
-            .from("daily_attendance")
-            .select("daily_earnings")
-            .eq("site_id", selectedSite.id)
-            .eq("date", date);
-
-          const { data: dayExpenses } = await supabase
-            .from("expenses")
-            .select("amount")
-            .eq("site_id", selectedSite.id)
-            .eq("date", date);
-
-          const typedDayAttendance = dayAttendance as
-            | { daily_earnings: number }[]
-            | null;
-          const typedDayExpenses = dayExpenses as { amount: number }[] | null;
-
-          return {
-            date: dayjs(date).format("DD MMM"),
-            labor:
-              typedDayAttendance?.reduce(
-                (sum, a) => sum + (a.daily_earnings || 0),
-                0
-              ) || 0,
-            expenses:
-              typedDayExpenses?.reduce((sum, e) => sum + (e.amount || 0), 0) ||
-              0,
-          };
-        })
-      );
-      setWeeklyTrendData(trendData);
-
-      // Fetch expense breakdown
-      const { data: expensesData } = await supabase
-        .from("expenses")
-        .select("module, amount")
-        .eq("site_id", selectedSite.id)
-        .gte("date", dayjs().subtract(30, "days").format("YYYY-MM-DD"));
-
-      const typedExpensesData = expensesData as
-        | { module: string; amount: number }[]
-        | null;
-
-      const expensesByModule =
-        typedExpensesData?.reduce((acc: any, exp) => {
-          acc[exp.module] = (acc[exp.module] || 0) + exp.amount;
-          return acc;
-        }, {}) || {};
-
-      const expenseBreakdownData = Object.entries(expensesByModule).map(
-        ([module, amount]) => ({
-          name: module.charAt(0).toUpperCase() + module.slice(1),
-          value: amount as number,
-        })
-      );
-      setExpenseBreakdown(expenseBreakdownData);
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
+  // Refresh all dashboard data
+  const handleRefresh = () => {
+    queryClient.invalidateQueries({ queryKey: ["dashboardStats", siteId] });
+    queryClient.invalidateQueries({ queryKey: ["recentAttendance", siteId] });
+    queryClient.invalidateQueries({ queryKey: ["pendingSalaries", siteId] });
+    queryClient.invalidateQueries({ queryKey: ["weeklyTrendData", siteId] });
+    queryClient.invalidateQueries({ queryKey: ["expenseBreakdown", siteId] });
   };
 
   const statsCards = [
     {
       title: "Today's Laborers",
-      value: loading ? "..." : stats.todayLaborers.toString(),
-      subtitle: `${stats.activeLaborers} total active`,
+      value: loading ? "..." : (stats?.todayLaborers || 0).toString(),
+      subtitle: `${stats?.activeLaborers || 0} total active`,
       icon: <People sx={{ fontSize: 40 }} />,
       color: "#1976d2",
       bgColor: "#e3f2fd",
     },
     {
       title: "Today's Cost",
-      value: loading ? "..." : `₹${stats.todayCost.toLocaleString()}`,
+      value: loading ? "..." : `₹${(stats?.todayCost || 0).toLocaleString()}`,
       subtitle: "Labor expenses",
       icon: <AccountBalanceWallet sx={{ fontSize: 40 }} />,
       color: "#2e7d32",
@@ -297,7 +113,7 @@ export default function SiteDashboardPage() {
     },
     {
       title: "Week Total",
-      value: loading ? "..." : `₹${stats.weekTotal.toLocaleString()}`,
+      value: loading ? "..." : `₹${(stats?.weekTotal || 0).toLocaleString()}`,
       subtitle: "Last 7 days",
       icon: <TrendingUp sx={{ fontSize: 40 }} />,
       color: "#9c27b0",
@@ -307,8 +123,8 @@ export default function SiteDashboardPage() {
       title: "Pending Payments",
       value: loading
         ? "..."
-        : `₹${stats.pendingPaymentAmount.toLocaleString()}`,
-      subtitle: `${stats.pendingSalaries} salary periods`,
+        : `₹${(stats?.pendingPaymentAmount || 0).toLocaleString()}`,
+      subtitle: `${stats?.pendingSalaries || 0} salary periods`,
       icon: <Payment sx={{ fontSize: 40 }} />,
       color: "#d32f2f",
       bgColor: "#ffebee",
@@ -337,14 +153,14 @@ export default function SiteDashboardPage() {
       <PageHeader
         title="Site Dashboard"
         subtitle={`${selectedSite.name} • Welcome back, ${userProfile?.name}`}
-        onRefresh={fetchDashboardData}
+        onRefresh={handleRefresh}
         isLoading={loading}
         showBack={false}
       />
 
-      {error && (
-        <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError("")}>
-          {error}
+      {statsError && (
+        <Alert severity="error" sx={{ mb: 3 }}>
+          {(statsError as Error).message}
         </Alert>
       )}
 
@@ -428,14 +244,12 @@ export default function SiteDashboardPage() {
               </Button>
             </Box>
             <Divider sx={{ mb: 2 }} />
-            {loading ? (
-              <Typography
-                variant="body2"
-                color="text.secondary"
-                sx={{ textAlign: "center", py: 4 }}
-              >
-                Loading...
-              </Typography>
+            {attendanceLoading ? (
+              <Box>
+                {[1, 2, 3].map((i) => (
+                  <Skeleton key={i} height={60} sx={{ mb: 1 }} />
+                ))}
+              </Box>
             ) : recentAttendance.length === 0 ? (
               <Typography
                 variant="body2"
@@ -500,14 +314,12 @@ export default function SiteDashboardPage() {
               </Button>
             </Box>
             <Divider sx={{ mb: 2 }} />
-            {loading ? (
-              <Typography
-                variant="body2"
-                color="text.secondary"
-                sx={{ textAlign: "center", py: 4 }}
-              >
-                Loading...
-              </Typography>
+            {salariesLoading ? (
+              <Box>
+                {[1, 2, 3].map((i) => (
+                  <Skeleton key={i} height={60} sx={{ mb: 1 }} />
+                ))}
+              </Box>
             ) : pendingSalaries.length === 0 ? (
               <Typography
                 variant="body2"
@@ -566,14 +378,16 @@ export default function SiteDashboardPage() {
             <Typography variant="h6" fontWeight={600} sx={{ mb: 2 }}>
               Weekly Cost Trend
             </Typography>
-            {weeklyTrendData.length > 0 ? (
+            {trendLoading ? (
+              <Skeleton variant="rectangular" height={300} />
+            ) : weeklyTrendData.length > 0 ? (
               <ResponsiveContainer width="100%" height={300}>
                 <LineChart data={weeklyTrendData}>
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="date" />
                   <YAxis />
                   <Tooltip
-                    formatter={(value: any) => `₹${value.toLocaleString()}`}
+                    formatter={(value: number) => `₹${value.toLocaleString()}`}
                   />
                   <Legend />
                   <Line
@@ -608,7 +422,9 @@ export default function SiteDashboardPage() {
             <Typography variant="h6" fontWeight={600} sx={{ mb: 2 }}>
               Expense Breakdown (30 days)
             </Typography>
-            {expenseBreakdown.length > 0 ? (
+            {expenseLoading ? (
+              <Skeleton variant="circular" width={200} height={200} sx={{ mx: "auto" }} />
+            ) : expenseBreakdown.length > 0 ? (
               <ResponsiveContainer width="100%" height={300}>
                 <PieChart>
                   <Pie
@@ -619,8 +435,8 @@ export default function SiteDashboardPage() {
                     outerRadius={80}
                     fill="#8884d8"
                     dataKey="value"
-                    label={({ name, percent }: any) =>
-                      `${name}: ${((percent || 0) * 100).toFixed(0)}%`
+                    label={({ name, percent }) =>
+                      `${name || ''}: ${((percent || 0) * 100).toFixed(0)}%`
                     }
                   >
                     {expenseBreakdown.map((entry, index) => {
@@ -639,7 +455,7 @@ export default function SiteDashboardPage() {
                     })}
                   </Pie>
                   <Tooltip
-                    formatter={(value: any) => `₹${value.toLocaleString()}`}
+                    formatter={(value: number) => `₹${value.toLocaleString()}`}
                   />
                 </PieChart>
               </ResponsiveContainer>

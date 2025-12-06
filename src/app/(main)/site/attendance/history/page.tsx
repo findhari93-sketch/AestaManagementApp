@@ -43,6 +43,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useSite } from "@/contexts/SiteContext";
 import { useAuth } from "@/contexts/AuthContext";
 import PageHeader from "@/components/layout/PageHeader";
+import type { LaborerType } from "@/types/database.types";
 import dayjs from "dayjs";
 
 interface AttendanceRecord {
@@ -50,6 +51,7 @@ interface AttendanceRecord {
   date: string;
   laborer_id: string;
   laborer_name: string;
+  laborer_type: LaborerType;
   category_name: string;
   role_name: string;
   team_name: string | null;
@@ -60,6 +62,8 @@ interface AttendanceRecord {
   daily_earnings: number;
   advance_given?: number;
   extra_given?: number;
+  is_paid: boolean;
+  subcontract_title?: string | null;
 }
 
 interface DateSummary {
@@ -102,6 +106,8 @@ export default function AttendanceHistoryPage() {
   const [dateTo, setDateTo] = useState(dayjs().format("YYYY-MM-DD"));
   const [selectedLaborer, setSelectedLaborer] = useState<string>("all");
   const [selectedTeam, setSelectedTeam] = useState<string>("all");
+  const [paymentFilter, setPaymentFilter] = useState<"all" | "paid" | "unpaid">("all");
+  const [laborerTypeFilter, setLaborerTypeFilter] = useState<"all" | "contract" | "daily_market">("all");
 
   const [laborers, setLaborers] = useState<any[]>([]);
   const [teams, setTeams] = useState<any[]>([]);
@@ -176,8 +182,11 @@ export default function AttendanceHistoryPage() {
           hours_worked,
           daily_rate_applied,
           daily_earnings,
-          laborers!inner(name, team_id, category_id, role_id, teams(name), labor_categories(name), labor_roles(name)),
-          building_sections!inner(name)
+          is_paid,
+          subcontract_id,
+          laborers!inner(name, team_id, category_id, role_id, laborer_type, teams(name), labor_categories(name), labor_roles(name)),
+          building_sections!inner(name),
+          subcontracts(title)
         `
         )
         .eq("site_id", selectedSite.id)
@@ -191,6 +200,18 @@ export default function AttendanceHistoryPage() {
 
       if (selectedTeam !== "all") {
         query = query.eq("laborers.team_id", selectedTeam);
+      }
+
+      // Apply payment filter at query level if possible
+      if (paymentFilter === "paid") {
+        query = query.eq("is_paid", true);
+      } else if (paymentFilter === "unpaid") {
+        query = query.or("is_paid.eq.false,is_paid.is.null");
+      }
+
+      // Apply laborer type filter
+      if (laborerTypeFilter !== "all") {
+        query = query.eq("laborers.laborer_type", laborerTypeFilter);
       }
 
       const { data: attendanceData, error } = await query;
@@ -241,6 +262,7 @@ export default function AttendanceHistoryPage() {
             date: record.date,
             laborer_id: record.laborer_id,
             laborer_name: record.laborers.name,
+            laborer_type: record.laborers.laborer_type || "daily_market",
             category_name: record.laborers.labor_categories?.name || "Unknown",
             role_name: record.laborers.labor_roles?.name || "Unknown",
             team_name: record.laborers.teams?.name || null,
@@ -251,6 +273,8 @@ export default function AttendanceHistoryPage() {
             daily_earnings: record.daily_earnings,
             advance_given: advances.advance,
             extra_given: advances.extra,
+            is_paid: record.is_paid || false,
+            subcontract_title: record.subcontracts?.title || null,
           };
         }
       );
@@ -317,7 +341,7 @@ export default function AttendanceHistoryPage() {
 
   useEffect(() => {
     fetchAttendanceHistory();
-  }, [selectedSite, dateFrom, dateTo, selectedLaborer, selectedTeam]);
+  }, [selectedSite, dateFrom, dateTo, selectedLaborer, selectedTeam, paymentFilter, laborerTypeFilter]);
 
   const toggleDateExpanded = (date: string) => {
     setDateSummaries((prev) =>
@@ -342,6 +366,22 @@ export default function AttendanceHistoryPage() {
         size: 180,
       },
       {
+        accessorKey: "laborer_type",
+        header: "Type",
+        size: 120,
+        Cell: ({ cell }) => {
+          const type = cell.getValue<string>();
+          return (
+            <Chip
+              label={type === "contract" ? "CONTRACT" : "DAILY"}
+              size="small"
+              color={type === "contract" ? "primary" : "warning"}
+              variant="outlined"
+            />
+          );
+        },
+      },
+      {
         accessorKey: "category_name",
         header: "Category",
         size: 120,
@@ -351,6 +391,12 @@ export default function AttendanceHistoryPage() {
         header: "Team",
         size: 150,
         Cell: ({ cell }) => cell.getValue<string>() || "-",
+      },
+      {
+        accessorKey: "subcontract_title",
+        header: "Subcontract",
+        size: 150,
+        Cell: ({ cell }) => cell.getValue<string>() || "General Work",
       },
       {
         accessorKey: "work_days",
@@ -366,6 +412,22 @@ export default function AttendanceHistoryPage() {
             ₹{cell.getValue<number>().toLocaleString()}
           </Typography>
         ),
+      },
+      {
+        accessorKey: "is_paid",
+        header: "Payment",
+        size: 100,
+        Cell: ({ cell }) => {
+          const isPaid = cell.getValue<boolean>();
+          return (
+            <Chip
+              label={isPaid ? "PAID" : "PENDING"}
+              size="small"
+              color={isPaid ? "success" : "default"}
+              variant={isPaid ? "filled" : "outlined"}
+            />
+          );
+        },
       },
       {
         accessorKey: "advance_given",
@@ -511,7 +573,7 @@ export default function AttendanceHistoryPage() {
       {/* Filters */}
       <Paper sx={{ p: 2, mb: 3 }}>
         <Grid container spacing={2}>
-          <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+          <Grid size={{ xs: 12, sm: 6, md: 2 }}>
             <TextField
               fullWidth
               label="From Date"
@@ -519,9 +581,10 @@ export default function AttendanceHistoryPage() {
               value={dateFrom}
               onChange={(e) => setDateFrom(e.target.value)}
               slotProps={{ inputLabel: { shrink: true } }}
+              size="small"
             />
           </Grid>
-          <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+          <Grid size={{ xs: 12, sm: 6, md: 2 }}>
             <TextField
               fullWidth
               label="To Date"
@@ -529,10 +592,11 @@ export default function AttendanceHistoryPage() {
               value={dateTo}
               onChange={(e) => setDateTo(e.target.value)}
               slotProps={{ inputLabel: { shrink: true } }}
+              size="small"
             />
           </Grid>
-          <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-            <FormControl fullWidth>
+          <Grid size={{ xs: 12, sm: 6, md: 2 }}>
+            <FormControl fullWidth size="small">
               <InputLabel>Laborer</InputLabel>
               <Select
                 value={selectedLaborer}
@@ -548,8 +612,8 @@ export default function AttendanceHistoryPage() {
               </Select>
             </FormControl>
           </Grid>
-          <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-            <FormControl fullWidth>
+          <Grid size={{ xs: 12, sm: 6, md: 2 }}>
+            <FormControl fullWidth size="small">
               <InputLabel>Team</InputLabel>
               <Select
                 value={selectedTeam}
@@ -562,6 +626,34 @@ export default function AttendanceHistoryPage() {
                     {team.name}
                   </MenuItem>
                 ))}
+              </Select>
+            </FormControl>
+          </Grid>
+          <Grid size={{ xs: 12, sm: 6, md: 2 }}>
+            <FormControl fullWidth size="small">
+              <InputLabel>Payment Status</InputLabel>
+              <Select
+                value={paymentFilter}
+                onChange={(e) => setPaymentFilter(e.target.value as any)}
+                label="Payment Status"
+              >
+                <MenuItem value="all">All Status</MenuItem>
+                <MenuItem value="paid">Paid Only</MenuItem>
+                <MenuItem value="unpaid">Unpaid Only</MenuItem>
+              </Select>
+            </FormControl>
+          </Grid>
+          <Grid size={{ xs: 12, sm: 6, md: 2 }}>
+            <FormControl fullWidth size="small">
+              <InputLabel>Laborer Type</InputLabel>
+              <Select
+                value={laborerTypeFilter}
+                onChange={(e) => setLaborerTypeFilter(e.target.value as any)}
+                label="Laborer Type"
+              >
+                <MenuItem value="all">All Types</MenuItem>
+                <MenuItem value="contract">Contract Only</MenuItem>
+                <MenuItem value="daily_market">Daily Market Only</MenuItem>
               </Select>
             </FormControl>
           </Grid>
@@ -713,17 +805,27 @@ export default function AttendanceHistoryPage() {
                               <TableHead>
                                 <TableRow sx={{ bgcolor: "action.hover" }}>
                                   <TableCell>Name</TableCell>
+                                  <TableCell>Type</TableCell>
                                   <TableCell>Category</TableCell>
                                   <TableCell>Team</TableCell>
                                   <TableCell align="center">Days</TableCell>
                                   <TableCell align="right">Earnings</TableCell>
-                                  <TableCell align="right">Advance</TableCell>
+                                  <TableCell align="center">Payment</TableCell>
                                 </TableRow>
                               </TableHead>
                               <TableBody>
                                 {summary.records.map((record) => (
                                   <TableRow key={record.id}>
                                     <TableCell>{record.laborer_name}</TableCell>
+                                    <TableCell>
+                                      <Chip
+                                        label={record.laborer_type === "contract" ? "C" : "D"}
+                                        size="small"
+                                        color={record.laborer_type === "contract" ? "primary" : "warning"}
+                                        variant="outlined"
+                                        sx={{ minWidth: 30 }}
+                                      />
+                                    </TableCell>
                                     <TableCell>
                                       {record.category_name}
                                     </TableCell>
@@ -736,10 +838,13 @@ export default function AttendanceHistoryPage() {
                                     <TableCell align="right">
                                       ₹{record.daily_earnings.toLocaleString()}
                                     </TableCell>
-                                    <TableCell align="right">
-                                      {record.advance_given
-                                        ? `₹${record.advance_given.toLocaleString()}`
-                                        : "-"}
+                                    <TableCell align="center">
+                                      <Chip
+                                        label={record.is_paid ? "PAID" : "PENDING"}
+                                        size="small"
+                                        color={record.is_paid ? "success" : "default"}
+                                        variant={record.is_paid ? "filled" : "outlined"}
+                                      />
                                     </TableCell>
                                   </TableRow>
                                 ))}

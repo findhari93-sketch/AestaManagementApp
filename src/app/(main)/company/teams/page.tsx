@@ -23,16 +23,30 @@ import {
   ListItem,
   ListItemText,
   ListItemSecondaryAction,
+  Tooltip,
+  Divider,
 } from "@mui/material";
-import { Add, Edit, Delete, People } from "@mui/icons-material";
+import { Add, Edit, Delete, People, PersonAdd, PersonRemove } from "@mui/icons-material";
 import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import PageHeader from "@/components/layout/PageHeader";
-import type { Team } from "@/types/database.types";
+import type { Team, LaborerType } from "@/types/database.types";
 import dayjs from "dayjs";
 
-type TeamWithCount = Team & { member_count: number };
+type TeamWithCount = Team & {
+  member_count: number; // Count of laborers with associated_team_id = team.id
+  work_assignment_count: number; // Count of laborers with team_id = team.id (current work)
+};
+
+interface TeamMember {
+  id: string;
+  name: string;
+  phone: string | null;
+  laborer_type: LaborerType;
+  category_name: string;
+  role_name: string;
+}
 
 export default function TeamsPage() {
   const [teams, setTeams] = useState<TeamWithCount[]>([]);
@@ -41,8 +55,8 @@ export default function TeamsPage() {
   const [membersDialogOpen, setMembersDialogOpen] = useState(false);
   const [editingTeam, setEditingTeam] = useState<Team | null>(null);
   const [selectedTeam, setSelectedTeam] = useState<Team | null>(null);
-  const [teamMembers, setTeamMembers] = useState<any[]>([]);
-  const [availableLaborers, setAvailableLaborers] = useState<any[]>([]);
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  const [availableLaborers, setAvailableLaborers] = useState<TeamMember[]>([]);
   const [error, setError] = useState("");
 
   const { userProfile } = useAuth();
@@ -69,11 +83,23 @@ export default function TeamsPage() {
 
       const teamsWithCount = await Promise.all(
         ((teamsData as any[]) || []).map(async (team: any) => {
-          const { count } = await supabase
+          // Count laborers associated with this Mesthri's team (via associated_team_id)
+          const { count: associatedCount } = await supabase
+            .from("laborers")
+            .select("*", { count: "exact", head: true })
+            .eq("associated_team_id", team.id);
+
+          // Count laborers currently assigned to work with this team (via team_id)
+          const { count: workCount } = await supabase
             .from("laborers")
             .select("*", { count: "exact", head: true })
             .eq("team_id", team.id);
-          return { ...team, member_count: count || 0 };
+
+          return {
+            ...team,
+            member_count: associatedCount || 0,
+            work_assignment_count: workCount || 0,
+          };
         })
       );
       setTeams(teamsWithCount as any);
@@ -155,26 +181,48 @@ export default function TeamsPage() {
 
   const handleOpenMembers = async (team: Team) => {
     setSelectedTeam(team);
+    // Fetch laborers associated with this Mesthri's team (via associated_team_id)
     const { data: members } = await supabase
       .from("laborers")
-      .select("id, name")
-      .eq("team_id", team.id)
+      .select(
+        `id, name, phone, laborer_type, category:labor_categories(name), role:labor_roles(name)`
+      )
+      .eq("associated_team_id", team.id)
       .order("name");
+
+    // Fetch contract laborers not yet associated with any Mesthri
     const { data: available } = await supabase
       .from("laborers")
-      .select("id, name")
-      .is("team_id", null)
+      .select(
+        `id, name, phone, laborer_type, category:labor_categories(name), role:labor_roles(name)`
+      )
+      .is("associated_team_id", null)
+      .eq("laborer_type", "contract")
       .eq("status", "active")
       .order("name");
-    setTeamMembers(members || []);
-    setAvailableLaborers(available || []);
+
+    setTeamMembers(
+      (members || []).map((m: any) => ({
+        ...m,
+        category_name: m.category?.name || "",
+        role_name: m.role?.name || "",
+      }))
+    );
+    setAvailableLaborers(
+      (available || []).map((l: any) => ({
+        ...l,
+        category_name: l.category?.name || "",
+        role_name: l.role?.name || "",
+      }))
+    );
     setMembersDialogOpen(true);
   };
 
   const handleAddMember = async (laborerId: string) => {
     if (!selectedTeam) return;
+    // Associate laborer with this Mesthri's team
     await (supabase.from("laborers") as any)
-      .update({ team_id: selectedTeam.id })
+      .update({ associated_team_id: selectedTeam.id })
       .eq("id", laborerId);
     await handleOpenMembers(selectedTeam);
     await fetchTeams();
@@ -182,8 +230,9 @@ export default function TeamsPage() {
 
   const handleRemoveMember = async (laborerId: string) => {
     if (!selectedTeam) return;
+    // Remove association from this Mesthri's team
     await (supabase.from("laborers") as any)
-      .update({ team_id: null })
+      .update({ associated_team_id: null })
       .eq("id", laborerId);
     await handleOpenMembers(selectedTeam);
     await fetchTeams();
@@ -191,10 +240,10 @@ export default function TeamsPage() {
 
   const columns = useMemo<MRT_ColumnDef<TeamWithCount>[]>(
     () => [
-      { accessorKey: "name", header: "Team Name", size: 200 },
+      { accessorKey: "name", header: "Team / Mesthri Name", size: 200 },
       {
         accessorKey: "leader_name",
-        header: "Leader",
+        header: "Leader (Mesthri)",
         size: 180,
         Cell: ({ cell }) => cell.getValue<string>() || "-",
       },
@@ -206,10 +255,32 @@ export default function TeamsPage() {
       },
       {
         accessorKey: "member_count",
-        header: "Members",
-        size: 100,
+        header: "Team Members",
+        size: 130,
+        Cell: ({ cell, row }) => (
+          <Tooltip title="Contract laborers associated with this Mesthri">
+            <Chip
+              label={`${cell.getValue<number>()} associated`}
+              size="small"
+              color="primary"
+              variant="filled"
+            />
+          </Tooltip>
+        ),
+      },
+      {
+        accessorKey: "work_assignment_count",
+        header: "Work Assignments",
+        size: 140,
         Cell: ({ cell }) => (
-          <Chip label={cell.getValue<number>()} size="small" color="primary" />
+          <Tooltip title="Laborers currently assigned to work with this team">
+            <Chip
+              label={`${cell.getValue<number>()} working`}
+              size="small"
+              color="info"
+              variant="outlined"
+            />
+          </Tooltip>
         ),
       },
       {
@@ -230,12 +301,14 @@ export default function TeamsPage() {
         size: 150,
         Cell: ({ row }) => (
           <Box sx={{ display: "flex", gap: 0.5 }}>
-            <IconButton
-              size="small"
-              onClick={() => handleOpenMembers(row.original)}
-            >
-              <People fontSize="small" />
-            </IconButton>
+            <Tooltip title="Manage team members">
+              <IconButton
+                size="small"
+                onClick={() => handleOpenMembers(row.original)}
+              >
+                <People fontSize="small" />
+              </IconButton>
+            </Tooltip>
             <IconButton
               size="small"
               onClick={() => handleOpenDialog(row.original)}
@@ -263,8 +336,8 @@ export default function TeamsPage() {
   return (
     <Box>
       <PageHeader
-        title="Teams"
-        subtitle="Manage contractor teams"
+        title="Teams / Mesthri Groups"
+        subtitle="Manage Mesthri teams and their associated contract laborers"
         onRefresh={fetchTeams}
         isLoading={loading}
         actions={
@@ -347,55 +420,107 @@ export default function TeamsPage() {
       <Dialog
         open={membersDialogOpen}
         onClose={() => setMembersDialogOpen(false)}
-        maxWidth="sm"
+        maxWidth="md"
         fullWidth
       >
-        <DialogTitle>Team Members - {selectedTeam?.name}</DialogTitle>
+        <DialogTitle>
+          <Box>
+            <Typography variant="h6">
+              Mesthri&apos;s Team - {selectedTeam?.name}
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Contract laborers associated with this Mesthri. Payments for these
+              laborers go to the Mesthri.
+            </Typography>
+          </Box>
+        </DialogTitle>
         <DialogContent>
-          <Typography variant="subtitle2" sx={{ mt: 2, mb: 1 }}>
-            Current Members ({teamMembers.length})
+          <Typography variant="subtitle2" sx={{ mt: 2, mb: 1, fontWeight: 600 }}>
+            Associated Contract Laborers ({teamMembers.length})
           </Typography>
           <List dense>
             {teamMembers.map((m) => (
-              <ListItem key={m.id}>
-                <ListItemText primary={m.name} />
+              <ListItem
+                key={m.id}
+                sx={{
+                  bgcolor: "action.hover",
+                  borderRadius: 1,
+                  mb: 0.5,
+                }}
+              >
+                <ListItemText
+                  primary={
+                    <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                      <Typography fontWeight={500}>{m.name}</Typography>
+                      <Chip
+                        label={m.laborer_type === "contract" ? "CONTRACT" : "DAILY"}
+                        size="small"
+                        color={m.laborer_type === "contract" ? "primary" : "warning"}
+                        variant="outlined"
+                      />
+                    </Box>
+                  }
+                  secondary={
+                    <Typography variant="body2" color="text.secondary">
+                      {m.category_name} - {m.role_name}
+                      {m.phone && ` | ${m.phone}`}
+                    </Typography>
+                  }
+                />
                 <ListItemSecondaryAction>
-                  <IconButton
-                    edge="end"
-                    size="small"
-                    onClick={() => handleRemoveMember(m.id)}
-                    disabled={!canEdit}
-                  >
-                    <Delete fontSize="small" />
-                  </IconButton>
+                  <Tooltip title="Remove from Mesthri's team">
+                    <IconButton
+                      edge="end"
+                      size="small"
+                      onClick={() => handleRemoveMember(m.id)}
+                      disabled={!canEdit}
+                      color="error"
+                    >
+                      <PersonRemove fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
                 </ListItemSecondaryAction>
               </ListItem>
             ))}
             {teamMembers.length === 0 && (
-              <Typography variant="body2" color="text.secondary">
-                No members
+              <Typography variant="body2" color="text.secondary" sx={{ py: 2 }}>
+                No laborers associated with this Mesthri yet
               </Typography>
             )}
           </List>
-          {canEdit && availableLaborers.length > 0 && (
+
+          {canEdit && (
             <>
-              <Typography variant="subtitle2" sx={{ mt: 2, mb: 1 }}>
-                Add Member
+              <Divider sx={{ my: 2 }} />
+              <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
+                Add Contract Laborer to Team
               </Typography>
-              <FormControl fullWidth size="small">
-                <InputLabel>Select Laborer</InputLabel>
-                <Select
-                  label="Select Laborer"
-                  onChange={(e) => handleAddMember(e.target.value as string)}
-                  value=""
-                >
-                  {availableLaborers.map((l) => (
-                    <MenuItem key={l.id} value={l.id}>
-                      {l.name}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
+              {availableLaborers.length > 0 ? (
+                <FormControl fullWidth size="small">
+                  <InputLabel>Select Contract Laborer</InputLabel>
+                  <Select
+                    label="Select Contract Laborer"
+                    onChange={(e) => handleAddMember(e.target.value as string)}
+                    value=""
+                  >
+                    {availableLaborers.map((l) => (
+                      <MenuItem key={l.id} value={l.id}>
+                        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                          <Typography>{l.name}</Typography>
+                          <Typography variant="body2" color="text.secondary">
+                            ({l.category_name} - {l.role_name})
+                          </Typography>
+                        </Box>
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              ) : (
+                <Typography variant="body2" color="text.secondary">
+                  No unassigned contract laborers available. To add laborers, first
+                  create them in the Laborers page with type &quot;Contract&quot;.
+                </Typography>
+              )}
             </>
           )}
         </DialogContent>

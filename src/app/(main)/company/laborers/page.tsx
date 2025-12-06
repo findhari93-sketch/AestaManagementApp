@@ -35,6 +35,7 @@ import type {
   LaborCategory,
   LaborRole,
   Team,
+  LaborerType,
 } from "@/types/database.types";
 import dayjs from "dayjs";
 
@@ -42,6 +43,7 @@ type LaborerWithDetails = Laborer & {
   category_name: string;
   role_name: string;
   team_name: string | null;
+  associated_team_name?: string | null;
 };
 
 export default function LaborersPage() {
@@ -65,8 +67,10 @@ export default function LaborersPage() {
     category_id: "",
     role_id: "",
     employment_type: "daily_wage" as "daily_wage" | "contract" | "specialist",
+    laborer_type: "daily_market" as LaborerType,
     daily_rate: 0,
     team_id: "",
+    associated_team_id: "",
     status: "active" as "active" | "inactive",
     joining_date: dayjs().format("YYYY-MM-DD"),
   });
@@ -77,7 +81,7 @@ export default function LaborersPage() {
       const { data, error } = await supabase
         .from("laborers")
         .select(
-          `*, category:labor_categories(name), role:labor_roles(name), team:teams(name)`
+          `*, category:labor_categories(name), role:labor_roles(name), team:teams!laborers_team_id_fkey(name), associated_team:teams!laborers_associated_team_id_fkey(name)`
         )
         .order("name");
 
@@ -88,6 +92,7 @@ export default function LaborersPage() {
           category_name: l.category?.name || "",
           role_name: l.role?.name || "",
           team_name: l.team?.name || null,
+          associated_team_name: l.associated_team?.name || null,
         }))
       );
     } catch (err: any) {
@@ -122,8 +127,10 @@ export default function LaborersPage() {
         category_id: laborer.category_id,
         role_id: laborer.role_id,
         employment_type: laborer.employment_type,
+        laborer_type: laborer.laborer_type || "daily_market",
         daily_rate: laborer.daily_rate,
         team_id: laborer.team_id || "",
+        associated_team_id: laborer.associated_team_id || "",
         status: laborer.status,
         joining_date: laborer.joining_date,
       });
@@ -135,8 +142,10 @@ export default function LaborersPage() {
         category_id: "",
         role_id: "",
         employment_type: "daily_wage",
+        laborer_type: "daily_market",
         daily_rate: 0,
         team_id: "",
+        associated_team_id: "",
         status: "active",
         joining_date: dayjs().format("YYYY-MM-DD"),
       });
@@ -154,6 +163,7 @@ export default function LaborersPage() {
       const payload = {
         ...formData,
         team_id: formData.team_id || null,
+        associated_team_id: formData.associated_team_id || null,
         phone: formData.phone || null,
       };
 
@@ -212,8 +222,24 @@ export default function LaborersPage() {
       { accessorKey: "category_name", header: "Category", size: 130 },
       { accessorKey: "role_name", header: "Role", size: 150 },
       {
+        accessorKey: "laborer_type",
+        header: "Laborer Type",
+        size: 140,
+        Cell: ({ cell }) => {
+          const type = cell.getValue<string>() || "daily_market";
+          return (
+            <Chip
+              label={type === "contract" ? "CONTRACT" : "DAILY MARKET"}
+              size="small"
+              color={type === "contract" ? "primary" : "warning"}
+              variant={type === "contract" ? "filled" : "outlined"}
+            />
+          );
+        },
+      },
+      {
         accessorKey: "employment_type",
-        header: "Type",
+        header: "Employment",
         size: 120,
         Cell: ({ cell }) => (
           <Chip
@@ -231,8 +257,14 @@ export default function LaborersPage() {
         ),
       },
       {
+        accessorKey: "associated_team_name",
+        header: "Mesthri Team",
+        size: 140,
+        Cell: ({ cell }) => cell.getValue<string>() || "-",
+      },
+      {
         accessorKey: "team_name",
-        header: "Team",
+        header: "Work Team",
         size: 130,
         Cell: ({ cell }) => cell.getValue<string>() || "-",
       },
@@ -408,6 +440,47 @@ export default function LaborersPage() {
               </Grid>
             </Grid>
             <Grid container spacing={2}>
+              <Grid size={{ xs: 12, sm: 6 }}>
+                <FormControl fullWidth required>
+                  <InputLabel>Laborer Type</InputLabel>
+                  <Select
+                    value={formData.laborer_type}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        laborer_type: e.target.value as LaborerType,
+                        // Clear associated team if switching to daily_market
+                        associated_team_id: e.target.value === "daily_market" ? "" : formData.associated_team_id,
+                      })
+                    }
+                    label="Laborer Type"
+                  >
+                    <MenuItem value="daily_market">Daily Market (Hired separately - paid directly)</MenuItem>
+                    <MenuItem value="contract">Contract (Mesthri&apos;s team - paid via Mesthri)</MenuItem>
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid size={{ xs: 12, sm: 6 }}>
+                <FormControl fullWidth disabled={formData.laborer_type !== "contract"}>
+                  <InputLabel>Mesthri&apos;s Team {formData.laborer_type === "contract" ? "(Required)" : "(N/A)"}</InputLabel>
+                  <Select
+                    value={formData.associated_team_id}
+                    onChange={(e) =>
+                      setFormData({ ...formData, associated_team_id: e.target.value })
+                    }
+                    label={`Mesthri's Team ${formData.laborer_type === "contract" ? "(Required)" : "(N/A)"}`}
+                  >
+                    <MenuItem value="">None</MenuItem>
+                    {teams.map((t) => (
+                      <MenuItem key={t.id} value={t.id}>
+                        {t.name} ({t.leader_name})
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+            </Grid>
+            <Grid container spacing={2}>
               <Grid size={{ xs: 12, sm: 4 }}>
                 <FormControl fullWidth>
                   <InputLabel>Employment Type</InputLabel>
@@ -444,13 +517,13 @@ export default function LaborersPage() {
               </Grid>
               <Grid size={{ xs: 12, sm: 4 }}>
                 <FormControl fullWidth>
-                  <InputLabel>Team (Optional)</InputLabel>
+                  <InputLabel>Work Team (Optional)</InputLabel>
                   <Select
                     value={formData.team_id}
                     onChange={(e) =>
                       setFormData({ ...formData, team_id: e.target.value })
                     }
-                    label="Team (Optional)"
+                    label="Work Team (Optional)"
                   >
                     <MenuItem value="">None</MenuItem>
                     {teams.map((t) => (

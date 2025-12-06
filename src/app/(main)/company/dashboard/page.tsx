@@ -1,8 +1,5 @@
 "use client";
 
-export const dynamic = "force-dynamic";
-
-import { useState, useEffect } from "react";
 import {
   Box,
   Card,
@@ -15,11 +12,10 @@ import {
   ListItemText,
   ListItemAvatar,
   Avatar,
-  Chip,
   Button,
   Divider,
   Alert,
-  LinearProgress,
+  Skeleton,
 } from "@mui/material";
 import {
   People,
@@ -42,212 +38,62 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import { useAuth } from "@/contexts/AuthContext";
-import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import PageHeader from "@/components/layout/PageHeader";
 import dayjs from "dayjs";
-
-interface CompanyStats {
-  totalSites: number;
-  activeSites: number;
-  totalLaborers: number;
-  activeLaborers: number;
-  totalTeams: number;
-  pendingPayments: number;
-  pendingPaymentAmount: number;
-  monthlyExpenses: number;
-}
-
-interface SiteSummary {
-  id: string;
-  name: string;
-  status: string;
-  todayLaborers: number;
-  todayCost: number;
-  weekCost: number;
-}
+import { useCompanyStats, useSiteSummaries } from "@/hooks/queries/useCompanyData";
+import { useQueryClient } from "@tanstack/react-query";
 
 export default function CompanyDashboardPage() {
   const { userProfile } = useAuth();
   const router = useRouter();
-  const supabase = createClient();
+  const queryClient = useQueryClient();
 
-  const [stats, setStats] = useState<CompanyStats>({
-    totalSites: 0,
-    activeSites: 0,
-    totalLaborers: 0,
-    activeLaborers: 0,
-    totalTeams: 0,
-    pendingPayments: 0,
-    pendingPaymentAmount: 0,
-    monthlyExpenses: 0,
-  });
-  const [siteSummaries, setSiteSummaries] = useState<SiteSummary[]>([]);
-  const [siteComparisonData, setSiteComparisonData] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  // Use React Query hooks for data fetching with caching
+  const {
+    data: stats,
+    isLoading: statsLoading,
+    error: statsError,
+  } = useCompanyStats();
 
-  useEffect(() => {
-    fetchCompanyData();
-  }, []);
+  const { data: siteSummaries = [], isLoading: summariesLoading } =
+    useSiteSummaries();
 
-  const fetchCompanyData = async () => {
-    try {
-      setLoading(true);
-      setError("");
+  const loading = statsLoading || summariesLoading;
 
-      const today = dayjs().format("YYYY-MM-DD");
-      const weekStart = dayjs().subtract(7, "days").format("YYYY-MM-DD");
-      const monthStart = dayjs().startOf("month").format("YYYY-MM-DD");
-
-      // Fetch sites
-      const { data: sites, error: sitesError } = await supabase
-        .from("sites")
-        .select("id, name, status");
-
-      if (sitesError) throw sitesError;
-
-      const sitesList = sites as
-        | { id: string; name: string; status: string }[]
-        | null;
-      const totalSites = sitesList?.length || 0;
-      const activeSites =
-        sitesList?.filter((s) => s.status === "active").length || 0;
-
-      // Fetch laborers
-      const { data: laborers, error: laborersError } = await supabase
-        .from("laborers")
-        .select("id, status");
-
-      if (laborersError) throw laborersError;
-
-      const laborersList = laborers as { id: string; status: string }[] | null;
-      const totalLaborers = laborersList?.length || 0;
-      const activeLaborers =
-        laborersList?.filter((l) => l.status === "active").length || 0;
-
-      // Fetch teams
-      const { count: totalTeams, error: teamsError } = await supabase
-        .from("teams")
-        .select("id", { count: "exact", head: true });
-
-      if (teamsError) throw teamsError;
-
-      // Fetch pending payments
-      const { data: pendingData, error: pendingError } = await supabase
-        .from("salary_periods")
-        .select("balance_due")
-        .in("status", ["calculated", "partial"]);
-
-      if (pendingError) throw pendingError;
-
-      const pendingList = pendingData as { balance_due: number }[] | null;
-      const pendingPayments = pendingList?.length || 0;
-      const pendingPaymentAmount =
-        pendingList?.reduce((sum, p) => sum + (p.balance_due || 0), 0) || 0;
-
-      // Fetch monthly expenses
-      const { data: monthlyExpData, error: monthlyError } = await supabase
-        .from("daily_attendance")
-        .select("daily_earnings")
-        .gte("date", monthStart)
-        .lte("date", today);
-
-      if (monthlyError) throw monthlyError;
-
-      const monthlyExpList = monthlyExpData as
-        | { daily_earnings: number }[]
-        | null;
-      const monthlyExpenses =
-        monthlyExpList?.reduce((sum, a) => sum + (a.daily_earnings || 0), 0) ||
-        0;
-
-      setStats({
-        totalSites,
-        activeSites,
-        totalLaborers,
-        activeLaborers,
-        totalTeams: totalTeams || 0,
-        pendingPayments,
-        pendingPaymentAmount,
-        monthlyExpenses,
-      });
-
-      // Fetch site-wise summaries
-      const summaries: SiteSummary[] = await Promise.all(
-        (sitesList || [])
-          .filter((s) => s.status === "active")
-          .map(async (site) => {
-            const { data: todayAtt } = await supabase
-              .from("daily_attendance")
-              .select("daily_earnings")
-              .eq("site_id", site.id)
-              .eq("date", today);
-
-            const { data: weekAtt } = await supabase
-              .from("daily_attendance")
-              .select("daily_earnings")
-              .eq("site_id", site.id)
-              .gte("date", weekStart)
-              .lte("date", today);
-
-            const todayList = todayAtt as { daily_earnings: number }[] | null;
-            const weekList = weekAtt as { daily_earnings: number }[] | null;
-
-            return {
-              id: site.id,
-              name: site.name,
-              status: site.status,
-              todayLaborers: todayList?.length || 0,
-              todayCost:
-                todayList?.reduce(
-                  (sum, a) => sum + (a.daily_earnings || 0),
-                  0
-                ) || 0,
-              weekCost:
-                weekList?.reduce(
-                  (sum, a) => sum + (a.daily_earnings || 0),
-                  0
-                ) || 0,
-            };
-          })
-      );
-      setSiteSummaries(summaries);
-
-      // Create comparison chart data
-      const comparisonData = summaries.map((s) => ({
-        name: s.name.length > 15 ? s.name.substring(0, 15) + "..." : s.name,
-        Today: s.todayCost,
-        "This Week": s.weekCost,
-      }));
-      setSiteComparisonData(comparisonData);
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
+  // Refresh all company data
+  const handleRefresh = () => {
+    queryClient.invalidateQueries({ queryKey: ["companyStats"] });
+    queryClient.invalidateQueries({ queryKey: ["siteSummaries"] });
   };
+
+  // Create comparison chart data
+  const siteComparisonData = siteSummaries.map((s) => ({
+    name: s.name.length > 15 ? s.name.substring(0, 15) + "..." : s.name,
+    Today: s.todayCost,
+    "This Week": s.weekCost,
+  }));
 
   const statsCards = [
     {
       title: "Active Sites",
-      value: loading ? "..." : stats.activeSites.toString(),
-      subtitle: `${stats.totalSites} total sites`,
+      value: loading ? "..." : (stats?.activeSites || 0).toString(),
+      subtitle: `${stats?.totalSites || 0} total sites`,
       icon: <Domain sx={{ fontSize: 40 }} />,
       color: "#1976d2",
       bgColor: "#e3f2fd",
     },
     {
       title: "Active Laborers",
-      value: loading ? "..." : stats.activeLaborers.toString(),
-      subtitle: `${stats.totalLaborers} total registered`,
+      value: loading ? "..." : (stats?.activeLaborers || 0).toString(),
+      subtitle: `${stats?.totalLaborers || 0} total registered`,
       icon: <People sx={{ fontSize: 40 }} />,
       color: "#2e7d32",
       bgColor: "#e8f5e9",
     },
     {
       title: "Teams",
-      value: loading ? "..." : stats.totalTeams.toString(),
+      value: loading ? "..." : (stats?.totalTeams || 0).toString(),
       subtitle: "Contractor teams",
       icon: <Groups sx={{ fontSize: 40 }} />,
       color: "#9c27b0",
@@ -257,8 +103,8 @@ export default function CompanyDashboardPage() {
       title: "Pending Payments",
       value: loading
         ? "..."
-        : `₹${stats.pendingPaymentAmount.toLocaleString()}`,
-      subtitle: `${stats.pendingPayments} pending`,
+        : `₹${(stats?.pendingPaymentAmount || 0).toLocaleString()}`,
+      subtitle: `${stats?.pendingPayments || 0} pending`,
       icon: <Payment sx={{ fontSize: 40 }} />,
       color: "#d32f2f",
       bgColor: "#ffebee",
@@ -270,14 +116,14 @@ export default function CompanyDashboardPage() {
       <PageHeader
         title="Company Dashboard"
         subtitle={`Overview of all sites and resources • Welcome, ${userProfile?.name}`}
-        onRefresh={fetchCompanyData}
+        onRefresh={handleRefresh}
         isLoading={loading}
         showBack={false}
       />
 
-      {error && (
-        <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError("")}>
-          {error}
+      {statsError && (
+        <Alert severity="error" sx={{ mb: 3 }}>
+          {(statsError as Error).message}
         </Alert>
       )}
 
@@ -352,7 +198,7 @@ export default function CompanyDashboardPage() {
               This Month&apos;s Labor Cost
             </Typography>
             <Typography variant="h3" fontWeight={700}>
-              ₹{stats.monthlyExpenses.toLocaleString()}
+              ₹{(stats?.monthlyExpenses || 0).toLocaleString()}
             </Typography>
             <Typography variant="body2" sx={{ opacity: 0.8 }}>
               {dayjs().format("MMMM YYYY")} • Across all sites
@@ -399,14 +245,12 @@ export default function CompanyDashboardPage() {
               </Button>
             </Box>
             <Divider sx={{ mb: 2 }} />
-            {loading ? (
-              <Typography
-                variant="body2"
-                color="text.secondary"
-                sx={{ textAlign: "center", py: 4 }}
-              >
-                Loading...
-              </Typography>
+            {summariesLoading ? (
+              <Box>
+                {[1, 2, 3].map((i) => (
+                  <Skeleton key={i} height={70} sx={{ mb: 1 }} />
+                ))}
+              </Box>
             ) : siteSummaries.length === 0 ? (
               <Typography
                 variant="body2"
@@ -457,14 +301,16 @@ export default function CompanyDashboardPage() {
             <Typography variant="h6" fontWeight={600} sx={{ mb: 2 }}>
               Site-wise Cost Comparison
             </Typography>
-            {siteComparisonData.length > 0 ? (
+            {summariesLoading ? (
+              <Skeleton variant="rectangular" height={300} />
+            ) : siteComparisonData.length > 0 ? (
               <ResponsiveContainer width="100%" height={300}>
                 <BarChart data={siteComparisonData}>
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="name" />
                   <YAxis />
                   <Tooltip
-                    formatter={(value: any) => `₹${value.toLocaleString()}`}
+                    formatter={(value: number) => `₹${value.toLocaleString()}`}
                   />
                   <Legend />
                   <Bar dataKey="Today" fill="#1976d2" />

@@ -1,0 +1,1200 @@
+"use client";
+
+export const dynamic = "force-dynamic";
+
+import React, { useState, useEffect, useMemo } from "react";
+import {
+  Box,
+  Button,
+  Typography,
+  TextField,
+  Card,
+  CardContent,
+  Grid,
+  Alert,
+  Chip,
+  IconButton,
+  Tooltip,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  Tabs,
+  Tab,
+  Divider,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Paper,
+  Autocomplete,
+} from "@mui/material";
+import {
+  Add as AddIcon,
+  AccountBalanceWallet as WalletIcon,
+  ArrowDownward as ReceivedIcon,
+  ArrowUpward as SpentIcon,
+  SwapHoriz as SettlementIcon,
+  Person as PersonIcon,
+  CheckCircle as CheckIcon,
+  Receipt as ReceiptIcon,
+} from "@mui/icons-material";
+import { createClient } from "@/lib/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
+import PageHeader from "@/components/layout/PageHeader";
+import type {
+  SiteEngineerTransaction,
+  SiteEngineerSettlement,
+  SiteEngineerTransactionType,
+  PaymentMode,
+  RecipientType,
+} from "@/types/database.types";
+import dayjs from "dayjs";
+
+interface User {
+  id: string;
+  name: string;
+  role: string;
+}
+
+interface Site {
+  id: string;
+  name: string;
+}
+
+interface TransactionWithDetails extends SiteEngineerTransaction {
+  user_name?: string;
+  site_name?: string;
+}
+
+interface SettlementWithDetails extends SiteEngineerSettlement {
+  engineer_name?: string;
+}
+
+interface TabPanelProps {
+  children?: React.ReactNode;
+  index: number;
+  value: number;
+}
+
+function TabPanel(props: TabPanelProps) {
+  const { children, value, index, ...other } = props;
+  return (
+    <div role="tabpanel" hidden={value !== index} {...other}>
+      {value === index && <Box sx={{ py: 3 }}>{children}</Box>}
+    </div>
+  );
+}
+
+export default function EngineerWalletPage() {
+  const [transactions, setTransactions] = useState<TransactionWithDetails[]>([]);
+  const [settlements, setSettlements] = useState<SettlementWithDetails[]>([]);
+  const [engineers, setEngineers] = useState<User[]>([]);
+  const [sites, setSites] = useState<Site[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [tabValue, setTabValue] = useState(0);
+  const [openTransactionDialog, setOpenTransactionDialog] = useState(false);
+  const [openSettlementDialog, setOpenSettlementDialog] = useState(false);
+  const [selectedEngineer, setSelectedEngineer] = useState<User | null>(null);
+
+  const { userProfile } = useAuth();
+  const supabase = createClient();
+
+  const canEdit = userProfile?.role === "admin" || userProfile?.role === "office";
+
+  // Transaction Form State
+  const [transactionForm, setTransactionForm] = useState({
+    user_id: "",
+    transaction_type: "received_from_company" as SiteEngineerTransactionType,
+    amount: 0,
+    transaction_date: dayjs().format("YYYY-MM-DD"),
+    site_id: "",
+    description: "",
+    recipient_type: "" as RecipientType | "",
+    payment_mode: "cash" as PaymentMode,
+    notes: "",
+  });
+
+  // Settlement Form State
+  const [settlementForm, setSettlementForm] = useState({
+    site_engineer_id: "",
+    amount: 0,
+    settlement_date: dayjs().format("YYYY-MM-DD"),
+    settlement_type: "company_to_engineer" as "company_to_engineer" | "engineer_to_company",
+    payment_mode: "cash" as PaymentMode,
+    notes: "",
+  });
+
+  const fetchData = async () => {
+    try {
+      setLoading(true);
+      setError("");
+
+      // Fetch site engineers
+      const { data: usersData, error: usersError } = await supabase
+        .from("users")
+        .select("id, name, role")
+        .in("role", ["site_engineer", "admin", "office"]);
+
+      if (usersError) throw usersError;
+      setEngineers((usersData || []) as User[]);
+
+      // Fetch sites
+      const { data: sitesData, error: sitesError } = await supabase
+        .from("sites")
+        .select("id, name")
+        .eq("status", "active");
+
+      if (sitesError) throw sitesError;
+      setSites((sitesData || []) as Site[]);
+
+      // Fetch transactions - use explicit FK hint for user_id relationship
+      const { data: transactionsData, error: transactionsError } = await supabase
+        .from("site_engineer_transactions")
+        .select("*, user:users!site_engineer_transactions_user_id_fkey(name), site:sites(name)")
+        .order("transaction_date", { ascending: false })
+        .limit(200);
+
+      if (transactionsError) throw transactionsError;
+
+      const formattedTransactions: TransactionWithDetails[] = ((transactionsData || []) as any[]).map(
+        (t) => ({
+          ...t,
+          user_name: t.user?.name || "Unknown",
+          site_name: t.site?.name || "-",
+        })
+      );
+      setTransactions(formattedTransactions);
+
+      // Fetch settlements - use explicit FK hint for site_engineer_id relationship
+      const { data: settlementsData, error: settlementsError } = await supabase
+        .from("site_engineer_settlements")
+        .select("*, engineer:users!site_engineer_settlements_site_engineer_id_fkey(name)")
+        .order("settlement_date", { ascending: false })
+        .limit(100);
+
+      if (settlementsError) throw settlementsError;
+
+      const formattedSettlements: SettlementWithDetails[] = ((settlementsData || []) as any[]).map(
+        (s) => ({
+          ...s,
+          engineer_name: s.engineer?.name || "Unknown",
+        })
+      );
+      setSettlements(formattedSettlements);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  // Calculate wallet summary per engineer
+  const walletSummary = useMemo(() => {
+    const summary: Record<
+      string,
+      {
+        engineer_name: string;
+        received: number;
+        spent: number;
+        own_money: number;
+        returned: number;
+        settled: number;
+        balance: number;
+        owed_to_engineer: number;
+        by_site: Record<string, { spent: number; own_money: number }>;
+      }
+    > = {};
+
+    // Initialize from transactions
+    transactions.forEach((t) => {
+      if (!summary[t.user_id]) {
+        const engineer = engineers.find((e) => e.id === t.user_id);
+        summary[t.user_id] = {
+          engineer_name: engineer?.name || t.user_name || "Unknown",
+          received: 0,
+          spent: 0,
+          own_money: 0,
+          returned: 0,
+          settled: 0,
+          balance: 0,
+          owed_to_engineer: 0,
+          by_site: {},
+        };
+      }
+
+      const s = summary[t.user_id];
+
+      switch (t.transaction_type) {
+        case "received_from_company":
+          s.received += t.amount;
+          break;
+        case "spent_on_behalf":
+          s.spent += t.amount;
+          if (t.site_id && t.site_name) {
+            if (!s.by_site[t.site_id]) {
+              s.by_site[t.site_id] = { spent: 0, own_money: 0 };
+            }
+            s.by_site[t.site_id].spent += t.amount;
+          }
+          break;
+        case "used_own_money":
+          s.own_money += t.amount;
+          if (!t.is_settled) {
+            s.owed_to_engineer += t.amount;
+          }
+          if (t.site_id && t.site_name) {
+            if (!s.by_site[t.site_id]) {
+              s.by_site[t.site_id] = { spent: 0, own_money: 0 };
+            }
+            s.by_site[t.site_id].own_money += t.amount;
+          }
+          break;
+        case "returned_to_company":
+          s.returned += t.amount;
+          break;
+      }
+    });
+
+    // Add settlement totals
+    settlements.forEach((st) => {
+      if (summary[st.site_engineer_id]) {
+        if (st.settlement_type === "company_to_engineer") {
+          summary[st.site_engineer_id].settled += st.amount;
+        }
+      }
+    });
+
+    // Calculate balances
+    Object.values(summary).forEach((s) => {
+      s.balance = s.received - s.spent - s.returned;
+      s.owed_to_engineer = s.own_money - s.settled;
+    });
+
+    return summary;
+  }, [transactions, settlements, engineers]);
+
+  // Overall company totals
+  const companyTotals = useMemo(() => {
+    let totalGiven = 0;
+    let totalSpent = 0;
+    let totalOwnMoney = 0;
+    let totalReturned = 0;
+    let totalOwedToEngineers = 0;
+    let totalWithEngineers = 0;
+
+    Object.values(walletSummary).forEach((s) => {
+      totalGiven += s.received;
+      totalSpent += s.spent;
+      totalOwnMoney += s.own_money;
+      totalReturned += s.returned;
+      totalOwedToEngineers += Math.max(0, s.owed_to_engineer);
+      totalWithEngineers += Math.max(0, s.balance);
+    });
+
+    return {
+      totalGiven,
+      totalSpent,
+      totalOwnMoney,
+      totalReturned,
+      totalOwedToEngineers,
+      totalWithEngineers,
+    };
+  }, [walletSummary]);
+
+  const handleOpenTransactionDialog = () => {
+    setTransactionForm({
+      user_id: selectedEngineer?.id || "",
+      transaction_type: "received_from_company",
+      amount: 0,
+      transaction_date: dayjs().format("YYYY-MM-DD"),
+      site_id: "",
+      description: "",
+      recipient_type: "",
+      payment_mode: "cash",
+      notes: "",
+    });
+    setOpenTransactionDialog(true);
+  };
+
+  const handleSaveTransaction = async () => {
+    try {
+      setError("");
+      setSuccess("");
+
+      if (!transactionForm.user_id) {
+        setError("Please select a site engineer");
+        return;
+      }
+
+      if (transactionForm.amount <= 0) {
+        setError("Amount must be greater than 0");
+        return;
+      }
+
+      // Validate site_id for spent/own_money types
+      if (
+        (transactionForm.transaction_type === "spent_on_behalf" ||
+          transactionForm.transaction_type === "used_own_money") &&
+        !transactionForm.site_id
+      ) {
+        setError("Site is required for spending transactions");
+        return;
+      }
+
+      const insertData: any = {
+        user_id: transactionForm.user_id,
+        transaction_type: transactionForm.transaction_type,
+        amount: transactionForm.amount,
+        transaction_date: transactionForm.transaction_date,
+        site_id: transactionForm.site_id || null,
+        description: transactionForm.description || null,
+        recipient_type: transactionForm.recipient_type || null,
+        payment_mode: transactionForm.payment_mode,
+        notes: transactionForm.notes || null,
+        recorded_by: userProfile?.name || "Unknown",
+        recorded_by_user_id: userProfile?.id,
+        is_settled: false,
+      };
+
+      const { error: insertError } = await (supabase.from("site_engineer_transactions") as any).insert(insertData);
+
+      if (insertError) throw insertError;
+
+      setSuccess("Transaction recorded successfully");
+      await fetchData();
+      setOpenTransactionDialog(false);
+    } catch (err: any) {
+      setError(err.message);
+    }
+  };
+
+  const handleOpenSettlementDialog = () => {
+    setSettlementForm({
+      site_engineer_id: selectedEngineer?.id || "",
+      amount: 0,
+      settlement_date: dayjs().format("YYYY-MM-DD"),
+      settlement_type: "company_to_engineer",
+      payment_mode: "cash",
+      notes: "",
+    });
+    setOpenSettlementDialog(true);
+  };
+
+  const handleSaveSettlement = async () => {
+    try {
+      setError("");
+      setSuccess("");
+
+      if (!settlementForm.site_engineer_id) {
+        setError("Please select a site engineer");
+        return;
+      }
+
+      if (settlementForm.amount <= 0) {
+        setError("Amount must be greater than 0");
+        return;
+      }
+
+      const insertData: any = {
+        site_engineer_id: settlementForm.site_engineer_id,
+        amount: settlementForm.amount,
+        settlement_date: settlementForm.settlement_date,
+        settlement_type: settlementForm.settlement_type,
+        payment_mode: settlementForm.payment_mode,
+        notes: settlementForm.notes || null,
+        recorded_by: userProfile?.name || "Unknown",
+        recorded_by_user_id: userProfile?.id,
+      };
+
+      const { error: insertError } = await (supabase.from("site_engineer_settlements") as any).insert(insertData);
+
+      if (insertError) throw insertError;
+
+      // If this is a reimbursement (company_to_engineer), mark related "own_money" transactions as settled
+      if (settlementForm.settlement_type === "company_to_engineer") {
+        // Get unsettled own_money transactions for this engineer
+        const { data: unsettledTx } = await supabase
+          .from("site_engineer_transactions")
+          .select("id, amount")
+          .eq("user_id", settlementForm.site_engineer_id)
+          .eq("transaction_type", "used_own_money")
+          .eq("is_settled", false)
+          .order("transaction_date", { ascending: true });
+
+        if (unsettledTx && unsettledTx.length > 0) {
+          let remainingAmount = settlementForm.amount;
+          const idsToSettle: string[] = [];
+
+          for (const tx of unsettledTx as any[]) {
+            if (remainingAmount >= tx.amount) {
+              idsToSettle.push(tx.id);
+              remainingAmount -= tx.amount;
+            }
+            if (remainingAmount <= 0) break;
+          }
+
+          if (idsToSettle.length > 0) {
+            await (supabase.from("site_engineer_transactions") as any)
+              .update({
+                is_settled: true,
+                settled_date: settlementForm.settlement_date,
+                settled_by: userProfile?.id,
+              })
+              .in("id", idsToSettle);
+          }
+        }
+      }
+
+      setSuccess("Settlement recorded successfully");
+      await fetchData();
+      setOpenSettlementDialog(false);
+    } catch (err: any) {
+      setError(err.message);
+    }
+  };
+
+  const getTransactionTypeLabel = (type: SiteEngineerTransactionType) => {
+    const labels: Record<SiteEngineerTransactionType, string> = {
+      received_from_company: "Received",
+      spent_on_behalf: "Spent",
+      used_own_money: "Own Money",
+      returned_to_company: "Returned",
+    };
+    return labels[type];
+  };
+
+  const getTransactionTypeColor = (type: SiteEngineerTransactionType) => {
+    const colors: Record<SiteEngineerTransactionType, "success" | "error" | "warning" | "info"> = {
+      received_from_company: "success",
+      spent_on_behalf: "error",
+      used_own_money: "warning",
+      returned_to_company: "info",
+    };
+    return colors[type];
+  };
+
+  // Filter transactions by selected engineer
+  const filteredTransactions = useMemo(() => {
+    if (!selectedEngineer) return transactions;
+    return transactions.filter((t) => t.user_id === selectedEngineer.id);
+  }, [transactions, selectedEngineer]);
+
+  const filteredSettlements = useMemo(() => {
+    if (!selectedEngineer) return settlements;
+    return settlements.filter((s) => s.site_engineer_id === selectedEngineer.id);
+  }, [settlements, selectedEngineer]);
+
+  return (
+    <Box>
+      <PageHeader
+        title="Site Engineer Wallet"
+        subtitle="Track money flow between company and site engineers"
+        onRefresh={fetchData}
+        isLoading={loading}
+        actions={
+          canEdit && (
+            <Box sx={{ display: "flex", gap: 1 }}>
+              <Button
+                variant="outlined"
+                startIcon={<SettlementIcon />}
+                onClick={handleOpenSettlementDialog}
+              >
+                Record Settlement
+              </Button>
+              <Button
+                variant="contained"
+                startIcon={<AddIcon />}
+                onClick={handleOpenTransactionDialog}
+              >
+                Record Transaction
+              </Button>
+            </Box>
+          )
+        }
+      />
+
+      {error && (
+        <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>
+          {error}
+        </Alert>
+      )}
+
+      {success && (
+        <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSuccess("")}>
+          {success}
+        </Alert>
+      )}
+
+      {/* Company Overview Stats */}
+      <Card sx={{ mb: 3 }}>
+        <CardContent>
+          <Typography variant="h6" gutterBottom>
+            Company Overview
+          </Typography>
+          <Grid container spacing={3}>
+            <Grid size={{ xs: 6, md: 2 }}>
+              <Box>
+                <Typography variant="caption" color="text.secondary">
+                  Total Given
+                </Typography>
+                <Typography variant="h5" fontWeight={600} color="success.main">
+                  ₹{companyTotals.totalGiven.toLocaleString()}
+                </Typography>
+              </Box>
+            </Grid>
+            <Grid size={{ xs: 6, md: 2 }}>
+              <Box>
+                <Typography variant="caption" color="text.secondary">
+                  Total Spent
+                </Typography>
+                <Typography variant="h5" fontWeight={600} color="error.main">
+                  ₹{companyTotals.totalSpent.toLocaleString()}
+                </Typography>
+              </Box>
+            </Grid>
+            <Grid size={{ xs: 6, md: 2 }}>
+              <Box>
+                <Typography variant="caption" color="text.secondary">
+                  Own Money Used
+                </Typography>
+                <Typography variant="h5" fontWeight={600} color="warning.main">
+                  ₹{companyTotals.totalOwnMoney.toLocaleString()}
+                </Typography>
+              </Box>
+            </Grid>
+            <Grid size={{ xs: 6, md: 2 }}>
+              <Box>
+                <Typography variant="caption" color="text.secondary">
+                  Returned
+                </Typography>
+                <Typography variant="h5" fontWeight={600} color="info.main">
+                  ₹{companyTotals.totalReturned.toLocaleString()}
+                </Typography>
+              </Box>
+            </Grid>
+            <Grid size={{ xs: 6, md: 2 }}>
+              <Box>
+                <Typography variant="caption" color="text.secondary">
+                  With Engineers
+                </Typography>
+                <Typography variant="h5" fontWeight={600}>
+                  ₹{companyTotals.totalWithEngineers.toLocaleString()}
+                </Typography>
+              </Box>
+            </Grid>
+            <Grid size={{ xs: 6, md: 2 }}>
+              <Box>
+                <Typography variant="caption" color="text.secondary">
+                  Owed to Engineers
+                </Typography>
+                <Typography variant="h5" fontWeight={600} color="error.main">
+                  ₹{companyTotals.totalOwedToEngineers.toLocaleString()}
+                </Typography>
+              </Box>
+            </Grid>
+          </Grid>
+        </CardContent>
+      </Card>
+
+      {/* Engineer Filter */}
+      <Card sx={{ mb: 3 }}>
+        <CardContent>
+          <Autocomplete
+            options={engineers}
+            getOptionLabel={(option) => option.name}
+            value={selectedEngineer}
+            onChange={(_, newValue) => setSelectedEngineer(newValue)}
+            renderInput={(params) => (
+              <TextField {...params} label="Filter by Site Engineer" placeholder="All engineers" />
+            )}
+            sx={{ maxWidth: 400 }}
+          />
+        </CardContent>
+      </Card>
+
+      {/* Per-Engineer Summary (when one is selected) */}
+      {selectedEngineer && walletSummary[selectedEngineer.id] && (
+        <Card sx={{ mb: 3 }}>
+          <CardContent>
+            <Typography variant="h6" gutterBottom>
+              {selectedEngineer.name}&apos;s Wallet Summary
+            </Typography>
+            <Grid container spacing={3}>
+              <Grid size={{ xs: 6, md: 2 }}>
+                <Box>
+                  <Typography variant="caption" color="text.secondary">
+                    Received
+                  </Typography>
+                  <Typography variant="h6" fontWeight={600} color="success.main">
+                    ₹{walletSummary[selectedEngineer.id].received.toLocaleString()}
+                  </Typography>
+                </Box>
+              </Grid>
+              <Grid size={{ xs: 6, md: 2 }}>
+                <Box>
+                  <Typography variant="caption" color="text.secondary">
+                    Spent
+                  </Typography>
+                  <Typography variant="h6" fontWeight={600} color="error.main">
+                    ₹{walletSummary[selectedEngineer.id].spent.toLocaleString()}
+                  </Typography>
+                </Box>
+              </Grid>
+              <Grid size={{ xs: 6, md: 2 }}>
+                <Box>
+                  <Typography variant="caption" color="text.secondary">
+                    Own Money
+                  </Typography>
+                  <Typography variant="h6" fontWeight={600} color="warning.main">
+                    ₹{walletSummary[selectedEngineer.id].own_money.toLocaleString()}
+                  </Typography>
+                </Box>
+              </Grid>
+              <Grid size={{ xs: 6, md: 2 }}>
+                <Box>
+                  <Typography variant="caption" color="text.secondary">
+                    Returned
+                  </Typography>
+                  <Typography variant="h6" fontWeight={600} color="info.main">
+                    ₹{walletSummary[selectedEngineer.id].returned.toLocaleString()}
+                  </Typography>
+                </Box>
+              </Grid>
+              <Grid size={{ xs: 6, md: 2 }}>
+                <Box>
+                  <Typography variant="caption" color="text.secondary">
+                    Balance
+                  </Typography>
+                  <Typography variant="h6" fontWeight={600}>
+                    ₹{walletSummary[selectedEngineer.id].balance.toLocaleString()}
+                  </Typography>
+                </Box>
+              </Grid>
+              <Grid size={{ xs: 6, md: 2 }}>
+                <Box>
+                  <Typography variant="caption" color="text.secondary">
+                    Owed to Engineer
+                  </Typography>
+                  <Typography
+                    variant="h6"
+                    fontWeight={600}
+                    color={walletSummary[selectedEngineer.id].owed_to_engineer > 0 ? "error.main" : "success.main"}
+                  >
+                    ₹{Math.max(0, walletSummary[selectedEngineer.id].owed_to_engineer).toLocaleString()}
+                  </Typography>
+                </Box>
+              </Grid>
+            </Grid>
+
+            {/* Spending by Site */}
+            {Object.keys(walletSummary[selectedEngineer.id].by_site).length > 0 && (
+              <Box sx={{ mt: 3 }}>
+                <Typography variant="subtitle2" gutterBottom>
+                  Spending by Site
+                </Typography>
+                <TableContainer component={Paper} variant="outlined">
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Site</TableCell>
+                        <TableCell align="right">Spent</TableCell>
+                        <TableCell align="right">Own Money</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {Object.entries(walletSummary[selectedEngineer.id].by_site).map(([siteId, data]) => {
+                        const site = sites.find((s) => s.id === siteId);
+                        return (
+                          <TableRow key={siteId}>
+                            <TableCell>{site?.name || "Unknown Site"}</TableCell>
+                            <TableCell align="right">₹{data.spent.toLocaleString()}</TableCell>
+                            <TableCell align="right">₹{data.own_money.toLocaleString()}</TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              </Box>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Tabs for Transactions and Settlements */}
+      <Card>
+        <CardContent>
+          <Tabs value={tabValue} onChange={(_, v) => setTabValue(v)}>
+            <Tab label="Transactions" />
+            <Tab label="Settlements" />
+          </Tabs>
+
+          <TabPanel value={tabValue} index={0}>
+            <TableContainer>
+              <Table>
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Date</TableCell>
+                    <TableCell>Engineer</TableCell>
+                    <TableCell>Type</TableCell>
+                    <TableCell>Site</TableCell>
+                    <TableCell align="right">Amount</TableCell>
+                    <TableCell>Mode</TableCell>
+                    <TableCell>Description</TableCell>
+                    <TableCell>Settled?</TableCell>
+                    <TableCell>Recorded By</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {filteredTransactions.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={9} align="center">
+                        No transactions found
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    filteredTransactions.map((t) => (
+                      <TableRow key={t.id}>
+                        <TableCell>{dayjs(t.transaction_date).format("DD MMM YYYY")}</TableCell>
+                        <TableCell>{t.user_name}</TableCell>
+                        <TableCell>
+                          <Chip
+                            label={getTransactionTypeLabel(t.transaction_type)}
+                            size="small"
+                            color={getTransactionTypeColor(t.transaction_type)}
+                          />
+                        </TableCell>
+                        <TableCell>{t.site_name}</TableCell>
+                        <TableCell align="right">
+                          <Typography
+                            fontWeight={600}
+                            color={
+                              t.transaction_type === "received_from_company"
+                                ? "success.main"
+                                : t.transaction_type === "returned_to_company"
+                                ? "info.main"
+                                : "error.main"
+                            }
+                          >
+                            {t.transaction_type === "received_from_company" ? "+" : "-"}₹
+                            {t.amount.toLocaleString()}
+                          </Typography>
+                        </TableCell>
+                        <TableCell>
+                          <Chip label={t.payment_mode.toUpperCase()} size="small" variant="outlined" />
+                        </TableCell>
+                        <TableCell>{t.description || t.notes || "-"}</TableCell>
+                        <TableCell>
+                          {t.transaction_type === "used_own_money" ? (
+                            t.is_settled ? (
+                              <Chip label="Settled" size="small" color="success" icon={<CheckIcon />} />
+                            ) : (
+                              <Chip label="Pending" size="small" color="warning" />
+                            )
+                          ) : (
+                            "-"
+                          )}
+                        </TableCell>
+                        <TableCell>{t.recorded_by}</TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </TabPanel>
+
+          <TabPanel value={tabValue} index={1}>
+            <TableContainer>
+              <Table>
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Date</TableCell>
+                    <TableCell>Engineer</TableCell>
+                    <TableCell>Type</TableCell>
+                    <TableCell align="right">Amount</TableCell>
+                    <TableCell>Mode</TableCell>
+                    <TableCell>Notes</TableCell>
+                    <TableCell>Recorded By</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {filteredSettlements.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={7} align="center">
+                        No settlements found
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    filteredSettlements.map((s) => (
+                      <TableRow key={s.id}>
+                        <TableCell>{dayjs(s.settlement_date).format("DD MMM YYYY")}</TableCell>
+                        <TableCell>{s.engineer_name}</TableCell>
+                        <TableCell>
+                          <Chip
+                            label={
+                              s.settlement_type === "company_to_engineer"
+                                ? "Company → Engineer"
+                                : "Engineer → Company"
+                            }
+                            size="small"
+                            color={s.settlement_type === "company_to_engineer" ? "success" : "info"}
+                          />
+                        </TableCell>
+                        <TableCell align="right">
+                          <Typography fontWeight={600}>₹{s.amount.toLocaleString()}</Typography>
+                        </TableCell>
+                        <TableCell>
+                          <Chip label={s.payment_mode.toUpperCase()} size="small" variant="outlined" />
+                        </TableCell>
+                        <TableCell>{s.notes || "-"}</TableCell>
+                        <TableCell>{s.recorded_by}</TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </TabPanel>
+        </CardContent>
+      </Card>
+
+      {/* Record Transaction Dialog */}
+      <Dialog
+        open={openTransactionDialog}
+        onClose={() => setOpenTransactionDialog(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Record Transaction</DialogTitle>
+        <DialogContent>
+          <Box sx={{ mt: 2 }}>
+            <Grid container spacing={2}>
+              <Grid size={{ xs: 12 }}>
+                <FormControl fullWidth required>
+                  <InputLabel>Site Engineer</InputLabel>
+                  <Select
+                    value={transactionForm.user_id}
+                    label="Site Engineer"
+                    onChange={(e) =>
+                      setTransactionForm({ ...transactionForm, user_id: e.target.value })
+                    }
+                  >
+                    {engineers.map((eng) => (
+                      <MenuItem key={eng.id} value={eng.id}>
+                        {eng.name} ({eng.role})
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid size={{ xs: 12 }}>
+                <FormControl fullWidth required>
+                  <InputLabel>Transaction Type</InputLabel>
+                  <Select
+                    value={transactionForm.transaction_type}
+                    label="Transaction Type"
+                    onChange={(e) =>
+                      setTransactionForm({
+                        ...transactionForm,
+                        transaction_type: e.target.value as SiteEngineerTransactionType,
+                      })
+                    }
+                  >
+                    <MenuItem value="received_from_company">
+                      <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                        <ReceivedIcon color="success" fontSize="small" />
+                        Received from Company
+                      </Box>
+                    </MenuItem>
+                    <MenuItem value="spent_on_behalf">
+                      <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                        <SpentIcon color="error" fontSize="small" />
+                        Spent on Behalf
+                      </Box>
+                    </MenuItem>
+                    <MenuItem value="used_own_money">
+                      <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                        <WalletIcon color="warning" fontSize="small" />
+                        Used Own Money
+                      </Box>
+                    </MenuItem>
+                    <MenuItem value="returned_to_company">
+                      <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                        <SettlementIcon color="info" fontSize="small" />
+                        Returned to Company
+                      </Box>
+                    </MenuItem>
+                  </Select>
+                </FormControl>
+              </Grid>
+              {(transactionForm.transaction_type === "spent_on_behalf" ||
+                transactionForm.transaction_type === "used_own_money") && (
+                <Grid size={{ xs: 12 }}>
+                  <FormControl fullWidth required>
+                    <InputLabel>Site</InputLabel>
+                    <Select
+                      value={transactionForm.site_id}
+                      label="Site"
+                      onChange={(e) =>
+                        setTransactionForm({ ...transactionForm, site_id: e.target.value })
+                      }
+                    >
+                      {sites.map((site) => (
+                        <MenuItem key={site.id} value={site.id}>
+                          {site.name}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                </Grid>
+              )}
+              <Grid size={{ xs: 12, md: 6 }}>
+                <TextField
+                  fullWidth
+                  label="Amount"
+                  type="number"
+                  value={transactionForm.amount}
+                  onChange={(e) =>
+                    setTransactionForm({ ...transactionForm, amount: Number(e.target.value) })
+                  }
+                  slotProps={{ input: { startAdornment: "₹" } }}
+                  required
+                />
+              </Grid>
+              <Grid size={{ xs: 12, md: 6 }}>
+                <TextField
+                  fullWidth
+                  label="Date"
+                  type="date"
+                  value={transactionForm.transaction_date}
+                  onChange={(e) =>
+                    setTransactionForm({ ...transactionForm, transaction_date: e.target.value })
+                  }
+                  slotProps={{ inputLabel: { shrink: true } }}
+                  required
+                />
+              </Grid>
+              <Grid size={{ xs: 12, md: 6 }}>
+                <FormControl fullWidth required>
+                  <InputLabel>Payment Mode</InputLabel>
+                  <Select
+                    value={transactionForm.payment_mode}
+                    label="Payment Mode"
+                    onChange={(e) =>
+                      setTransactionForm({
+                        ...transactionForm,
+                        payment_mode: e.target.value as PaymentMode,
+                      })
+                    }
+                  >
+                    <MenuItem value="cash">Cash</MenuItem>
+                    <MenuItem value="upi">UPI</MenuItem>
+                    <MenuItem value="bank_transfer">Bank Transfer</MenuItem>
+                  </Select>
+                </FormControl>
+              </Grid>
+              {(transactionForm.transaction_type === "spent_on_behalf" ||
+                transactionForm.transaction_type === "used_own_money") && (
+                <Grid size={{ xs: 12, md: 6 }}>
+                  <FormControl fullWidth>
+                    <InputLabel>Recipient Type</InputLabel>
+                    <Select
+                      value={transactionForm.recipient_type}
+                      label="Recipient Type"
+                      onChange={(e) =>
+                        setTransactionForm({
+                          ...transactionForm,
+                          recipient_type: e.target.value as RecipientType,
+                        })
+                      }
+                    >
+                      <MenuItem value="">Not specified</MenuItem>
+                      <MenuItem value="laborer">Laborer</MenuItem>
+                      <MenuItem value="mesthri">Mesthri</MenuItem>
+                      <MenuItem value="vendor">Vendor</MenuItem>
+                      <MenuItem value="other">Other</MenuItem>
+                    </Select>
+                  </FormControl>
+                </Grid>
+              )}
+              <Grid size={{ xs: 12 }}>
+                <TextField
+                  fullWidth
+                  label="Description"
+                  value={transactionForm.description}
+                  onChange={(e) =>
+                    setTransactionForm({ ...transactionForm, description: e.target.value })
+                  }
+                  placeholder="What is this payment for?"
+                />
+              </Grid>
+              <Grid size={{ xs: 12 }}>
+                <TextField
+                  fullWidth
+                  label="Notes"
+                  value={transactionForm.notes}
+                  onChange={(e) =>
+                    setTransactionForm({ ...transactionForm, notes: e.target.value })
+                  }
+                  multiline
+                  rows={2}
+                />
+              </Grid>
+            </Grid>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setOpenTransactionDialog(false)}>Cancel</Button>
+          <Button onClick={handleSaveTransaction} variant="contained">
+            Save Transaction
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Record Settlement Dialog */}
+      <Dialog
+        open={openSettlementDialog}
+        onClose={() => setOpenSettlementDialog(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Record Settlement</DialogTitle>
+        <DialogContent>
+          <Box sx={{ mt: 2 }}>
+            <Alert severity="info" sx={{ mb: 2 }}>
+              Use this to record reimbursements to engineers for their own money used, or when
+              engineers return unused company funds.
+            </Alert>
+            <Grid container spacing={2}>
+              <Grid size={{ xs: 12 }}>
+                <FormControl fullWidth required>
+                  <InputLabel>Site Engineer</InputLabel>
+                  <Select
+                    value={settlementForm.site_engineer_id}
+                    label="Site Engineer"
+                    onChange={(e) =>
+                      setSettlementForm({ ...settlementForm, site_engineer_id: e.target.value })
+                    }
+                  >
+                    {engineers.map((eng) => (
+                      <MenuItem key={eng.id} value={eng.id}>
+                        {eng.name} ({eng.role})
+                        {walletSummary[eng.id] && walletSummary[eng.id].owed_to_engineer > 0 && (
+                          <Chip
+                            label={`Owed: ₹${walletSummary[eng.id].owed_to_engineer.toLocaleString()}`}
+                            size="small"
+                            color="warning"
+                            sx={{ ml: 1 }}
+                          />
+                        )}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid size={{ xs: 12 }}>
+                <FormControl fullWidth required>
+                  <InputLabel>Settlement Type</InputLabel>
+                  <Select
+                    value={settlementForm.settlement_type}
+                    label="Settlement Type"
+                    onChange={(e) =>
+                      setSettlementForm({
+                        ...settlementForm,
+                        settlement_type: e.target.value as "company_to_engineer" | "engineer_to_company",
+                      })
+                    }
+                  >
+                    <MenuItem value="company_to_engineer">
+                      Company → Engineer (Reimbursement for own money used)
+                    </MenuItem>
+                    <MenuItem value="engineer_to_company">
+                      Engineer → Company (Returning unused funds)
+                    </MenuItem>
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid size={{ xs: 12, md: 6 }}>
+                <TextField
+                  fullWidth
+                  label="Amount"
+                  type="number"
+                  value={settlementForm.amount}
+                  onChange={(e) =>
+                    setSettlementForm({ ...settlementForm, amount: Number(e.target.value) })
+                  }
+                  slotProps={{ input: { startAdornment: "₹" } }}
+                  required
+                />
+              </Grid>
+              <Grid size={{ xs: 12, md: 6 }}>
+                <TextField
+                  fullWidth
+                  label="Date"
+                  type="date"
+                  value={settlementForm.settlement_date}
+                  onChange={(e) =>
+                    setSettlementForm({ ...settlementForm, settlement_date: e.target.value })
+                  }
+                  slotProps={{ inputLabel: { shrink: true } }}
+                  required
+                />
+              </Grid>
+              <Grid size={{ xs: 12 }}>
+                <FormControl fullWidth required>
+                  <InputLabel>Payment Mode</InputLabel>
+                  <Select
+                    value={settlementForm.payment_mode}
+                    label="Payment Mode"
+                    onChange={(e) =>
+                      setSettlementForm({
+                        ...settlementForm,
+                        payment_mode: e.target.value as PaymentMode,
+                      })
+                    }
+                  >
+                    <MenuItem value="cash">Cash</MenuItem>
+                    <MenuItem value="upi">UPI</MenuItem>
+                    <MenuItem value="bank_transfer">Bank Transfer</MenuItem>
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid size={{ xs: 12 }}>
+                <TextField
+                  fullWidth
+                  label="Notes"
+                  value={settlementForm.notes}
+                  onChange={(e) =>
+                    setSettlementForm({ ...settlementForm, notes: e.target.value })
+                  }
+                  multiline
+                  rows={2}
+                />
+              </Grid>
+            </Grid>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setOpenSettlementDialog(false)}>Cancel</Button>
+          <Button onClick={handleSaveSettlement} variant="contained">
+            Save Settlement
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </Box>
+  );
+}

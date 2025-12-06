@@ -1,7 +1,5 @@
 "use client";
 
-export const dynamic = "force-dynamic";
-
 import React, { useState, useEffect, useMemo } from "react";
 import {
   Box,
@@ -25,19 +23,35 @@ import {
   CardContent,
   Grid,
   Collapse,
+  InputLabel,
+  Checkbox,
+  FormControlLabel,
+  Divider,
+  Tooltip,
 } from "@mui/material";
 import {
   Save as SaveIcon,
   ExpandMore as ExpandMoreIcon,
   ExpandLess as ExpandLessIcon,
   CheckCircle as CheckCircleIcon,
+  Sync as SyncIcon,
+  Person as PersonIcon,
+  Group as GroupIcon,
+  Payment as PaymentIcon,
 } from "@mui/icons-material";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSite } from "@/contexts/SiteContext";
 import PageHeader from "@/components/layout/PageHeader";
-import type { Laborer, BuildingSection } from "@/types/database.types";
+import type {
+  BuildingSection,
+  PaymentMode,
+  PaymentChannel,
+  LaborerType,
+} from "@/types/database.types";
 import dayjs from "dayjs";
+import { usePresence } from "@/hooks/usePresence";
+import PresenceIndicator from "@/components/PresenceIndicator";
 
 interface AttendanceEntry {
   laborer_id: string;
@@ -45,6 +59,7 @@ interface AttendanceEntry {
   category_name: string;
   role_name: string;
   team_name: string | null;
+  team_id: string | null;
   daily_rate: number;
   work_days: number;
   section_id: string;
@@ -54,6 +69,13 @@ interface AttendanceEntry {
   extra_given: number;
   notes: string;
   isExpanded: boolean;
+  // Payment ecosystem fields
+  laborer_type: LaborerType;
+  subcontract_id: string | null;
+  is_paid: boolean;
+  payment_amount: number;
+  payment_mode: PaymentMode;
+  payment_channel: PaymentChannel;
 }
 
 interface DailySummary {
@@ -63,15 +85,33 @@ interface DailySummary {
   totalAmount: number;
 }
 
+interface PaymentSummary {
+  underContract: number;
+  outsideContract: number;
+  alreadyPaid: number;
+  pendingPayment: number;
+  total: number;
+}
+
+interface SubcontractOption {
+  id: string;
+  title: string;
+  team_id: string | null;
+  laborer_id: string | null;
+  contract_type: string;
+}
+
 export default function AttendancePage() {
   const [date, setDate] = useState(dayjs().format("YYYY-MM-DD"));
   const [laborers, setLaborers] = useState<any[]>([]);
   const [sections, setSections] = useState<BuildingSection[]>([]);
+  const [subcontracts, setSubcontracts] = useState<SubcontractOption[]>([]);
   const [attendanceEntries, setAttendanceEntries] = useState<AttendanceEntry[]>(
     []
   );
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [existingAttendance, setExistingAttendance] = useState<Set<string>>(
@@ -88,6 +128,12 @@ export default function AttendancePage() {
     userProfile?.role === "office" ||
     userProfile?.role === "site_engineer";
 
+  // Track presence - show who else is editing attendance for this site/date
+  const { activeUsers } = usePresence({
+    channelName: `attendance:${selectedSite?.id}:${date}`,
+    enabled: !!selectedSite,
+  });
+
   const fetchData = async () => {
     if (!selectedSite) return;
 
@@ -95,7 +141,7 @@ export default function AttendancePage() {
       setLoading(true);
       setError("");
 
-      // Fetch active laborers with category and role info
+      // Fetch active laborers with category, role, and laborer_type
       const { data: laborersData, error: laborersError } = await supabase
         .from("laborers")
         .select(
@@ -111,17 +157,6 @@ export default function AttendancePage() {
 
       if (laborersError) throw laborersError;
 
-      const typedLaborersData = laborersData as
-        | {
-            id: string;
-            name: string;
-            labor_categories: { name: string } | null;
-            labor_roles: { name: string } | null;
-            teams: { name: string } | null;
-            daily_rate: number;
-          }[]
-        | null;
-
       // Fetch sections for the site
       const { data: sectionsData, error: sectionsError } = await supabase
         .from("building_sections")
@@ -131,50 +166,87 @@ export default function AttendancePage() {
 
       if (sectionsError) throw sectionsError;
 
-      const typedSectionsData = sectionsData as BuildingSection[] | null;
+      // Fetch active subcontracts for the site
+      const { data: subcontractsData, error: subcontractsError } = await supabase
+        .from("subcontracts")
+        .select("id, title, team_id, laborer_id, contract_type")
+        .eq("site_id", selectedSite.id)
+        .eq("status", "active")
+        .order("title");
 
-      setLaborers(typedLaborersData || []);
-      setSections(typedSectionsData || []);
+      if (subcontractsError) throw subcontractsError;
+
+      setLaborers(laborersData || []);
+      setSections(sectionsData || []);
+      const typedSubcontracts = (subcontractsData || []) as SubcontractOption[];
+      setSubcontracts(typedSubcontracts);
 
       // Fetch existing attendance for the date
       const { data: existingData, error: existingError } = await supabase
         .from("daily_attendance")
-        .select("laborer_id")
+        .select("laborer_id, subcontract_id, is_paid")
         .eq("site_id", selectedSite.id)
         .eq("date", date);
 
       if (existingError) throw existingError;
 
-      const existingSet = new Set(
-        (existingData as { laborer_id: string }[] | null)?.map(
-          (a) => a.laborer_id
-        ) || []
+      const existingMap = new Map(
+        (existingData || []).map((a: any) => [
+          a.laborer_id,
+          { subcontract_id: a.subcontract_id, is_paid: a.is_paid },
+        ])
       );
-      setExistingAttendance(existingSet);
+      setExistingAttendance(new Set(existingMap.keys()));
 
       // Initialize attendance entries
+      const typedLaborersData = laborersData as any[] | null;
+      const typedSectionsData = sectionsData as BuildingSection[] | null;
+
       if (
         typedLaborersData &&
         typedSectionsData &&
         typedSectionsData.length > 0
       ) {
         const defaultSection = typedSectionsData[0];
-        const entries: AttendanceEntry[] = typedLaborersData.map((laborer) => ({
-          laborer_id: laborer.id,
-          laborer_name: laborer.name,
-          category_name: laborer.labor_categories?.name || "Unknown",
-          role_name: laborer.labor_roles?.name || "Unknown",
-          team_name: laborer.teams?.name || null,
-          daily_rate: laborer.daily_rate || 0,
-          work_days: existingSet.has(laborer.id) ? 0 : 1,
-          section_id: defaultSection.id,
-          section_name: defaultSection.name,
-          hours_worked: 8,
-          advance_given: 0,
-          extra_given: 0,
-          notes: "",
-          isExpanded: false,
-        }));
+        const entries: AttendanceEntry[] = typedLaborersData.map((laborer) => {
+          const existingRecord = existingMap.get(laborer.id);
+
+          // Try to find a matching subcontract for this laborer
+          let defaultSubcontract: string | null = null;
+          if (laborer.team_id && typedSubcontracts.length > 0) {
+            const teamSubcontract = typedSubcontracts.find(
+              (sc) => sc.team_id === laborer.team_id
+            );
+            if (teamSubcontract) {
+              defaultSubcontract = teamSubcontract.id;
+            }
+          }
+
+          return {
+            laborer_id: laborer.id,
+            laborer_name: laborer.name,
+            category_name: laborer.labor_categories?.name || "Unknown",
+            role_name: laborer.labor_roles?.name || "Unknown",
+            team_name: laborer.teams?.name || null,
+            team_id: laborer.team_id || null,
+            daily_rate: laborer.daily_rate || 0,
+            work_days: existingMap.has(laborer.id) ? 0 : 1,
+            section_id: defaultSection.id,
+            section_name: defaultSection.name,
+            hours_worked: 8,
+            advance_given: 0,
+            extra_given: 0,
+            notes: "",
+            isExpanded: false,
+            // Payment ecosystem fields
+            laborer_type: laborer.laborer_type || "daily_market",
+            subcontract_id: existingRecord?.subcontract_id || defaultSubcontract,
+            is_paid: false,
+            payment_amount: 0,
+            payment_mode: "cash" as PaymentMode,
+            payment_channel: "via_site_engineer" as PaymentChannel,
+          };
+        });
         setAttendanceEntries(entries);
       }
     } catch (err: any) {
@@ -197,6 +269,8 @@ export default function AttendancePage() {
               work_days: value,
               hours_worked:
                 value === 0.5 ? 4 : value === 1 ? 8 : value === 1.5 ? 12 : 16,
+              payment_amount:
+                value > 0 ? value * entry.daily_rate : 0,
             }
           : entry
       )
@@ -213,6 +287,62 @@ export default function AttendancePage() {
               section_id: sectionId,
               section_name: section?.name || "",
             }
+          : entry
+      )
+    );
+  };
+
+  const handleSubcontractChange = (laborerId: string, subcontractId: string | null) => {
+    setAttendanceEntries((prev) =>
+      prev.map((entry) =>
+        entry.laborer_id === laborerId
+          ? { ...entry, subcontract_id: subcontractId }
+          : entry
+      )
+    );
+  };
+
+  const handleIsPaidChange = (laborerId: string, isPaid: boolean) => {
+    setAttendanceEntries((prev) =>
+      prev.map((entry) =>
+        entry.laborer_id === laborerId
+          ? {
+              ...entry,
+              is_paid: isPaid,
+              payment_amount: isPaid
+                ? entry.work_days * entry.daily_rate
+                : 0,
+            }
+          : entry
+      )
+    );
+  };
+
+  const handlePaymentModeChange = (laborerId: string, mode: PaymentMode) => {
+    setAttendanceEntries((prev) =>
+      prev.map((entry) =>
+        entry.laborer_id === laborerId
+          ? { ...entry, payment_mode: mode }
+          : entry
+      )
+    );
+  };
+
+  const handlePaymentChannelChange = (laborerId: string, channel: PaymentChannel) => {
+    setAttendanceEntries((prev) =>
+      prev.map((entry) =>
+        entry.laborer_id === laborerId
+          ? { ...entry, payment_channel: channel }
+          : entry
+      )
+    );
+  };
+
+  const handlePaymentAmountChange = (laborerId: string, amount: number) => {
+    setAttendanceEntries((prev) =>
+      prev.map((entry) =>
+        entry.laborer_id === laborerId
+          ? { ...entry, payment_amount: amount }
           : entry
       )
     );
@@ -298,6 +428,11 @@ export default function AttendancePage() {
           entry.daily_rate
         ),
         entered_by: userProfile?.id,
+        // Payment ecosystem fields
+        subcontract_id: entry.subcontract_id,
+        is_paid: entry.is_paid,
+        recorded_by: userProfile?.name || userProfile?.email,
+        recorded_by_user_id: userProfile?.id,
       }));
 
       const laborerIds = activeEntries.map((e) => e.laborer_id);
@@ -358,8 +493,44 @@ export default function AttendancePage() {
         if (advanceError) throw advanceError;
       }
 
+      // Handle labor payments for daily market laborers marked as paid
+      const paidDailyLaborers = activeEntries.filter(
+        (entry) => entry.is_paid && entry.laborer_type === "daily_market"
+      );
+
+      if (paidDailyLaborers.length > 0) {
+        const laborPayments = paidDailyLaborers.map((entry) => ({
+          laborer_id: entry.laborer_id,
+          site_id: selectedSite.id,
+          subcontract_id: entry.subcontract_id,
+          amount: entry.payment_amount,
+          payment_date: date,
+          payment_for_date: date,
+          payment_mode: entry.payment_mode,
+          payment_channel: entry.payment_channel,
+          paid_by: userProfile?.name || userProfile?.email || "Unknown",
+          paid_by_user_id: userProfile?.id,
+          is_under_contract: !!entry.subcontract_id,
+          recorded_by: userProfile?.name || userProfile?.email || "Unknown",
+          recorded_by_user_id: userProfile?.id,
+        }));
+
+        const { error: paymentError } = await (
+          supabase.from("labor_payments") as any
+        ).insert(laborPayments);
+
+        if (paymentError) {
+          console.error("Error recording labor payments:", paymentError);
+          // Don't throw - attendance is saved, payments are secondary
+        }
+      }
+
       setSuccess(
-        `Attendance saved successfully for ${activeEntries.length} laborer(s)`
+        `Attendance saved successfully for ${activeEntries.length} laborer(s)${
+          paidDailyLaborers.length > 0
+            ? ` (${paidDailyLaborers.length} payments recorded)`
+            : ""
+        }`
       );
       setShowSummary(true);
       await fetchData();
@@ -367,6 +538,110 @@ export default function AttendancePage() {
       setError(err.message);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleSyncToExpenses = async () => {
+    if (!selectedSite || !userProfile) return;
+
+    try {
+      setSyncing(true);
+      setError("");
+
+      const activeEntries = attendanceEntries.filter((e) => e.work_days > 0);
+      if (activeEntries.length === 0) {
+        setError("No attendance entries to sync");
+        return;
+      }
+
+      const totalAmount = activeEntries.reduce(
+        (sum, e) => sum + calculateDailyEarnings(e.work_days, e.daily_rate),
+        0
+      );
+      const totalWorkDays = activeEntries.reduce((sum, e) => sum + e.work_days, 0);
+
+      // Check if already synced
+      const { data: existingSync } = await supabase
+        .from("attendance_expense_sync")
+        .select("id")
+        .eq("site_id", selectedSite.id)
+        .eq("attendance_date", date)
+        .single();
+
+      if (existingSync) {
+        setError("Attendance for this date has already been synced to expenses");
+        return;
+      }
+
+      // Get or create "Daily Labor" expense category
+      let categoryId: string;
+      const { data: laborCategory } = await supabase
+        .from("expense_categories")
+        .select("id")
+        .eq("module", "labor")
+        .eq("name", "Daily Labor")
+        .single();
+
+      const typedCategory = laborCategory as { id: string } | null;
+      if (typedCategory) {
+        categoryId = typedCategory.id;
+      } else {
+        const { data: newCategory, error: catError } = await (
+          supabase.from("expense_categories") as any
+        ).insert({
+          module: "labor",
+          name: "Daily Labor",
+          is_recurring: false,
+        }).select("id").single();
+
+        if (catError) throw catError;
+        categoryId = newCategory.id;
+      }
+
+      // Create expense record
+      const { data: expense, error: expenseError } = await (
+        supabase.from("expenses") as any
+      ).insert({
+        module: "labor",
+        category_id: categoryId,
+        date: date,
+        amount: totalAmount,
+        site_id: selectedSite.id,
+        description: `Daily labor for ${dayjs(date).format("DD MMM YYYY")} - ${activeEntries.length} laborers`,
+        payment_mode: "cash",
+        is_recurring: false,
+        is_cleared: false,
+      }).select("id").single();
+
+      if (expenseError) throw expenseError;
+
+      // Record sync
+      const { error: syncError } = await (
+        supabase.from("attendance_expense_sync") as any
+      ).insert({
+        attendance_date: date,
+        site_id: selectedSite.id,
+        expense_id: expense.id,
+        total_laborers: activeEntries.length,
+        total_work_days: totalWorkDays,
+        total_amount: totalAmount,
+        synced_by: userProfile.name || userProfile.email,
+        synced_by_user_id: userProfile.id,
+      });
+
+      if (syncError) throw syncError;
+
+      // Update attendance records as synced
+      await (supabase.from("daily_attendance") as any)
+        .update({ synced_to_expense: true })
+        .eq("site_id", selectedSite.id)
+        .eq("date", date);
+
+      setSuccess(`Synced ₹${totalAmount.toLocaleString()} to daily expenses`);
+    } catch (err: any) {
+      setError("Failed to sync: " + err.message);
+    } finally {
+      setSyncing(false);
     }
   };
 
@@ -386,6 +661,35 @@ export default function AttendancePage() {
     );
 
     return { present, totalEarnings, totalAdvance, totalExtra };
+  }, [attendanceEntries]);
+
+  // Payment summary breakdown
+  const paymentSummary = useMemo<PaymentSummary>(() => {
+    const activeEntries = attendanceEntries.filter((e) => e.work_days > 0);
+
+    const underContract = activeEntries
+      .filter((e) => e.subcontract_id)
+      .reduce((sum, e) => sum + calculateDailyEarnings(e.work_days, e.daily_rate), 0);
+
+    const outsideContract = activeEntries
+      .filter((e) => !e.subcontract_id)
+      .reduce((sum, e) => sum + calculateDailyEarnings(e.work_days, e.daily_rate), 0);
+
+    const alreadyPaid = activeEntries
+      .filter((e) => e.is_paid)
+      .reduce((sum, e) => sum + e.payment_amount, 0);
+
+    const pendingPayment = activeEntries
+      .filter((e) => !e.is_paid && e.laborer_type === "daily_market")
+      .reduce((sum, e) => sum + calculateDailyEarnings(e.work_days, e.daily_rate), 0);
+
+    return {
+      underContract,
+      outsideContract,
+      alreadyPaid,
+      pendingPayment,
+      total: underContract + outsideContract,
+    };
   }, [attendanceEntries]);
 
   // Calculate daily summary by category
@@ -415,6 +719,31 @@ export default function AttendancePage() {
       (a, b) => b.totalAmount - a.totalAmount
     );
   }, [attendanceEntries]);
+
+  const getLaborerTypeBadge = (type: LaborerType) => {
+    if (type === "contract") {
+      return (
+        <Chip
+          icon={<GroupIcon sx={{ fontSize: 14 }} />}
+          label="CONTRACT"
+          size="small"
+          color="primary"
+          variant="outlined"
+          sx={{ ml: 1, height: 20, fontSize: 10 }}
+        />
+      );
+    }
+    return (
+      <Chip
+        icon={<PersonIcon sx={{ fontSize: 14 }} />}
+        label="DAILY"
+        size="small"
+        color="secondary"
+        variant="outlined"
+        sx={{ ml: 1, height: 20, fontSize: 10 }}
+      />
+    );
+  };
 
   if (!selectedSite) {
     return (
@@ -448,11 +777,14 @@ export default function AttendancePage() {
         </Alert>
       )}
 
+      {/* Presence Indicator - Show who else is viewing/editing */}
+      <PresenceIndicator activeUsers={activeUsers} />
+
       {/* Date and Stats Card */}
       <Card sx={{ mb: 3 }}>
         <CardContent>
           <Grid container spacing={3} alignItems="center">
-            <Grid size={{ xs: 12, md: 3 }}>
+            <Grid size={{ xs: 12, md: 2 }}>
               <TextField
                 fullWidth
                 label="Attendance Date"
@@ -462,7 +794,7 @@ export default function AttendancePage() {
                 slotProps={{ inputLabel: { shrink: true } }}
               />
             </Grid>
-            <Grid size={{ xs: 6, md: 2 }}>
+            <Grid size={{ xs: 6, md: 1.5 }}>
               <Box>
                 <Typography variant="caption" color="text.secondary">
                   Present
@@ -482,29 +814,93 @@ export default function AttendancePage() {
                 </Typography>
               </Box>
             </Grid>
-            <Grid size={{ xs: 6, md: 2 }}>
+            <Grid size={{ xs: 6, md: 1.5 }}>
               <Box>
                 <Typography variant="caption" color="text.secondary">
-                  Total Advance
+                  Advance
                 </Typography>
-                <Typography variant="h5" fontWeight={600} color="warning.main">
+                <Typography variant="h6" fontWeight={600} color="warning.main">
                   ₹{stats.totalAdvance.toLocaleString()}
                 </Typography>
               </Box>
             </Grid>
-            <Grid size={{ xs: 6, md: 2 }}>
+            <Grid size={{ xs: 6, md: 1.5 }}>
               <Box>
                 <Typography variant="caption" color="text.secondary">
-                  Total Extra
+                  Extra
                 </Typography>
-                <Typography variant="h5" fontWeight={600} color="success.main">
+                <Typography variant="h6" fontWeight={600} color="success.main">
                   ₹{stats.totalExtra.toLocaleString()}
                 </Typography>
               </Box>
             </Grid>
+            <Grid size={{ xs: 12, md: 3.5 }}>
+              <Button
+                variant="outlined"
+                startIcon={<SyncIcon />}
+                onClick={handleSyncToExpenses}
+                disabled={syncing || loading || stats.present === 0}
+                fullWidth
+              >
+                {syncing ? "Syncing..." : "Sync to Daily Expenses"}
+              </Button>
+            </Grid>
           </Grid>
         </CardContent>
       </Card>
+
+      {/* Payment Summary Card */}
+      {stats.present > 0 && (
+        <Card sx={{ mb: 3, bgcolor: "grey.50" }}>
+          <CardContent sx={{ py: 2 }}>
+            <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1.5 }}>
+              Payment Breakdown
+            </Typography>
+            <Grid container spacing={2}>
+              <Grid size={{ xs: 6, sm: 3 }}>
+                <Box sx={{ p: 1.5, bgcolor: "primary.50", borderRadius: 1 }}>
+                  <Typography variant="caption" color="text.secondary">
+                    Under Subcontract
+                  </Typography>
+                  <Typography variant="h6" fontWeight={600} color="primary.main">
+                    ₹{paymentSummary.underContract.toLocaleString()}
+                  </Typography>
+                </Box>
+              </Grid>
+              <Grid size={{ xs: 6, sm: 3 }}>
+                <Box sx={{ p: 1.5, bgcolor: "secondary.50", borderRadius: 1 }}>
+                  <Typography variant="caption" color="text.secondary">
+                    General Work
+                  </Typography>
+                  <Typography variant="h6" fontWeight={600} color="secondary.main">
+                    ₹{paymentSummary.outsideContract.toLocaleString()}
+                  </Typography>
+                </Box>
+              </Grid>
+              <Grid size={{ xs: 6, sm: 3 }}>
+                <Box sx={{ p: 1.5, bgcolor: "success.50", borderRadius: 1 }}>
+                  <Typography variant="caption" color="text.secondary">
+                    Paid Today
+                  </Typography>
+                  <Typography variant="h6" fontWeight={600} color="success.main">
+                    ₹{paymentSummary.alreadyPaid.toLocaleString()}
+                  </Typography>
+                </Box>
+              </Grid>
+              <Grid size={{ xs: 6, sm: 3 }}>
+                <Box sx={{ p: 1.5, bgcolor: "warning.50", borderRadius: 1 }}>
+                  <Typography variant="caption" color="text.secondary">
+                    Pending (Daily)
+                  </Typography>
+                  <Typography variant="h6" fontWeight={600} color="warning.main">
+                    ₹{paymentSummary.pendingPayment.toLocaleString()}
+                  </Typography>
+                </Box>
+              </Grid>
+            </Grid>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Attendance Table */}
       <Paper sx={{ borderRadius: 3, mb: 3 }}>
@@ -515,24 +911,25 @@ export default function AttendancePage() {
                 <TableCell width={40}></TableCell>
                 <TableCell>Laborer</TableCell>
                 <TableCell>Category / Role</TableCell>
-                <TableCell>Team</TableCell>
+                <TableCell>Subcontract</TableCell>
                 <TableCell>Rate</TableCell>
                 <TableCell>Work Days</TableCell>
                 <TableCell>Section</TableCell>
                 <TableCell>Earnings</TableCell>
+                <TableCell align="center">Paid</TableCell>
                 <TableCell align="center">Status</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={9} align="center">
+                  <TableCell colSpan={10} align="center">
                     Loading...
                   </TableCell>
                 </TableRow>
               ) : attendanceEntries.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={9} align="center">
+                  <TableCell colSpan={10} align="center">
                     No laborers found
                   </TableCell>
                 </TableRow>
@@ -553,9 +950,17 @@ export default function AttendancePage() {
                         </IconButton>
                       </TableCell>
                       <TableCell>
-                        <Typography variant="body2" fontWeight={500}>
-                          {entry.laborer_name}
-                        </Typography>
+                        <Box sx={{ display: "flex", alignItems: "center" }}>
+                          <Typography variant="body2" fontWeight={500}>
+                            {entry.laborer_name}
+                          </Typography>
+                          {getLaborerTypeBadge(entry.laborer_type)}
+                        </Box>
+                        {entry.team_name && (
+                          <Typography variant="caption" color="text.disabled">
+                            Team: {entry.team_name}
+                          </Typography>
+                        )}
                       </TableCell>
                       <TableCell>
                         <Typography variant="body2" color="text.secondary">
@@ -566,9 +971,28 @@ export default function AttendancePage() {
                         </Typography>
                       </TableCell>
                       <TableCell>
-                        <Typography variant="body2" color="text.secondary">
-                          {entry.team_name || "-"}
-                        </Typography>
+                        <FormControl size="small" sx={{ minWidth: 140 }}>
+                          <Select
+                            value={entry.subcontract_id || ""}
+                            onChange={(e) =>
+                              handleSubcontractChange(
+                                entry.laborer_id,
+                                e.target.value || null
+                              )
+                            }
+                            disabled={!canEdit || entry.work_days === 0}
+                            displayEmpty
+                          >
+                            <MenuItem value="">
+                              <em>General Work</em>
+                            </MenuItem>
+                            {subcontracts.map((sc) => (
+                              <MenuItem key={sc.id} value={sc.id}>
+                                {sc.title}
+                              </MenuItem>
+                            ))}
+                          </Select>
+                        </FormControl>
                       </TableCell>
                       <TableCell>
                         <Typography variant="body2">
@@ -596,7 +1020,7 @@ export default function AttendancePage() {
                         </FormControl>
                       </TableCell>
                       <TableCell>
-                        <FormControl size="small" sx={{ minWidth: 120 }}>
+                        <FormControl size="small" sx={{ minWidth: 110 }}>
                           <Select
                             value={entry.section_id}
                             onChange={(e) =>
@@ -625,6 +1049,31 @@ export default function AttendancePage() {
                         </Typography>
                       </TableCell>
                       <TableCell align="center">
+                        {entry.laborer_type === "daily_market" && entry.work_days > 0 && (
+                          <Tooltip title="Mark as paid today">
+                            <Checkbox
+                              checked={entry.is_paid}
+                              onChange={(e) =>
+                                handleIsPaidChange(entry.laborer_id, e.target.checked)
+                              }
+                              disabled={!canEdit}
+                              size="small"
+                              color="success"
+                            />
+                          </Tooltip>
+                        )}
+                        {entry.laborer_type === "contract" && entry.work_days > 0 && (
+                          <Tooltip title="Payment via Mesthri">
+                            <Chip
+                              label="Via Mesthri"
+                              size="small"
+                              variant="outlined"
+                              sx={{ fontSize: 10 }}
+                            />
+                          </Tooltip>
+                        )}
+                      </TableCell>
+                      <TableCell align="center">
                         {existingAttendance.has(entry.laborer_id) && (
                           <Chip
                             label="Recorded"
@@ -636,7 +1085,7 @@ export default function AttendancePage() {
                       </TableCell>
                     </TableRow>
                     <TableRow>
-                      <TableCell colSpan={9} sx={{ py: 0, borderBottom: 0 }}>
+                      <TableCell colSpan={10} sx={{ py: 0, borderBottom: 0 }}>
                         <Collapse
                           in={entry.isExpanded}
                           timeout="auto"
@@ -644,6 +1093,84 @@ export default function AttendancePage() {
                         >
                           <Box sx={{ p: 2, bgcolor: "action.hover" }}>
                             <Grid container spacing={2}>
+                              {/* Payment Details for Daily Market Laborers */}
+                              {entry.laborer_type === "daily_market" && entry.is_paid && (
+                                <>
+                                  <Grid size={12}>
+                                    <Divider sx={{ mb: 1 }}>
+                                      <Chip
+                                        label="Payment Details"
+                                        size="small"
+                                        icon={<PaymentIcon />}
+                                      />
+                                    </Divider>
+                                  </Grid>
+                                  <Grid size={{ xs: 12, md: 2 }}>
+                                    <TextField
+                                      fullWidth
+                                      label="Payment Amount"
+                                      type="number"
+                                      size="small"
+                                      value={entry.payment_amount}
+                                      onChange={(e) =>
+                                        handlePaymentAmountChange(
+                                          entry.laborer_id,
+                                          Number(e.target.value)
+                                        )
+                                      }
+                                      disabled={!canEdit}
+                                      slotProps={{ input: { startAdornment: "₹" } }}
+                                    />
+                                  </Grid>
+                                  <Grid size={{ xs: 12, md: 2.5 }}>
+                                    <FormControl fullWidth size="small">
+                                      <InputLabel>Payment Mode</InputLabel>
+                                      <Select
+                                        value={entry.payment_mode}
+                                        onChange={(e) =>
+                                          handlePaymentModeChange(
+                                            entry.laborer_id,
+                                            e.target.value as PaymentMode
+                                          )
+                                        }
+                                        label="Payment Mode"
+                                        disabled={!canEdit}
+                                      >
+                                        <MenuItem value="cash">Cash</MenuItem>
+                                        <MenuItem value="upi">UPI</MenuItem>
+                                        <MenuItem value="bank_transfer">Bank Transfer</MenuItem>
+                                      </Select>
+                                    </FormControl>
+                                  </Grid>
+                                  <Grid size={{ xs: 12, md: 3.5 }}>
+                                    <FormControl fullWidth size="small">
+                                      <InputLabel>Payment Channel</InputLabel>
+                                      <Select
+                                        value={entry.payment_channel}
+                                        onChange={(e) =>
+                                          handlePaymentChannelChange(
+                                            entry.laborer_id,
+                                            e.target.value as PaymentChannel
+                                          )
+                                        }
+                                        label="Payment Channel"
+                                        disabled={!canEdit}
+                                      >
+                                        <MenuItem value="via_site_engineer">
+                                          Via Site Engineer
+                                        </MenuItem>
+                                        <MenuItem value="at_office">At Office</MenuItem>
+                                        <MenuItem value="company_direct_online">
+                                          Company Direct Online
+                                        </MenuItem>
+                                      </Select>
+                                    </FormControl>
+                                  </Grid>
+                                  <Grid size={12}>
+                                    <Divider sx={{ my: 1 }} />
+                                  </Grid>
+                                </>
+                              )}
                               <Grid size={{ xs: 12, md: 3 }}>
                                 <TextField
                                   fullWidth

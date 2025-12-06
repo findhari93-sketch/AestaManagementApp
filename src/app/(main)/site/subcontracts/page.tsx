@@ -29,7 +29,6 @@ import {
   ToggleButtonGroup,
   ToggleButton,
   Paper,
-  Tooltip,
 } from "@mui/material";
 import {
   Add,
@@ -43,6 +42,7 @@ import {
 import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { useSite } from "@/contexts/SiteContext";
 import PageHeader from "@/components/layout/PageHeader";
 import type {
   Subcontract,
@@ -51,31 +51,35 @@ import type {
   MeasurementUnit,
   PaymentMode,
   PaymentType,
+  PaymentChannel,
 } from "@/types/database.types";
 import dayjs from "dayjs";
 
 interface SubcontractWithDetails extends Subcontract {
   team_name?: string;
   laborer_name?: string;
-  site_name?: string;
   total_paid?: number;
   balance_due?: number;
   completion_percentage?: number;
 }
 
-export default function CompanyContractsPage() {
+export default function SiteSubcontractsPage() {
   const { userProfile } = useAuth();
+  const { selectedSite } = useSite();
   const supabase = createClient();
 
-  const [subcontracts, setSubcontracts] = useState<SubcontractWithDetails[]>([]);
+  const [subcontracts, setSubcontracts] = useState<SubcontractWithDetails[]>(
+    []
+  );
   const [teams, setTeams] = useState<any[]>([]);
   const [laborers, setLaborers] = useState<any[]>([]);
-  const [sites, setSites] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [viewDialogOpen, setViewDialogOpen] = useState(false);
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
-  const [editingSubcontract, setEditingSubcontract] = useState<Subcontract | null>(null);
+  const [editingSubcontract, setEditingSubcontract] = useState<Subcontract | null>(
+    null
+  );
   const [selectedSubcontract, setSelectedSubcontract] =
     useState<SubcontractWithDetails | null>(null);
   const [error, setError] = useState("");
@@ -83,9 +87,8 @@ export default function CompanyContractsPage() {
   // Filters
   const [activeTab, setActiveTab] = useState<ContractStatus | "all">("all");
 
-  // Form state
+  // Form state (no site_id - will use selectedSite.id)
   const [form, setForm] = useState({
-    site_id: "",
     contract_type: "mesthri" as ContractType,
     team_id: "",
     laborer_id: "",
@@ -100,25 +103,32 @@ export default function CompanyContractsPage() {
     start_date: dayjs().format("YYYY-MM-DD"),
     expected_end_date: "",
     status: "draft" as ContractStatus,
-    is_rate_based: true, // New field to toggle between rate-based and lump sum
+    is_rate_based: true,
   });
 
-  // Payment form
+  // Payment form - Enhanced with payment channel and period tracking
   const [paymentForm, setPaymentForm] = useState({
     payment_type: "part_payment" as PaymentType,
     amount: 0,
     payment_date: dayjs().format("YYYY-MM-DD"),
     payment_mode: "cash" as PaymentMode,
+    payment_channel: "via_site_engineer" as PaymentChannel,
+    period_from_date: dayjs().subtract(6, "day").format("YYYY-MM-DD"),
+    period_to_date: dayjs().format("YYYY-MM-DD"),
     notes: "",
   });
+
+  // Site engineers list for payment channel
+  const [siteEngineers, setSiteEngineers] = useState<any[]>([]);
+  const [selectedSiteEngineer, setSelectedSiteEngineer] = useState<string>("");
 
   const canEdit =
     userProfile?.role === "admin" || userProfile?.role === "office";
 
-  // Fetch options
+  // Fetch teams, laborers, and site engineers
   useEffect(() => {
     const fetchOptions = async () => {
-      const [teamsRes, laborersRes, sitesRes] = await Promise.all([
+      const [teamsRes, laborersRes, engineersRes] = await Promise.all([
         supabase
           .from("teams")
           .select("id, name")
@@ -130,22 +140,24 @@ export default function CompanyContractsPage() {
           .eq("status", "active")
           .order("name"),
         supabase
-          .from("sites")
-          .select("id, name")
-          .eq("status", "active")
+          .from("users")
+          .select("id, name, role")
+          .in("role", ["site_engineer", "admin", "office"])
           .order("name"),
       ]);
 
       setTeams(teamsRes.data || []);
       setLaborers(laborersRes.data || []);
-      setSites(sitesRes.data || []);
+      setSiteEngineers(engineersRes.data || []);
     };
 
     fetchOptions();
   }, []);
 
-  // Fetch subcontracts
+  // Fetch subcontracts for selected site
   const fetchSubcontracts = async () => {
+    if (!selectedSite) return;
+
     setLoading(true);
     try {
       let query = supabase
@@ -154,10 +166,10 @@ export default function CompanyContractsPage() {
           `
           *,
           teams(name),
-          laborers(name),
-          sites(name)
+          laborers(name)
         `
         )
+        .eq("site_id", selectedSite.id)
         .order("created_at", { ascending: false });
 
       if (activeTab !== "all") {
@@ -169,33 +181,33 @@ export default function CompanyContractsPage() {
       if (error) throw error;
 
       // Fetch payments for each subcontract
-      const subcontractsWithDetails: SubcontractWithDetails[] = await Promise.all(
-        (data || []).map(async (subcontract: any) => {
-          const { data: payments } = await supabase
-            .from("subcontract_payments")
-            .select("amount")
-            .eq("subcontract_id", subcontract.id);
+      const subcontractsWithDetails: SubcontractWithDetails[] =
+        await Promise.all(
+          (data || []).map(async (subcontract: any) => {
+            const { data: payments } = await supabase
+              .from("subcontract_payments")
+              .select("amount")
+              .eq("subcontract_id", subcontract.id);
 
-          const paymentsList = payments as { amount: number }[] | null;
-          const totalPaid =
-            paymentsList?.reduce((sum, p) => sum + p.amount, 0) || 0;
-          const balanceDue = subcontract.total_value - totalPaid;
-          const completionPercentage =
-            subcontract.total_value > 0
-              ? (totalPaid / subcontract.total_value) * 100
-              : 0;
+            const paymentsList = payments as { amount: number }[] | null;
+            const totalPaid =
+              paymentsList?.reduce((sum, p) => sum + p.amount, 0) || 0;
+            const balanceDue = subcontract.total_value - totalPaid;
+            const completionPercentage =
+              subcontract.total_value > 0
+                ? (totalPaid / subcontract.total_value) * 100
+                : 0;
 
-          return {
-            ...subcontract,
-            team_name: subcontract.teams?.name,
-            laborer_name: subcontract.laborers?.name,
-            site_name: subcontract.sites?.name,
-            total_paid: totalPaid,
-            balance_due: balanceDue,
-            completion_percentage: completionPercentage,
-          };
-        })
-      );
+            return {
+              ...subcontract,
+              team_name: subcontract.teams?.name,
+              laborer_name: subcontract.laborers?.name,
+              total_paid: totalPaid,
+              balance_due: balanceDue,
+              completion_percentage: completionPercentage,
+            };
+          })
+        );
 
       setSubcontracts(subcontractsWithDetails);
     } catch (err: any) {
@@ -207,8 +219,10 @@ export default function CompanyContractsPage() {
   };
 
   useEffect(() => {
-    fetchSubcontracts();
-  }, [activeTab]);
+    if (selectedSite) {
+      fetchSubcontracts();
+    }
+  }, [activeTab, selectedSite]);
 
   // Auto-calculate total value for rate-based contracts
   useEffect(() => {
@@ -216,7 +230,7 @@ export default function CompanyContractsPage() {
       const calculatedValue = form.rate_per_unit * form.total_units;
       setForm((prev) => ({
         ...prev,
-        total_value: Math.round(calculatedValue * 100) / 100, // Round to 2 decimals
+        total_value: Math.round(calculatedValue * 100) / 100,
       }));
     }
   }, [form.is_rate_based, form.rate_per_unit, form.total_units]);
@@ -227,7 +241,6 @@ export default function CompanyContractsPage() {
       const isRateBased =
         (subcontract.rate_per_unit ?? 0) > 0 && (subcontract.total_units ?? 0) > 0;
       setForm({
-        site_id: subcontract.site_id || "",
         contract_type: subcontract.contract_type,
         team_id: subcontract.team_id || "",
         laborer_id: subcontract.laborer_id || "",
@@ -247,7 +260,6 @@ export default function CompanyContractsPage() {
     } else {
       setEditingSubcontract(null);
       setForm({
-        site_id: "",
         contract_type: "mesthri",
         team_id: "",
         laborer_id: "",
@@ -274,9 +286,9 @@ export default function CompanyContractsPage() {
   };
 
   const handleSubmit = async () => {
-    if (!userProfile) return;
+    if (!userProfile || !selectedSite) return;
 
-    if (!form.title || form.total_value <= 0 || !form.site_id) {
+    if (!form.title || form.total_value <= 0) {
       setError("Please fill in all required fields with valid values");
       return;
     }
@@ -294,7 +306,7 @@ export default function CompanyContractsPage() {
     setLoading(true);
     try {
       const subcontractData = {
-        site_id: form.site_id,
+        site_id: selectedSite.id, // Auto-set from selected site
         contract_type: form.contract_type,
         team_id: form.contract_type === "mesthri" ? form.team_id : null,
         laborer_id:
@@ -368,13 +380,17 @@ export default function CompanyContractsPage() {
       amount: 0,
       payment_date: dayjs().format("YYYY-MM-DD"),
       payment_mode: "cash",
+      payment_channel: "via_site_engineer",
+      period_from_date: dayjs().subtract(6, "day").format("YYYY-MM-DD"),
+      period_to_date: dayjs().format("YYYY-MM-DD"),
       notes: "",
     });
+    setSelectedSiteEngineer("");
     setPaymentDialogOpen(true);
   };
 
   const handleRecordPayment = async () => {
-    if (!selectedSubcontract || !userProfile) return;
+    if (!selectedSubcontract || !userProfile || !selectedSite) return;
 
     if (paymentForm.amount <= 0) {
       setError("Please enter a valid payment amount");
@@ -386,8 +402,56 @@ export default function CompanyContractsPage() {
       return;
     }
 
+    // Validate site engineer selection when channel is via_site_engineer
+    if (paymentForm.payment_channel === "via_site_engineer" && !selectedSiteEngineer) {
+      setError("Please select which site engineer made this payment");
+      return;
+    }
+
     setLoading(true);
     try {
+      let siteEngineerTransactionId: string | null = null;
+
+      // If payment is via site engineer, create a wallet transaction first
+      if (paymentForm.payment_channel === "via_site_engineer" && selectedSiteEngineer) {
+        const { data: txData, error: txError } = await (
+          supabase.from("site_engineer_transactions") as any
+        ).insert({
+          user_id: selectedSiteEngineer,
+          transaction_type: "spent_on_behalf",
+          amount: paymentForm.amount,
+          transaction_date: paymentForm.payment_date,
+          site_id: selectedSite.id,
+          description: `Payment to Mesthri - ${selectedSubcontract.title}`,
+          recipient_type: "mesthri",
+          recipient_id: selectedSubcontract.team_id,
+          payment_mode: paymentForm.payment_mode,
+          related_subcontract_id: selectedSubcontract.id,
+          is_settled: false,
+          notes: paymentForm.notes || null,
+          recorded_by: userProfile.name || userProfile.email,
+          recorded_by_user_id: userProfile.id,
+        }).select("id").single();
+
+        if (txError) throw txError;
+        siteEngineerTransactionId = txData?.id || null;
+      }
+
+      // Get the payer name based on channel
+      let paidByName = userProfile.name || "Unknown";
+      if (paymentForm.payment_channel === "via_site_engineer" && selectedSiteEngineer) {
+        const engineer = siteEngineers.find(e => e.id === selectedSiteEngineer);
+        paidByName = engineer?.name || "Site Engineer";
+      } else if (paymentForm.payment_channel === "mesthri_at_office") {
+        paidByName = "Office Staff";
+      } else if (paymentForm.payment_channel === "company_direct_online") {
+        paidByName = "Company (Online Transfer)";
+      }
+
+      // Calculate balance after this payment
+      const balanceAfterPayment = (selectedSubcontract.balance_due || 0) - paymentForm.amount;
+
+      // Record the payment with enhanced fields
       const { error } = await (
         supabase.from("subcontract_payments") as any
       ).insert({
@@ -396,7 +460,15 @@ export default function CompanyContractsPage() {
         amount: paymentForm.amount,
         payment_date: paymentForm.payment_date,
         payment_mode: paymentForm.payment_mode,
-        paid_by: userProfile.id,
+        payment_channel: paymentForm.payment_channel,
+        paid_by: paidByName,
+        paid_by_user_id: paymentForm.payment_channel === "via_site_engineer" ? selectedSiteEngineer : userProfile.id,
+        period_from_date: paymentForm.period_from_date,
+        period_to_date: paymentForm.period_to_date,
+        balance_after_payment: balanceAfterPayment,
+        site_engineer_transaction_id: siteEngineerTransactionId,
+        recorded_by: userProfile.name || userProfile.email,
+        recorded_by_user_id: userProfile.id,
         notes: paymentForm.notes || null,
       });
 
@@ -432,12 +504,13 @@ export default function CompanyContractsPage() {
     return colorMap[status];
   };
 
+  // Table columns (no site column since we're already in site context)
   const columns = useMemo<MRT_ColumnDef<SubcontractWithDetails>[]>(
     () => [
       {
         accessorKey: "title",
         header: "Subcontract Title",
-        size: 200,
+        size: 220,
         Cell: ({ cell, row }) => (
           <Box>
             <Typography variant="body2" fontWeight={600}>
@@ -450,12 +523,6 @@ export default function CompanyContractsPage() {
             </Typography>
           </Box>
         ),
-      },
-      {
-        accessorKey: "site_name",
-        header: "Site",
-        size: 150,
-        Cell: ({ cell }) => cell.getValue<string>() || "-",
       },
       {
         accessorKey: "contract_type",
@@ -474,7 +541,7 @@ export default function CompanyContractsPage() {
       {
         accessorKey: "total_value",
         header: "Subcontract Value",
-        size: 140,
+        size: 150,
         Cell: ({ cell }) => (
           <Typography variant="body2" fontWeight={700}>
             ₹{cell.getValue<number>().toLocaleString()}
@@ -509,9 +576,7 @@ export default function CompanyContractsPage() {
           const percentage = cell.getValue<number>() || 0;
           return (
             <Box sx={{ width: "100%" }}>
-              <Typography variant="caption">
-                {percentage.toFixed(0)}%
-              </Typography>
+              <Typography variant="caption">{percentage.toFixed(0)}%</Typography>
               <LinearProgress
                 variant="determinate"
                 value={Math.min(percentage, 100)}
@@ -603,16 +668,34 @@ export default function CompanyContractsPage() {
     const paid = subcontracts.reduce((sum, c) => sum + (c.total_paid || 0), 0);
     const due = subcontracts.reduce((sum, c) => sum + (c.balance_due || 0), 0);
     const active = subcontracts.filter((c) => c.status === "active").length;
-    const completed = subcontracts.filter((c) => c.status === "completed").length;
+    const completed = subcontracts.filter(
+      (c) => c.status === "completed"
+    ).length;
 
     return { total, paid, due, active, completed, count: subcontracts.length };
   }, [subcontracts]);
 
+  // Show message if no site selected
+  if (!selectedSite) {
+    return (
+      <Box>
+        <PageHeader
+          title="Sub Contract Management"
+          subtitle="Manage subcontracts for this site"
+        />
+        <Alert severity="info" sx={{ mt: 2 }}>
+          Please select a site from the site selector to view and manage
+          subcontracts.
+        </Alert>
+      </Box>
+    );
+  }
+
   return (
     <Box>
       <PageHeader
-        title="All Subcontracts Overview"
-        subtitle="View all subcontracts across all sites (manage from Site > Subcontracts)"
+        title="Sub Contract Management"
+        subtitle={`Manage subcontracts for ${selectedSite.name}`}
         onRefresh={fetchSubcontracts}
         isLoading={loading}
         actions={
@@ -728,25 +811,10 @@ export default function CompanyContractsPage() {
         </DialogTitle>
         <DialogContent>
           <Box sx={{ display: "flex", flexDirection: "column", gap: 2, mt: 2 }}>
-            <FormControl fullWidth required>
-              <InputLabel>Site</InputLabel>
-              <Select
-                value={form.site_id}
-                onChange={(e) => setForm({ ...form, site_id: e.target.value })}
-                label="Site"
-              >
-                {sites.map((site) => (
-                  <MenuItem key={site.id} value={site.id}>
-                    {site.name}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-
             <Grid container spacing={2}>
               <Grid size={{ xs: 12, sm: 6 }}>
                 <FormControl fullWidth required>
-                  <InputLabel>Contract Type</InputLabel>
+                  <InputLabel>Subcontract Type</InputLabel>
                   <Select
                     value={form.contract_type}
                     onChange={(e) =>
@@ -755,7 +823,7 @@ export default function CompanyContractsPage() {
                         contract_type: e.target.value as ContractType,
                       })
                     }
-                    label="Contract Type"
+                    label="Subcontract Type"
                   >
                     <MenuItem value="mesthri">Mesthri (Team Based)</MenuItem>
                     <MenuItem value="specialist">
@@ -805,7 +873,7 @@ export default function CompanyContractsPage() {
 
             <TextField
               fullWidth
-              label="Contract Title"
+              label="Subcontract Title"
               value={form.title}
               onChange={(e) => setForm({ ...form, title: e.target.value })}
               required
@@ -844,7 +912,7 @@ export default function CompanyContractsPage() {
                 gutterBottom
                 sx={{ mb: 1.5 }}
               >
-                Contract Value Type
+                Subcontract Value Type
               </Typography>
               <ToggleButtonGroup
                 value={form.is_rate_based ? "rate" : "lumpsum"}
@@ -882,7 +950,7 @@ export default function CompanyContractsPage() {
                 </ToggleButton>
                 <ToggleButton value="lumpsum">
                   <MoneyIcon sx={{ mr: 1, fontSize: 20 }} />
-                  Lump Sum Contract
+                  Lump Sum Subcontract
                 </ToggleButton>
               </ToggleButtonGroup>
             </Box>
@@ -971,7 +1039,7 @@ export default function CompanyContractsPage() {
                   >
                     <Box>
                       <Typography variant="caption" color="text.secondary">
-                        Total Contract Value
+                        Total Subcontract Value
                       </Typography>
                       <Typography
                         variant="body2"
@@ -1003,7 +1071,7 @@ export default function CompanyContractsPage() {
               /* Lump Sum Contract Fields */
               <TextField
                 fullWidth
-                label="Total Contract Value"
+                label="Total Subcontract Value"
                 type="number"
                 value={form.total_value || ""}
                 onChange={(e) =>
@@ -1015,7 +1083,7 @@ export default function CompanyContractsPage() {
                     startAdornment: "₹",
                   },
                 }}
-                helperText="Enter the fixed contract amount"
+                helperText="Enter the fixed subcontract amount"
               />
             )}
 
@@ -1095,11 +1163,6 @@ export default function CompanyContractsPage() {
                   <Chip
                     label={selectedSubcontract.status.toUpperCase()}
                     color={getStatusColor(selectedSubcontract.status)}
-                    size="small"
-                  />
-                  <Chip
-                    label={selectedSubcontract.site_name}
-                    variant="outlined"
                     size="small"
                   />
                 </Box>
@@ -1205,14 +1268,14 @@ export default function CompanyContractsPage() {
         </DialogActions>
       </Dialog>
 
-      {/* Payment Dialog */}
+      {/* Payment Dialog - Enhanced with payment channel and period tracking */}
       <Dialog
         open={paymentDialogOpen}
         onClose={() => setPaymentDialogOpen(false)}
-        maxWidth="sm"
+        maxWidth="md"
         fullWidth
       >
-        <DialogTitle>Record Payment</DialogTitle>
+        <DialogTitle>Record Payment to Mesthri</DialogTitle>
         <DialogContent>
           {selectedSubcontract && (
             <Box
@@ -1221,80 +1284,187 @@ export default function CompanyContractsPage() {
               <Alert severity="info">
                 <Typography variant="body2">
                   <strong>{selectedSubcontract.title}</strong>
+                  {selectedSubcontract.team_name && (
+                    <> - {selectedSubcontract.team_name}</>
+                  )}
                 </Typography>
                 <Typography variant="caption">
-                  Balance Due: ₹
-                  {(selectedSubcontract.balance_due || 0).toLocaleString()}
+                  Contract Value: ₹{selectedSubcontract.total_value.toLocaleString()} |
+                  Paid: ₹{(selectedSubcontract.total_paid || 0).toLocaleString()} |
+                  Balance Due: ₹{(selectedSubcontract.balance_due || 0).toLocaleString()}
                 </Typography>
               </Alert>
 
-              <FormControl fullWidth>
-                <InputLabel>Payment Type</InputLabel>
+              <Divider />
+              <Typography variant="subtitle2" color="text.secondary">
+                Payment Channel (How was the payment made?)
+              </Typography>
+
+              <FormControl fullWidth required>
+                <InputLabel>Payment Channel</InputLabel>
                 <Select
-                  value={paymentForm.payment_type}
+                  value={paymentForm.payment_channel}
                   onChange={(e) =>
                     setPaymentForm({
                       ...paymentForm,
-                      payment_type: e.target.value as PaymentType,
+                      payment_channel: e.target.value as PaymentChannel,
                     })
                   }
-                  label="Payment Type"
+                  label="Payment Channel"
                 >
-                  <MenuItem value="weekly_advance">Weekly Advance</MenuItem>
-                  <MenuItem value="part_payment">Part Payment</MenuItem>
-                  <MenuItem value="milestone">Milestone Payment</MenuItem>
-                  <MenuItem value="final_settlement">Final Settlement</MenuItem>
+                  <MenuItem value="via_site_engineer">
+                    Via Site Engineer (Engineer pays on company&apos;s behalf)
+                  </MenuItem>
+                  <MenuItem value="mesthri_at_office">
+                    Mesthri at Office (Mesthri came to office to collect)
+                  </MenuItem>
+                  <MenuItem value="company_direct_online">
+                    Company Direct Online (UPI/Bank Transfer from company)
+                  </MenuItem>
                 </Select>
               </FormControl>
 
-              <TextField
-                fullWidth
-                label="Amount"
-                type="number"
-                value={paymentForm.amount || ""}
-                onChange={(e) =>
-                  setPaymentForm({
-                    ...paymentForm,
-                    amount: Number(e.target.value),
-                  })
-                }
-                required
-                slotProps={{ input: { startAdornment: "₹" } }}
-              />
+              {/* Site Engineer Selection - Only shown when via_site_engineer */}
+              {paymentForm.payment_channel === "via_site_engineer" && (
+                <FormControl fullWidth required>
+                  <InputLabel>Site Engineer</InputLabel>
+                  <Select
+                    value={selectedSiteEngineer}
+                    onChange={(e) => setSelectedSiteEngineer(e.target.value)}
+                    label="Site Engineer"
+                  >
+                    {siteEngineers.map((eng) => (
+                      <MenuItem key={eng.id} value={eng.id}>
+                        {eng.name} ({eng.role})
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              )}
 
-              <TextField
-                fullWidth
-                label="Payment Date"
-                type="date"
-                value={paymentForm.payment_date}
-                onChange={(e) =>
-                  setPaymentForm({
-                    ...paymentForm,
-                    payment_date: e.target.value,
-                  })
-                }
-                slotProps={{ inputLabel: { shrink: true } }}
-                required
-              />
+              {paymentForm.payment_channel === "via_site_engineer" && (
+                <Alert severity="warning" sx={{ py: 0.5 }}>
+                  <Typography variant="caption">
+                    This will automatically deduct ₹{paymentForm.amount.toLocaleString() || 0} from the selected engineer&apos;s wallet balance.
+                  </Typography>
+                </Alert>
+              )}
 
-              <FormControl fullWidth>
-                <InputLabel>Payment Mode</InputLabel>
-                <Select
-                  value={paymentForm.payment_mode}
-                  onChange={(e) =>
-                    setPaymentForm({
-                      ...paymentForm,
-                      payment_mode: e.target.value as PaymentMode,
-                    })
-                  }
-                  label="Payment Mode"
-                >
-                  <MenuItem value="cash">Cash</MenuItem>
-                  <MenuItem value="upi">UPI</MenuItem>
-                  <MenuItem value="bank_transfer">Bank Transfer</MenuItem>
-                  <MenuItem value="cheque">Cheque</MenuItem>
-                </Select>
-              </FormControl>
+              <Divider />
+
+              <Grid container spacing={2}>
+                <Grid size={{ xs: 12, sm: 6 }}>
+                  <FormControl fullWidth>
+                    <InputLabel>Payment Type</InputLabel>
+                    <Select
+                      value={paymentForm.payment_type}
+                      onChange={(e) =>
+                        setPaymentForm({
+                          ...paymentForm,
+                          payment_type: e.target.value as PaymentType,
+                        })
+                      }
+                      label="Payment Type"
+                    >
+                      <MenuItem value="weekly_advance">Weekly Advance</MenuItem>
+                      <MenuItem value="part_payment">Part Payment</MenuItem>
+                      <MenuItem value="milestone">Milestone Payment</MenuItem>
+                      <MenuItem value="final_settlement">Final Settlement</MenuItem>
+                    </Select>
+                  </FormControl>
+                </Grid>
+                <Grid size={{ xs: 12, sm: 6 }}>
+                  <TextField
+                    fullWidth
+                    label="Amount"
+                    type="number"
+                    value={paymentForm.amount || ""}
+                    onChange={(e) =>
+                      setPaymentForm({
+                        ...paymentForm,
+                        amount: Number(e.target.value),
+                      })
+                    }
+                    required
+                    slotProps={{ input: { startAdornment: "₹" } }}
+                  />
+                </Grid>
+              </Grid>
+
+              <Typography variant="subtitle2" color="text.secondary" sx={{ mt: 1 }}>
+                Period Covered by this Payment
+              </Typography>
+
+              <Grid container spacing={2}>
+                <Grid size={{ xs: 12, sm: 6 }}>
+                  <TextField
+                    fullWidth
+                    label="Period From"
+                    type="date"
+                    value={paymentForm.period_from_date}
+                    onChange={(e) =>
+                      setPaymentForm({
+                        ...paymentForm,
+                        period_from_date: e.target.value,
+                      })
+                    }
+                    slotProps={{ inputLabel: { shrink: true } }}
+                  />
+                </Grid>
+                <Grid size={{ xs: 12, sm: 6 }}>
+                  <TextField
+                    fullWidth
+                    label="Period To"
+                    type="date"
+                    value={paymentForm.period_to_date}
+                    onChange={(e) =>
+                      setPaymentForm({
+                        ...paymentForm,
+                        period_to_date: e.target.value,
+                      })
+                    }
+                    slotProps={{ inputLabel: { shrink: true } }}
+                  />
+                </Grid>
+              </Grid>
+
+              <Grid container spacing={2}>
+                <Grid size={{ xs: 12, sm: 6 }}>
+                  <TextField
+                    fullWidth
+                    label="Payment Date"
+                    type="date"
+                    value={paymentForm.payment_date}
+                    onChange={(e) =>
+                      setPaymentForm({
+                        ...paymentForm,
+                        payment_date: e.target.value,
+                      })
+                    }
+                    slotProps={{ inputLabel: { shrink: true } }}
+                    required
+                  />
+                </Grid>
+                <Grid size={{ xs: 12, sm: 6 }}>
+                  <FormControl fullWidth>
+                    <InputLabel>Payment Mode</InputLabel>
+                    <Select
+                      value={paymentForm.payment_mode}
+                      onChange={(e) =>
+                        setPaymentForm({
+                          ...paymentForm,
+                          payment_mode: e.target.value as PaymentMode,
+                        })
+                      }
+                      label="Payment Mode"
+                    >
+                      <MenuItem value="cash">Cash</MenuItem>
+                      <MenuItem value="upi">UPI</MenuItem>
+                      <MenuItem value="bank_transfer">Bank Transfer</MenuItem>
+                    </Select>
+                  </FormControl>
+                </Grid>
+              </Grid>
 
               <TextField
                 fullWidth
@@ -1305,7 +1475,36 @@ export default function CompanyContractsPage() {
                 }
                 multiline
                 rows={2}
+                placeholder="Any additional notes about this payment..."
               />
+
+              {/* Balance after payment preview */}
+              {paymentForm.amount > 0 && (
+                <Paper elevation={0} sx={{ p: 2, bgcolor: "grey.100", borderRadius: 2 }}>
+                  <Grid container spacing={2}>
+                    <Grid size={{ xs: 6 }}>
+                      <Typography variant="caption" color="text.secondary">
+                        Current Balance
+                      </Typography>
+                      <Typography variant="body1" fontWeight={600} color="error.main">
+                        ₹{(selectedSubcontract.balance_due || 0).toLocaleString()}
+                      </Typography>
+                    </Grid>
+                    <Grid size={{ xs: 6 }}>
+                      <Typography variant="caption" color="text.secondary">
+                        After This Payment
+                      </Typography>
+                      <Typography
+                        variant="body1"
+                        fontWeight={600}
+                        color={(selectedSubcontract.balance_due || 0) - paymentForm.amount <= 0 ? "success.main" : "warning.main"}
+                      >
+                        ₹{Math.max(0, (selectedSubcontract.balance_due || 0) - paymentForm.amount).toLocaleString()}
+                      </Typography>
+                    </Grid>
+                  </Grid>
+                </Paper>
+              )}
             </Box>
           )}
         </DialogContent>
