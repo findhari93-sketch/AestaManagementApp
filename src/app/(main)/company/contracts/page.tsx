@@ -225,7 +225,7 @@ export default function CompanyContractsPage() {
     if (contract) {
       setEditingContract(contract);
       const isRateBased =
-        contract.rate_per_unit > 0 && contract.total_units > 0;
+        (contract.rate_per_unit ?? 0) > 0 && (contract.total_units ?? 0) > 0;
       setForm({
         site_id: contract.site_id || "",
         contract_type: contract.contract_type,
