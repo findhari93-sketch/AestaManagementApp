@@ -735,7 +735,7 @@ export default function AttendanceDrawer({
                   </Box>
                 ) : (
                   <Alert severity="info">
-                    Click "Select Laborers" to add workers for this day
+                    Click &quot;Select Laborers&quot; to add workers for this day
                   </Alert>
                 )}
               </Box>
