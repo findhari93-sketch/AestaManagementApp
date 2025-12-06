@@ -314,9 +314,9 @@ export default function CompanyContractsPage() {
       };
 
       if (editingContract) {
-        const { error } = await supabase
+        const { error } = await (supabase
           .from("contracts")
-          .update(contractData)
+          .update(contractData) as any)
           .eq("id", editingContract.id);
 
         if (error) throw error;
