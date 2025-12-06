@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useState, useCallback, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Site } from "@/types/database.types";
 import { useAuth } from "./AuthContext";
@@ -22,10 +22,19 @@ export function SiteProvider({ children }: { children: React.ReactNode }) {
   const { userProfile } = useAuth();
   const [supabase] = useState(() => createClient());
 
-  const fetchSites = async () => {
-    try {
-      setLoading(true);
+  // Use ref to track if we're currently fetching (prevents race conditions)
+  const isFetchingRef = useRef(false);
 
+  const fetchSites = useCallback(async () => {
+    // Prevent concurrent fetches (race condition fix)
+    if (isFetchingRef.current) {
+      return;
+    }
+
+    isFetchingRef.current = true;
+    setLoading(true);
+
+    try {
       let query = supabase.from("sites").select("*").order("name");
 
       // Filter by assigned sites if user is not admin
@@ -40,32 +49,48 @@ export function SiteProvider({ children }: { children: React.ReactNode }) {
       const sitesData: Site[] = data || [];
       setSites(sitesData);
 
-      // Auto-select first site if none selected
-      if (sitesData.length > 0 && !selectedSite) {
+      // Auto-select site using functional update (avoids stale closure)
+      setSelectedSite((prevSelected) => {
+        // Keep existing selection if valid
+        if (prevSelected && sitesData.some((s) => s.id === prevSelected.id)) {
+          return prevSelected;
+        }
+
+        // No sites available
+        if (sitesData.length === 0) {
+          return null;
+        }
+
+        // Try to restore from localStorage
         const savedSiteId = localStorage.getItem("selectedSiteId");
         if (savedSiteId) {
           const savedSite = sitesData.find((s) => s.id === savedSiteId);
           if (savedSite) {
-            setSelectedSite(savedSite);
-          } else {
-            setSelectedSite(sitesData[0]);
+            return savedSite;
           }
-        } else {
-          setSelectedSite(sitesData[0]);
         }
-      }
+
+        // Default to first site
+        return sitesData[0];
+      });
     } catch (error) {
       console.error("Error fetching sites:", error);
     } finally {
       setLoading(false);
+      isFetchingRef.current = false;
     }
-  };
+  }, [userProfile, supabase]);
 
   useEffect(() => {
     if (userProfile) {
       fetchSites();
+    } else {
+      // Reset state when user logs out
+      setSites([]);
+      setSelectedSite(null);
+      setLoading(false);
     }
-  }, [userProfile]);
+  }, [userProfile, fetchSites]);
 
   useEffect(() => {
     if (selectedSite) {
@@ -73,9 +98,9 @@ export function SiteProvider({ children }: { children: React.ReactNode }) {
     }
   }, [selectedSite]);
 
-  const refreshSites = async () => {
+  const refreshSites = useCallback(async () => {
     await fetchSites();
-  };
+  }, [fetchSites]);
 
   const value = {
     sites,

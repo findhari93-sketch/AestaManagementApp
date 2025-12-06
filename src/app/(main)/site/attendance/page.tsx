@@ -7,750 +7,573 @@ import {
   Typography,
   Paper,
   TextField,
+  Grid,
+  Card,
+  CardContent,
+  Chip,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  Alert,
+  CircularProgress,
+  Collapse,
+  IconButton,
   Table,
   TableBody,
   TableCell,
   TableContainer,
   TableHead,
   TableRow,
-  IconButton,
-  Alert,
-  Chip,
-  FormControl,
-  Select,
-  MenuItem,
-  Card,
-  CardContent,
-  Grid,
-  Collapse,
-  InputLabel,
-  Checkbox,
-  FormControlLabel,
-  Divider,
-  Tooltip,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
 } from "@mui/material";
 import {
-  Save as SaveIcon,
-  ExpandMore as ExpandMoreIcon,
-  ExpandLess as ExpandLessIcon,
-  CheckCircle as CheckCircleIcon,
-  Sync as SyncIcon,
-  Person as PersonIcon,
-  Group as GroupIcon,
-  Payment as PaymentIcon,
+  CalendarToday,
+  Person,
+  TrendingUp,
+  AttachMoney,
+  Download,
+  ExpandMore,
+  ExpandLess,
+  Refresh,
+  Add as AddIcon,
+  Edit,
+  Delete,
 } from "@mui/icons-material";
+import AttendanceDrawer from "@/components/attendance/AttendanceDrawer";
+import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
 import { createClient } from "@/lib/supabase/client";
-import { useAuth } from "@/contexts/AuthContext";
 import { useSite } from "@/contexts/SiteContext";
+import { useAuth } from "@/contexts/AuthContext";
 import PageHeader from "@/components/layout/PageHeader";
-import type {
-  BuildingSection,
-  PaymentMode,
-  PaymentChannel,
-  LaborerType,
-} from "@/types/database.types";
+import type { LaborerType } from "@/types/database.types";
 import dayjs from "dayjs";
-import { usePresence } from "@/hooks/usePresence";
-import PresenceIndicator from "@/components/PresenceIndicator";
 
-interface AttendanceEntry {
+interface AttendanceRecord {
+  id: string;
+  date: string;
   laborer_id: string;
   laborer_name: string;
+  laborer_type: LaborerType;
   category_name: string;
   role_name: string;
   team_name: string | null;
-  team_id: string | null;
-  daily_rate: number;
-  work_days: number;
-  section_id: string;
   section_name: string;
+  work_days: number;
   hours_worked: number;
-  advance_given: number;
-  extra_given: number;
-  notes: string;
-  isExpanded: boolean;
-  // Payment ecosystem fields
-  laborer_type: LaborerType;
-  subcontract_id: string | null;
+  daily_rate_applied: number;
+  daily_earnings: number;
+  advance_given?: number;
+  extra_given?: number;
   is_paid: boolean;
-  payment_amount: number;
-  payment_mode: PaymentMode;
-  payment_channel: PaymentChannel;
+  subcontract_title?: string | null;
 }
 
-interface DailySummary {
+interface DateSummary {
+  date: string;
+  records: AttendanceRecord[];
+  totalLaborers: number;
+  totalWorkDays: number;
+  totalEarnings: number;
+  totalAdvances: number;
+  totalExtras: number;
+  categoryBreakdown: { [key: string]: { count: number; amount: number } };
+  isExpanded?: boolean;
+}
+
+interface CategorySummary {
   category: string;
   count: number;
   workDays: number;
   totalAmount: number;
 }
 
-interface PaymentSummary {
-  underContract: number;
-  outsideContract: number;
-  alreadyPaid: number;
-  pendingPayment: number;
-  total: number;
-}
-
-interface SubcontractOption {
-  id: string;
-  title: string;
-  team_id: string | null;
-  laborer_id: string | null;
-  contract_type: string;
-}
-
 export default function AttendancePage() {
-  const [date, setDate] = useState(dayjs().format("YYYY-MM-DD"));
-  const [laborers, setLaborers] = useState<any[]>([]);
-  const [sections, setSections] = useState<BuildingSection[]>([]);
-  const [subcontracts, setSubcontracts] = useState<SubcontractOption[]>([]);
-  const [attendanceEntries, setAttendanceEntries] = useState<AttendanceEntry[]>(
-    []
-  );
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [syncing, setSyncing] = useState(false);
-  const [error, setError] = useState("");
-  const [success, setSuccess] = useState("");
-  const [existingAttendance, setExistingAttendance] = useState<Set<string>>(
-    new Set()
-  );
-  const [showSummary, setShowSummary] = useState(false);
-
-  const { userProfile } = useAuth();
   const { selectedSite } = useSite();
+  const { userProfile } = useAuth();
   const supabase = createClient();
 
-  const canEdit =
-    userProfile?.role === "admin" ||
-    userProfile?.role === "office" ||
-    userProfile?.role === "site_engineer";
+  const [loading, setLoading] = useState(false);
+  const [attendanceRecords, setAttendanceRecords] = useState<
+    AttendanceRecord[]
+  >([]);
+  const [dateSummaries, setDateSummaries] = useState<DateSummary[]>([]);
+  const [viewMode, setViewMode] = useState<"date-wise" | "detailed">(
+    "date-wise"
+  );
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
-  // Track presence - show who else is editing attendance for this site/date
-  const { activeUsers } = usePresence({
-    channelName: `attendance:${selectedSite?.id}:${date}`,
-    enabled: !!selectedSite,
+  // Filters
+  const [dateFrom, setDateFrom] = useState(
+    dayjs().subtract(30, "days").format("YYYY-MM-DD")
+  );
+  const [dateTo, setDateTo] = useState(dayjs().format("YYYY-MM-DD"));
+  const [selectedLaborer, setSelectedLaborer] = useState<string>("all");
+  const [selectedTeam, setSelectedTeam] = useState<string>("all");
+  const [paymentFilter, setPaymentFilter] = useState<"all" | "paid" | "unpaid">(
+    "all"
+  );
+  const [laborerTypeFilter, setLaborerTypeFilter] = useState<
+    "all" | "contract" | "daily_market"
+  >("all");
+
+  const [laborers, setLaborers] = useState<any[]>([]);
+  const [teams, setTeams] = useState<any[]>([]);
+
+  // Edit dialog state
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [editingRecord, setEditingRecord] = useState<AttendanceRecord | null>(
+    null
+  );
+  const [editForm, setEditForm] = useState({
+    work_days: 1,
+    daily_rate_applied: 0,
+    is_paid: false,
   });
 
-  const fetchData = async () => {
+  // Date-specific drawer state
+  const [selectedDateForDrawer, setSelectedDateForDrawer] = useState<
+    string | undefined
+  >(undefined);
+
+  const canEdit =
+    userProfile?.role === "admin" || userProfile?.role === "office";
+
+  // Category counts for top summary
+  const categoryCounts = useMemo(() => {
+    const counts: { [key: string]: number } = {};
+    attendanceRecords.forEach((r) => {
+      if (r.work_days > 0) {
+        counts[r.category_name] = (counts[r.category_name] || 0) + 1;
+      }
+    });
+    return counts;
+  }, [attendanceRecords]);
+
+  const stats = useMemo(() => {
+    const totalDays = attendanceRecords.reduce(
+      (sum, r) => sum + r.work_days,
+      0
+    );
+    const totalEarnings = attendanceRecords.reduce(
+      (sum, r) => sum + r.daily_earnings,
+      0
+    );
+    const uniqueLaborers = new Set(attendanceRecords.map((r) => r.laborer_id))
+      .size;
+    const avgDailyRate =
+      attendanceRecords.length > 0
+        ? attendanceRecords.reduce((sum, r) => sum + r.daily_rate_applied, 0) /
+          attendanceRecords.length
+        : 0;
+
+    return { totalDays, totalEarnings, uniqueLaborers, avgDailyRate };
+  }, [attendanceRecords]);
+
+  useEffect(() => {
     if (!selectedSite) return;
 
-    try {
-      setLoading(true);
-      setError("");
-
-      // Fetch active laborers with category, role, and laborer_type
-      const { data: laborersData, error: laborersError } = await supabase
+    const fetchOptions = async () => {
+      const { data: laborersData } = await supabase
         .from("laborers")
-        .select(
-          `
-          *,
-          teams:team_id (name),
-          labor_categories:category_id (name),
-          labor_roles:role_id (name)
-        `
-        )
+        .select("id, name")
         .eq("status", "active")
         .order("name");
 
-      if (laborersError) throw laborersError;
-
-      // Fetch sections for the site
-      const { data: sectionsData, error: sectionsError } = await supabase
-        .from("building_sections")
-        .select("*")
-        .eq("site_id", selectedSite.id)
-        .order("name");
-
-      if (sectionsError) throw sectionsError;
-
-      // Fetch active subcontracts for the site
-      const { data: subcontractsData, error: subcontractsError } = await supabase
-        .from("subcontracts")
-        .select("id, title, team_id, laborer_id, contract_type")
-        .eq("site_id", selectedSite.id)
+      const { data: teamsData } = await supabase
+        .from("teams")
+        .select("id, name")
         .eq("status", "active")
-        .order("title");
-
-      if (subcontractsError) throw subcontractsError;
+        .order("name");
 
       setLaborers(laborersData || []);
-      setSections(sectionsData || []);
-      const typedSubcontracts = (subcontractsData || []) as SubcontractOption[];
-      setSubcontracts(typedSubcontracts);
+      setTeams(teamsData || []);
+    };
 
-      // Fetch existing attendance for the date
-      const { data: existingData, error: existingError } = await supabase
+    fetchOptions();
+  }, [selectedSite]);
+
+  const fetchAttendanceHistory = async () => {
+    if (!selectedSite) return;
+
+    setLoading(true);
+    try {
+      let query = supabase
         .from("daily_attendance")
-        .select("laborer_id, subcontract_id, is_paid")
+        .select(
+          `
+          id,
+          date,
+          laborer_id,
+          work_days,
+          hours_worked,
+          daily_rate_applied,
+          daily_earnings,
+          is_paid,
+          subcontract_id,
+          laborers!inner(name, team_id, category_id, role_id, laborer_type, team:teams!laborers_team_id_fkey(name), labor_categories(name), labor_roles(name)),
+          building_sections!inner(name),
+          subcontracts(title)
+        `
+        )
         .eq("site_id", selectedSite.id)
-        .eq("date", date);
+        .gte("date", dateFrom)
+        .lte("date", dateTo)
+        .order("date", { ascending: false });
 
-      if (existingError) throw existingError;
+      if (selectedLaborer !== "all") {
+        query = query.eq("laborer_id", selectedLaborer);
+      }
 
-      const existingMap = new Map(
-        (existingData || []).map((a: any) => [
-          a.laborer_id,
-          { subcontract_id: a.subcontract_id, is_paid: a.is_paid },
-        ])
-      );
-      setExistingAttendance(new Set(existingMap.keys()));
+      if (selectedTeam !== "all") {
+        query = query.eq("laborers.team_id", selectedTeam);
+      }
 
-      // Initialize attendance entries
-      const typedLaborersData = laborersData as any[] | null;
-      const typedSectionsData = sectionsData as BuildingSection[] | null;
+      // Apply payment filter at query level if possible
+      if (paymentFilter === "paid") {
+        query = query.eq("is_paid", true);
+      } else if (paymentFilter === "unpaid") {
+        query = query.or("is_paid.eq.false,is_paid.is.null");
+      }
 
-      if (
-        typedLaborersData &&
-        typedSectionsData &&
-        typedSectionsData.length > 0
-      ) {
-        const defaultSection = typedSectionsData[0];
-        const entries: AttendanceEntry[] = typedLaborersData.map((laborer) => {
-          const existingRecord = existingMap.get(laborer.id);
+      // Apply laborer type filter
+      if (laborerTypeFilter !== "all") {
+        query = query.eq("laborers.laborer_type", laborerTypeFilter);
+      }
 
-          // Try to find a matching subcontract for this laborer
-          let defaultSubcontract: string | null = null;
-          if (laborer.team_id && typedSubcontracts.length > 0) {
-            const teamSubcontract = typedSubcontracts.find(
-              (sc) => sc.team_id === laborer.team_id
-            );
-            if (teamSubcontract) {
-              defaultSubcontract = teamSubcontract.id;
-            }
-          }
+      const { data: attendanceData, error } = await query;
+
+      if (error) throw error;
+
+      // Fetch advances
+      let advancesQuery = supabase
+        .from("advances")
+        .select("laborer_id, date, amount, transaction_type")
+        .gte("date", dateFrom)
+        .lte("date", dateTo);
+
+      if (selectedLaborer !== "all") {
+        advancesQuery = advancesQuery.eq("laborer_id", selectedLaborer);
+      }
+
+      const { data: advancesData } = await (advancesQuery as any);
+
+      const advancesMap = new Map<string, { advance: number; extra: number }>();
+      (
+        advancesData as
+          | {
+              laborer_id: string;
+              date: string;
+              amount: number;
+              transaction_type: string;
+            }[]
+          | null
+      )?.forEach((adv) => {
+        const key = `${adv.laborer_id}_${adv.date}`;
+        const existing = advancesMap.get(key) || { advance: 0, extra: 0 };
+        if (adv.transaction_type === "advance") {
+          existing.advance += adv.amount;
+        } else if (adv.transaction_type === "extra") {
+          existing.extra += adv.amount;
+        }
+        advancesMap.set(key, existing);
+      });
+
+      const records: AttendanceRecord[] = (attendanceData || []).map(
+        (record: any) => {
+          const key = `${record.laborer_id}_${record.date}`;
+          const advances = advancesMap.get(key) || { advance: 0, extra: 0 };
 
           return {
-            laborer_id: laborer.id,
-            laborer_name: laborer.name,
-            category_name: laborer.labor_categories?.name || "Unknown",
-            role_name: laborer.labor_roles?.name || "Unknown",
-            team_name: laborer.teams?.name || null,
-            team_id: laborer.team_id || null,
-            daily_rate: laborer.daily_rate || 0,
-            work_days: existingMap.has(laborer.id) ? 0 : 1,
-            section_id: defaultSection.id,
-            section_name: defaultSection.name,
-            hours_worked: 8,
-            advance_given: 0,
-            extra_given: 0,
-            notes: "",
-            isExpanded: false,
-            // Payment ecosystem fields
-            laborer_type: laborer.laborer_type || "daily_market",
-            subcontract_id: existingRecord?.subcontract_id || defaultSubcontract,
-            is_paid: false,
-            payment_amount: 0,
-            payment_mode: "cash" as PaymentMode,
-            payment_channel: "via_site_engineer" as PaymentChannel,
+            id: record.id,
+            date: record.date,
+            laborer_id: record.laborer_id,
+            laborer_name: record.laborers.name,
+            laborer_type: record.laborers.laborer_type || "daily_market",
+            category_name: record.laborers.labor_categories?.name || "Unknown",
+            role_name: record.laborers.labor_roles?.name || "Unknown",
+            team_name: record.laborers.team?.name || null,
+            section_name: record.building_sections.name,
+            work_days: record.work_days,
+            hours_worked: record.hours_worked,
+            daily_rate_applied: record.daily_rate_applied,
+            daily_earnings: record.daily_earnings,
+            advance_given: advances.advance,
+            extra_given: advances.extra,
+            is_paid: record.is_paid || false,
+            subcontract_title: record.subcontracts?.title || null,
           };
-        });
-        setAttendanceEntries(entries);
-      }
-    } catch (err: any) {
-      setError(err.message);
+        }
+      );
+
+      setAttendanceRecords(records);
+
+      // Group by date for date-wise view
+      const dateMap = new Map<string, DateSummary>();
+      records.forEach((record) => {
+        const existing = dateMap.get(record.date);
+        if (existing) {
+          existing.records.push(record);
+          existing.totalLaborers = new Set(
+            existing.records.map((r) => r.laborer_id)
+          ).size;
+          existing.totalWorkDays += record.work_days;
+          existing.totalEarnings += record.daily_earnings;
+          existing.totalAdvances += record.advance_given || 0;
+          existing.totalExtras += record.extra_given || 0;
+
+          // Update category breakdown
+          const cat = record.category_name;
+          existing.categoryBreakdown[cat] = existing.categoryBreakdown[cat] || {
+            count: 0,
+            amount: 0,
+          };
+          existing.categoryBreakdown[cat].count += 1;
+          existing.categoryBreakdown[cat].amount += record.daily_earnings;
+        } else {
+          const categoryBreakdown: {
+            [key: string]: { count: number; amount: number };
+          } = {};
+          categoryBreakdown[record.category_name] = {
+            count: 1,
+            amount: record.daily_earnings,
+          };
+
+          dateMap.set(record.date, {
+            date: record.date,
+            records: [record],
+            totalLaborers: 1,
+            totalWorkDays: record.work_days,
+            totalEarnings: record.daily_earnings,
+            totalAdvances: record.advance_given || 0,
+            totalExtras: record.extra_given || 0,
+            categoryBreakdown,
+            isExpanded: false,
+          });
+        }
+      });
+
+      setDateSummaries(
+        Array.from(dateMap.values()).sort(
+          (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+        )
+      );
+    } catch (error: any) {
+      console.error("Error fetching attendance history:", error);
+      alert("Failed to load attendance history: " + error.message);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchData();
-  }, [selectedSite, date]);
+    fetchAttendanceHistory();
+  }, [
+    selectedSite,
+    dateFrom,
+    dateTo,
+    selectedLaborer,
+    selectedTeam,
+    paymentFilter,
+    laborerTypeFilter,
+  ]);
 
-  const handleWorkDaysChange = (laborerId: string, value: number) => {
-    setAttendanceEntries((prev) =>
-      prev.map((entry) =>
-        entry.laborer_id === laborerId
-          ? {
-              ...entry,
-              work_days: value,
-              hours_worked:
-                value === 0.5 ? 4 : value === 1 ? 8 : value === 1.5 ? 12 : 16,
-              payment_amount:
-                value > 0 ? value * entry.daily_rate : 0,
-            }
-          : entry
+  const toggleDateExpanded = (date: string) => {
+    setDateSummaries((prev) =>
+      prev.map((d) =>
+        d.date === date ? { ...d, isExpanded: !d.isExpanded } : d
       )
     );
   };
 
-  const handleSectionChange = (laborerId: string, sectionId: string) => {
-    const section = sections.find((s) => s.id === sectionId);
-    setAttendanceEntries((prev) =>
-      prev.map((entry) =>
-        entry.laborer_id === laborerId
-          ? {
-              ...entry,
-              section_id: sectionId,
-              section_name: section?.name || "",
-            }
-          : entry
-      )
-    );
+  const handleOpenEditDialog = (record: AttendanceRecord) => {
+    setEditingRecord(record);
+    setEditForm({
+      work_days: record.work_days,
+      daily_rate_applied: record.daily_rate_applied,
+      is_paid: record.is_paid,
+    });
+    setEditDialogOpen(true);
   };
 
-  const handleSubcontractChange = (laborerId: string, subcontractId: string | null) => {
-    setAttendanceEntries((prev) =>
-      prev.map((entry) =>
-        entry.laborer_id === laborerId
-          ? { ...entry, subcontract_id: subcontractId }
-          : entry
-      )
-    );
-  };
+  const handleEditSubmit = async () => {
+    if (!editingRecord) return;
 
-  const handleIsPaidChange = (laborerId: string, isPaid: boolean) => {
-    setAttendanceEntries((prev) =>
-      prev.map((entry) =>
-        entry.laborer_id === laborerId
-          ? {
-              ...entry,
-              is_paid: isPaid,
-              payment_amount: isPaid
-                ? entry.work_days * entry.daily_rate
-                : 0,
-            }
-          : entry
-      )
-    );
-  };
-
-  const handlePaymentModeChange = (laborerId: string, mode: PaymentMode) => {
-    setAttendanceEntries((prev) =>
-      prev.map((entry) =>
-        entry.laborer_id === laborerId
-          ? { ...entry, payment_mode: mode }
-          : entry
-      )
-    );
-  };
-
-  const handlePaymentChannelChange = (laborerId: string, channel: PaymentChannel) => {
-    setAttendanceEntries((prev) =>
-      prev.map((entry) =>
-        entry.laborer_id === laborerId
-          ? { ...entry, payment_channel: channel }
-          : entry
-      )
-    );
-  };
-
-  const handlePaymentAmountChange = (laborerId: string, amount: number) => {
-    setAttendanceEntries((prev) =>
-      prev.map((entry) =>
-        entry.laborer_id === laborerId
-          ? { ...entry, payment_amount: amount }
-          : entry
-      )
-    );
-  };
-
-  const handleAdvanceChange = (laborerId: string, value: number) => {
-    setAttendanceEntries((prev) =>
-      prev.map((entry) =>
-        entry.laborer_id === laborerId
-          ? { ...entry, advance_given: value }
-          : entry
-      )
-    );
-  };
-
-  const handleExtraChange = (laborerId: string, value: number) => {
-    setAttendanceEntries((prev) =>
-      prev.map((entry) =>
-        entry.laborer_id === laborerId
-          ? { ...entry, extra_given: value }
-          : entry
-      )
-    );
-  };
-
-  const handleNotesChange = (laborerId: string, value: string) => {
-    setAttendanceEntries((prev) =>
-      prev.map((entry) =>
-        entry.laborer_id === laborerId ? { ...entry, notes: value } : entry
-      )
-    );
-  };
-
-  const toggleExpanded = (laborerId: string) => {
-    setAttendanceEntries((prev) =>
-      prev.map((entry) =>
-        entry.laborer_id === laborerId
-          ? { ...entry, isExpanded: !entry.isExpanded }
-          : entry
-      )
-    );
-  };
-
-  const calculateDailyEarnings = (workDays: number, dailyRate: number) => {
-    return workDays * dailyRate;
-  };
-
-  const handleSubmit = async () => {
-    if (!selectedSite) {
-      setError("Please select a site");
-      return;
-    }
-
-    if (!canEdit) {
-      setError("You do not have permission to record attendance");
-      return;
-    }
-
+    setLoading(true);
     try {
-      setSaving(true);
-      setError("");
-      setSuccess("");
+      const daily_earnings = editForm.work_days * editForm.daily_rate_applied;
 
-      const activeEntries = attendanceEntries.filter(
-        (entry) => entry.work_days > 0
-      );
+      const { error } = await (supabase.from("daily_attendance") as any)
+        .update({
+          work_days: editForm.work_days,
+          daily_rate_applied: editForm.daily_rate_applied,
+          daily_earnings,
+          hours_worked: editForm.work_days * 8,
+          is_paid: editForm.is_paid,
+        })
+        .eq("id", editingRecord.id);
 
-      if (activeEntries.length === 0) {
-        setError("No attendance entries to save");
-        return;
-      }
+      if (error) throw error;
 
-      const attendanceRecords = activeEntries.map((entry) => ({
-        site_id: selectedSite.id,
-        laborer_id: entry.laborer_id,
-        date: date,
-        section_id: entry.section_id,
-        work_days: entry.work_days,
-        hours_worked: entry.hours_worked,
-        daily_rate_applied: entry.daily_rate,
-        daily_earnings: calculateDailyEarnings(
-          entry.work_days,
-          entry.daily_rate
-        ),
-        entered_by: userProfile?.id,
-        // Payment ecosystem fields
-        subcontract_id: entry.subcontract_id,
-        is_paid: entry.is_paid,
-        recorded_by: userProfile?.name || userProfile?.email,
-        recorded_by_user_id: userProfile?.id,
-      }));
+      setEditDialogOpen(false);
+      setEditingRecord(null);
+      fetchAttendanceHistory();
+    } catch (error: any) {
+      alert("Failed to update: " + error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-      const laborerIds = activeEntries.map((e) => e.laborer_id);
-      const { error: deleteError } = await supabase
+  const handleOpenDrawerForDate = (date: string) => {
+    setSelectedDateForDrawer(date);
+    setDrawerOpen(true);
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm("Are you sure you want to delete this attendance record?"))
+      return;
+
+    setLoading(true);
+    try {
+      const { error } = await supabase
         .from("daily_attendance")
         .delete()
-        .eq("site_id", selectedSite.id)
-        .eq("date", date)
-        .in("laborer_id", laborerIds);
+        .eq("id", id);
 
-      if (deleteError) throw deleteError;
-
-      const { error: insertError } = await (
-        supabase.from("daily_attendance") as any
-      ).insert(attendanceRecords);
-
-      if (insertError) throw insertError;
-
-      // Handle advances and extras
-      const advanceRecords = activeEntries
-        .filter((entry) => entry.advance_given > 0 || entry.extra_given > 0)
-        .flatMap((entry) => {
-          const records = [];
-          if (entry.advance_given > 0) {
-            records.push({
-              laborer_id: entry.laborer_id,
-              date: date,
-              amount: entry.advance_given,
-              transaction_type: "advance" as const,
-              payment_mode: "cash" as const,
-              reason: entry.notes || null,
-              given_by: userProfile?.id,
-              deduction_status: "pending" as const,
-              deducted_amount: 0,
-            });
-          }
-          if (entry.extra_given > 0) {
-            records.push({
-              laborer_id: entry.laborer_id,
-              date: date,
-              amount: entry.extra_given,
-              transaction_type: "extra" as const,
-              payment_mode: "cash" as const,
-              reason: entry.notes || null,
-              given_by: userProfile?.id,
-              deduction_status: "deducted" as const,
-              deducted_amount: entry.extra_given,
-            });
-          }
-          return records;
-        });
-
-      if (advanceRecords.length > 0) {
-        const { error: advanceError } = await (
-          supabase.from("advances") as any
-        ).insert(advanceRecords);
-
-        if (advanceError) throw advanceError;
-      }
-
-      // Handle labor payments for daily market laborers marked as paid
-      const paidDailyLaborers = activeEntries.filter(
-        (entry) => entry.is_paid && entry.laborer_type === "daily_market"
-      );
-
-      if (paidDailyLaborers.length > 0) {
-        const laborPayments = paidDailyLaborers.map((entry) => ({
-          laborer_id: entry.laborer_id,
-          site_id: selectedSite.id,
-          subcontract_id: entry.subcontract_id,
-          amount: entry.payment_amount,
-          payment_date: date,
-          payment_for_date: date,
-          payment_mode: entry.payment_mode,
-          payment_channel: entry.payment_channel,
-          paid_by: userProfile?.name || userProfile?.email || "Unknown",
-          paid_by_user_id: userProfile?.id,
-          is_under_contract: !!entry.subcontract_id,
-          recorded_by: userProfile?.name || userProfile?.email || "Unknown",
-          recorded_by_user_id: userProfile?.id,
-        }));
-
-        const { error: paymentError } = await (
-          supabase.from("labor_payments") as any
-        ).insert(laborPayments);
-
-        if (paymentError) {
-          console.error("Error recording labor payments:", paymentError);
-          // Don't throw - attendance is saved, payments are secondary
-        }
-      }
-
-      setSuccess(
-        `Attendance saved successfully for ${activeEntries.length} laborer(s)${
-          paidDailyLaborers.length > 0
-            ? ` (${paidDailyLaborers.length} payments recorded)`
-            : ""
-        }`
-      );
-      setShowSummary(true);
-      await fetchData();
-    } catch (err: any) {
-      setError(err.message);
+      if (error) throw error;
+      fetchAttendanceHistory();
+    } catch (error: any) {
+      alert("Failed to delete: " + error.message);
     } finally {
-      setSaving(false);
+      setLoading(false);
     }
   };
 
-  const handleSyncToExpenses = async () => {
-    if (!selectedSite || !userProfile) return;
-
-    try {
-      setSyncing(true);
-      setError("");
-
-      const activeEntries = attendanceEntries.filter((e) => e.work_days > 0);
-      if (activeEntries.length === 0) {
-        setError("No attendance entries to sync");
-        return;
-      }
-
-      const totalAmount = activeEntries.reduce(
-        (sum, e) => sum + calculateDailyEarnings(e.work_days, e.daily_rate),
-        0
-      );
-      const totalWorkDays = activeEntries.reduce((sum, e) => sum + e.work_days, 0);
-
-      // Check if already synced
-      const { data: existingSync } = await supabase
-        .from("attendance_expense_sync")
-        .select("id")
-        .eq("site_id", selectedSite.id)
-        .eq("attendance_date", date)
-        .single();
-
-      if (existingSync) {
-        setError("Attendance for this date has already been synced to expenses");
-        return;
-      }
-
-      // Get or create "Daily Labor" expense category
-      let categoryId: string;
-      const { data: laborCategory } = await supabase
-        .from("expense_categories")
-        .select("id")
-        .eq("module", "labor")
-        .eq("name", "Daily Labor")
-        .single();
-
-      const typedCategory = laborCategory as { id: string } | null;
-      if (typedCategory) {
-        categoryId = typedCategory.id;
-      } else {
-        const { data: newCategory, error: catError } = await (
-          supabase.from("expense_categories") as any
-        ).insert({
-          module: "labor",
-          name: "Daily Labor",
-          is_recurring: false,
-        }).select("id").single();
-
-        if (catError) throw catError;
-        categoryId = newCategory.id;
-      }
-
-      // Create expense record
-      const { data: expense, error: expenseError } = await (
-        supabase.from("expenses") as any
-      ).insert({
-        module: "labor",
-        category_id: categoryId,
-        date: date,
-        amount: totalAmount,
-        site_id: selectedSite.id,
-        description: `Daily labor for ${dayjs(date).format("DD MMM YYYY")} - ${activeEntries.length} laborers`,
-        payment_mode: "cash",
-        is_recurring: false,
-        is_cleared: false,
-      }).select("id").single();
-
-      if (expenseError) throw expenseError;
-
-      // Record sync
-      const { error: syncError } = await (
-        supabase.from("attendance_expense_sync") as any
-      ).insert({
-        attendance_date: date,
-        site_id: selectedSite.id,
-        expense_id: expense.id,
-        total_laborers: activeEntries.length,
-        total_work_days: totalWorkDays,
-        total_amount: totalAmount,
-        synced_by: userProfile.name || userProfile.email,
-        synced_by_user_id: userProfile.id,
-      });
-
-      if (syncError) throw syncError;
-
-      // Update attendance records as synced
-      await (supabase.from("daily_attendance") as any)
-        .update({ synced_to_expense: true })
-        .eq("site_id", selectedSite.id)
-        .eq("date", date);
-
-      setSuccess(`Synced ₹${totalAmount.toLocaleString()} to daily expenses`);
-    } catch (err: any) {
-      setError("Failed to sync: " + err.message);
-    } finally {
-      setSyncing(false);
-    }
-  };
-
-  const stats = useMemo(() => {
-    const present = attendanceEntries.filter((e) => e.work_days > 0).length;
-    const totalEarnings = attendanceEntries.reduce(
-      (sum, e) => sum + calculateDailyEarnings(e.work_days, e.daily_rate),
-      0
-    );
-    const totalAdvance = attendanceEntries.reduce(
-      (sum, e) => sum + (e.advance_given || 0),
-      0
-    );
-    const totalExtra = attendanceEntries.reduce(
-      (sum, e) => sum + (e.extra_given || 0),
-      0
-    );
-
-    return { present, totalEarnings, totalAdvance, totalExtra };
-  }, [attendanceEntries]);
-
-  // Payment summary breakdown
-  const paymentSummary = useMemo<PaymentSummary>(() => {
-    const activeEntries = attendanceEntries.filter((e) => e.work_days > 0);
-
-    const underContract = activeEntries
-      .filter((e) => e.subcontract_id)
-      .reduce((sum, e) => sum + calculateDailyEarnings(e.work_days, e.daily_rate), 0);
-
-    const outsideContract = activeEntries
-      .filter((e) => !e.subcontract_id)
-      .reduce((sum, e) => sum + calculateDailyEarnings(e.work_days, e.daily_rate), 0);
-
-    const alreadyPaid = activeEntries
-      .filter((e) => e.is_paid)
-      .reduce((sum, e) => sum + e.payment_amount, 0);
-
-    const pendingPayment = activeEntries
-      .filter((e) => !e.is_paid && e.laborer_type === "daily_market")
-      .reduce((sum, e) => sum + calculateDailyEarnings(e.work_days, e.daily_rate), 0);
-
-    return {
-      underContract,
-      outsideContract,
-      alreadyPaid,
-      pendingPayment,
-      total: underContract + outsideContract,
-    };
-  }, [attendanceEntries]);
-
-  // Calculate daily summary by category
-  const dailySummary = useMemo<DailySummary[]>(() => {
-    const summaryMap = new Map<string, DailySummary>();
-
-    attendanceEntries
-      .filter((e) => e.work_days > 0)
-      .forEach((entry) => {
-        const category = entry.category_name;
-        const existing = summaryMap.get(category) || {
-          category,
-          count: 0,
-          workDays: 0,
-          totalAmount: 0,
-        };
-        existing.count += 1;
-        existing.workDays += entry.work_days;
-        existing.totalAmount += calculateDailyEarnings(
-          entry.work_days,
-          entry.daily_rate
-        );
-        summaryMap.set(category, existing);
-      });
-
-    return Array.from(summaryMap.values()).sort(
-      (a, b) => b.totalAmount - a.totalAmount
-    );
-  }, [attendanceEntries]);
-
-  const getLaborerTypeBadge = (type: LaborerType) => {
-    if (type === "contract") {
-      return (
-        <Chip
-          icon={<GroupIcon sx={{ fontSize: 14 }} />}
-          label="CONTRACT"
-          size="small"
-          color="primary"
-          variant="outlined"
-          sx={{ ml: 1, height: 20, fontSize: 10 }}
-        />
-      );
-    }
-    return (
-      <Chip
-        icon={<PersonIcon sx={{ fontSize: 14 }} />}
-        label="DAILY"
-        size="small"
-        color="secondary"
-        variant="outlined"
-        sx={{ ml: 1, height: 20, fontSize: 10 }}
-      />
-    );
-  };
+  const detailedColumns = useMemo<MRT_ColumnDef<AttendanceRecord>[]>(
+    () => [
+      {
+        accessorKey: "date",
+        header: "Date",
+        size: 120,
+        Cell: ({ cell }) =>
+          dayjs(cell.getValue<string>()).format("DD MMM YYYY"),
+      },
+      {
+        accessorKey: "laborer_name",
+        header: "Laborer",
+        size: 180,
+      },
+      {
+        accessorKey: "laborer_type",
+        header: "Type",
+        size: 120,
+        Cell: ({ cell }) => {
+          const type = cell.getValue<string>();
+          return (
+            <Chip
+              label={type === "contract" ? "CONTRACT" : "DAILY"}
+              size="small"
+              color={type === "contract" ? "primary" : "warning"}
+              variant="outlined"
+            />
+          );
+        },
+      },
+      {
+        accessorKey: "category_name",
+        header: "Category",
+        size: 120,
+      },
+      {
+        accessorKey: "team_name",
+        header: "Team",
+        size: 150,
+        Cell: ({ cell }) => cell.getValue<string>() || "-",
+      },
+      {
+        accessorKey: "subcontract_title",
+        header: "Subcontract",
+        size: 150,
+        Cell: ({ cell }) => cell.getValue<string>() || "General Work",
+      },
+      {
+        accessorKey: "work_days",
+        header: "Work Days",
+        size: 100,
+      },
+      {
+        accessorKey: "daily_earnings",
+        header: "Earnings",
+        size: 120,
+        Cell: ({ cell }) => (
+          <Typography variant="body2" fontWeight={600} color="success.main">
+            ₹{cell.getValue<number>().toLocaleString()}
+          </Typography>
+        ),
+      },
+      {
+        accessorKey: "is_paid",
+        header: "Payment",
+        size: 100,
+        Cell: ({ cell }) => {
+          const isPaid = cell.getValue<boolean>();
+          return (
+            <Chip
+              label={isPaid ? "PAID" : "PENDING"}
+              size="small"
+              color={isPaid ? "success" : "default"}
+              variant={isPaid ? "filled" : "outlined"}
+            />
+          );
+        },
+      },
+      {
+        accessorKey: "advance_given",
+        header: "Advance",
+        size: 100,
+        Cell: ({ cell }) => {
+          const amount = cell.getValue<number>() || 0;
+          return amount > 0 ? `₹${amount.toLocaleString()}` : "-";
+        },
+      },
+      {
+        id: "mrt-row-actions",
+        header: "Actions",
+        size: 100,
+        Cell: ({ row }) => (
+          <Box sx={{ display: "flex", gap: 0.5 }}>
+            <IconButton
+              size="small"
+              onClick={() => handleOpenEditDialog(row.original)}
+              disabled={!canEdit}
+            >
+              <Edit fontSize="small" />
+            </IconButton>
+            <IconButton
+              size="small"
+              color="error"
+              onClick={() => handleDelete(row.original.id)}
+              disabled={!canEdit}
+            >
+              <Delete fontSize="small" />
+            </IconButton>
+          </Box>
+        ),
+      },
+    ],
+    [canEdit]
+  );
 
   if (!selectedSite) {
     return (
       <Box>
-        <PageHeader title="Attendance Entry" showBack={true} />
+        <PageHeader title="Attendance" />
         <Alert severity="warning">
-          Please select a site to record attendance
+          Please select a site to view attendance
         </Alert>
       </Box>
     );
@@ -759,579 +582,652 @@ export default function AttendancePage() {
   return (
     <Box>
       <PageHeader
-        title="Attendance Entry"
-        subtitle={`Record daily attendance for ${selectedSite.name}`}
-        onRefresh={fetchData}
+        title="Attendance"
+        subtitle={`Manage attendance for ${selectedSite.name}`}
+        onRefresh={fetchAttendanceHistory}
         isLoading={loading}
+        actions={
+          <Box sx={{ display: "flex", gap: 1 }}>
+            <Button
+              variant="contained"
+              color="primary"
+              startIcon={<AddIcon />}
+              onClick={() => setDrawerOpen(true)}
+            >
+              Add Attendance
+            </Button>
+            <Button
+              variant={viewMode === "date-wise" ? "contained" : "outlined"}
+              onClick={() => setViewMode("date-wise")}
+              size="small"
+              color="inherit"
+            >
+              Date-wise
+            </Button>
+            <Button
+              variant={viewMode === "detailed" ? "contained" : "outlined"}
+              onClick={() => setViewMode("detailed")}
+              size="small"
+              color="inherit"
+            >
+              Detailed
+            </Button>
+          </Box>
+        }
       />
 
-      {error && (
-        <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>
-          {error}
-        </Alert>
-      )}
-
-      {success && (
-        <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSuccess("")}>
-          {success}
-        </Alert>
-      )}
-
-      {/* Presence Indicator - Show who else is viewing/editing */}
-      <PresenceIndicator activeUsers={activeUsers} />
-
-      {/* Date and Stats Card */}
-      <Card sx={{ mb: 3 }}>
-        <CardContent>
-          <Grid container spacing={3} alignItems="center">
-            <Grid size={{ xs: 12, md: 2 }}>
-              <TextField
-                fullWidth
-                label="Attendance Date"
-                type="date"
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
-                slotProps={{ inputLabel: { shrink: true } }}
-              />
-            </Grid>
-            <Grid size={{ xs: 6, md: 1.5 }}>
-              <Box>
+      {/* Category Summary Cards */}
+      <Grid container spacing={2} sx={{ mb: 3 }}>
+        {Object.entries(categoryCounts).map(([category, count]) => (
+          <Grid key={category} size={{ xs: 6, sm: 4, md: 2 }}>
+            <Card>
+              <CardContent sx={{ py: 1.5, px: 2 }}>
                 <Typography variant="caption" color="text.secondary">
-                  Present
+                  {category}
                 </Typography>
-                <Typography variant="h5" fontWeight={600} color="primary">
-                  {stats.present}
+                <Typography variant="h5" fontWeight={700}>
+                  {count}
+                </Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+        ))}
+      </Grid>
+
+      {/* Stats Cards */}
+      <Grid container spacing={2} sx={{ mb: 3 }}>
+        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+          <Card>
+            <CardContent>
+              <Box
+                sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}
+              >
+                <Person color="primary" />
+                <Typography variant="body2" color="text.secondary">
+                  Unique Laborers
                 </Typography>
               </Box>
-            </Grid>
-            <Grid size={{ xs: 6, md: 2 }}>
-              <Box>
-                <Typography variant="caption" color="text.secondary">
+              <Typography variant="h4" fontWeight={700}>
+                {stats.uniqueLaborers}
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+          <Card>
+            <CardContent>
+              <Box
+                sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}
+              >
+                <CalendarToday color="success" />
+                <Typography variant="body2" color="text.secondary">
+                  Total Work Days
+                </Typography>
+              </Box>
+              <Typography variant="h4" fontWeight={700}>
+                {stats.totalDays.toFixed(1)}
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+          <Card>
+            <CardContent>
+              <Box
+                sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}
+              >
+                <AttachMoney color="error" />
+                <Typography variant="body2" color="text.secondary">
                   Total Earnings
                 </Typography>
-                <Typography variant="h5" fontWeight={600}>
-                  ₹{stats.totalEarnings.toLocaleString()}
-                </Typography>
               </Box>
-            </Grid>
-            <Grid size={{ xs: 6, md: 1.5 }}>
-              <Box>
-                <Typography variant="caption" color="text.secondary">
-                  Advance
-                </Typography>
-                <Typography variant="h6" fontWeight={600} color="warning.main">
-                  ₹{stats.totalAdvance.toLocaleString()}
-                </Typography>
-              </Box>
-            </Grid>
-            <Grid size={{ xs: 6, md: 1.5 }}>
-              <Box>
-                <Typography variant="caption" color="text.secondary">
-                  Extra
-                </Typography>
-                <Typography variant="h6" fontWeight={600} color="success.main">
-                  ₹{stats.totalExtra.toLocaleString()}
-                </Typography>
-              </Box>
-            </Grid>
-            <Grid size={{ xs: 12, md: 3.5 }}>
-              <Button
-                variant="outlined"
-                startIcon={<SyncIcon />}
-                onClick={handleSyncToExpenses}
-                disabled={syncing || loading || stats.present === 0}
-                fullWidth
+              <Typography variant="h4" fontWeight={700}>
+                ₹{stats.totalEarnings.toLocaleString()}
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+          <Card>
+            <CardContent>
+              <Box
+                sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}
               >
-                {syncing ? "Syncing..." : "Sync to Daily Expenses"}
-              </Button>
-            </Grid>
+                <TrendingUp color="warning" />
+                <Typography variant="body2" color="text.secondary">
+                  Avg Daily Rate
+                </Typography>
+              </Box>
+              <Typography variant="h4" fontWeight={700}>
+                ₹{stats.avgDailyRate.toFixed(0)}
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+      </Grid>
+
+      {/* Filters */}
+      <Paper sx={{ p: 2, mb: 3 }}>
+        <Grid container spacing={2}>
+          <Grid size={{ xs: 12, sm: 6, md: 2 }}>
+            <TextField
+              fullWidth
+              label="From Date"
+              type="date"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+              slotProps={{ inputLabel: { shrink: true } }}
+              size="small"
+            />
           </Grid>
-        </CardContent>
-      </Card>
+          <Grid size={{ xs: 12, sm: 6, md: 2 }}>
+            <TextField
+              fullWidth
+              label="To Date"
+              type="date"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+              slotProps={{ inputLabel: { shrink: true } }}
+              size="small"
+            />
+          </Grid>
+          <Grid size={{ xs: 12, sm: 6, md: 2 }}>
+            <FormControl fullWidth size="small">
+              <InputLabel>Laborer</InputLabel>
+              <Select
+                value={selectedLaborer}
+                onChange={(e) => setSelectedLaborer(e.target.value)}
+                label="Laborer"
+              >
+                <MenuItem value="all">All Laborers</MenuItem>
+                {laborers.map((laborer) => (
+                  <MenuItem key={laborer.id} value={laborer.id}>
+                    {laborer.name}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Grid>
+          <Grid size={{ xs: 12, sm: 6, md: 2 }}>
+            <FormControl fullWidth size="small">
+              <InputLabel>Team</InputLabel>
+              <Select
+                value={selectedTeam}
+                onChange={(e) => setSelectedTeam(e.target.value)}
+                label="Team"
+              >
+                <MenuItem value="all">All Teams</MenuItem>
+                {teams.map((team) => (
+                  <MenuItem key={team.id} value={team.id}>
+                    {team.name}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Grid>
+          <Grid size={{ xs: 12, sm: 6, md: 2 }}>
+            <FormControl fullWidth size="small">
+              <InputLabel>Payment Status</InputLabel>
+              <Select
+                value={paymentFilter}
+                onChange={(e) => setPaymentFilter(e.target.value as any)}
+                label="Payment Status"
+              >
+                <MenuItem value="all">All Status</MenuItem>
+                <MenuItem value="paid">Paid Only</MenuItem>
+                <MenuItem value="unpaid">Unpaid Only</MenuItem>
+              </Select>
+            </FormControl>
+          </Grid>
+          <Grid size={{ xs: 12, sm: 6, md: 2 }}>
+            <FormControl fullWidth size="small">
+              <InputLabel>Laborer Type</InputLabel>
+              <Select
+                value={laborerTypeFilter}
+                onChange={(e) => setLaborerTypeFilter(e.target.value as any)}
+                label="Laborer Type"
+              >
+                <MenuItem value="all">All Types</MenuItem>
+                <MenuItem value="contract">Contract Only</MenuItem>
+                <MenuItem value="daily_market">Daily Market Only</MenuItem>
+              </Select>
+            </FormControl>
+          </Grid>
+        </Grid>
+      </Paper>
 
-      {/* Payment Summary Card */}
-      {stats.present > 0 && (
-        <Card sx={{ mb: 3, bgcolor: "grey.50" }}>
-          <CardContent sx={{ py: 2 }}>
-            <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1.5 }}>
-              Payment Breakdown
-            </Typography>
-            <Grid container spacing={2}>
-              <Grid size={{ xs: 6, sm: 3 }}>
-                <Box sx={{ p: 1.5, bgcolor: "primary.50", borderRadius: 1 }}>
-                  <Typography variant="caption" color="text.secondary">
-                    Under Subcontract
-                  </Typography>
-                  <Typography variant="h6" fontWeight={600} color="primary.main">
-                    ₹{paymentSummary.underContract.toLocaleString()}
-                  </Typography>
-                </Box>
-              </Grid>
-              <Grid size={{ xs: 6, sm: 3 }}>
-                <Box sx={{ p: 1.5, bgcolor: "secondary.50", borderRadius: 1 }}>
-                  <Typography variant="caption" color="text.secondary">
-                    General Work
-                  </Typography>
-                  <Typography variant="h6" fontWeight={600} color="secondary.main">
-                    ₹{paymentSummary.outsideContract.toLocaleString()}
-                  </Typography>
-                </Box>
-              </Grid>
-              <Grid size={{ xs: 6, sm: 3 }}>
-                <Box sx={{ p: 1.5, bgcolor: "success.50", borderRadius: 1 }}>
-                  <Typography variant="caption" color="text.secondary">
-                    Paid Today
-                  </Typography>
-                  <Typography variant="h6" fontWeight={600} color="success.main">
-                    ₹{paymentSummary.alreadyPaid.toLocaleString()}
-                  </Typography>
-                </Box>
-              </Grid>
-              <Grid size={{ xs: 6, sm: 3 }}>
-                <Box sx={{ p: 1.5, bgcolor: "warning.50", borderRadius: 1 }}>
-                  <Typography variant="caption" color="text.secondary">
-                    Pending (Daily)
-                  </Typography>
-                  <Typography variant="h6" fontWeight={600} color="warning.main">
-                    ₹{paymentSummary.pendingPayment.toLocaleString()}
-                  </Typography>
-                </Box>
-              </Grid>
-            </Grid>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Attendance Table */}
-      <Paper sx={{ borderRadius: 3, mb: 3 }}>
-        <TableContainer>
-          <Table size="small">
-            <TableHead>
-              <TableRow sx={{ bgcolor: "action.hover" }}>
-                <TableCell width={40}></TableCell>
-                <TableCell>Laborer</TableCell>
-                <TableCell>Category / Role</TableCell>
-                <TableCell>Subcontract</TableCell>
-                <TableCell>Rate</TableCell>
-                <TableCell>Work Days</TableCell>
-                <TableCell>Section</TableCell>
-                <TableCell>Earnings</TableCell>
-                <TableCell align="center">Paid</TableCell>
-                <TableCell align="center">Status</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {loading ? (
+      {/* Data Display */}
+      {loading ? (
+        <Box sx={{ display: "flex", justifyContent: "center", p: 4 }}>
+          <CircularProgress />
+        </Box>
+      ) : viewMode === "date-wise" ? (
+        <Paper sx={{ borderRadius: 3 }}>
+          <TableContainer>
+            <Table>
+              <TableHead>
                 <TableRow>
-                  <TableCell colSpan={10} align="center">
-                    Loading...
+                  <TableCell sx={{ width: 50, fontWeight: 700 }}></TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Date</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }} align="center">
+                    Laborers
+                  </TableCell>
+                  <TableCell sx={{ fontWeight: 700 }} align="center">
+                    Work Days
+                  </TableCell>
+                  <TableCell sx={{ fontWeight: 700 }} align="right">
+                    Earnings
+                  </TableCell>
+                  <TableCell sx={{ fontWeight: 700 }} align="right">
+                    Advances
+                  </TableCell>
+                  <TableCell sx={{ fontWeight: 700 }} align="right">
+                    Net
                   </TableCell>
                 </TableRow>
-              ) : attendanceEntries.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={10} align="center">
-                    No laborers found
-                  </TableCell>
-                </TableRow>
-              ) : (
-                attendanceEntries.map((entry) => (
-                  <React.Fragment key={entry.laborer_id}>
-                    <TableRow hover>
+              </TableHead>
+              <TableBody>
+                {dateSummaries.map((summary) => (
+                  <React.Fragment key={summary.date}>
+                    <TableRow
+                      hover
+                      onClick={() => toggleDateExpanded(summary.date)}
+                      sx={{
+                        cursor: "pointer",
+                        "&:hover": { bgcolor: "action.hover" },
+                      }}
+                    >
                       <TableCell>
-                        <IconButton
-                          size="small"
-                          onClick={() => toggleExpanded(entry.laborer_id)}
-                        >
-                          {entry.isExpanded ? (
-                            <ExpandLessIcon />
-                          ) : (
-                            <ExpandMoreIcon />
-                          )}
+                        <IconButton size="small">
+                          {summary.isExpanded ? <ExpandLess /> : <ExpandMore />}
                         </IconButton>
                       </TableCell>
                       <TableCell>
-                        <Box sx={{ display: "flex", alignItems: "center" }}>
-                          <Typography variant="body2" fontWeight={500}>
-                            {entry.laborer_name}
-                          </Typography>
-                          {getLaborerTypeBadge(entry.laborer_type)}
-                        </Box>
-                        {entry.team_name && (
-                          <Typography variant="caption" color="text.disabled">
-                            Team: {entry.team_name}
-                          </Typography>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <Typography variant="body2" color="text.secondary">
-                          {entry.category_name}
-                        </Typography>
-                        <Typography variant="caption" color="text.disabled">
-                          {entry.role_name}
-                        </Typography>
-                      </TableCell>
-                      <TableCell>
-                        <FormControl size="small" sx={{ minWidth: 140 }}>
-                          <Select
-                            value={entry.subcontract_id || ""}
-                            onChange={(e) =>
-                              handleSubcontractChange(
-                                entry.laborer_id,
-                                e.target.value || null
-                              )
-                            }
-                            disabled={!canEdit || entry.work_days === 0}
-                            displayEmpty
-                          >
-                            <MenuItem value="">
-                              <em>General Work</em>
-                            </MenuItem>
-                            {subcontracts.map((sc) => (
-                              <MenuItem key={sc.id} value={sc.id}>
-                                {sc.title}
-                              </MenuItem>
-                            ))}
-                          </Select>
-                        </FormControl>
-                      </TableCell>
-                      <TableCell>
-                        <Typography variant="body2">
-                          ₹{entry.daily_rate}
-                        </Typography>
-                      </TableCell>
-                      <TableCell>
-                        <FormControl size="small" sx={{ minWidth: 100 }}>
-                          <Select
-                            value={entry.work_days}
-                            onChange={(e) =>
-                              handleWorkDaysChange(
-                                entry.laborer_id,
-                                Number(e.target.value)
-                              )
-                            }
-                            disabled={!canEdit}
-                          >
-                            <MenuItem value={0}>Absent</MenuItem>
-                            <MenuItem value={0.5}>Half Day</MenuItem>
-                            <MenuItem value={1}>Full Day</MenuItem>
-                            <MenuItem value={1.5}>1.5 Days</MenuItem>
-                            <MenuItem value={2}>2 Days</MenuItem>
-                          </Select>
-                        </FormControl>
-                      </TableCell>
-                      <TableCell>
-                        <FormControl size="small" sx={{ minWidth: 110 }}>
-                          <Select
-                            value={entry.section_id}
-                            onChange={(e) =>
-                              handleSectionChange(
-                                entry.laborer_id,
-                                e.target.value
-                              )
-                            }
-                            disabled={!canEdit || entry.work_days === 0}
-                          >
-                            {sections.map((section) => (
-                              <MenuItem key={section.id} value={section.id}>
-                                {section.name}
-                              </MenuItem>
-                            ))}
-                          </Select>
-                        </FormControl>
-                      </TableCell>
-                      <TableCell>
                         <Typography variant="body2" fontWeight={600}>
-                          ₹
-                          {calculateDailyEarnings(
-                            entry.work_days,
-                            entry.daily_rate
-                          )}
+                          {dayjs(summary.date).format("DD MMM YYYY")}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          {dayjs(summary.date).format("dddd")}
                         </Typography>
                       </TableCell>
                       <TableCell align="center">
-                        {entry.laborer_type === "daily_market" && entry.work_days > 0 && (
-                          <Tooltip title="Mark as paid today">
-                            <Checkbox
-                              checked={entry.is_paid}
-                              onChange={(e) =>
-                                handleIsPaidChange(entry.laborer_id, e.target.checked)
-                              }
-                              disabled={!canEdit}
-                              size="small"
-                              color="success"
-                            />
-                          </Tooltip>
-                        )}
-                        {entry.laborer_type === "contract" && entry.work_days > 0 && (
-                          <Tooltip title="Payment via Mesthri">
-                            <Chip
-                              label="Via Mesthri"
-                              size="small"
-                              variant="outlined"
-                              sx={{ fontSize: 10 }}
-                            />
-                          </Tooltip>
-                        )}
+                        <Typography variant="body2" fontWeight={600}>
+                          {summary.totalLaborers}
+                        </Typography>
                       </TableCell>
                       <TableCell align="center">
-                        {existingAttendance.has(entry.laborer_id) && (
-                          <Chip
-                            label="Recorded"
-                            size="small"
-                            color="success"
-                            icon={<CheckCircleIcon />}
-                          />
-                        )}
+                        {summary.totalWorkDays}
+                      </TableCell>
+                      <TableCell align="right">
+                        <Typography
+                          variant="body2"
+                          fontWeight={600}
+                          color="success.main"
+                        >
+                          ₹{summary.totalEarnings.toLocaleString()}
+                        </Typography>
+                      </TableCell>
+                      <TableCell align="right">
+                        <Typography variant="body2" color="error.main">
+                          ₹{summary.totalAdvances.toLocaleString()}
+                        </Typography>
+                      </TableCell>
+                      <TableCell align="right">
+                        <Typography
+                          variant="body2"
+                          fontWeight={700}
+                          color="primary.main"
+                        >
+                          ₹
+                          {(
+                            summary.totalEarnings -
+                            summary.totalAdvances +
+                            summary.totalExtras
+                          ).toLocaleString()}
+                        </Typography>
                       </TableCell>
                     </TableRow>
                     <TableRow>
-                      <TableCell colSpan={10} sx={{ py: 0, borderBottom: 0 }}>
+                      <TableCell colSpan={7} sx={{ py: 0, border: 0 }}>
                         <Collapse
-                          in={entry.isExpanded}
+                          in={summary.isExpanded}
                           timeout="auto"
                           unmountOnExit
                         >
-                          <Box sx={{ p: 2, bgcolor: "action.hover" }}>
-                            <Grid container spacing={2}>
-                              {/* Payment Details for Daily Market Laborers */}
-                              {entry.laborer_type === "daily_market" && entry.is_paid && (
-                                <>
-                                  <Grid size={12}>
-                                    <Divider sx={{ mb: 1 }}>
-                                      <Chip
-                                        label="Payment Details"
-                                        size="small"
-                                        icon={<PaymentIcon />}
-                                      />
-                                    </Divider>
-                                  </Grid>
-                                  <Grid size={{ xs: 12, md: 2 }}>
-                                    <TextField
-                                      fullWidth
-                                      label="Payment Amount"
-                                      type="number"
-                                      size="small"
-                                      value={entry.payment_amount}
-                                      onChange={(e) =>
-                                        handlePaymentAmountChange(
-                                          entry.laborer_id,
-                                          Number(e.target.value)
-                                        )
-                                      }
-                                      disabled={!canEdit}
-                                      slotProps={{ input: { startAdornment: "₹" } }}
-                                    />
-                                  </Grid>
-                                  <Grid size={{ xs: 12, md: 2.5 }}>
-                                    <FormControl fullWidth size="small">
-                                      <InputLabel>Payment Mode</InputLabel>
-                                      <Select
-                                        value={entry.payment_mode}
-                                        onChange={(e) =>
-                                          handlePaymentModeChange(
-                                            entry.laborer_id,
-                                            e.target.value as PaymentMode
-                                          )
-                                        }
-                                        label="Payment Mode"
-                                        disabled={!canEdit}
-                                      >
-                                        <MenuItem value="cash">Cash</MenuItem>
-                                        <MenuItem value="upi">UPI</MenuItem>
-                                        <MenuItem value="bank_transfer">Bank Transfer</MenuItem>
-                                      </Select>
-                                    </FormControl>
-                                  </Grid>
-                                  <Grid size={{ xs: 12, md: 3.5 }}>
-                                    <FormControl fullWidth size="small">
-                                      <InputLabel>Payment Channel</InputLabel>
-                                      <Select
-                                        value={entry.payment_channel}
-                                        onChange={(e) =>
-                                          handlePaymentChannelChange(
-                                            entry.laborer_id,
-                                            e.target.value as PaymentChannel
-                                          )
-                                        }
-                                        label="Payment Channel"
-                                        disabled={!canEdit}
-                                      >
-                                        <MenuItem value="via_site_engineer">
-                                          Via Site Engineer
-                                        </MenuItem>
-                                        <MenuItem value="at_office">At Office</MenuItem>
-                                        <MenuItem value="company_direct_online">
-                                          Company Direct Online
-                                        </MenuItem>
-                                      </Select>
-                                    </FormControl>
-                                  </Grid>
-                                  <Grid size={12}>
-                                    <Divider sx={{ my: 1 }} />
-                                  </Grid>
-                                </>
+                          <Box sx={{ p: 2, bgcolor: "grey.50" }}>
+                            {/* Category breakdown */}
+                            <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                              Category Breakdown
+                            </Typography>
+                            <Box
+                              sx={{
+                                mb: 2,
+                                display: "flex",
+                                gap: 1,
+                                flexWrap: "wrap",
+                                alignItems: "center",
+                              }}
+                            >
+                              {Object.entries(summary.categoryBreakdown).map(
+                                ([cat, data]) => (
+                                  <Chip
+                                    key={cat}
+                                    label={`${cat}: ${
+                                      data.count
+                                    } (₹${data.amount.toLocaleString()})`}
+                                    size="small"
+                                    variant="outlined"
+                                    color="primary"
+                                  />
+                                )
                               )}
-                              <Grid size={{ xs: 12, md: 3 }}>
-                                <TextField
-                                  fullWidth
-                                  label="Advance Given"
-                                  type="number"
+
+                              {/* Add/Edit Laborers Button */}
+                              {canEdit && (
+                                <Button
+                                  variant="contained"
                                   size="small"
-                                  value={entry.advance_given}
-                                  onChange={(e) =>
-                                    handleAdvanceChange(
-                                      entry.laborer_id,
-                                      Number(e.target.value)
-                                    )
+                                  color="primary"
+                                  startIcon={<Edit />}
+                                  onClick={() =>
+                                    handleOpenDrawerForDate(summary.date)
                                   }
-                                  disabled={!canEdit || entry.work_days === 0}
-                                  slotProps={{ input: { startAdornment: "₹" } }}
-                                />
-                              </Grid>
-                              <Grid size={{ xs: 12, md: 3 }}>
-                                <TextField
-                                  fullWidth
-                                  label="Extra Payment"
-                                  type="number"
-                                  size="small"
-                                  value={entry.extra_given}
-                                  onChange={(e) =>
-                                    handleExtraChange(
-                                      entry.laborer_id,
-                                      Number(e.target.value)
-                                    )
-                                  }
-                                  disabled={!canEdit || entry.work_days === 0}
-                                  slotProps={{ input: { startAdornment: "₹" } }}
-                                />
-                              </Grid>
-                              <Grid size={{ xs: 12, md: 6 }}>
-                                <TextField
-                                  fullWidth
-                                  label="Notes"
-                                  size="small"
-                                  value={entry.notes}
-                                  onChange={(e) =>
-                                    handleNotesChange(
-                                      entry.laborer_id,
-                                      e.target.value
-                                    )
-                                  }
-                                  disabled={!canEdit || entry.work_days === 0}
-                                  placeholder="Optional notes"
-                                />
-                              </Grid>
-                            </Grid>
+                                  sx={{
+                                    ml: "auto",
+                                    textTransform: "none",
+                                    fontWeight: 600,
+                                    boxShadow: 1,
+                                    "&:hover": {
+                                      boxShadow: 2,
+                                    },
+                                  }}
+                                >
+                                  Manage Laborers
+                                </Button>
+                              )}
+                            </Box>
+
+                            {/* Individual records */}
+                            <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                              Individual Records
+                            </Typography>
+                            <Table size="small">
+                              <TableHead
+                                sx={{ position: "sticky", top: 0, zIndex: 1 }}
+                              >
+                                <TableRow >
+                                  <TableCell
+                                    sx={{ fontWeight: 700  }}
+                                  >
+                                    Name
+                                  </TableCell>
+                                  <TableCell
+                                    sx={{ fontWeight: 700 }}
+                                  >
+                                    Type
+                                  </TableCell>
+                                  <TableCell
+                                    sx={{ fontWeight: 700 }}
+                                  >
+                                    Category
+                                  </TableCell>
+                                  <TableCell
+                                    sx={{ fontWeight: 700 }}
+                                  >
+                                    Team
+                                  </TableCell>
+                                  <TableCell
+                                    sx={{ fontWeight: 700 }}
+                                    align="center"
+                                  >
+                                    Days
+                                  </TableCell>
+                                  <TableCell
+                                    sx={{ fontWeight: 700 }}
+                                    align="right"
+                                  >
+                                    Earnings
+                                  </TableCell>
+                                  <TableCell
+                                    sx={{ fontWeight: 700 }}
+                                    align="center"
+                                  >
+                                    Payment
+                                  </TableCell>
+                                  <TableCell
+                                    sx={{ fontWeight: 700 }}
+                                    align="center"
+                                  >
+                                    Actions
+                                  </TableCell>
+                                </TableRow>
+                              </TableHead>
+                              <TableBody>
+                                {summary.records.map((record) => (
+                                  <TableRow key={record.id}>
+                                    <TableCell>{record.laborer_name}</TableCell>
+                                    <TableCell>
+                                      <Chip
+                                        label={
+                                          record.laborer_type === "contract"
+                                            ? "C"
+                                            : "D"
+                                        }
+                                        size="small"
+                                        color={
+                                          record.laborer_type === "contract"
+                                            ? "primary"
+                                            : "warning"
+                                        }
+                                        variant="outlined"
+                                        sx={{ minWidth: 30 }}
+                                      />
+                                    </TableCell>
+                                    <TableCell>
+                                      {record.category_name}
+                                    </TableCell>
+                                    <TableCell>
+                                      {record.team_name || "-"}
+                                    </TableCell>
+                                    <TableCell align="center">
+                                      {record.work_days}
+                                    </TableCell>
+                                    <TableCell align="right">
+                                      ₹{record.daily_earnings.toLocaleString()}
+                                    </TableCell>
+                                    <TableCell align="center">
+                                      <Chip
+                                        label={
+                                          record.is_paid ? "PAID" : "PENDING"
+                                        }
+                                        size="small"
+                                        color={
+                                          record.is_paid ? "success" : "default"
+                                        }
+                                        variant={
+                                          record.is_paid ? "filled" : "outlined"
+                                        }
+                                      />
+                                    </TableCell>
+                                    <TableCell align="center">
+                                      <Box
+                                        sx={{
+                                          display: "flex",
+                                          gap: 0.5,
+                                          justifyContent: "center",
+                                        }}
+                                      >
+                                        <IconButton
+                                          size="small"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleOpenEditDialog(record);
+                                          }}
+                                          disabled={!canEdit}
+                                        >
+                                          <Edit fontSize="small" />
+                                        </IconButton>
+                                        <IconButton
+                                          size="small"
+                                          color="error"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleDelete(record.id);
+                                          }}
+                                          disabled={!canEdit}
+                                        >
+                                          <Delete fontSize="small" />
+                                        </IconButton>
+                                      </Box>
+                                    </TableCell>
+                                  </TableRow>
+                                ))}
+                              </TableBody>
+                            </Table>
                           </Box>
                         </Collapse>
                       </TableCell>
                     </TableRow>
                   </React.Fragment>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </TableContainer>
-
-        {canEdit && attendanceEntries.length > 0 && (
-          <Box sx={{ p: 2, display: "flex", justifyContent: "flex-end" }}>
-            <Button
-              variant="contained"
-              size="large"
-              startIcon={<SaveIcon />}
-              onClick={handleSubmit}
-              disabled={saving || loading}
-            >
-              {saving ? "Saving..." : "Save Attendance"}
-            </Button>
-          </Box>
-        )}
-      </Paper>
-
-      {/* Daily Summary Table */}
-      {(showSummary || dailySummary.length > 0) && stats.present > 0 && (
-        <Paper sx={{ borderRadius: 3, p: 3 }}>
-          <Typography variant="h6" fontWeight={600} sx={{ mb: 2 }}>
-            Daily Summary - {dayjs(date).format("DD MMM YYYY")}
-          </Typography>
-          <TableContainer>
-            <Table size="small">
-              <TableHead>
-                <TableRow sx={{ bgcolor: "primary.main" }}>
-                  <TableCell sx={{ color: "white", fontWeight: 600 }}>
-                    Category
-                  </TableCell>
-                  <TableCell
-                    sx={{ color: "white", fontWeight: 600 }}
-                    align="center"
-                  >
-                    Count
-                  </TableCell>
-                  <TableCell
-                    sx={{ color: "white", fontWeight: 600 }}
-                    align="center"
-                  >
-                    Work Days
-                  </TableCell>
-                  <TableCell
-                    sx={{ color: "white", fontWeight: 600 }}
-                    align="right"
-                  >
-                    Total Amount
-                  </TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {dailySummary.map((row) => (
-                  <TableRow key={row.category} hover>
-                    <TableCell>
-                      <Typography variant="body2" fontWeight={500}>
-                        {row.category}
-                      </Typography>
-                    </TableCell>
-                    <TableCell align="center">{row.count}</TableCell>
-                    <TableCell align="center">{row.workDays}</TableCell>
-                    <TableCell align="right">
-                      <Typography variant="body2" fontWeight={600}>
-                        ₹{row.totalAmount.toLocaleString()}
-                      </Typography>
-                    </TableCell>
-                  </TableRow>
                 ))}
-                <TableRow sx={{ bgcolor: "action.hover" }}>
-                  <TableCell>
-                    <Typography variant="body2" fontWeight={700}>
-                      TOTAL
-                    </Typography>
-                  </TableCell>
-                  <TableCell align="center">
-                    <Typography variant="body2" fontWeight={700}>
-                      {dailySummary.reduce((sum, r) => sum + r.count, 0)}
-                    </Typography>
-                  </TableCell>
-                  <TableCell align="center">
-                    <Typography variant="body2" fontWeight={700}>
-                      {dailySummary.reduce((sum, r) => sum + r.workDays, 0)}
-                    </Typography>
-                  </TableCell>
-                  <TableCell align="right">
-                    <Typography
-                      variant="body2"
-                      fontWeight={700}
-                      color="primary.main"
-                    >
-                      ₹
-                      {dailySummary
-                        .reduce((sum, r) => sum + r.totalAmount, 0)
-                        .toLocaleString()}
-                    </Typography>
-                  </TableCell>
-                </TableRow>
               </TableBody>
             </Table>
           </TableContainer>
         </Paper>
+      ) : (
+        <DataTable
+          columns={detailedColumns}
+          data={attendanceRecords}
+          isLoading={loading}
+        />
       )}
+
+      {/* Attendance Drawer */}
+      <AttendanceDrawer
+        open={drawerOpen}
+        onClose={() => {
+          setDrawerOpen(false);
+          setSelectedDateForDrawer(undefined);
+        }}
+        siteId={selectedSite.id}
+        date={selectedDateForDrawer}
+        onSuccess={() => {
+          fetchAttendanceHistory();
+          setSelectedDateForDrawer(undefined);
+        }}
+      />
+
+      {/* Edit Attendance Dialog */}
+      <Dialog
+        open={editDialogOpen}
+        onClose={() => setEditDialogOpen(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Edit Attendance</DialogTitle>
+        <DialogContent>
+          {editingRecord && (
+            <Box
+              sx={{ display: "flex", flexDirection: "column", gap: 2, mt: 2 }}
+            >
+              <Alert severity="info" sx={{ mb: 1 }}>
+                Editing attendance for{" "}
+                <strong>{editingRecord.laborer_name}</strong> on{" "}
+                {dayjs(editingRecord.date).format("DD MMM YYYY")}
+              </Alert>
+
+              <FormControl fullWidth size="small">
+                <InputLabel>Work Days</InputLabel>
+                <Select
+                  value={editForm.work_days}
+                  onChange={(e) =>
+                    setEditForm({
+                      ...editForm,
+                      work_days: e.target.value as number,
+                    })
+                  }
+                  label="Work Days"
+                >
+                  <MenuItem value={0.5}>Half Day (0.5)</MenuItem>
+                  <MenuItem value={1}>Full Day (1)</MenuItem>
+                  <MenuItem value={1.5}>1.5 Days</MenuItem>
+                  <MenuItem value={2}>2 Days</MenuItem>
+                </Select>
+              </FormControl>
+
+              <TextField
+                fullWidth
+                label="Daily Rate"
+                type="number"
+                size="small"
+                value={editForm.daily_rate_applied}
+                onChange={(e) =>
+                  setEditForm({
+                    ...editForm,
+                    daily_rate_applied: Number(e.target.value),
+                  })
+                }
+                slotProps={{
+                  input: {
+                    startAdornment: <Typography sx={{ mr: 0.5 }}>₹</Typography>,
+                  },
+                }}
+              />
+
+              <Box
+                sx={{
+                  p: 2,
+                  bgcolor: "grey.100",
+                  borderRadius: 1,
+                  display: "flex",
+                  justifyContent: "space-between",
+                }}
+              >
+                <Typography variant="body2" color="text.secondary">
+                  Total Earnings:
+                </Typography>
+                <Typography
+                  variant="body1"
+                  fontWeight={700}
+                  color="success.main"
+                >
+                  ₹
+                  {(
+                    editForm.work_days * editForm.daily_rate_applied
+                  ).toLocaleString()}
+                </Typography>
+              </Box>
+
+              <FormControl fullWidth size="small">
+                <InputLabel>Payment Status</InputLabel>
+                <Select
+                  value={editForm.is_paid ? "paid" : "pending"}
+                  onChange={(e) =>
+                    setEditForm({
+                      ...editForm,
+                      is_paid: e.target.value === "paid",
+                    })
+                  }
+                  label="Payment Status"
+                >
+                  <MenuItem value="pending">Pending</MenuItem>
+                  <MenuItem value="paid">Paid</MenuItem>
+                </Select>
+              </FormControl>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setEditDialogOpen(false)}>Cancel</Button>
+          <Button
+            onClick={handleEditSubmit}
+            variant="contained"
+            disabled={loading}
+          >
+            Update
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }

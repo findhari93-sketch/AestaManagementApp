@@ -60,11 +60,10 @@ interface NavItem {
 // Site-specific menu items
 const siteNavItems: NavItem[] = [
   { text: "Dashboard", icon: <DashboardIcon />, path: "/site/dashboard" },
-  { text: "Attendance", icon: <AccessTimeIcon />, path: "/site/attendance" },
   {
-    text: "Attendance History",
+    text: "Attendance",
     icon: <AccessTimeIcon />,
-    path: "/site/attendance/history",
+    path: "/site/attendance",
   },
   { text: "Holidays", icon: <EventBusyIcon />, path: "/site/holidays" },
   {

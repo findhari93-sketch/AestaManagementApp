@@ -428,6 +428,8 @@ export interface Expense {
   is_recurring: boolean;
   week_ending: string | null;
   is_cleared: boolean;
+  entered_by: string | null;
+  entered_by_user_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -600,6 +602,25 @@ export interface AttendanceExpenseSync {
   synced_by: string;
   synced_by_user_id: string | null;
   synced_at: string;
+}
+
+// Market Laborer Attendance (aggregate tracking for anonymous daily workers)
+// Used when we can't track individual laborers from the market - just counts by role
+export interface MarketLaborerAttendance {
+  id: string;
+  site_id: string;
+  section_id: string | null;
+  date: string;
+  role_id: string; // References labor_roles (Male Helper, Female Helper, etc.)
+  count: number; // Number of workers in this role
+  work_days: number; // 1, 0.5, 1.5, 2 etc.
+  rate_per_person: number; // Daily rate for this role
+  total_cost: number; // count × rate × work_days
+  notes: string | null;
+  entered_by: string;
+  entered_by_user_id: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 // System Tables
@@ -866,6 +887,11 @@ export interface Database {
         Row: AttendanceExpenseSync;
         Insert: Omit<AttendanceExpenseSync, "id" | "synced_at">;
         Update: Partial<Omit<AttendanceExpenseSync, "id" | "synced_at">>;
+      };
+      market_laborer_attendance: {
+        Row: MarketLaborerAttendance;
+        Insert: Omit<MarketLaborerAttendance, "id" | "created_at" | "updated_at">;
+        Update: Partial<Omit<MarketLaborerAttendance, "id" | "created_at" | "updated_at">>;
       };
       deletion_requests: {
         Row: DeletionRequest;
