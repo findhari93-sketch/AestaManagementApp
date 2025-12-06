@@ -177,7 +177,10 @@ export default function CompanyContractsPage() {
             .eq("contract_id", contract.id);
 
           const totalPaid =
-            payments?.reduce((sum, p) => sum + p.amount, 0) || 0;
+            (payments as { amount: number }[] | null)?.reduce(
+              (sum, p) => sum + p.amount,
+              0
+            ) || 0;
           const balanceDue = contract.total_value - totalPaid;
           const completionPercentage =
             contract.total_value > 0
