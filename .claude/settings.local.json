@@ -22,7 +22,8 @@
       "Bash(git remote add:*)",
       "Bash(git branch:*)",
       "Bash(git push:*)",
-      "Bash(git commit -m \"$(cat <<''EOF''\nRefactor client payments to use reusable FileUploader component\n\n- Created new FileUploader component for consistent file upload UI\n- Refactored client-payments page to use FileUploader\n- Removed duplicate file upload logic and validation\n- Improved code reusability and maintainability\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")"
+      "Bash(git commit -m \"$(cat <<''EOF''\nRefactor client payments to use reusable FileUploader component\n\n- Created new FileUploader component for consistent file upload UI\n- Refactored client-payments page to use FileUploader\n- Removed duplicate file upload logic and validation\n- Improved code reusability and maintainability\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")",
+      "Bash(git commit:*)"
     ],
     "deny": [],
     "ask": []

@@ -1,8 +1,8 @@
-'use client'
+"use client";
 
-export const dynamic = 'force-dynamic'
+export const dynamic = "force-dynamic";
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect } from "react";
 import {
   Box,
   Card,
@@ -20,7 +20,7 @@ import {
   Divider,
   Alert,
   LinearProgress,
-} from '@mui/material'
+} from "@mui/material";
 import {
   People,
   AccountBalanceWallet,
@@ -30,7 +30,7 @@ import {
   Payment,
   ArrowForward,
   Business,
-} from '@mui/icons-material'
+} from "@mui/icons-material";
 import {
   BarChart,
   Bar,
@@ -40,37 +40,37 @@ import {
   Tooltip,
   Legend,
   ResponsiveContainer,
-} from 'recharts'
-import { useAuth } from '@/contexts/AuthContext'
-import { createClient } from '@/lib/supabase/client'
-import { useRouter } from 'next/navigation'
-import PageHeader from '@/components/layout/PageHeader'
-import dayjs from 'dayjs'
+} from "recharts";
+import { useAuth } from "@/contexts/AuthContext";
+import { createClient } from "@/lib/supabase/client";
+import { useRouter } from "next/navigation";
+import PageHeader from "@/components/layout/PageHeader";
+import dayjs from "dayjs";
 
 interface CompanyStats {
-  totalSites: number
-  activeSites: number
-  totalLaborers: number
-  activeLaborers: number
-  totalTeams: number
-  pendingPayments: number
-  pendingPaymentAmount: number
-  monthlyExpenses: number
+  totalSites: number;
+  activeSites: number;
+  totalLaborers: number;
+  activeLaborers: number;
+  totalTeams: number;
+  pendingPayments: number;
+  pendingPaymentAmount: number;
+  monthlyExpenses: number;
 }
 
 interface SiteSummary {
-  id: string
-  name: string
-  status: string
-  todayLaborers: number
-  todayCost: number
-  weekCost: number
+  id: string;
+  name: string;
+  status: string;
+  todayLaborers: number;
+  todayCost: number;
+  weekCost: number;
 }
 
 export default function CompanyDashboardPage() {
-  const { userProfile } = useAuth()
-  const router = useRouter()
-  const supabase = createClient()
+  const { userProfile } = useAuth();
+  const router = useRouter();
+  const supabase = createClient();
 
   const [stats, setStats] = useState<CompanyStats>({
     totalSites: 0,
@@ -81,73 +81,78 @@ export default function CompanyDashboardPage() {
     pendingPayments: 0,
     pendingPaymentAmount: 0,
     monthlyExpenses: 0,
-  })
-  const [siteSummaries, setSiteSummaries] = useState<SiteSummary[]>([])
-  const [siteComparisonData, setSiteComparisonData] = useState<any[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
+  });
+  const [siteSummaries, setSiteSummaries] = useState<SiteSummary[]>([]);
+  const [siteComparisonData, setSiteComparisonData] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    fetchCompanyData()
-  }, [])
+    fetchCompanyData();
+  }, []);
 
   const fetchCompanyData = async () => {
     try {
-      setLoading(true)
-      setError('')
+      setLoading(true);
+      setError("");
 
-      const today = dayjs().format('YYYY-MM-DD')
-      const weekStart = dayjs().subtract(7, 'days').format('YYYY-MM-DD')
-      const monthStart = dayjs().startOf('month').format('YYYY-MM-DD')
+      const today = dayjs().format("YYYY-MM-DD");
+      const weekStart = dayjs().subtract(7, "days").format("YYYY-MM-DD");
+      const monthStart = dayjs().startOf("month").format("YYYY-MM-DD");
 
       // Fetch sites
       const { data: sites, error: sitesError } = await supabase
-        .from('sites')
-        .select('id, name, status')
+        .from("sites")
+        .select("id, name, status");
 
-      if (sitesError) throw sitesError
+      if (sitesError) throw sitesError;
 
-      const totalSites = sites?.length || 0
-      const activeSites = sites?.filter(s => s.status === 'active').length || 0
+      const totalSites = sites?.length || 0;
+      const activeSites =
+        sites?.filter((s) => s.status === "active").length || 0;
 
       // Fetch laborers
       const { data: laborers, error: laborersError } = await supabase
-        .from('laborers')
-        .select('id, status')
+        .from("laborers")
+        .select("id, status");
 
-      if (laborersError) throw laborersError
+      if (laborersError) throw laborersError;
 
-      const totalLaborers = laborers?.length || 0
-      const activeLaborers = laborers?.filter(l => l.status === 'active').length || 0
+      const totalLaborers = laborers?.length || 0;
+      const activeLaborers =
+        laborers?.filter((l) => l.status === "active").length || 0;
 
       // Fetch teams
       const { count: totalTeams, error: teamsError } = await supabase
-        .from('teams')
-        .select('id', { count: 'exact', head: true })
+        .from("teams")
+        .select("id", { count: "exact", head: true });
 
-      if (teamsError) throw teamsError
+      if (teamsError) throw teamsError;
 
       // Fetch pending payments
       const { data: pendingData, error: pendingError } = await supabase
-        .from('salary_periods')
-        .select('balance_due')
-        .in('status', ['calculated', 'partial'])
+        .from("salary_periods")
+        .select("balance_due")
+        .in("status", ["calculated", "partial"]);
 
-      if (pendingError) throw pendingError
+      if (pendingError) throw pendingError;
 
-      const pendingPayments = pendingData?.length || 0
-      const pendingPaymentAmount = pendingData?.reduce((sum, p) => sum + (p.balance_due || 0), 0) || 0
+      const pendingPayments = pendingData?.length || 0;
+      const pendingPaymentAmount =
+        pendingData?.reduce((sum, p) => sum + (p.balance_due || 0), 0) || 0;
 
       // Fetch monthly expenses
       const { data: monthlyExpData, error: monthlyError } = await supabase
-        .from('daily_attendance')
-        .select('daily_earnings')
-        .gte('date', monthStart)
-        .lte('date', today)
+        .from("daily_attendance")
+        .select("daily_earnings")
+        .gte("date", monthStart)
+        .lte("date", today);
 
-      if (monthlyError) throw monthlyError
+      if (monthlyError) throw monthlyError;
 
-      const monthlyExpenses = monthlyExpData?.reduce((sum, a) => sum + (a.daily_earnings || 0), 0) || 0
+      const monthlyExpenses =
+        monthlyExpData?.reduce((sum, a) => sum + (a.daily_earnings || 0), 0) ||
+        0;
 
       setStats({
         totalSites,
@@ -158,85 +163,94 @@ export default function CompanyDashboardPage() {
         pendingPayments,
         pendingPaymentAmount,
         monthlyExpenses,
-      })
+      });
 
       // Fetch site-wise summaries
       const summaries: SiteSummary[] = await Promise.all(
-        (sites || []).filter(s => s.status === 'active').map(async (site) => {
-          const { data: todayAtt } = await supabase
-            .from('daily_attendance')
-            .select('daily_earnings')
-            .eq('site_id', site.id)
-            .eq('date', today)
+        (sites || [])
+          .filter((s) => s.status === "active")
+          .map(async (site) => {
+            const { data: todayAtt } = await supabase
+              .from("daily_attendance")
+              .select("daily_earnings")
+              .eq("site_id", site.id)
+              .eq("date", today);
 
-          const { data: weekAtt } = await supabase
-            .from('daily_attendance')
-            .select('daily_earnings')
-            .eq('site_id', site.id)
-            .gte('date', weekStart)
-            .lte('date', today)
+            const { data: weekAtt } = await supabase
+              .from("daily_attendance")
+              .select("daily_earnings")
+              .eq("site_id", site.id)
+              .gte("date", weekStart)
+              .lte("date", today);
 
-          return {
-            id: site.id,
-            name: site.name,
-            status: site.status,
-            todayLaborers: todayAtt?.length || 0,
-            todayCost: todayAtt?.reduce((sum, a) => sum + (a.daily_earnings || 0), 0) || 0,
-            weekCost: weekAtt?.reduce((sum, a) => sum + (a.daily_earnings || 0), 0) || 0,
-          }
-        })
-      )
-      setSiteSummaries(summaries)
+            return {
+              id: site.id,
+              name: site.name,
+              status: site.status,
+              todayLaborers: todayAtt?.length || 0,
+              todayCost:
+                todayAtt?.reduce(
+                  (sum, a) => sum + (a.daily_earnings || 0),
+                  0
+                ) || 0,
+              weekCost:
+                weekAtt?.reduce((sum, a) => sum + (a.daily_earnings || 0), 0) ||
+                0,
+            };
+          })
+      );
+      setSiteSummaries(summaries);
 
       // Create comparison chart data
-      const comparisonData = summaries.map(s => ({
-        name: s.name.length > 15 ? s.name.substring(0, 15) + '...' : s.name,
-        'Today': s.todayCost,
-        'This Week': s.weekCost,
-      }))
-      setSiteComparisonData(comparisonData)
-
+      const comparisonData = summaries.map((s) => ({
+        name: s.name.length > 15 ? s.name.substring(0, 15) + "..." : s.name,
+        Today: s.todayCost,
+        "This Week": s.weekCost,
+      }));
+      setSiteComparisonData(comparisonData);
     } catch (err: any) {
-      setError(err.message)
+      setError(err.message);
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
   const statsCards = [
     {
-      title: 'Active Sites',
-      value: loading ? '...' : stats.activeSites.toString(),
+      title: "Active Sites",
+      value: loading ? "..." : stats.activeSites.toString(),
       subtitle: `${stats.totalSites} total sites`,
       icon: <Domain sx={{ fontSize: 40 }} />,
-      color: '#1976d2',
-      bgColor: '#e3f2fd',
+      color: "#1976d2",
+      bgColor: "#e3f2fd",
     },
     {
-      title: 'Active Laborers',
-      value: loading ? '...' : stats.activeLaborers.toString(),
+      title: "Active Laborers",
+      value: loading ? "..." : stats.activeLaborers.toString(),
       subtitle: `${stats.totalLaborers} total registered`,
       icon: <People sx={{ fontSize: 40 }} />,
-      color: '#2e7d32',
-      bgColor: '#e8f5e9',
+      color: "#2e7d32",
+      bgColor: "#e8f5e9",
     },
     {
-      title: 'Teams',
-      value: loading ? '...' : stats.totalTeams.toString(),
-      subtitle: 'Contractor teams',
+      title: "Teams",
+      value: loading ? "..." : stats.totalTeams.toString(),
+      subtitle: "Contractor teams",
       icon: <Groups sx={{ fontSize: 40 }} />,
-      color: '#9c27b0',
-      bgColor: '#f3e5f5',
+      color: "#9c27b0",
+      bgColor: "#f3e5f5",
     },
     {
-      title: 'Pending Payments',
-      value: loading ? '...' : `₹${stats.pendingPaymentAmount.toLocaleString()}`,
+      title: "Pending Payments",
+      value: loading
+        ? "..."
+        : `₹${stats.pendingPaymentAmount.toLocaleString()}`,
       subtitle: `${stats.pendingPayments} pending`,
       icon: <Payment sx={{ fontSize: 40 }} />,
-      color: '#d32f2f',
-      bgColor: '#ffebee',
+      color: "#d32f2f",
+      bgColor: "#ffebee",
     },
-  ]
+  ];
 
   return (
     <Box>
@@ -249,7 +263,7 @@ export default function CompanyDashboardPage() {
       />
 
       {error && (
-        <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError('')}>
+        <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError("")}>
           {error}
         </Alert>
       )}
@@ -260,25 +274,29 @@ export default function CompanyDashboardPage() {
           <Grid key={index} size={{ xs: 12, sm: 6, md: 3 }}>
             <Card
               sx={{
-                height: '100%',
+                height: "100%",
                 borderRadius: 3,
-                transition: 'transform 0.2s, box-shadow 0.2s',
-                '&:hover': {
-                  transform: 'translateY(-4px)',
-                  boxShadow: '0 8px 16px rgba(0,0,0,0.1)',
+                transition: "transform 0.2s, box-shadow 0.2s",
+                "&:hover": {
+                  transform: "translateY(-4px)",
+                  boxShadow: "0 8px 16px rgba(0,0,0,0.1)",
                 },
               }}
             >
               <CardContent>
                 <Box
                   sx={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'flex-start',
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "flex-start",
                   }}
                 >
                   <Box sx={{ flex: 1 }}>
-                    <Typography variant="body2" color="text.secondary" gutterBottom>
+                    <Typography
+                      variant="body2"
+                      color="text.secondary"
+                      gutterBottom
+                    >
                       {stat.title}
                     </Typography>
                     <Typography variant="h4" fontWeight={600} sx={{ mb: 0.5 }}>
@@ -306,25 +324,37 @@ export default function CompanyDashboardPage() {
       </Grid>
 
       {/* Monthly Summary Card */}
-      <Paper sx={{ p: 3, borderRadius: 3, mb: 3, bgcolor: 'primary.main', color: 'white' }}>
+      <Paper
+        sx={{
+          p: 3,
+          borderRadius: 3,
+          mb: 3,
+          bgcolor: "primary.main",
+          color: "white",
+        }}
+      >
         <Grid container alignItems="center" spacing={2}>
           <Grid size={{ xs: 12, md: 8 }}>
             <Typography variant="h6" fontWeight={600}>
-              This Month's Labor Cost
+              This Month&apos;s Labor Cost
             </Typography>
             <Typography variant="h3" fontWeight={700}>
               ₹{stats.monthlyExpenses.toLocaleString()}
             </Typography>
             <Typography variant="body2" sx={{ opacity: 0.8 }}>
-              {dayjs().format('MMMM YYYY')} • Across all sites
+              {dayjs().format("MMMM YYYY")} • Across all sites
             </Typography>
           </Grid>
-          <Grid size={{ xs: 12, md: 4 }} sx={{ textAlign: { md: 'right' } }}>
+          <Grid size={{ xs: 12, md: 4 }} sx={{ textAlign: { md: "right" } }}>
             <Button
               variant="contained"
-              sx={{ bgcolor: 'white', color: 'primary.main', '&:hover': { bgcolor: 'grey.100' } }}
+              sx={{
+                bgcolor: "white",
+                color: "primary.main",
+                "&:hover": { bgcolor: "grey.100" },
+              }}
               endIcon={<ArrowForward />}
-              onClick={() => router.push('/company/reports')}
+              onClick={() => router.push("/company/reports")}
             >
               View Full Report
             </Button>
@@ -335,26 +365,41 @@ export default function CompanyDashboardPage() {
       <Grid container spacing={3}>
         {/* Site-wise Summary */}
         <Grid size={{ xs: 12, md: 5 }}>
-          <Paper sx={{ p: 3, borderRadius: 3, height: '100%' }}>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+          <Paper sx={{ p: 3, borderRadius: 3, height: "100%" }}>
+            <Box
+              sx={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                mb: 2,
+              }}
+            >
               <Typography variant="h6" fontWeight={600}>
                 Active Sites
               </Typography>
               <Button
                 size="small"
                 endIcon={<ArrowForward />}
-                onClick={() => router.push('/company/sites')}
+                onClick={() => router.push("/company/sites")}
               >
                 Manage
               </Button>
             </Box>
             <Divider sx={{ mb: 2 }} />
             {loading ? (
-              <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', py: 4 }}>
+              <Typography
+                variant="body2"
+                color="text.secondary"
+                sx={{ textAlign: "center", py: 4 }}
+              >
                 Loading...
               </Typography>
             ) : siteSummaries.length === 0 ? (
-              <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', py: 4 }}>
+              <Typography
+                variant="body2"
+                color="text.secondary"
+                sx={{ textAlign: "center", py: 4 }}
+              >
                 No active sites
               </Typography>
             ) : (
@@ -364,12 +409,13 @@ export default function CompanyDashboardPage() {
                     key={site.id}
                     sx={{
                       px: 0,
-                      borderBottom: index < siteSummaries.length - 1 ? '1px solid' : 'none',
-                      borderColor: 'divider',
+                      borderBottom:
+                        index < siteSummaries.length - 1 ? "1px solid" : "none",
+                      borderColor: "divider",
                     }}
                   >
                     <ListItemAvatar>
-                      <Avatar sx={{ bgcolor: 'primary.light' }}>
+                      <Avatar sx={{ bgcolor: "primary.light" }}>
                         <Business />
                       </Avatar>
                     </ListItemAvatar>
@@ -377,7 +423,7 @@ export default function CompanyDashboardPage() {
                       primary={site.name}
                       secondary={`${site.todayLaborers} laborers today`}
                     />
-                    <Box sx={{ textAlign: 'right' }}>
+                    <Box sx={{ textAlign: "right" }}>
                       <Typography variant="body2" fontWeight={600}>
                         ₹{site.todayCost.toLocaleString()}
                       </Typography>
@@ -404,14 +450,16 @@ export default function CompanyDashboardPage() {
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="name" />
                   <YAxis />
-                  <Tooltip formatter={(value: any) => `₹${value.toLocaleString()}`} />
+                  <Tooltip
+                    formatter={(value: any) => `₹${value.toLocaleString()}`}
+                  />
                   <Legend />
                   <Bar dataKey="Today" fill="#1976d2" />
                   <Bar dataKey="This Week" fill="#2e7d32" />
                 </BarChart>
               </ResponsiveContainer>
             ) : (
-              <Box sx={{ textAlign: 'center', py: 4 }}>
+              <Box sx={{ textAlign: "center", py: 4 }}>
                 <Typography variant="body2" color="text.secondary">
                   No data available
                 </Typography>
@@ -432,7 +480,7 @@ export default function CompanyDashboardPage() {
                   fullWidth
                   variant="outlined"
                   startIcon={<People />}
-                  onClick={() => router.push('/company/laborers')}
+                  onClick={() => router.push("/company/laborers")}
                   sx={{ py: 1.5 }}
                 >
                   Manage Laborers
@@ -443,7 +491,7 @@ export default function CompanyDashboardPage() {
                   fullWidth
                   variant="outlined"
                   startIcon={<Groups />}
-                  onClick={() => router.push('/company/teams')}
+                  onClick={() => router.push("/company/teams")}
                   sx={{ py: 1.5 }}
                 >
                   Manage Teams
@@ -454,7 +502,7 @@ export default function CompanyDashboardPage() {
                   fullWidth
                   variant="outlined"
                   startIcon={<AccountBalanceWallet />}
-                  onClick={() => router.push('/company/salary')}
+                  onClick={() => router.push("/company/salary")}
                   sx={{ py: 1.5 }}
                 >
                   Salary & Payments
@@ -465,7 +513,7 @@ export default function CompanyDashboardPage() {
                   fullWidth
                   variant="outlined"
                   startIcon={<TrendingUp />}
-                  onClick={() => router.push('/company/reports')}
+                  onClick={() => router.push("/company/reports")}
                   sx={{ py: 1.5 }}
                 >
                   Company Reports
@@ -476,5 +524,5 @@ export default function CompanyDashboardPage() {
         </Grid>
       </Grid>
     </Box>
-  )
+  );
 }
