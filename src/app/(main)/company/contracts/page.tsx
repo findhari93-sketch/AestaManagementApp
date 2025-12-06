@@ -176,11 +176,9 @@ export default function CompanyContractsPage() {
             .select("amount")
             .eq("contract_id", contract.id);
 
+          const paymentsList = payments as { amount: number }[] | null;
           const totalPaid =
-            (payments as { amount: number }[] | null)?.reduce(
-              (sum, p) => sum + p.amount,
-              0
-            ) || 0;
+            paymentsList?.reduce((sum, p) => sum + p.amount, 0) || 0;
           const balanceDue = contract.total_value - totalPaid;
           const completionPercentage =
             contract.total_value > 0
