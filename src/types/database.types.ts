@@ -321,6 +321,17 @@ export interface DailyAttendance {
   synced_to_expense?: boolean;
   recorded_by?: string;
   recorded_by_user_id?: string | null;
+  // Time tracking fields (attendance redesign)
+  in_time?: string | null;
+  lunch_out?: string | null;
+  lunch_in?: string | null;
+  out_time?: string | null;
+  work_hours?: number | null;
+  break_hours?: number | null;
+  total_hours?: number | null;
+  day_units?: number;
+  // Snacks tracking
+  snacks_amount?: number;
   created_at: string;
   updated_at: string;
 }
@@ -434,37 +445,118 @@ export interface Expense {
   updated_at: string;
 }
 
+// =====================================================
+// Tea Shop & Snacks Tracking System
+// =====================================================
+
+// Tea Shop Account (per-site shop management)
 export interface TeaShopAccount {
   id: string;
-  shop_name: string;
-  owner_name: string;
-  contact_phone: string;
   site_id: string;
+  shop_name: string;
+  owner_name: string | null;
+  contact_phone: string | null;
+  address: string | null;
+  is_active: boolean;
+  notes: string | null;
   created_at: string;
   updated_at: string;
 }
 
+// Snack Item for JSON storage
+export interface SnackItem {
+  name: string;
+  quantity: number;
+  rate: number;
+  total: number;
+}
+
+// Tea Shop Entry (daily tea/snacks purchase)
 export interface TeaShopEntry {
   id: string;
   tea_shop_id: string;
+  site_id: string;
   date: string;
-  amount: number;
-  num_people: number | null;
-  num_rounds: number | null;
+  // Tea details
+  tea_rounds: number;
+  tea_people_count: number;
+  tea_rate_per_round: number;
+  tea_total: number;
+  // Snacks details
+  snacks_items: SnackItem[];
+  snacks_total: number;
+  // Total
+  total_amount: number;
+  // Market laborers consumption (anonymous group total)
+  market_laborer_count?: number;
+  market_laborer_tea_amount?: number;
+  market_laborer_snacks_amount?: number;
+  market_laborer_total?: number;
+  // Non-working laborers (on leave but consumed)
+  nonworking_laborer_count?: number;
+  nonworking_laborer_total?: number;
+  // Working laborers consumption
+  working_laborer_count?: number;
+  working_laborer_total?: number;
+  // Audit fields
+  notes: string | null;
+  entered_by: string | null;
   created_at: string;
+  updated_at?: string;
 }
 
-export interface TeaShopClearance {
+// Per-person consumption (optional detailed tracking)
+export interface TeaShopConsumptionDetail {
+  id: string;
+  entry_id: string;
+  laborer_id: string | null;
+  laborer_name: string | null;
+  laborer_type: string | null;
+  tea_rounds: number;
+  tea_amount: number;
+  snacks_items: Record<string, number>;  // {vada: 2, bajji: 1}
+  snacks_amount: number;
+  total_amount: number;
+  is_working: boolean;  // true = laborer was working that day, false = on leave but consumed
+  created_at: string;
+  updated_at?: string;
+}
+
+// Tea Shop Settlement (payment to shop)
+export type TeaShopPayerType = 'site_engineer' | 'company_direct';
+
+export interface TeaShopSettlement {
   id: string;
   tea_shop_id: string;
-  week_start: string;
-  week_end: string;
-  total_amount: number;
-  amount_paid: number;
+  // Period covered
+  period_start: string;
+  period_end: string;
+  // Amounts
+  entries_total: number;      // Total from entries in this period
+  previous_balance: number;   // Carried forward from previous
+  total_due: number;          // entries_total + previous_balance
+  amount_paid: number;        // Amount paid in this settlement
+  balance_remaining: number;  // Carries to next settlement
+  // Payment details
   payment_date: string;
   payment_mode: PaymentMode;
+  // Who paid
+  payer_type: TeaShopPayerType;
+  site_engineer_id: string | null;
+  site_engineer_transaction_id: string | null;
+  is_engineer_settled: boolean;
+  // Status
+  status: string;  // completed, partial
+  // Audit
+  notes: string | null;
+  recorded_by: string | null;
+  recorded_by_user_id: string | null;
   created_at: string;
+  updated_at: string;
 }
+
+// Legacy alias for backwards compatibility
+export type TeaShopClearance = TeaShopSettlement;
 
 export interface SalaryPeriod {
   id: string;
@@ -618,6 +710,48 @@ export interface MarketLaborerAttendance {
   total_cost: number; // count × rate × work_days
   notes: string | null;
   entered_by: string;
+  entered_by_user_id: string | null;
+  // Time tracking fields (group-level for anonymous workers)
+  in_time?: string | null;
+  lunch_out?: string | null;
+  lunch_in?: string | null;
+  out_time?: string | null;
+  work_hours?: number | null;
+  break_hours?: number | null;
+  total_hours?: number | null;
+  day_units?: number;
+  // Snacks tracking
+  snacks_per_person?: number;
+  total_snacks?: number;
+  created_at: string;
+  updated_at: string;
+}
+
+// Daily Work Summary (per site per date - work description, status, comments)
+export interface DailyWorkSummary {
+  id: string;
+  site_id: string;
+  date: string;
+  // Work description fields (same for all laborers on this day)
+  work_description: string | null;
+  work_status: string | null;
+  comments: string | null;
+  // Aggregated time info (earliest in, latest out)
+  first_in_time: string | null;
+  last_out_time: string | null;
+  // Aggregated laborer counts by type
+  daily_laborer_count: number;
+  contract_laborer_count: number;
+  market_laborer_count: number;
+  total_laborer_count: number;
+  // Aggregated amounts
+  total_salary: number;
+  total_snacks: number;
+  total_expense: number;
+  // Default snacks amount per person for this day
+  default_snacks_per_person: number;
+  // Audit fields
+  entered_by: string | null;
   entered_by_user_id: string | null;
   created_at: string;
   updated_at: string;
@@ -846,10 +980,21 @@ export interface Database {
         Insert: Omit<TeaShopEntry, "id" | "created_at">;
         Update: Partial<Omit<TeaShopEntry, "id" | "created_at">>;
       };
+      tea_shop_consumption_details: {
+        Row: TeaShopConsumptionDetail;
+        Insert: Omit<TeaShopConsumptionDetail, "id" | "created_at">;
+        Update: Partial<Omit<TeaShopConsumptionDetail, "id" | "created_at">>;
+      };
+      tea_shop_settlements: {
+        Row: TeaShopSettlement;
+        Insert: Omit<TeaShopSettlement, "id" | "created_at" | "updated_at">;
+        Update: Partial<Omit<TeaShopSettlement, "id" | "created_at" | "updated_at">>;
+      };
+      // Legacy alias
       tea_shop_clearances: {
         Row: TeaShopClearance;
-        Insert: Omit<TeaShopClearance, "id" | "created_at">;
-        Update: Partial<Omit<TeaShopClearance, "id" | "created_at">>;
+        Insert: Omit<TeaShopClearance, "id" | "created_at" | "updated_at">;
+        Update: Partial<Omit<TeaShopClearance, "id" | "created_at" | "updated_at">>;
       };
       salary_periods: {
         Row: SalaryPeriod;
@@ -892,6 +1037,11 @@ export interface Database {
         Row: MarketLaborerAttendance;
         Insert: Omit<MarketLaborerAttendance, "id" | "created_at" | "updated_at">;
         Update: Partial<Omit<MarketLaborerAttendance, "id" | "created_at" | "updated_at">>;
+      };
+      daily_work_summary: {
+        Row: DailyWorkSummary;
+        Insert: Omit<DailyWorkSummary, "id" | "created_at" | "updated_at">;
+        Update: Partial<Omit<DailyWorkSummary, "id" | "created_at" | "updated_at">>;
       };
       deletion_requests: {
         Row: DeletionRequest;

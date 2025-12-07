@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import {
   Drawer,
   Box,
@@ -18,6 +18,10 @@ import {
   Chip,
   InputAdornment,
   Grid,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
+  Tooltip,
 } from "@mui/material";
 import {
   Close as CloseIcon,
@@ -25,11 +29,18 @@ import {
   Delete as DeleteIcon,
   People as PeopleIcon,
   Store as StoreIcon,
+  ExpandMore as ExpandMoreIcon,
+  AccessTime as TimeIcon,
+  Description as WorkIcon,
+  ContentCopy as CopyIcon,
+  LocalCafe as TeaIcon,
 } from "@mui/icons-material";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import dayjs from "dayjs";
 import LaborerSelectionDialog from "./LaborerSelectionDialog";
+import TeaShopEntryDialog from "../tea-shop/TeaShopEntryDialog";
+import type { TeaShopEntry, TeaShopAccount as TeaShopAccountType } from "@/types/database.types";
 
 interface AttendanceDrawerProps {
   open: boolean;
@@ -50,25 +61,93 @@ interface LaborerWithCategory {
   laborer_type: string;
 }
 
+// Extended to include time tracking
 interface SelectedLaborer {
   laborerId: string;
   workDays: number;
   dailyRate: number;
+  // Time tracking
+  inTime: string;
+  lunchOut: string;
+  lunchIn: string;
+  outTime: string;
+  workHours: number;
+  breakHours: number;
+  totalHours: number;
+  dayUnits: number;
 }
 
+// Extended to include time tracking
 interface MarketLaborerEntry {
   id: string;
-  roleId: string;           // Changed from categoryId
-  roleName: string;         // Changed from categoryName
+  roleId: string;
+  roleName: string;
   count: number;
-  workDays: number;         // NEW: 0.5, 1, 1.5, 2
+  workDays: number;
   ratePerPerson: number;
+  // Time tracking (group-level)
+  inTime: string;
+  lunchOut: string;
+  lunchIn: string;
+  outTime: string;
+  workHours: number;
+  breakHours: number;
+  totalHours: number;
+  dayUnits: number;
 }
 
 interface LaborRole {
   id: string;
   name: string;
   default_daily_rate: number;
+}
+
+// Helper function to calculate hours from time strings
+function calculateTimeHours(
+  inTime: string,
+  outTime: string,
+  lunchOut: string,
+  lunchIn: string
+): { workHours: number; breakHours: number; totalHours: number; dayUnits: number } {
+  if (!inTime || !outTime) {
+    return { workHours: 0, breakHours: 0, totalHours: 0, dayUnits: 1 };
+  }
+
+  const parseTime = (time: string): number => {
+    const [hours, minutes] = time.split(":").map(Number);
+    return hours * 60 + minutes;
+  };
+
+  const inMinutes = parseTime(inTime);
+  const outMinutes = parseTime(outTime);
+  let totalMinutes = outMinutes - inMinutes;
+
+  // Handle overnight work
+  if (totalMinutes < 0) {
+    totalMinutes += 24 * 60;
+  }
+
+  let breakMinutes = 0;
+  if (lunchOut && lunchIn) {
+    const lunchOutMinutes = parseTime(lunchOut);
+    const lunchInMinutes = parseTime(lunchIn);
+    breakMinutes = lunchInMinutes - lunchOutMinutes;
+    if (breakMinutes < 0) breakMinutes = 0;
+  }
+
+  const workMinutes = totalMinutes - breakMinutes;
+  const workHours = Math.round((workMinutes / 60) * 100) / 100;
+  const breakHours = Math.round((breakMinutes / 60) * 100) / 100;
+  const totalHours = Math.round((totalMinutes / 60) * 100) / 100;
+
+  // Calculate day units based on work hours
+  let dayUnits = 1;
+  if (workHours <= 0) dayUnits = 0;
+  else if (workHours <= 10) dayUnits = 1;
+  else if (workHours <= 14) dayUnits = 1.5;
+  else dayUnits = 2;
+
+  return { workHours, breakHours, totalHours, dayUnits };
 }
 
 export default function AttendanceDrawer({
@@ -89,9 +168,18 @@ export default function AttendanceDrawer({
   const [selectedLaborers, setSelectedLaborers] = useState<
     Map<string, SelectedLaborer>
   >(new Map());
-  const [marketLaborers, setMarketLaborers] = useState<MarketLaborerEntry[]>(
-    []
-  );
+  const [marketLaborers, setMarketLaborers] = useState<MarketLaborerEntry[]>([]);
+
+  // Default time tracking values (apply to all)
+  const [defaultInTime, setDefaultInTime] = useState("08:00");
+  const [defaultLunchOut, setDefaultLunchOut] = useState("12:30");
+  const [defaultLunchIn, setDefaultLunchIn] = useState("13:30");
+  const [defaultOutTime, setDefaultOutTime] = useState("18:00");
+
+  // Work description fields (per day)
+  const [workDescription, setWorkDescription] = useState("");
+  const [workStatus, setWorkStatus] = useState("");
+  const [comments, setComments] = useState("");
 
   // Data state
   const [laborers, setLaborers] = useState<LaborerWithCategory[]>([]);
@@ -104,6 +192,16 @@ export default function AttendanceDrawer({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [expandedSection, setExpandedSection] = useState<string | false>("laborers");
+
+  // Tea Shop state - dialog-based approach
+  const [teaShops, setTeaShops] = useState<TeaShopAccountType[]>([]);
+  const [selectedTeaShop, setSelectedTeaShop] = useState<TeaShopAccountType | null>(null);
+  const [existingTeaEntry, setExistingTeaEntry] = useState<TeaShopEntry | null>(null);
+  const [teaShopDialogOpen, setTeaShopDialogOpen] = useState(false);
+
+  // Calculate tea shop total from existing entry
+  const teaShopTotal = existingTeaEntry?.total_amount || 0;
 
   // Sync selectedDate with initialDate when it changes
   useEffect(() => {
@@ -122,11 +220,33 @@ export default function AttendanceDrawer({
   // Load existing attendance when drawer opens with a specific date
   useEffect(() => {
     if (open && siteId && initialDate) {
-      // Small delay to ensure selectedDate state is synced
-      const dateToLoad = initialDate;
-      loadExistingAttendanceForDate(dateToLoad);
+      loadExistingAttendanceForDate(initialDate);
     }
   }, [open, siteId, initialDate]);
+
+  // Reset form when drawer closes
+  useEffect(() => {
+    if (!open) {
+      resetForm();
+    }
+  }, [open]);
+
+  const resetForm = () => {
+    setSelectedLaborers(new Map());
+    setMarketLaborers([]);
+    setDefaultInTime("08:00");
+    setDefaultLunchOut("12:30");
+    setDefaultLunchIn("13:30");
+    setDefaultOutTime("18:00");
+    setWorkDescription("");
+    setWorkStatus("");
+    setComments("");
+    setError(null);
+    setSuccess(null);
+    // Reset tea shop state
+    setExistingTeaEntry(null);
+    setTeaShopDialogOpen(false);
+  };
 
   const fetchData = async () => {
     setLoading(true);
@@ -134,18 +254,11 @@ export default function AttendanceDrawer({
       // Fetch laborers with category info
       const { data: laborersData, error: laborersError } = await supabase
         .from("laborers")
-        .select(
-          `
-          id,
-          name,
-          category_id,
-          daily_rate,
-          team_id,
-          laborer_type,
+        .select(`
+          id, name, category_id, daily_rate, team_id, laborer_type,
           labor_categories(name),
           team:teams!laborers_team_id_fkey(name)
-        `
-        )
+        `)
         .eq("status", "active")
         .order("name");
 
@@ -176,8 +289,7 @@ export default function AttendanceDrawer({
       const sectionsArray = (sectionsData || []) as { id: string; name: string }[];
       setSections(sectionsArray);
 
-      // Auto-select first section only when adding new attendance (not editing)
-      // When editing (initialDate provided), loadExistingAttendanceForDate will set the correct section
+      // Auto-select first section only when adding new attendance
       if (sectionsArray.length > 0 && !sectionId && !initialDate) {
         setSectionId(sectionsArray[0].id);
       }
@@ -190,6 +302,20 @@ export default function AttendanceDrawer({
 
       if (rolesError) throw rolesError;
       setLaborRoles((rolesData || []) as LaborRole[]);
+
+      // Fetch tea shops for this site
+      const { data: teaShopsData } = await (supabase
+        .from("tea_shop_accounts") as any)
+        .select("*")
+        .eq("site_id", siteId)
+        .eq("is_active", true)
+        .order("shop_name");
+
+      const shops = (teaShopsData || []) as TeaShopAccountType[];
+      setTeaShops(shops);
+      if (shops.length > 0 && !selectedTeaShop) {
+        setSelectedTeaShop(shops[0]);
+      }
     } catch (err: any) {
       console.error("Error fetching data:", err);
       setError("Failed to load data: " + err.message);
@@ -205,7 +331,7 @@ export default function AttendanceDrawer({
       // Load existing daily attendance for this date
       const { data: attendanceData, error: attendanceError } = await supabase
         .from("daily_attendance")
-        .select("laborer_id, work_days, daily_rate_applied, section_id")
+        .select("laborer_id, work_days, daily_rate_applied, section_id, in_time, lunch_out, lunch_in, out_time, work_hours, break_hours, total_hours, day_units")
         .eq("site_id", siteId)
         .eq("date", dateToLoad);
 
@@ -220,15 +346,21 @@ export default function AttendanceDrawer({
           laborerId: record.laborer_id,
           workDays: record.work_days,
           dailyRate: record.daily_rate_applied,
+          inTime: record.in_time || "08:00",
+          lunchOut: record.lunch_out || "12:30",
+          lunchIn: record.lunch_in || "13:30",
+          outTime: record.out_time || "18:00",
+          workHours: record.work_hours || 0,
+          breakHours: record.break_hours || 0,
+          totalHours: record.total_hours || 0,
+          dayUnits: record.day_units || 1,
         });
-        // Get section_id from the first record (all should have same section)
         if (!loadedSectionId && record.section_id) {
           loadedSectionId = record.section_id;
         }
       });
       setSelectedLaborers(existingSelected);
 
-      // Set the section from loaded attendance data
       if (loadedSectionId) {
         setSectionId(loadedSectionId);
       }
@@ -237,35 +369,71 @@ export default function AttendanceDrawer({
       const { data: marketData, error: marketError } = await (
         supabase.from("market_laborer_attendance") as any
       )
-        .select("id, role_id, count, work_days, rate_per_person, labor_roles(name)")
+        .select("id, role_id, count, work_days, rate_per_person, in_time, lunch_out, lunch_in, out_time, work_hours, break_hours, total_hours, day_units, labor_roles(name)")
         .eq("site_id", siteId)
         .eq("date", dateToLoad);
 
       let marketCount = 0;
       if (!marketError && marketData) {
-        const existingMarket: MarketLaborerEntry[] = marketData.map(
-          (m: any) => ({
-            id: m.id,
-            roleId: m.role_id,
-            roleName: m.labor_roles?.name || "Unknown",
-            count: m.count,
-            workDays: m.work_days || 1,
-            ratePerPerson: m.rate_per_person,
-          })
-        );
+        const existingMarket: MarketLaborerEntry[] = marketData.map((m: any) => ({
+          id: m.id,
+          roleId: m.role_id,
+          roleName: m.labor_roles?.name || "Unknown",
+          count: m.count,
+          workDays: m.work_days || 1,
+          ratePerPerson: m.rate_per_person,
+          inTime: m.in_time || "08:00",
+          lunchOut: m.lunch_out || "12:30",
+          lunchIn: m.lunch_in || "13:30",
+          outTime: m.out_time || "18:00",
+          workHours: m.work_hours || 0,
+          breakHours: m.break_hours || 0,
+          totalHours: m.total_hours || 0,
+          dayUnits: m.day_units || 1,
+        }));
         setMarketLaborers(existingMarket);
         marketCount = existingMarket.reduce((acc, m) => acc + m.count, 0);
       } else {
         setMarketLaborers([]);
       }
 
-      // Show success message with loaded counts
+      // Load work summary for this date
+      const { data: summaryData } = await (
+        supabase.from("daily_work_summary") as any
+      )
+        .select("work_description, work_status, comments")
+        .eq("site_id", siteId)
+        .eq("date", dateToLoad)
+        .single();
+
+      if (summaryData) {
+        setWorkDescription(summaryData.work_description || "");
+        setWorkStatus(summaryData.work_status || "");
+        setComments(summaryData.comments || "");
+      }
+
+      // Load existing tea shop entry for this date
+      if (teaShops.length > 0) {
+        const shopToUse = selectedTeaShop || teaShops[0];
+        const { data: teaEntryData } = await (supabase
+          .from("tea_shop_entries") as any)
+          .select("*")
+          .eq("tea_shop_id", shopToUse.id)
+          .eq("date", dateToLoad)
+          .single();
+
+        if (teaEntryData) {
+          setExistingTeaEntry(teaEntryData as TeaShopEntry);
+        } else {
+          setExistingTeaEntry(null);
+        }
+      }
+
       const namedCount = existingSelected.size;
       if (namedCount > 0 || marketCount > 0) {
         setSuccess(
-          `Loaded ${namedCount} named laborer${namedCount !== 1 ? "s" : ""} and ${marketCount} market laborer${marketCount !== 1 ? "s" : ""} for this date`
+          `Loaded ${namedCount} named laborer${namedCount !== 1 ? "s" : ""} and ${marketCount} market laborer${marketCount !== 1 ? "s" : ""}`
         );
-        // Auto-dismiss success message after 3 seconds
         setTimeout(() => setSuccess(null), 3000);
       }
     } catch (err: any) {
@@ -276,34 +444,83 @@ export default function AttendanceDrawer({
     }
   };
 
+  // Apply default times to all laborers
+  const applyDefaultTimesToAll = useCallback(() => {
+    const timeCalc = calculateTimeHours(defaultInTime, defaultOutTime, defaultLunchOut, defaultLunchIn);
+
+    setSelectedLaborers((prev) => {
+      const newMap = new Map(prev);
+      newMap.forEach((laborer, key) => {
+        newMap.set(key, {
+          ...laborer,
+          inTime: defaultInTime,
+          lunchOut: defaultLunchOut,
+          lunchIn: defaultLunchIn,
+          outTime: defaultOutTime,
+          ...timeCalc,
+        });
+      });
+      return newMap;
+    });
+
+    setMarketLaborers((prev) =>
+      prev.map((m) => ({
+        ...m,
+        inTime: defaultInTime,
+        lunchOut: defaultLunchOut,
+        lunchIn: defaultLunchIn,
+        outTime: defaultOutTime,
+        ...timeCalc,
+      }))
+    );
+  }, [defaultInTime, defaultOutTime, defaultLunchOut, defaultLunchIn]);
+
   // Calculate summary
   const summary = useMemo(() => {
     let namedCount = 0;
-    let namedAmount = 0;
+    let namedSalary = 0;
     let marketCount = 0;
-    let marketAmount = 0;
+    let marketSalary = 0;
+    let dailyCount = 0;
+    let contractCount = 0;
 
     selectedLaborers.forEach((s) => {
       namedCount++;
-      namedAmount += s.workDays * s.dailyRate;
+      const laborer = laborers.find((l) => l.id === s.laborerId);
+      const salary = s.dayUnits * s.dailyRate;
+      namedSalary += salary;
+
+      if (laborer?.laborer_type === "contract") {
+        contractCount++;
+      } else {
+        dailyCount++;
+      }
     });
 
     marketLaborers.forEach((m) => {
       marketCount += m.count;
-      marketAmount += m.count * m.ratePerPerson * m.workDays;
+      marketSalary += m.count * m.ratePerPerson * m.dayUnits;
     });
+
+    const totalSalary = namedSalary + marketSalary;
+    const totalExpense = totalSalary;
 
     return {
       namedCount,
-      namedAmount,
+      namedSalary,
       marketCount,
-      marketAmount,
+      marketSalary,
+      dailyCount,
+      contractCount,
       totalCount: namedCount + marketCount,
-      totalAmount: namedAmount + marketAmount,
+      totalSalary,
+      totalExpense,
     };
-  }, [selectedLaborers, marketLaborers]);
+  }, [selectedLaborers, marketLaborers, laborers]);
 
   const handleLaborerToggle = (laborer: LaborerWithCategory) => {
+    const timeCalc = calculateTimeHours(defaultInTime, defaultOutTime, defaultLunchOut, defaultLunchIn);
+
     setSelectedLaborers((prev) => {
       const newMap = new Map(prev);
       if (newMap.has(laborer.id)) {
@@ -313,6 +530,11 @@ export default function AttendanceDrawer({
           laborerId: laborer.id,
           workDays: 1,
           dailyRate: laborer.daily_rate,
+          inTime: defaultInTime,
+          lunchOut: defaultLunchOut,
+          lunchIn: defaultLunchIn,
+          outTime: defaultOutTime,
+          ...timeCalc,
         });
       }
       return newMap;
@@ -326,6 +548,7 @@ export default function AttendanceDrawer({
       (role) => !marketLaborers.some((m) => m.roleId === role.id)
     );
     const role = unusedRole || laborRoles[0];
+    const timeCalc = calculateTimeHours(defaultInTime, defaultOutTime, defaultLunchOut, defaultLunchIn);
 
     setMarketLaborers((prev) => [
       ...prev,
@@ -334,8 +557,13 @@ export default function AttendanceDrawer({
         roleId: role.id,
         roleName: role.name,
         count: 1,
-        workDays: 1, // Default to full day
+        workDays: 1,
         ratePerPerson: role.default_daily_rate,
+        inTime: defaultInTime,
+        lunchOut: defaultLunchOut,
+        lunchIn: defaultLunchIn,
+        outTime: defaultOutTime,
+        ...timeCalc,
       },
     ]);
   };
@@ -346,32 +574,93 @@ export default function AttendanceDrawer({
 
   const handleMarketLaborerChange = (
     id: string,
-    field: "roleId" | "count" | "workDays" | "ratePerPerson",
+    field: string,
     value: string | number
   ) => {
     setMarketLaborers((prev) =>
       prev.map((m) => {
         if (m.id !== id) return m;
 
+        let updated = { ...m };
+
         if (field === "roleId") {
-          // Auto-fill rate when role changes
           const role = laborRoles.find((r) => r.id === value);
-          return {
-            ...m,
+          updated = {
+            ...updated,
             roleId: value as string,
             roleName: role?.name || "Unknown",
             ratePerPerson: role?.default_daily_rate || 500,
           };
+        } else if (field === "count") {
+          const count = Math.max(1, value as number);
+          updated = {
+            ...updated,
+            count,
+          };
+        } else if (["inTime", "lunchOut", "lunchIn", "outTime"].includes(field)) {
+          updated = { ...updated, [field]: value };
+          const timeCalc = calculateTimeHours(
+            field === "inTime" ? (value as string) : updated.inTime,
+            field === "outTime" ? (value as string) : updated.outTime,
+            field === "lunchOut" ? (value as string) : updated.lunchOut,
+            field === "lunchIn" ? (value as string) : updated.lunchIn
+          );
+          updated = { ...updated, ...timeCalc };
+        } else {
+          updated = { ...updated, [field]: value };
         }
 
-        // Validate count and rate
-        if (field === "count" || field === "ratePerPerson") {
-          if ((value as number) < 0) return m;
-        }
-
-        return { ...m, [field]: value };
+        return updated;
       })
     );
+  };
+
+  const handleLaborerFieldChange = (
+    laborerId: string,
+    field: string,
+    value: string | number
+  ) => {
+    setSelectedLaborers((prev) => {
+      const newMap = new Map(prev);
+      const laborer = newMap.get(laborerId);
+      if (!laborer) return prev;
+
+      let updated = { ...laborer };
+
+      if (["inTime", "lunchOut", "lunchIn", "outTime"].includes(field)) {
+        updated = { ...updated, [field]: value };
+        const timeCalc = calculateTimeHours(
+          field === "inTime" ? (value as string) : updated.inTime,
+          field === "outTime" ? (value as string) : updated.outTime,
+          field === "lunchOut" ? (value as string) : updated.lunchOut,
+          field === "lunchIn" ? (value as string) : updated.lunchIn
+        );
+        updated = { ...updated, ...timeCalc };
+      } else {
+        updated = { ...updated, [field]: value };
+      }
+
+      newMap.set(laborerId, updated);
+      return newMap;
+    });
+  };
+
+  // Tea Shop dialog handler
+  const handleTeaShopDialogSuccess = async () => {
+    setTeaShopDialogOpen(false);
+    // Refresh tea shop entry
+    if (selectedTeaShop && selectedDate) {
+      const { data: teaEntryData } = await (supabase
+        .from("tea_shop_entries") as any)
+        .select("*")
+        .eq("tea_shop_id", selectedTeaShop.id)
+        .eq("date", selectedDate)
+        .single();
+
+      if (teaEntryData) {
+        setExistingTeaEntry(teaEntryData as TeaShopEntry);
+      }
+    }
   };
 
   const handleSave = async () => {
@@ -396,116 +685,192 @@ export default function AttendanceDrawer({
         laborer_id: s.laborerId,
         site_id: siteId,
         section_id: sectionId,
-        work_days: s.workDays,
-        hours_worked: s.workDays * 8,
+        work_days: s.dayUnits, // Use calculated day units
+        hours_worked: s.workHours,
         daily_rate_applied: s.dailyRate,
-        daily_earnings: s.workDays * s.dailyRate,
+        daily_earnings: s.dayUnits * s.dailyRate,
         entered_by: userProfile?.id || null,
         recorded_by: userProfile?.name || "Unknown",
         recorded_by_user_id: userProfile?.id || null,
         is_paid: false,
         synced_to_expense: true,
+        // Time tracking fields
+        in_time: s.inTime,
+        lunch_out: s.lunchOut,
+        lunch_in: s.lunchIn,
+        out_time: s.outTime,
+        work_hours: s.workHours,
+        break_hours: s.breakHours,
+        total_hours: s.totalHours,
+        day_units: s.dayUnits,
       }));
 
+      // Delete existing records for this date/site first
+      await (supabase.from("daily_attendance") as any)
+        .delete()
+        .eq("site_id", siteId)
+        .eq("date", selectedDate);
+
       if (namedRecords.length > 0) {
-        // Delete existing records for this date/site first
-        await (supabase.from("daily_attendance") as any)
-          .delete()
-          .eq("site_id", siteId)
-          .eq("date", selectedDate);
-
-        // Insert new records
-        const { error: attendanceError } = await (supabase.from("daily_attendance") as any)
-          .insert(namedRecords);
-
+        const { error: attendanceError } = await (
+          supabase.from("daily_attendance") as any
+        ).insert(namedRecords);
         if (attendanceError) throw attendanceError;
       }
 
       // 2. Save market laborers
-      if (marketLaborers.length > 0) {
-        // Delete existing market laborer records for this date/site
-        await (supabase.from("market_laborer_attendance") as any)
-          .delete()
-          .eq("site_id", siteId)
-          .eq("date", selectedDate);
+      await (supabase.from("market_laborer_attendance") as any)
+        .delete()
+        .eq("site_id", siteId)
+        .eq("date", selectedDate);
 
+      if (marketLaborers.length > 0) {
         const marketRecords = marketLaborers.map((m) => ({
           site_id: siteId,
           section_id: sectionId,
           date: selectedDate,
           role_id: m.roleId,
           count: m.count,
-          work_days: m.workDays,
+          work_days: m.dayUnits,
           rate_per_person: m.ratePerPerson,
-          total_cost: m.count * m.ratePerPerson * m.workDays,
+          total_cost: m.count * m.ratePerPerson * m.dayUnits,
           entered_by: userProfile?.name || "Unknown",
           entered_by_user_id: userProfile?.id || null,
+          // Time tracking fields
+          in_time: m.inTime,
+          lunch_out: m.lunchOut,
+          lunch_in: m.lunchIn,
+          out_time: m.outTime,
+          work_hours: m.workHours,
+          break_hours: m.breakHours,
+          total_hours: m.totalHours,
+          day_units: m.dayUnits,
         }));
 
         const { error: marketError } = await (
           supabase.from("market_laborer_attendance") as any
         ).insert(marketRecords);
-
         if (marketError) throw marketError;
       }
 
-      // 3. AUTO-SYNC: Create expense record for labor
-      const totalAmount = summary.totalAmount;
+      // 3. Save/Update daily work summary
+      const { error: summaryError } = await (
+        supabase.from("daily_work_summary") as any
+      ).upsert(
+        {
+          site_id: siteId,
+          date: selectedDate,
+          work_description: workDescription,
+          work_status: workStatus,
+          comments: comments,
+          first_in_time: defaultInTime,
+          last_out_time: defaultOutTime,
+          daily_laborer_count: summary.dailyCount,
+          contract_laborer_count: summary.contractCount,
+          market_laborer_count: summary.marketCount,
+          total_laborer_count: summary.totalCount,
+          total_salary: summary.totalSalary,
+          total_snacks: 0, // Snacks now managed via Tea Shop
+          total_expense: summary.totalExpense,
+          default_snacks_per_person: 0, // Snacks now managed via Tea Shop
+          entered_by: userProfile?.name || "Unknown",
+          entered_by_user_id: userProfile?.id || null,
+        },
+        { onConflict: "site_id,date" }
+      );
+
+      if (summaryError) {
+        console.error("Error saving work summary:", summaryError);
+        // Don't throw - this is non-critical
+      }
+
+      // 4. AUTO-SYNC: Create expense record for labor
+      const totalAmount = summary.totalExpense;
       if (totalAmount > 0) {
-        // Get labor expense category
-        const { data: laborCategory } = await (supabase.from("expense_categories") as any)
+        // First try to get existing labor category
+        let categoryId: string | null = null;
+        const { data: laborCategory } = await (
+          supabase.from("expense_categories") as any
+        )
           .select("id")
           .eq("module", "labor")
           .single();
 
-        const categoryId = (laborCategory as { id: string } | null)?.id;
+        if (laborCategory) {
+          categoryId = (laborCategory as { id: string }).id;
+        } else {
+          // Create labor category if it doesn't exist
+          const { data: newCategory, error: createCategoryError } = await (
+            supabase.from("expense_categories") as any
+          )
+            .insert({
+              name: "Labor",
+              module: "labor",
+              description: "Labor and attendance expenses",
+            })
+            .select()
+            .single();
 
-        // Delete existing expense for this date/site (auto-synced)
-        await (supabase.from("expenses") as any)
-          .delete()
-          .eq("site_id", siteId)
-          .eq("date", selectedDate)
-          .eq("module", "labor")
-          .like("description", "Daily labor%");
+          if (!createCategoryError && newCategory) {
+            categoryId = (newCategory as { id: string }).id;
+          }
+        }
 
-        // Create new expense
-        const { data: expenseData, error: expenseError } = await (supabase.from("expenses") as any)
-          .insert({
-            module: "labor",
-            category_id: categoryId,
-            date: selectedDate,
-            amount: totalAmount,
-            site_id: siteId,
-            section_id: sectionId,
-            description: `Daily labor - ${summary.totalCount} laborers`,
-            payment_mode: "cash",
-            is_recurring: false,
-            is_cleared: false,
-            entered_by: userProfile?.name || "Unknown",
-            entered_by_user_id: userProfile?.id || null,
-          })
-          .select()
-          .single();
+        // Only create expense if we have a valid category
+        if (categoryId) {
+          await (supabase.from("expenses") as any)
+            .delete()
+            .eq("site_id", siteId)
+            .eq("date", selectedDate)
+            .eq("module", "labor")
+            .like("description", "Daily labor%");
 
-        if (expenseError) throw expenseError;
+          const { data: expenseData, error: expenseError } = await (
+            supabase.from("expenses") as any
+          )
+            .insert({
+              module: "labor",
+              category_id: categoryId,
+              date: selectedDate,
+              amount: totalAmount,
+              site_id: siteId,
+              section_id: sectionId,
+              description: `Daily labor - ${summary.totalCount} laborers (Salary: ₹${summary.totalSalary.toLocaleString()})`,
+              payment_mode: "cash",
+              is_recurring: false,
+              is_cleared: false,
+              entered_by: userProfile?.name || "Unknown",
+              entered_by_user_id: userProfile?.id || null,
+            })
+            .select()
+            .single();
 
-        // 4. Track sync in attendance_expense_sync
-        await (supabase.from("attendance_expense_sync") as any).upsert(
-          {
-            attendance_date: selectedDate,
-            site_id: siteId,
-            expense_id: expenseData?.id || null,
-            total_laborers: summary.totalCount,
-            total_work_days: summary.namedCount + summary.marketCount,
-            total_amount: totalAmount,
-            synced_by: userProfile?.name || "Unknown",
-            synced_by_user_id: userProfile?.id || null,
-          },
-          { onConflict: "attendance_date,site_id" }
-        );
+          if (expenseError) {
+            console.error("Error creating expense:", expenseError);
+            // Don't throw - attendance was saved successfully
+          } else {
+            await (supabase.from("attendance_expense_sync") as any).upsert(
+              {
+                attendance_date: selectedDate,
+                site_id: siteId,
+                expense_id: expenseData?.id || null,
+                total_laborers: summary.totalCount,
+                total_work_days: summary.totalCount,
+                total_amount: totalAmount,
+                synced_by: userProfile?.name || "Unknown",
+                synced_by_user_id: userProfile?.id || null,
+              },
+              { onConflict: "attendance_date,site_id" }
+            );
+          }
+        } else {
+          console.warn("Could not create expense - no category found or created");
+        }
       }
 
-      setSuccess("Attendance saved and synced to expenses!");
+      // Note: Tea shop entries are now managed via TeaShopEntryDialog
+
+      setSuccess("Attendance saved successfully!");
       setTimeout(() => {
         onSuccess?.();
         handleClose();
@@ -519,19 +884,9 @@ export default function AttendanceDrawer({
   };
 
   const handleClose = () => {
-    setSelectedLaborers(new Map());
-    setMarketLaborers([]);
-    setError(null);
-    setSuccess(null);
+    resetForm();
     onClose();
   };
-
-  const workDaysOptions = [
-    { value: 0.5, label: "Half Day" },
-    { value: 1, label: "Full Day" },
-    { value: 1.5, label: "1.5 Days" },
-    { value: 2, label: "2 Days" },
-  ];
 
   return (
     <Drawer
@@ -540,13 +895,11 @@ export default function AttendanceDrawer({
       onClose={handleClose}
       disableScrollLock={false}
       hideBackdrop={false}
-      ModalProps={{
-        keepMounted: false,
-      }}
+      ModalProps={{ keepMounted: false }}
       PaperProps={{
         sx: {
-          width: { xs: "100%", sm: 600, md: 800 },
-          maxWidth: "90vw",
+          width: { xs: "100%", sm: 700, md: 900 },
+          maxWidth: "95vw",
           overflowY: "auto",
         },
       }}
@@ -558,31 +911,31 @@ export default function AttendanceDrawer({
             p: 2,
             borderBottom: 1,
             borderColor: "divider",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
+            bgcolor: "primary.main",
+            color: "white",
           }}
         >
-          <Box>
-            <Typography variant="h6" fontWeight={600}>
-              {initialDate
-                ? `Edit Attendance for ${dayjs(initialDate).format("DD MMM YYYY")}`
-                : "Add Attendance"}
-            </Typography>
-            {initialDate && (
-              <Typography variant="caption" color="text.secondary">
-                You can add new laborers or edit existing ones for this date
+          <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <Box>
+              <Typography variant="h6" fontWeight={600}>
+                {initialDate
+                  ? `Edit Attendance - ${dayjs(initialDate).format("DD MMM YYYY (ddd)")}`
+                  : "Add Attendance"}
               </Typography>
-            )}
+              {initialDate && (
+                <Typography variant="caption" sx={{ opacity: 0.9 }}>
+                  Manage laborers and time tracking for this date
+                </Typography>
+              )}
+            </Box>
+            <IconButton onClick={handleClose} size="small" sx={{ color: "white" }}>
+              <CloseIcon />
+            </IconButton>
           </Box>
-          <IconButton onClick={handleClose} size="small">
-            <CloseIcon />
-          </IconButton>
         </Box>
 
         {/* Content */}
         <Box sx={{ flex: 1, overflow: "auto", p: 2 }}>
-          {/* Alerts */}
           {error && (
             <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
               {error}
@@ -600,8 +953,8 @@ export default function AttendanceDrawer({
             </Box>
           ) : (
             <>
-              {/* Date and Section */}
-              <Box sx={{ display: "flex", gap: 2, mb: 3 }}>
+              {/* Date and Section Row */}
+              <Box sx={{ display: "flex", gap: 2, mb: 2 }}>
                 <TextField
                   label="Date"
                   type="date"
@@ -610,14 +963,7 @@ export default function AttendanceDrawer({
                   slotProps={{ inputLabel: { shrink: true } }}
                   size="small"
                   disabled={!!initialDate}
-                  sx={{
-                    flex: 1,
-                    ...(initialDate && {
-                      '& .MuiInputBase-root': {
-                        bgcolor: 'action.disabledBackground',
-                      },
-                    }),
-                  }}
+                  sx={{ flex: 1 }}
                 />
                 <FormControl size="small" sx={{ flex: 1 }}>
                   <InputLabel>Section</InputLabel>
@@ -635,22 +981,237 @@ export default function AttendanceDrawer({
                 </FormControl>
               </Box>
 
-              <Divider sx={{ mb: 2 }} />
+              {/* Default Time Settings */}
+              <Accordion
+                expanded={expandedSection === "time"}
+                onChange={(_, isExpanded) => setExpandedSection(isExpanded ? "time" : false)}
+                sx={{ mb: 2 }}
+              >
+                <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                  <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                    <TimeIcon color="info" />
+                    <Typography fontWeight={600}>Default Time Settings</Typography>
+                    <Chip
+                      label={`${defaultInTime} - ${defaultOutTime}`}
+                      size="small"
+                      variant="outlined"
+                    />
+                  </Box>
+                </AccordionSummary>
+                <AccordionDetails>
+                  <Grid container spacing={2}>
+                    <Grid size={3}>
+                      <TextField
+                        fullWidth
+                        size="small"
+                        label="In Time"
+                        type="time"
+                        value={defaultInTime}
+                        onChange={(e) => setDefaultInTime(e.target.value)}
+                        slotProps={{ inputLabel: { shrink: true } }}
+                      />
+                    </Grid>
+                    <Grid size={3}>
+                      <TextField
+                        fullWidth
+                        size="small"
+                        label="Lunch Out"
+                        type="time"
+                        value={defaultLunchOut}
+                        onChange={(e) => setDefaultLunchOut(e.target.value)}
+                        slotProps={{ inputLabel: { shrink: true } }}
+                      />
+                    </Grid>
+                    <Grid size={3}>
+                      <TextField
+                        fullWidth
+                        size="small"
+                        label="Lunch In"
+                        type="time"
+                        value={defaultLunchIn}
+                        onChange={(e) => setDefaultLunchIn(e.target.value)}
+                        slotProps={{ inputLabel: { shrink: true } }}
+                      />
+                    </Grid>
+                    <Grid size={3}>
+                      <TextField
+                        fullWidth
+                        size="small"
+                        label="Out Time"
+                        type="time"
+                        value={defaultOutTime}
+                        onChange={(e) => setDefaultOutTime(e.target.value)}
+                        slotProps={{ inputLabel: { shrink: true } }}
+                      />
+                    </Grid>
+                  </Grid>
+                  <Button
+                    size="small"
+                    startIcon={<CopyIcon />}
+                    onClick={applyDefaultTimesToAll}
+                    sx={{ mt: 2 }}
+                  >
+                    Apply to All Laborers
+                  </Button>
+                </AccordionDetails>
+              </Accordion>
+
+              {/* Work Description */}
+              <Accordion
+                expanded={expandedSection === "work"}
+                onChange={(_, isExpanded) => setExpandedSection(isExpanded ? "work" : false)}
+                sx={{ mb: 2 }}
+              >
+                <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                  <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                    <WorkIcon color="success" />
+                    <Typography fontWeight={600}>Work Description</Typography>
+                    {workDescription && (
+                      <Chip label="Filled" size="small" color="success" variant="outlined" />
+                    )}
+                  </Box>
+                </AccordionSummary>
+                <AccordionDetails>
+                  <TextField
+                    fullWidth
+                    multiline
+                    rows={2}
+                    size="small"
+                    label="Work Planned for Today"
+                    placeholder="e.g., Plastering 2nd floor, Electrical wiring..."
+                    value={workDescription}
+                    onChange={(e) => setWorkDescription(e.target.value)}
+                    sx={{ mb: 2 }}
+                  />
+                  <TextField
+                    fullWidth
+                    multiline
+                    rows={2}
+                    size="small"
+                    label="Work Status / Completion"
+                    placeholder="e.g., 80% completed, pending electrical..."
+                    value={workStatus}
+                    onChange={(e) => setWorkStatus(e.target.value)}
+                    sx={{ mb: 2 }}
+                  />
+                  <TextField
+                    fullWidth
+                    multiline
+                    rows={2}
+                    size="small"
+                    label="Comments / Notes"
+                    placeholder="Any additional notes..."
+                    value={comments}
+                    onChange={(e) => setComments(e.target.value)}
+                  />
+                </AccordionDetails>
+              </Accordion>
+
+              {/* Tea & Snacks - Opens TeaShopEntryDialog */}
+              <Box
+                sx={{
+                  mb: 2,
+                  p: 2,
+                  border: "1px solid",
+                  borderColor: existingTeaEntry ? "warning.main" : "divider",
+                  borderRadius: 2,
+                  bgcolor: existingTeaEntry ? "warning.50" : "background.paper",
+                }}
+              >
+                <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                    <TeaIcon color="warning" />
+                    <Typography fontWeight={600}>Tea & Snacks</Typography>
+                  </Box>
+                  {teaShopTotal > 0 && (
+                    <Chip
+                      label={`₹${teaShopTotal.toLocaleString()}`}
+                      size="small"
+                      color="warning"
+                    />
+                  )}
+                </Box>
+
+                {teaShops.length === 0 ? (
+                  <Alert severity="info" sx={{ mt: 2 }}>
+                    No tea shop configured for this site. Add one in Site Settings.
+                  </Alert>
+                ) : (
+                  <Box sx={{ mt: 2 }}>
+                    {existingTeaEntry ? (
+                      <Box sx={{ mb: 2 }}>
+                        <Typography variant="body2" color="text.secondary" gutterBottom>
+                          Entry for {dayjs(existingTeaEntry.date).format("DD MMM YYYY")}
+                        </Typography>
+                        <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap", mb: 1 }}>
+                          <Typography variant="body2">
+                            Tea: {existingTeaEntry.tea_rounds} rounds × ₹{existingTeaEntry.tea_rate_per_round} = <strong>₹{existingTeaEntry.tea_total}</strong>
+                          </Typography>
+                          {existingTeaEntry.snacks_total > 0 && (
+                            <Typography variant="body2">
+                              Snacks: <strong>₹{existingTeaEntry.snacks_total}</strong>
+                            </Typography>
+                          )}
+                        </Box>
+                        <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}>
+                          {(existingTeaEntry.working_laborer_count ?? 0) > 0 && (
+                            <Chip
+                              label={`Working: ${existingTeaEntry.working_laborer_count}`}
+                              size="small"
+                              variant="outlined"
+                              color="success"
+                            />
+                          )}
+                          {(existingTeaEntry.nonworking_laborer_count ?? 0) > 0 && (
+                            <Chip
+                              label={`Non-Working: ${existingTeaEntry.nonworking_laborer_count}`}
+                              size="small"
+                              variant="outlined"
+                              color="warning"
+                            />
+                          )}
+                          {(existingTeaEntry.market_laborer_count ?? 0) > 0 && (
+                            <Chip
+                              label={`Market: ${existingTeaEntry.market_laborer_count}`}
+                              size="small"
+                              variant="outlined"
+                              color="info"
+                            />
+                          )}
+                        </Box>
+                      </Box>
+                    ) : (
+                      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                        No tea/snacks entry for this date yet.
+                      </Typography>
+                    )}
+
+                    <Button
+                      variant={existingTeaEntry ? "outlined" : "contained"}
+                      color="warning"
+                      startIcon={<TeaIcon />}
+                      onClick={() => setTeaShopDialogOpen(true)}
+                      fullWidth
+                      disabled={!selectedTeaShop}
+                    >
+                      {existingTeaEntry ? "Edit Tea & Snacks" : "Add Tea & Snacks"}
+                    </Button>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1, textAlign: "center" }}>
+                      Opens dialog with laborer assignment options
+                    </Typography>
+                  </Box>
+                )}
+              </Box>
+
+              <Divider sx={{ my: 2 }} />
 
               {/* Named Laborers Section */}
               <Box sx={{ mb: 3 }}>
-                <Box
-                  sx={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    mb: 2,
-                  }}
-                >
+                <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 2 }}>
                   <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
                     <PeopleIcon color="primary" />
                     <Typography variant="subtitle1" fontWeight={600}>
-                      Selected Laborers
+                      Named Laborers
                     </Typography>
                     {selectedLaborers.size > 0 && (
                       <Chip
@@ -670,65 +1231,114 @@ export default function AttendanceDrawer({
                   </Button>
                 </Box>
 
-                {/* Show selected laborers in compact list */}
                 {selectedLaborers.size > 0 ? (
-                  <Box
-                    sx={{
-                      border: 1,
-                      borderColor: "divider",
-                      borderRadius: 1,
-                      overflow: "hidden",
-                    }}
-                  >
+                  <Box sx={{ border: 1, borderColor: "divider", borderRadius: 1, overflow: "hidden" }}>
                     {Array.from(selectedLaborers.values()).map((selection) => {
-                      const laborer = laborers.find(
-                        (l) => l.id === selection.laborerId
-                      );
+                      const laborer = laborers.find((l) => l.id === selection.laborerId);
                       if (!laborer) return null;
 
                       return (
                         <Box
                           key={selection.laborerId}
                           sx={{
-                            display: "flex",
-                            alignItems: "center",
                             p: 1.5,
                             borderBottom: 1,
                             borderColor: "divider",
                             "&:last-child": { borderBottom: 0 },
+                            "&:hover": { bgcolor: "action.hover" },
                           }}
                         >
-                          <Box sx={{ flex: 1 }}>
-                            <Typography variant="body2" fontWeight={600}>
-                              {laborer.name}
+                          <Box sx={{ display: "flex", alignItems: "center", mb: 1 }}>
+                            <Box sx={{ flex: 1 }}>
+                              <Typography variant="body2" fontWeight={600}>
+                                {laborer.name}
+                              </Typography>
+                              <Typography variant="caption" color="text.secondary">
+                                {laborer.category_name} • {laborer.team_name || "No Team"} •{" "}
+                                <Chip
+                                  label={laborer.laborer_type === "contract" ? "Contract" : "Daily"}
+                                  size="small"
+                                  color={laborer.laborer_type === "contract" ? "info" : "warning"}
+                                  sx={{ height: 18, fontSize: "0.65rem" }}
+                                />
+                              </Typography>
+                            </Box>
+                            <Tooltip title={`Work: ${selection.workHours}h | Break: ${selection.breakHours}h`}>
+                              <Chip
+                                label={`${selection.dayUnits} unit${selection.dayUnits !== 1 ? "s" : ""}`}
+                                size="small"
+                                color="primary"
+                                variant="outlined"
+                                sx={{ mr: 1 }}
+                              />
+                            </Tooltip>
+                            <Typography variant="body2" fontWeight={600} sx={{ minWidth: 70, textAlign: "right", mr: 1 }}>
+                              ₹{(selection.dayUnits * selection.dailyRate).toLocaleString()}
                             </Typography>
-                            <Typography variant="caption" color="text.secondary">
-                              {laborer.category_name} • {laborer.team_name || "No Team"}
-                            </Typography>
+                            <IconButton size="small" onClick={() => handleLaborerToggle(laborer)}>
+                              <DeleteIcon fontSize="small" />
+                            </IconButton>
                           </Box>
-                          <Chip
-                            label={`${selection.workDays} day${
-                              selection.workDays !== 1 ? "s" : ""
-                            }`}
-                            size="small"
-                            sx={{ mr: 2 }}
-                          />
-                          <Typography
-                            variant="body2"
-                            fontWeight={600}
-                            sx={{ minWidth: 80, textAlign: "right", mr: 1 }}
-                          >
-                            ₹
-                            {(
-                              selection.workDays * selection.dailyRate
-                            ).toLocaleString()}
-                          </Typography>
-                          <IconButton
-                            size="small"
-                            onClick={() => handleLaborerToggle(laborer)}
-                          >
-                            <DeleteIcon fontSize="small" />
-                          </IconButton>
+                          {/* Time Row */}
+                          <Grid container spacing={1} alignItems="center">
+                            <Grid size={2.5}>
+                              <TextField
+                                fullWidth
+                                size="small"
+                                type="time"
+                                label="In"
+                                value={selection.inTime}
+                                onChange={(e) =>
+                                  handleLaborerFieldChange(selection.laborerId, "inTime", e.target.value)
+                                }
+                                slotProps={{ inputLabel: { shrink: true } }}
+                              />
+                            </Grid>
+                            <Grid size={2.5}>
+                              <TextField
+                                fullWidth
+                                size="small"
+                                type="time"
+                                label="L-Out"
+                                value={selection.lunchOut}
+                                onChange={(e) =>
+                                  handleLaborerFieldChange(selection.laborerId, "lunchOut", e.target.value)
+                                }
+                                slotProps={{ inputLabel: { shrink: true } }}
+                              />
+                            </Grid>
+                            <Grid size={2.5}>
+                              <TextField
+                                fullWidth
+                                size="small"
+                                type="time"
+                                label="L-In"
+                                value={selection.lunchIn}
+                                onChange={(e) =>
+                                  handleLaborerFieldChange(selection.laborerId, "lunchIn", e.target.value)
+                                }
+                                slotProps={{ inputLabel: { shrink: true } }}
+                              />
+                            </Grid>
+                            <Grid size={2.5}>
+                              <TextField
+                                fullWidth
+                                size="small"
+                                type="time"
+                                label="Out"
+                                value={selection.outTime}
+                                onChange={(e) =>
+                                  handleLaborerFieldChange(selection.laborerId, "outTime", e.target.value)
+                                }
+                                slotProps={{ inputLabel: { shrink: true } }}
+                              />
+                            </Grid>
+                            <Grid size={2}>
+                              <Typography variant="caption" color="text.secondary" sx={{ display: "block", textAlign: "center" }}>
+                                {selection.workHours}h work
+                              </Typography>
+                            </Grid>
+                          </Grid>
                         </Box>
                       );
                     })}
@@ -747,7 +1357,26 @@ export default function AttendanceDrawer({
                 siteId={siteId}
                 selectedLaborers={selectedLaborers}
                 onConfirm={(selected) => {
-                  setSelectedLaborers(selected);
+                  // Merge new selections with existing time data
+                  const merged = new Map<string, SelectedLaborer>();
+                  const timeCalc = calculateTimeHours(defaultInTime, defaultOutTime, defaultLunchOut, defaultLunchIn);
+
+                  selected.forEach((sel, key) => {
+                    const existing = selectedLaborers.get(key);
+                    if (existing) {
+                      merged.set(key, { ...existing, ...sel });
+                    } else {
+                      merged.set(key, {
+                        ...sel,
+                        inTime: defaultInTime,
+                        lunchOut: defaultLunchOut,
+                        lunchIn: defaultLunchIn,
+                        outTime: defaultOutTime,
+                        ...timeCalc,
+                      });
+                    }
+                  });
+                  setSelectedLaborers(merged);
                   setLaborerDialogOpen(false);
                 }}
               />
@@ -756,26 +1385,22 @@ export default function AttendanceDrawer({
 
               {/* Market Laborers Section */}
               <Box sx={{ mb: 3 }}>
-                <Box
-                  sx={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    mb: 2,
-                  }}
-                >
+                <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 2 }}>
                   <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
                     <StoreIcon color="warning" />
                     <Typography variant="subtitle1" fontWeight={600}>
                       Market Laborers (Anonymous)
                     </Typography>
+                    {marketLaborers.length > 0 && (
+                      <Chip
+                        label={`${marketLaborers.reduce((acc, m) => acc + m.count, 0)} workers`}
+                        size="small"
+                        color="warning"
+                      />
+                    )}
                   </Box>
-                  <Button
-                    size="small"
-                    startIcon={<AddIcon />}
-                    onClick={handleAddMarketLaborer}
-                  >
-                    Add
+                  <Button size="small" startIcon={<AddIcon />} onClick={handleAddMarketLaborer}>
+                    Add Group
                   </Button>
                 </Box>
 
@@ -785,26 +1410,20 @@ export default function AttendanceDrawer({
                     sx={{
                       mb: 2,
                       p: 2,
-                      bgcolor: "grey.50",
+                      bgcolor: "warning.50",
                       borderRadius: 1,
                       border: 1,
-                      borderColor: "divider",
+                      borderColor: "warning.200",
                     }}
                   >
                     <Grid container spacing={2} alignItems="flex-start">
                       <Grid size={3}>
                         <FormControl fullWidth size="small">
-                          <InputLabel>Labor Role</InputLabel>
+                          <InputLabel>Role</InputLabel>
                           <Select
                             value={entry.roleId}
-                            onChange={(e) =>
-                              handleMarketLaborerChange(
-                                entry.id,
-                                "roleId",
-                                e.target.value
-                              )
-                            }
-                            label="Labor Role"
+                            onChange={(e) => handleMarketLaborerChange(entry.id, "roleId", e.target.value)}
+                            label="Role"
                           >
                             {laborRoles.map((role) => (
                               <MenuItem key={role.id} value={role.id}>
@@ -814,112 +1433,107 @@ export default function AttendanceDrawer({
                           </Select>
                         </FormControl>
                       </Grid>
-
                       <Grid size={2}>
                         <TextField
                           fullWidth
                           size="small"
-                          label="No. of Workers"
+                          label="Count"
                           type="number"
                           value={entry.count}
-                          onChange={(e) =>
-                            handleMarketLaborerChange(
-                              entry.id,
-                              "count",
-                              Number(e.target.value)
-                            )
-                          }
-                          slotProps={{
-                            htmlInput: { min: 1 },
-                          }}
+                          onChange={(e) => handleMarketLaborerChange(entry.id, "count", Number(e.target.value))}
+                          slotProps={{ htmlInput: { min: 1 } }}
                         />
                       </Grid>
-
-                      <Grid size={2}>
-                        <FormControl fullWidth size="small">
-                          <InputLabel>Work Days</InputLabel>
-                          <Select
-                            value={entry.workDays}
-                            onChange={(e) =>
-                              handleMarketLaborerChange(
-                                entry.id,
-                                "workDays",
-                                e.target.value as number
-                              )
-                            }
-                            label="Work Days"
-                          >
-                            <MenuItem value={0.5}>Half Day (0.5)</MenuItem>
-                            <MenuItem value={1}>Full Day (1)</MenuItem>
-                            <MenuItem value={1.5}>1.5 Days</MenuItem>
-                            <MenuItem value={2}>2 Days</MenuItem>
-                          </Select>
-                        </FormControl>
-                      </Grid>
-
-                      <Grid size={2}>
+                      <Grid size={3}>
                         <TextField
                           fullWidth
                           size="small"
-                          label="Rate per Person"
+                          label="Rate/Person"
                           type="number"
                           value={entry.ratePerPerson}
-                          onChange={(e) =>
-                            handleMarketLaborerChange(
-                              entry.id,
-                              "ratePerPerson",
-                              Number(e.target.value)
-                            )
-                          }
+                          onChange={(e) => handleMarketLaborerChange(entry.id, "ratePerPerson", Number(e.target.value))}
                           slotProps={{
-                            input: {
-                              startAdornment: (
-                                <InputAdornment position="start">₹</InputAdornment>
-                              ),
-                            },
+                            input: { startAdornment: <InputAdornment position="start">₹</InputAdornment> },
                           }}
                         />
                       </Grid>
-
-                      <Grid size={2}>
+                      <Grid size={3}>
+                        <Box sx={{ textAlign: "center" }}>
+                          <Typography variant="caption" color="text.secondary">
+                            Total
+                          </Typography>
+                          <Typography variant="body2" fontWeight={700} color="success.main">
+                            ₹{(entry.count * entry.ratePerPerson * entry.dayUnits).toLocaleString()}
+                          </Typography>
+                        </Box>
+                      </Grid>
+                      <Grid size={1} sx={{ display: "flex", justifyContent: "center" }}>
+                        <IconButton size="small" color="error" onClick={() => handleRemoveMarketLaborer(entry.id)}>
+                          <DeleteIcon fontSize="small" />
+                        </IconButton>
+                      </Grid>
+                    </Grid>
+                    {/* Time row for market laborers */}
+                    <Grid container spacing={1} sx={{ mt: 1 }}>
+                      <Grid size={2.4}>
                         <TextField
                           fullWidth
                           size="small"
-                          label="Total Cost"
-                          value={`₹${(
-                            entry.count *
-                            entry.ratePerPerson *
-                            entry.workDays
-                          ).toLocaleString()}`}
-                          disabled
-                          sx={{
-                            "& .MuiInputBase-input": {
-                              fontWeight: 600,
-                              color: "success.main",
-                            },
-                          }}
+                          type="time"
+                          label="In"
+                          value={entry.inTime}
+                          onChange={(e) => handleMarketLaborerChange(entry.id, "inTime", e.target.value)}
+                          slotProps={{ inputLabel: { shrink: true } }}
                         />
                       </Grid>
-
-                      <Grid size={1} sx={{ display: "flex", alignItems: "flex-start", pt: 0.5 }}>
-                        <IconButton
+                      <Grid size={2.4}>
+                        <TextField
+                          fullWidth
                           size="small"
-                          color="error"
-                          onClick={() => handleRemoveMarketLaborer(entry.id)}
-                        >
-                          <DeleteIcon fontSize="small" />
-                        </IconButton>
+                          type="time"
+                          label="L-Out"
+                          value={entry.lunchOut}
+                          onChange={(e) => handleMarketLaborerChange(entry.id, "lunchOut", e.target.value)}
+                          slotProps={{ inputLabel: { shrink: true } }}
+                        />
+                      </Grid>
+                      <Grid size={2.4}>
+                        <TextField
+                          fullWidth
+                          size="small"
+                          type="time"
+                          label="L-In"
+                          value={entry.lunchIn}
+                          onChange={(e) => handleMarketLaborerChange(entry.id, "lunchIn", e.target.value)}
+                          slotProps={{ inputLabel: { shrink: true } }}
+                        />
+                      </Grid>
+                      <Grid size={2.4}>
+                        <TextField
+                          fullWidth
+                          size="small"
+                          type="time"
+                          label="Out"
+                          value={entry.outTime}
+                          onChange={(e) => handleMarketLaborerChange(entry.id, "outTime", e.target.value)}
+                          slotProps={{ inputLabel: { shrink: true } }}
+                        />
+                      </Grid>
+                      <Grid size={2.4}>
+                        <Box sx={{ textAlign: "center", pt: 1 }}>
+                          <Chip
+                            label={`${entry.dayUnits} W/D unit${entry.dayUnits !== 1 ? "s" : ""}`}
+                            size="small"
+                            color="info"
+                          />
+                        </Box>
                       </Grid>
                     </Grid>
                   </Box>
                 ))}
 
                 {marketLaborers.length === 0 && (
-                  <Typography
-                    variant="body2"
-                    color="text.secondary"
-                    sx={{ textAlign: "center", py: 2 }}
-                  >
+                  <Typography variant="body2" color="text.secondary" sx={{ textAlign: "center", py: 2 }}>
                     No market laborers added
                   </Typography>
                 )}
@@ -929,41 +1543,52 @@ export default function AttendanceDrawer({
         </Box>
 
         {/* Summary & Save */}
-        <Box
-          sx={{
-            borderTop: 1,
-            borderColor: "divider",
-            p: 2,
-            bgcolor: "grey.50",
-          }}
-        >
-          {/* Summary */}
-          <Box sx={{ mb: 2 }}>
-            <Typography variant="subtitle2" color="text.secondary" gutterBottom>
-              SUMMARY
+        <Box sx={{ borderTop: 1, borderColor: "divider", p: 2, bgcolor: "grey.50" }}>
+          <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+            SUMMARY
+          </Typography>
+          <Grid container spacing={2} sx={{ mb: 2 }}>
+            <Grid size={4}>
+              <Box sx={{ textAlign: "center", p: 1, bgcolor: "primary.50", borderRadius: 1 }}>
+                <Typography variant="caption" color="text.secondary">
+                  Laborers
+                </Typography>
+                <Typography variant="h6" fontWeight={700}>
+                  {summary.totalCount}
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  D: {summary.dailyCount} | C: {summary.contractCount} | M: {summary.marketCount}
+                </Typography>
+              </Box>
+            </Grid>
+            <Grid size={4}>
+              <Box sx={{ textAlign: "center", p: 1, bgcolor: "success.50", borderRadius: 1 }}>
+                <Typography variant="caption" color="text.secondary">
+                  Salary
+                </Typography>
+                <Typography variant="h6" fontWeight={700} color="success.main">
+                  ₹{summary.totalSalary.toLocaleString()}
+                </Typography>
+              </Box>
+            </Grid>
+            <Grid size={4}>
+              <Box sx={{ textAlign: "center", p: 1, bgcolor: "warning.50", borderRadius: 1 }}>
+                <Typography variant="caption" color="text.secondary">
+                  Tea Shop
+                </Typography>
+                <Typography variant="h6" fontWeight={700} color="warning.main">
+                  ₹{teaShopTotal.toLocaleString()}
+                </Typography>
+              </Box>
+            </Grid>
+          </Grid>
+          <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 2 }}>
+            <Typography variant="subtitle1" fontWeight={700}>
+              TOTAL EXPENSE:
             </Typography>
-            <Box sx={{ display: "flex", justifyContent: "space-between", mb: 0.5 }}>
-              <Typography variant="body2">Named Laborers:</Typography>
-              <Typography variant="body2">
-                {summary.namedCount} → ₹{summary.namedAmount.toLocaleString()}
-              </Typography>
-            </Box>
-            <Box sx={{ display: "flex", justifyContent: "space-between", mb: 0.5 }}>
-              <Typography variant="body2">Market Laborers:</Typography>
-              <Typography variant="body2">
-                {summary.marketCount} → ₹{summary.marketAmount.toLocaleString()}
-              </Typography>
-            </Box>
-            <Divider sx={{ my: 1 }} />
-            <Box sx={{ display: "flex", justifyContent: "space-between" }}>
-              <Typography variant="subtitle1" fontWeight={700}>
-                TOTAL:
-              </Typography>
-              <Typography variant="subtitle1" fontWeight={700} color="primary.main">
-                {summary.totalCount} laborers → ₹
-                {summary.totalAmount.toLocaleString()}
-              </Typography>
-            </Box>
+            <Typography variant="h5" fontWeight={700} color="primary.main">
+              ₹{(summary.totalExpense + teaShopTotal).toLocaleString()}
+            </Typography>
           </Box>
 
           <Button
@@ -971,25 +1596,26 @@ export default function AttendanceDrawer({
             variant="contained"
             size="large"
             onClick={handleSave}
-            disabled={
-              saving || (selectedLaborers.size === 0 && marketLaborers.length === 0)
-            }
+            disabled={saving || (selectedLaborers.size === 0 && marketLaborers.length === 0)}
           >
-            {saving ? (
-              <CircularProgress size={24} color="inherit" />
-            ) : (
-              "Save Attendance"
-            )}
+            {saving ? <CircularProgress size={24} color="inherit" /> : "Save Attendance"}
           </Button>
-          <Typography
-            variant="caption"
-            color="text.secondary"
-            sx={{ display: "block", textAlign: "center", mt: 1 }}
-          >
-            Attendance will be auto-synced to Daily Expenses
+          <Typography variant="caption" color="text.secondary" sx={{ display: "block", textAlign: "center", mt: 1 }}>
+            Auto-synced to Daily Expenses
           </Typography>
         </Box>
       </Box>
+
+      {/* Tea Shop Entry Dialog */}
+      {selectedTeaShop && (
+        <TeaShopEntryDialog
+          open={teaShopDialogOpen}
+          onClose={() => setTeaShopDialogOpen(false)}
+          shop={selectedTeaShop}
+          entry={existingTeaEntry}
+          onSuccess={handleTeaShopDialogSuccess}
+        />
+      )}
     </Drawer>
   );
 }
