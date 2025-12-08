@@ -170,16 +170,6 @@ export default function LaborerSelectionDialog({
     setLocalSelected(newSelected);
   };
 
-  // Handle work days change
-  const handleWorkDaysChange = (laborerId: string, workDays: number) => {
-    const existing = localSelected.get(laborerId);
-    if (existing) {
-      const newSelected = new Map(localSelected);
-      newSelected.set(laborerId, { ...existing, workDays });
-      setLocalSelected(newSelected);
-    }
-  };
-
   // Handle select all
   const handleSelectAll = () => {
     const newSelected = new Map(localSelected);
@@ -200,15 +190,15 @@ export default function LaborerSelectionDialog({
     setLocalSelected(new Map());
   };
 
-  // Calculate summary
+  // Calculate summary (daily rate total - work days applied in AttendanceDrawer)
   const summary = useMemo(() => {
-    let totalCost = 0;
+    let totalDailyRate = 0;
     localSelected.forEach((s) => {
-      totalCost += s.workDays * s.dailyRate;
+      totalDailyRate += s.dailyRate;
     });
     return {
       count: localSelected.size,
-      totalCost,
+      totalDailyRate,
     };
   }, [localSelected]);
 
@@ -251,41 +241,14 @@ export default function LaborerSelectionDialog({
         Cell: ({ cell }) => `₹${cell.getValue<number>().toLocaleString()}`,
       },
       {
-        id: "work_days",
-        header: "Work Days",
-        size: 140,
+        id: "selected_indicator",
+        header: "",
+        size: 80,
         Cell: ({ row }) => {
           const isSelected = localSelected.has(row.original.id);
-          const selection = localSelected.get(row.original.id);
-
+          if (!isSelected) return null;
           return (
-            <FormControl size="small" fullWidth disabled={!isSelected}>
-              <Select
-                value={isSelected ? (selection?.workDays || 1) : 1}
-                onChange={(e) => handleWorkDaysChange(row.original.id, e.target.value as number)}
-                sx={{ minWidth: 120 }}
-              >
-                <MenuItem value={0.5}>Half Day (0.5)</MenuItem>
-                <MenuItem value={1}>Full Day (1)</MenuItem>
-                <MenuItem value={1.5}>1.5 Days</MenuItem>
-                <MenuItem value={2}>2 Days</MenuItem>
-              </Select>
-            </FormControl>
-          );
-        },
-      },
-      {
-        id: "cost",
-        header: "Cost",
-        size: 100,
-        Cell: ({ row }) => {
-          const selection = localSelected.get(row.original.id);
-          if (!selection) return "-";
-          const cost = selection.workDays * selection.dailyRate;
-          return (
-            <Typography variant="body2" fontWeight={600} color="success.main">
-              ₹{cost.toLocaleString()}
-            </Typography>
+            <Chip label="Selected" size="small" color="primary" variant="outlined" />
           );
         },
       },
@@ -392,7 +355,7 @@ export default function LaborerSelectionDialog({
             •
           </Typography>
           <Typography variant="body2" fontWeight={700} color="success.main">
-            Total: ₹{summary.totalCost.toLocaleString()}
+            Rate Total: ₹{summary.totalDailyRate.toLocaleString()}/day
           </Typography>
         </Box>
 

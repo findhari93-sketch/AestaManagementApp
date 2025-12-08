@@ -46,16 +46,27 @@ export type SiteEngineerTransactionType = "received_from_company" | "spent_on_be
 export type SettlementType = "company_to_engineer" | "engineer_to_company";
 export type RecipientType = "laborer" | "mesthri" | "vendor" | "other";
 
+// Theme preference type
+export type ThemePreference = "light" | "dark";
+
 // Core Tables
 export interface User {
   id: string;
   auth_id: string;
   email: string;
   name: string;
+  display_name: string | null;
   phone: string | null;
   role: UserRole;
   assigned_sites: string[] | null;
   status: UserStatus;
+  avatar_url: string | null;
+  job_title: string | null;
+  timezone: string | null;
+  date_format: string | null;
+  last_login_at: string | null;
+  theme_preference: ThemePreference;
+  email_notifications: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -545,6 +556,8 @@ export interface TeaShopSettlement {
   site_engineer_id: string | null;
   site_engineer_transaction_id: string | null;
   is_engineer_settled: boolean;
+  // Link to subcontract (optional)
+  subcontract_id: string | null;
   // Status
   status: string;  // completed, partial
   // Audit

@@ -51,6 +51,12 @@ import { useSite } from "@/contexts/SiteContext";
 import type { TeaShopAccount, TeaShopEntry, SnackItem, Laborer } from "@/types/database.types";
 import dayjs from "dayjs";
 
+interface PreSelectedLaborer {
+  id: string;
+  name: string;
+  laborer_type: string;
+}
+
 interface TeaShopEntryDialogProps {
   open: boolean;
   onClose: () => void;
@@ -58,6 +64,8 @@ interface TeaShopEntryDialogProps {
   entry?: TeaShopEntry | null;
   onSuccess?: () => void;
   initialDate?: string; // Optional: pre-set the date (YYYY-MM-DD format)
+  preSelectedLaborers?: PreSelectedLaborer[]; // Laborers from AttendanceDrawer (in-memory)
+  initialMarketCount?: number; // Market laborer count from AttendanceDrawer
 }
 
 interface LaborerWithConsumption {
@@ -133,6 +141,8 @@ export default function TeaShopEntryDialog({
   entry,
   onSuccess,
   initialDate,
+  preSelectedLaborers,
+  initialMarketCount,
 }: TeaShopEntryDialogProps) {
   const { userProfile } = useAuth();
   const { selectedSite } = useSite();
@@ -230,6 +240,32 @@ export default function TeaShopEntryDialog({
     setHasAttendance(null); // Reset to checking state
 
     try {
+      // If we have pre-selected laborers from AttendanceDrawer, use those directly
+      // This happens when tea dialog is opened from within attendance entry (before saving)
+      if (preSelectedLaborers && preSelectedLaborers.length > 0) {
+        setHasAttendance(true);
+        const laborers: LaborerWithConsumption[] = preSelectedLaborers.map((l) => ({
+          id: l.id,
+          name: l.name,
+          type: l.laborer_type || "daily",
+          selected: false,
+          teaAmount: 0,
+          snacksAmount: 0,
+          snackItems: {},
+          omitFromTea: false,
+          omitFromSnacks: false,
+        }));
+        setWorkingLaborers(laborers);
+
+        // Set market laborer count from prop if provided
+        if (initialMarketCount !== undefined && initialMarketCount > 0) {
+          setMarketLaborerCount(initialMarketCount);
+        }
+        setLoadingLaborers(false);
+        return;
+      }
+
+      // Otherwise, query database for attendance (normal flow when opening from tea shop page)
       // First check if attendance exists for this date
       const { data: attendanceData, count } = await (supabase
         .from("daily_attendance") as any)
@@ -285,7 +321,7 @@ export default function TeaShopEntryDialog({
     } finally {
       setLoadingLaborers(false);
     }
-  }, [selectedSite, date, supabase]);
+  }, [selectedSite, date, supabase, preSelectedLaborers, initialMarketCount]);
 
   // Fetch all site laborers for non-working selection
   const fetchAllSiteLaborers = useCallback(async () => {

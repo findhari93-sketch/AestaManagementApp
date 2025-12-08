@@ -382,6 +382,7 @@ export default function MainLayout({
           <Tooltip title="Account settings">
             <IconButton onClick={handleUserMenuOpen} sx={{ ml: 2 }}>
               <Avatar
+                src={userProfile?.avatar_url || undefined}
                 sx={{
                   bgcolor: "primary.main",
                   width: 38,
@@ -404,38 +405,56 @@ export default function MainLayout({
               sx: { minWidth: 220, mt: 1 },
             }}
           >
-            <Box sx={{ px: 2, py: 1.5 }}>
-              <Typography variant="subtitle1" fontWeight={600}>
-                {userProfile?.name}
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                {userProfile?.email}
-              </Typography>
-              <Typography
-                variant="caption"
+            <Box sx={{ px: 2, py: 1.5, display: "flex", alignItems: "center", gap: 1.5 }}>
+              <Avatar
+                src={userProfile?.avatar_url || undefined}
                 sx={{
-                  display: "inline-block",
-                  mt: 0.5,
-                  px: 1,
-                  py: 0.25,
-                  bgcolor: "primary.light",
-                  color: "primary.dark",
-                  borderRadius: 1,
-                  fontWeight: 600,
+                  width: 48,
+                  height: 48,
+                  bgcolor: "primary.main",
                 }}
               >
-                {userProfile?.role?.toUpperCase()}
-              </Typography>
+                {userProfile?.name?.charAt(0).toUpperCase() || "U"}
+              </Avatar>
+              <Box>
+                <Typography variant="subtitle1" fontWeight={600}>
+                  {userProfile?.display_name || userProfile?.name}
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ fontSize: "0.75rem" }}>
+                  {userProfile?.email}
+                </Typography>
+                <Typography
+                  variant="caption"
+                  sx={{
+                    display: "inline-block",
+                    mt: 0.5,
+                    px: 1,
+                    py: 0.25,
+                    bgcolor: "primary.light",
+                    color: "primary.dark",
+                    borderRadius: 1,
+                    fontWeight: 600,
+                    fontSize: "0.65rem",
+                  }}
+                >
+                  {userProfile?.role?.toUpperCase()}
+                </Typography>
+              </Box>
             </Box>
             <Divider />
-            {userProfile?.role === "admin" && (
-              <MenuItem onClick={handleSettings}>
-                <ListItemIcon>
-                  <SettingsIcon fontSize="small" />
-                </ListItemIcon>
-                <ListItemText>Settings</ListItemText>
-              </MenuItem>
-            )}
+            <MenuItem onClick={handleSettings}>
+              <ListItemIcon>
+                <PersonIcon fontSize="small" />
+              </ListItemIcon>
+              <ListItemText>My Profile</ListItemText>
+            </MenuItem>
+            <MenuItem onClick={handleSettings}>
+              <ListItemIcon>
+                <SettingsIcon fontSize="small" />
+              </ListItemIcon>
+              <ListItemText>Settings</ListItemText>
+            </MenuItem>
+            <Divider />
             <MenuItem onClick={handleSignOut}>
               <ListItemIcon>
                 <Logout fontSize="small" />

@@ -28,7 +28,7 @@ import { Close as CloseIcon } from "@mui/icons-material";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSite } from "@/contexts/SiteContext";
-import type { TeaShopAccount, TeaShopEntry, PaymentMode } from "@/types/database.types";
+import type { TeaShopAccount, TeaShopEntry, TeaShopSettlement, PaymentMode, Subcontract } from "@/types/database.types";
 import dayjs from "dayjs";
 
 interface TeaShopSettlementDialogProps {
@@ -38,11 +38,18 @@ interface TeaShopSettlementDialogProps {
   pendingBalance: number;
   entries: TeaShopEntry[];
   onSuccess?: () => void;
+  settlement?: TeaShopSettlement | null; // For edit mode
 }
 
 interface SiteEngineer {
   id: string;
   name: string;
+}
+
+interface SubcontractOption {
+  id: string;
+  title: string;
+  team_name?: string;
 }
 
 export default function TeaShopSettlementDialog({
@@ -52,7 +59,9 @@ export default function TeaShopSettlementDialog({
   pendingBalance,
   entries,
   onSuccess,
+  settlement,
 }: TeaShopSettlementDialogProps) {
+  const isEditMode = !!settlement;
   const { userProfile } = useAuth();
   const { selectedSite } = useSite();
   const supabase = createClient();
@@ -74,24 +83,44 @@ export default function TeaShopSettlementDialog({
   // Site engineers list
   const [engineers, setEngineers] = useState<SiteEngineer[]>([]);
 
+  // Subcontracts for linking
+  const [subcontracts, setSubcontracts] = useState<SubcontractOption[]>([]);
+  const [selectedSubcontractId, setSelectedSubcontractId] = useState<string>("");
+
   useEffect(() => {
     if (open) {
-      // Reset form
-      setPeriodStart(dayjs().subtract(7, "days").format("YYYY-MM-DD"));
-      setPeriodEnd(dayjs().format("YYYY-MM-DD"));
-      setAmountPaying(pendingBalance);
-      setPaymentDate(dayjs().format("YYYY-MM-DD"));
-      setPaymentMode("cash");
-      setPayerType("company_direct");
-      setSelectedEngineerId("");
-      setCreateWalletTransaction(true);
-      setNotes("");
-      setError(null);
-
-      // Fetch site engineers
+      // Fetch site engineers and subcontracts
       fetchEngineers();
+      fetchSubcontracts();
+
+      if (isEditMode && settlement) {
+        // Edit mode - populate from settlement
+        setPeriodStart(settlement.period_start);
+        setPeriodEnd(settlement.period_end);
+        setAmountPaying(settlement.amount_paid);
+        setPaymentDate(settlement.payment_date);
+        setPaymentMode(settlement.payment_mode);
+        setPayerType(settlement.payer_type);
+        setSelectedEngineerId(settlement.site_engineer_id || "");
+        setCreateWalletTransaction(false); // Don't create new transaction when editing
+        setNotes(settlement.notes || "");
+        setSelectedSubcontractId(settlement.subcontract_id || "");
+      } else {
+        // New settlement - reset form
+        setPeriodStart(dayjs().subtract(7, "days").format("YYYY-MM-DD"));
+        setPeriodEnd(dayjs().format("YYYY-MM-DD"));
+        setAmountPaying(pendingBalance);
+        setPaymentDate(dayjs().format("YYYY-MM-DD"));
+        setPaymentMode("cash");
+        setPayerType("company_direct");
+        setSelectedEngineerId("");
+        setCreateWalletTransaction(true);
+        setNotes("");
+        setSelectedSubcontractId("");
+      }
+      setError(null);
     }
-  }, [open, pendingBalance]);
+  }, [open, pendingBalance, settlement, isEditMode]);
 
   const fetchEngineers = async () => {
     if (!selectedSite) return;
@@ -106,6 +135,27 @@ export default function TeaShopSettlementDialog({
       setEngineers(data || []);
     } catch (err) {
       console.error("Error fetching engineers:", err);
+    }
+  };
+
+  const fetchSubcontracts = async () => {
+    if (!selectedSite) return;
+
+    try {
+      const { data } = await supabase
+        .from("subcontracts")
+        .select("id, title, teams(name)")
+        .eq("site_id", selectedSite.id)
+        .in("status", ["draft", "active"]);
+
+      const options: SubcontractOption[] = (data || []).map((sc: any) => ({
+        id: sc.id,
+        title: sc.title,
+        team_name: sc.teams?.name,
+      }));
+      setSubcontracts(options);
+    } catch (err) {
+      console.error("Error fetching subcontracts:", err);
     }
   };
 
@@ -168,7 +218,7 @@ export default function TeaShopSettlementDialog({
         engineerTransactionId = txData?.id || null;
       }
 
-      // Create settlement record
+      // Settlement record data
       const settlementData = {
         tea_shop_id: shop.id,
         period_start: periodStart,
@@ -182,19 +232,31 @@ export default function TeaShopSettlementDialog({
         payment_mode: paymentMode,
         payer_type: payerType,
         site_engineer_id: payerType === "site_engineer" ? selectedEngineerId : null,
-        site_engineer_transaction_id: engineerTransactionId,
-        is_engineer_settled: false,
+        site_engineer_transaction_id: isEditMode ? settlement?.site_engineer_transaction_id : engineerTransactionId,
+        is_engineer_settled: isEditMode ? settlement?.is_engineer_settled : false,
         status: balanceRemaining > 0 ? "partial" : "completed",
         notes: notes.trim() || null,
         recorded_by: userProfile?.name || null,
         recorded_by_user_id: userProfile?.id || null,
+        subcontract_id: selectedSubcontractId || null,
       };
 
-      const { error: settlementError } = await (supabase
-        .from("tea_shop_settlements") as any)
-        .insert(settlementData);
+      if (isEditMode && settlement) {
+        // Update existing settlement
+        const { error: settlementError } = await (supabase
+          .from("tea_shop_settlements") as any)
+          .update(settlementData)
+          .eq("id", settlement.id);
 
-      if (settlementError) throw settlementError;
+        if (settlementError) throw settlementError;
+      } else {
+        // Create new settlement
+        const { error: settlementError } = await (supabase
+          .from("tea_shop_settlements") as any)
+          .insert(settlementData);
+
+        if (settlementError) throw settlementError;
+      }
 
       onSuccess?.();
     } catch (err: any) {
@@ -210,7 +272,7 @@ export default function TeaShopSettlementDialog({
       <DialogTitle>
         <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <Typography variant="h6" fontWeight={700}>
-            Record Settlement
+            {isEditMode ? "Edit Settlement" : "Record Settlement"}
           </Typography>
           <IconButton onClick={onClose} size="small">
             <CloseIcon />
@@ -383,6 +445,25 @@ export default function TeaShopSettlementDialog({
           )}
         </Paper>
 
+        {/* Link to Subcontract (Optional) */}
+        <FormControl fullWidth size="small" sx={{ mb: 3 }}>
+          <InputLabel>Link to Subcontract (Optional)</InputLabel>
+          <Select
+            value={selectedSubcontractId}
+            onChange={(e) => setSelectedSubcontractId(e.target.value)}
+            label="Link to Subcontract (Optional)"
+          >
+            <MenuItem value="">
+              <em>None - General Site Expense</em>
+            </MenuItem>
+            {subcontracts.map((sc) => (
+              <MenuItem key={sc.id} value={sc.id}>
+                {sc.title}{sc.team_name ? ` (${sc.team_name})` : ""}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+
         {/* Payment Mode */}
         <FormControl fullWidth size="small" sx={{ mb: 3 }}>
           <InputLabel>Payment Mode</InputLabel>
@@ -420,7 +501,7 @@ export default function TeaShopSettlementDialog({
           onClick={handleSave}
           disabled={loading || amountPaying <= 0}
         >
-          {loading ? <CircularProgress size={24} /> : "Record Payment"}
+          {loading ? <CircularProgress size={24} /> : isEditMode ? "Update Settlement" : "Record Payment"}
         </Button>
       </DialogActions>
     </Dialog>

@@ -86,6 +86,7 @@ export default function TeaShopPage() {
   const [entryDialogOpen, setEntryDialogOpen] = useState(false);
   const [settlementDialogOpen, setSettlementDialogOpen] = useState(false);
   const [editingEntry, setEditingEntry] = useState<TeaShopEntry | null>(null);
+  const [editingSettlement, setEditingSettlement] = useState<TeaShopSettlement | null>(null);
 
   // Date filters
   const [dateFrom, setDateFrom] = useState(dayjs().subtract(7, "days").format("YYYY-MM-DD"));
@@ -242,6 +243,23 @@ export default function TeaShopPage() {
     } catch (error: any) {
       alert("Failed to delete: " + error.message);
     }
+  };
+
+  const handleDeleteSettlement = async (id: string) => {
+    if (!confirm("Are you sure you want to delete this settlement? This will affect the pending balance.")) return;
+
+    try {
+      const { error } = await supabase.from("tea_shop_settlements").delete().eq("id", id);
+      if (error) throw error;
+      fetchData();
+    } catch (error: any) {
+      alert("Failed to delete settlement: " + error.message);
+    }
+  };
+
+  const handleEditSettlement = (settlement: TeaShopSettlement) => {
+    setEditingSettlement(settlement);
+    setSettlementDialogOpen(true);
   };
 
   const filteredEntries = entries.filter(
@@ -534,6 +552,7 @@ export default function TeaShopPage() {
                     <TableCell sx={{ fontWeight: 700 }} align="center">Paid By</TableCell>
                     <TableCell sx={{ fontWeight: 700 }} align="center">Mode</TableCell>
                     <TableCell sx={{ fontWeight: 700 }}>Notes</TableCell>
+                    <TableCell sx={{ fontWeight: 700 }} align="center">Actions</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -589,11 +608,30 @@ export default function TeaShopPage() {
                           </Typography>
                         </Tooltip>
                       </TableCell>
+                      <TableCell align="center">
+                        <Box sx={{ display: "flex", gap: 0.5, justifyContent: "center" }}>
+                          <IconButton
+                            size="small"
+                            onClick={() => handleEditSettlement(settlement)}
+                            disabled={!canEdit}
+                          >
+                            <Edit fontSize="small" />
+                          </IconButton>
+                          <IconButton
+                            size="small"
+                            color="error"
+                            onClick={() => handleDeleteSettlement(settlement.id)}
+                            disabled={!canEdit}
+                          >
+                            <Delete fontSize="small" />
+                          </IconButton>
+                        </Box>
+                      </TableCell>
                     </TableRow>
                   ))}
                   {settlements.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={8} align="center" sx={{ py: 4 }}>
+                      <TableCell colSpan={9} align="center" sx={{ py: 4 }}>
                         <Typography color="text.secondary">
                           No settlements recorded yet
                         </Typography>
@@ -638,12 +676,17 @@ export default function TeaShopPage() {
 
           <TeaShopSettlementDialog
             open={settlementDialogOpen}
-            onClose={() => setSettlementDialogOpen(false)}
+            onClose={() => {
+              setSettlementDialogOpen(false);
+              setEditingSettlement(null);
+            }}
             shop={shop}
             pendingBalance={stats.pendingBalance}
             entries={entries}
+            settlement={editingSettlement}
             onSuccess={() => {
               setSettlementDialogOpen(false);
+              setEditingSettlement(null);
               fetchData();
             }}
           />

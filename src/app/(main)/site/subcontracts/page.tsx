@@ -38,12 +38,14 @@ import {
   Payment as PaymentIcon,
   Calculate as CalculateIcon,
   AttachMoney as MoneyIcon,
+  ExpandMore as ExpandMoreIcon,
 } from "@mui/icons-material";
 import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSite } from "@/contexts/SiteContext";
 import PageHeader from "@/components/layout/PageHeader";
+import SubcontractPaymentBreakdown from "@/components/subcontracts/SubcontractPaymentBreakdown";
 import type {
   Subcontract,
   ContractType,
@@ -797,7 +799,18 @@ export default function SiteSubcontractsPage() {
         </CardContent>
       </Card>
 
-      <DataTable columns={columns} data={subcontracts} isLoading={loading} />
+      <DataTable
+        columns={columns}
+        data={subcontracts}
+        isLoading={loading}
+        enableExpanding
+        renderDetailPanel={({ row }) => (
+          <SubcontractPaymentBreakdown
+            subcontractId={row.original.id}
+            totalValue={row.original.total_value}
+          />
+        )}
+      />
 
       {/* Add/Edit Dialog */}
       <Dialog

@@ -20,6 +20,8 @@ import {
   MenuItem,
   OutlinedInput,
   SelectChangeEvent,
+  CircularProgress,
+  Typography,
 } from "@mui/material";
 import {
   Add as AddIcon,
@@ -123,17 +125,28 @@ export default function UsersManagement() {
     });
   };
 
+  const [submitting, setSubmitting] = useState(false);
+
   const handleSubmit = async () => {
     try {
       setError("");
+      setSubmitting(true);
 
       if (!formData.email || !formData.name || !formData.role) {
-        setError("Please fill in all required fields");
+        setError("Please fill in all required fields (Name, Email, and Role).");
+        setSubmitting(false);
         return;
       }
 
       if (!editingUser && !formData.password) {
-        setError("Password is required for new users");
+        setError("Password is required for new users.");
+        setSubmitting(false);
+        return;
+      }
+
+      if (!editingUser && formData.password.length < 6) {
+        setError("Password must be at least 6 characters long.");
+        setSubmitting(false);
         return;
       }
 
@@ -145,36 +158,39 @@ export default function UsersManagement() {
         assigned_sites:
           formData.assigned_sites.length > 0 ? formData.assigned_sites : null,
         status: formData.status,
+        password: formData.password || undefined,
       };
 
       if (editingUser) {
-        const { error } = await (supabase.from("users") as any)
-          .update(userData)
-          .eq("id", editingUser.id);
-
-        if (error) throw error;
-        setSuccess("User updated successfully");
-      } else {
-        // Create auth user first
-        const { data: authData, error: authError } =
-          await supabase.auth.admin.createUser({
-            email: formData.email,
-            password: formData.password,
-            email_confirm: true,
-          });
-
-        if (authError) throw authError;
-
-        // Create user profile
-        const { error: profileError } = await (
-          supabase.from("users") as any
-        ).insert({
-          auth_id: authData.user.id,
-          ...userData,
+        // Update existing user via API
+        const response = await fetch("/api/admin/users", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: editingUser.id, ...userData }),
         });
 
-        if (profileError) throw profileError;
-        setSuccess("User created successfully");
+        const result = await response.json();
+
+        if (!result.success) {
+          throw new Error(result.error || "Failed to update user");
+        }
+
+        setSuccess("User updated successfully!");
+      } else {
+        // Create new user via API
+        const response = await fetch("/api/admin/users", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(userData),
+        });
+
+        const result = await response.json();
+
+        if (!result.success) {
+          throw new Error(result.error || "Failed to create user");
+        }
+
+        setSuccess("User created successfully! They can now log in with their email and password.");
       }
 
       await fetchUsers();
@@ -182,7 +198,10 @@ export default function UsersManagement() {
         handleCloseDialog();
       }, 1500);
     } catch (err: any) {
-      setError(err.message);
+      // Display user-friendly error message
+      setError(err.message || "An unexpected error occurred. Please try again.");
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -247,10 +266,59 @@ export default function UsersManagement() {
       {
         accessorKey: "assigned_sites",
         header: "Assigned Sites",
-        size: 140,
-        Cell: ({ cell }) => {
+        size: 200,
+        Cell: ({ row, cell }) => {
+          const role = row.original.role;
           const siteIds = cell.getValue<string[]>();
-          return siteIds ? siteIds.length : "All";
+
+          // Admins always have access to all sites
+          if (role === "admin") {
+            return (
+              <Chip
+                label="All Sites"
+                size="small"
+                color="success"
+                variant="outlined"
+              />
+            );
+          }
+
+          // For non-admins, show assigned sites
+          if (!siteIds || siteIds.length === 0) {
+            return (
+              <Chip
+                label="All Sites"
+                size="small"
+                color="info"
+                variant="outlined"
+              />
+            );
+          }
+
+          // Show site names
+          const siteNames = siteIds
+            .map((id) => sites.find((s) => s.id === id)?.name)
+            .filter(Boolean);
+
+          if (siteNames.length <= 2) {
+            return (
+              <Box sx={{ display: "flex", gap: 0.5, flexWrap: "wrap" }}>
+                {siteNames.map((name, idx) => (
+                  <Chip key={idx} label={name} size="small" variant="outlined" />
+                ))}
+              </Box>
+            );
+          }
+
+          return (
+            <Tooltip title={siteNames.join(", ")}>
+              <Chip
+                label={`${siteNames.length} sites`}
+                size="small"
+                variant="outlined"
+              />
+            </Tooltip>
+          );
         },
       },
       {
@@ -273,7 +341,7 @@ export default function UsersManagement() {
           dayjs(cell.getValue<string>()).format("DD MMM YYYY"),
       },
     ],
-    []
+    [sites]
   );
 
   return (
@@ -428,7 +496,14 @@ export default function UsersManagement() {
               </FormControl>
             </Grid>
 
-            {formData.role !== "admin" && (
+            {/* Site Assignment Section */}
+            {formData.role === "admin" ? (
+              <Grid size={{ xs: 12 }}>
+                <Alert severity="info" sx={{ mt: 1 }}>
+                  <strong>Admin Access:</strong> Admins automatically have access to all sites. No site assignment needed.
+                </Alert>
+              </Grid>
+            ) : (
               <Grid size={{ xs: 12 }}>
                 <FormControl fullWidth>
                   <InputLabel>Assigned Sites</InputLabel>
@@ -438,25 +513,51 @@ export default function UsersManagement() {
                     onChange={handleSiteChange}
                     input={<OutlinedInput label="Assigned Sites" />}
                     renderValue={(selected) => {
-                      if (selected.length === 0) return "All sites";
-                      return `${selected.length} site(s) selected`;
+                      if (selected.length === 0) return "All sites (no restriction)";
+                      const selectedNames = selected
+                        .map((id) => sites.find((s) => s.id === id)?.name)
+                        .filter(Boolean);
+                      return selectedNames.join(", ");
                     }}
                   >
                     {sites.map((site) => (
                       <MenuItem key={site.id} value={site.id}>
-                        {site.name}
+                        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                          <Chip
+                            size="small"
+                            label={formData.assigned_sites.includes(site.id) ? "Selected" : ""}
+                            color={formData.assigned_sites.includes(site.id) ? "primary" : "default"}
+                            sx={{
+                              minWidth: 70,
+                              visibility: formData.assigned_sites.includes(site.id) ? "visible" : "hidden"
+                            }}
+                          />
+                          {site.name}
+                        </Box>
                       </MenuItem>
                     ))}
                   </Select>
                 </FormControl>
+                <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: "block" }}>
+                  {formData.assigned_sites.length === 0
+                    ? "Leave empty to grant access to all sites. Select specific sites to restrict access."
+                    : `User will only have access to ${formData.assigned_sites.length} selected site(s).`}
+                </Typography>
               </Grid>
             )}
           </Grid>
         </DialogContent>
         <DialogActions>
-          <Button onClick={handleCloseDialog}>Cancel</Button>
-          <Button onClick={handleSubmit} variant="contained">
-            {editingUser ? "Update" : "Create"}
+          <Button onClick={handleCloseDialog} disabled={submitting}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleSubmit}
+            variant="contained"
+            disabled={submitting}
+            startIcon={submitting ? <CircularProgress size={16} color="inherit" /> : undefined}
+          >
+            {submitting ? "Saving..." : editingUser ? "Update User" : "Create User"}
           </Button>
         </DialogActions>
       </Dialog>

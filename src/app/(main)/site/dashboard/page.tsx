@@ -23,6 +23,9 @@ import {
   CalendarToday,
   Payment,
   ArrowForward,
+  LocalCafe as TeaIcon,
+  Receipt as ExpenseIcon,
+  Warning as WarningIcon,
 } from "@mui/icons-material";
 import {
   LineChart,
@@ -41,6 +44,8 @@ import { useSite } from "@/contexts/SiteContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useRouter } from "next/navigation";
 import PageHeader from "@/components/layout/PageHeader";
+import { createClient } from "@/lib/supabase/client";
+import { useState, useEffect } from "react";
 import dayjs from "dayjs";
 import {
   useDashboardStats,
@@ -51,13 +56,32 @@ import {
 } from "@/hooks/queries/useDashboardData";
 import { useQueryClient } from "@tanstack/react-query";
 
+interface ProjectCosts {
+  teaShopCount: number;
+  teaShopTotal: number;
+  expensesCount: number;
+  expensesTotal: number;
+  totalUnlinked: number;
+}
+
 export default function SiteDashboardPage() {
   const { selectedSite } = useSite();
   const { userProfile } = useAuth();
   const router = useRouter();
   const queryClient = useQueryClient();
+  const supabase = createClient();
 
   const siteId = selectedSite?.id;
+
+  // Project costs (unlinked payments)
+  const [projectCosts, setProjectCosts] = useState<ProjectCosts>({
+    teaShopCount: 0,
+    teaShopTotal: 0,
+    expensesCount: 0,
+    expensesTotal: 0,
+    totalUnlinked: 0,
+  });
+  const [projectCostsLoading, setProjectCostsLoading] = useState(true);
 
   // Use React Query hooks for data fetching with caching
   const {
@@ -84,6 +108,59 @@ export default function SiteDashboardPage() {
     salariesLoading ||
     trendLoading ||
     expenseLoading;
+
+  // Fetch project costs (unlinked payments)
+  useEffect(() => {
+    const fetchProjectCosts = async () => {
+      if (!siteId) return;
+      setProjectCostsLoading(true);
+
+      try {
+        // Fetch tea shop accounts for this site
+        const { data: teaShops } = await supabase
+          .from("tea_shop_accounts")
+          .select("id")
+          .eq("site_id", siteId);
+
+        const teaShopIds = (teaShops || []).map((t: any) => t.id);
+
+        // Fetch unlinked tea shop settlements
+        let teaSettlements: any[] = [];
+        if (teaShopIds.length > 0) {
+          const { data } = await supabase
+            .from("tea_shop_settlements")
+            .select("amount_paid")
+            .in("tea_shop_id", teaShopIds)
+            .is("subcontract_id", null);
+          teaSettlements = data || [];
+        }
+
+        // Fetch unlinked expenses
+        const { data: expenses } = await supabase
+          .from("expenses")
+          .select("amount")
+          .eq("site_id", siteId)
+          .is("subcontract_id", null);
+
+        const teaTotal = teaSettlements.reduce((sum: number, t: any) => sum + (t.amount_paid || 0), 0);
+        const expenseTotal = (expenses || []).reduce((sum: number, e: any) => sum + (e.amount || 0), 0);
+
+        setProjectCosts({
+          teaShopCount: teaSettlements.length,
+          teaShopTotal: teaTotal,
+          expensesCount: (expenses || []).length,
+          expensesTotal: expenseTotal,
+          totalUnlinked: teaTotal + expenseTotal,
+        });
+      } catch (err) {
+        console.error("Error fetching project costs:", err);
+      } finally {
+        setProjectCostsLoading(false);
+      }
+    };
+
+    fetchProjectCosts();
+  }, [siteId]);
 
   // Refresh all dashboard data
   const handleRefresh = () => {
@@ -468,6 +545,68 @@ export default function SiteDashboardPage() {
             )}
           </Paper>
         </Grid>
+
+        {/* Project Costs (Unlinked Payments) */}
+        {projectCosts.totalUnlinked > 0 && (
+          <Grid size={{ xs: 12, md: 6 }}>
+            <Paper sx={{ p: 3, borderRadius: 3, bgcolor: "warning.50", border: "1px solid", borderColor: "warning.200" }}>
+              <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 2 }}>
+                <WarningIcon color="warning" />
+                <Typography variant="h6" fontWeight={600}>
+                  Unlinked Project Costs
+                </Typography>
+              </Box>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                These payments are not linked to any subcontract and are treated as general project costs.
+              </Typography>
+
+              {projectCostsLoading ? (
+                <Skeleton variant="rectangular" height={100} />
+              ) : (
+                <Box>
+                  {projectCosts.teaShopCount > 0 && (
+                    <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 1, p: 1.5, bgcolor: "background.paper", borderRadius: 1 }}>
+                      <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                        <TeaIcon fontSize="small" color="secondary" />
+                        <Typography variant="body2">Tea/Snacks</Typography>
+                        <Chip label={projectCosts.teaShopCount} size="small" />
+                      </Box>
+                      <Typography fontWeight={600}>₹{projectCosts.teaShopTotal.toLocaleString()}</Typography>
+                    </Box>
+                  )}
+
+                  {projectCosts.expensesCount > 0 && (
+                    <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 1, p: 1.5, bgcolor: "background.paper", borderRadius: 1 }}>
+                      <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                        <ExpenseIcon fontSize="small" color="error" />
+                        <Typography variant="body2">Other Expenses</Typography>
+                        <Chip label={projectCosts.expensesCount} size="small" />
+                      </Box>
+                      <Typography fontWeight={600}>₹{projectCosts.expensesTotal.toLocaleString()}</Typography>
+                    </Box>
+                  )}
+
+                  <Divider sx={{ my: 1.5 }} />
+
+                  <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <Typography variant="subtitle1" fontWeight={600}>Total Unlinked</Typography>
+                    <Typography variant="h6" fontWeight={700} color="warning.dark">
+                      ₹{projectCosts.totalUnlinked.toLocaleString()}
+                    </Typography>
+                  </Box>
+
+                  <Button
+                    size="small"
+                    sx={{ mt: 2 }}
+                    onClick={() => router.push("/site/subcontracts")}
+                  >
+                    Link to Subcontracts
+                  </Button>
+                </Box>
+              )}
+            </Paper>
+          </Grid>
+        )}
 
         {/* Quick Actions */}
         <Grid size={{ xs: 12 }}>

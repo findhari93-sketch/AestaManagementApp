@@ -546,17 +546,11 @@ export default function LoginPage() {
                   }
                 />
                 <Link
-                  href="#"
+                  href="/forgot-password"
                   variant="body2"
                   sx={{
                     textDecoration: "none",
                     "&:hover": { textDecoration: "underline" },
-                  }}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    alert(
-                      "Please contact your administrator to reset your password."
-                    );
                   }}
                 >
                   Forgot password?
