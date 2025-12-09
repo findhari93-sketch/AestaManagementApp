@@ -27,6 +27,7 @@ import {
   Collapse,
   Checkbox,
   FormControlLabel,
+  Slider,
 } from "@mui/material";
 import {
   Close as CloseIcon,
@@ -51,7 +52,13 @@ import { useAuth } from "@/contexts/AuthContext";
 import dayjs from "dayjs";
 import LaborerSelectionDialog from "./LaborerSelectionDialog";
 import TeaShopEntryDialog from "../tea-shop/TeaShopEntryDialog";
-import type { TeaShopEntry, TeaShopAccount as TeaShopAccountType } from "@/types/database.types";
+import AttendanceSaveConfirmDialog from "./AttendanceSaveConfirmDialog";
+import type {
+  TeaShopEntry,
+  TeaShopAccount as TeaShopAccountType,
+} from "@/types/database.types";
+
+type AttendanceMode = "morning" | "evening" | "full";
 
 interface AttendanceDrawerProps {
   open: boolean;
@@ -59,6 +66,7 @@ interface AttendanceDrawerProps {
   siteId: string;
   date?: string;
   onSuccess?: () => void;
+  mode?: AttendanceMode; // morning=check-in, evening=confirm, full=legacy
 }
 
 interface LaborerWithCategory {
@@ -180,15 +188,22 @@ const WORK_UNIT_PRESETS: WorkUnitPreset[] = [
 
 // Get preset by value
 const getPresetByValue = (value: number): WorkUnitPreset => {
-  return WORK_UNIT_PRESETS.find((p) => p.value === value) || WORK_UNIT_PRESETS[1];
+  return (
+    WORK_UNIT_PRESETS.find((p) => p.value === value) || WORK_UNIT_PRESETS[1]
+  );
 };
 
 // Hour Alignment Status
 type AlignmentStatus = "aligned" | "underwork" | "overwork" | "no-times";
 
-const getAlignmentStatus = (workHours: number, preset: WorkUnitPreset, hasTimeEntries: boolean): AlignmentStatus => {
+const getAlignmentStatus = (
+  workHours: number,
+  preset: WorkUnitPreset,
+  hasTimeEntries: boolean
+): AlignmentStatus => {
   if (!hasTimeEntries || workHours === 0) return "no-times";
-  if (workHours >= preset.minHours && workHours <= preset.maxHours) return "aligned";
+  if (workHours >= preset.minHours && workHours <= preset.maxHours)
+    return "aligned";
   if (workHours < preset.minHours) return "underwork";
   return "overwork";
 };
@@ -241,6 +256,7 @@ export default function AttendanceDrawer({
   siteId,
   date: initialDate,
   onSuccess,
+  mode = "full",
 }: AttendanceDrawerProps) {
   const { userProfile } = useAuth();
   const supabase = createClient();
@@ -253,7 +269,9 @@ export default function AttendanceDrawer({
   const [selectedLaborers, setSelectedLaborers] = useState<
     Map<string, SelectedLaborer>
   >(new Map());
-  const [marketLaborers, setMarketLaborers] = useState<MarketLaborerEntry[]>([]);
+  const [marketLaborers, setMarketLaborers] = useState<MarketLaborerEntry[]>(
+    []
+  );
 
   // Default time tracking values (apply to all) - Updated to user preferences
   const [defaultInTime, setDefaultInTime] = useState("09:00");
@@ -280,17 +298,41 @@ export default function AttendanceDrawer({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const [expandedSection, setExpandedSection] = useState<string | false>("laborers");
+  const [expandedSection, setExpandedSection] = useState<string | false>(
+    "laborers"
+  );
 
   // New Phase 2 state: Per-laborer expanded time fields
-  const [expandedLaborerTimes, setExpandedLaborerTimes] = useState<Set<string>>(new Set());
+  const [expandedLaborerTimes, setExpandedLaborerTimes] = useState<Set<string>>(
+    new Set()
+  );
   const [showGlobalCustomTimes, setShowGlobalCustomTimes] = useState(false);
 
   // Tea Shop state - dialog-based approach
   const [teaShops, setTeaShops] = useState<TeaShopAccountType[]>([]);
-  const [selectedTeaShop, setSelectedTeaShop] = useState<TeaShopAccountType | null>(null);
-  const [existingTeaEntry, setExistingTeaEntry] = useState<TeaShopEntry | null>(null);
+  const [selectedTeaShop, setSelectedTeaShop] =
+    useState<TeaShopAccountType | null>(null);
+  const [existingTeaEntry, setExistingTeaEntry] = useState<TeaShopEntry | null>(
+    null
+  );
   const [teaShopDialogOpen, setTeaShopDialogOpen] = useState(false);
+
+  // Audit tracking - store original creator info when editing
+  const [originalCreator, setOriginalCreator] = useState<{
+    entered_by?: string | null;
+    entered_by_user_id?: string | null;
+  } | null>(null);
+
+  // Save confirmation dialog state
+  const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
+  const [hasExistingAttendance, setHasExistingAttendance] = useState(false);
+  const [siteName, setSiteName] = useState("");
+
+  // Two-phase attendance state
+  const [workProgressPercent, setWorkProgressPercent] = useState(100);
+  const [existingAttendanceStatus, setExistingAttendanceStatus] = useState<
+    "morning_entry" | "confirmed" | null
+  >(null);
 
   // Calculate tea shop total from existing entry
   const teaShopTotal = existingTeaEntry?.total_amount || 0;
@@ -342,6 +384,14 @@ export default function AttendanceDrawer({
     // Reset Phase 2 state
     setExpandedLaborerTimes(new Set());
     setShowGlobalCustomTimes(false);
+    // Reset audit tracking
+    setOriginalCreator(null);
+    // Reset confirmation dialog state
+    setConfirmDialogOpen(false);
+    setHasExistingAttendance(false);
+    // Reset two-phase state
+    setWorkProgressPercent(100);
+    setExistingAttendanceStatus(null);
   };
 
   const fetchData = async () => {
@@ -350,11 +400,13 @@ export default function AttendanceDrawer({
       // Fetch laborers with category info
       const { data: laborersData, error: laborersError } = await supabase
         .from("laborers")
-        .select(`
+        .select(
+          `
           id, name, category_id, daily_rate, team_id, laborer_type,
           labor_categories(name),
           team:teams!laborers_team_id_fkey(name)
-        `)
+        `
+        )
         .eq("status", "active")
         .order("name");
 
@@ -382,7 +434,10 @@ export default function AttendanceDrawer({
         .order("name");
 
       if (sectionsError) throw sectionsError;
-      const sectionsArray = (sectionsData || []) as { id: string; name: string }[];
+      const sectionsArray = (sectionsData || []) as {
+        id: string;
+        name: string;
+      }[];
       setSections(sectionsArray);
 
       // Auto-select first section only when adding new attendance
@@ -400,8 +455,9 @@ export default function AttendanceDrawer({
       setLaborRoles((rolesData || []) as LaborRole[]);
 
       // Fetch tea shops for this site
-      const { data: teaShopsData } = await (supabase
-        .from("tea_shop_accounts") as any)
+      const { data: teaShopsData } = await (
+        supabase.from("tea_shop_accounts") as any
+      )
         .select("*")
         .eq("site_id", siteId)
         .eq("is_active", true)
@@ -411,6 +467,17 @@ export default function AttendanceDrawer({
       setTeaShops(shops);
       if (shops.length > 0 && !selectedTeaShop) {
         setSelectedTeaShop(shops[0]);
+      }
+
+      // Fetch site name for confirmation dialog
+      const { data: siteData } = await supabase
+        .from("sites")
+        .select("name")
+        .eq("id", siteId)
+        .single();
+
+      if (siteData) {
+        setSiteName(siteData.name);
       }
     } catch (err: any) {
       console.error("Error fetching data:", err);
@@ -424,14 +491,32 @@ export default function AttendanceDrawer({
     try {
       setLoading(true);
 
-      // Load existing daily attendance for this date
+      // Load existing daily attendance for this date (including audit fields and two-phase status)
       const { data: attendanceData, error: attendanceError } = await supabase
         .from("daily_attendance")
-        .select("laborer_id, work_days, daily_rate_applied, section_id, in_time, lunch_out, lunch_in, out_time, work_hours, break_hours, total_hours, day_units")
+        .select(
+          "laborer_id, work_days, daily_rate_applied, section_id, in_time, lunch_out, lunch_in, out_time, work_hours, break_hours, total_hours, day_units, entered_by, recorded_by_user_id, attendance_status, work_progress_percent"
+        )
         .eq("site_id", siteId)
         .eq("date", dateToLoad);
 
       if (attendanceError) throw attendanceError;
+
+      // Store original creator info and attendance status for audit tracking (from first record)
+      if (attendanceData && attendanceData.length > 0) {
+        const firstRecord = attendanceData[0] as any;
+        setOriginalCreator({
+          entered_by: firstRecord.entered_by,
+          entered_by_user_id: firstRecord.recorded_by_user_id,
+        });
+        setHasExistingAttendance(true);
+        // Load two-phase status
+        setExistingAttendanceStatus(firstRecord.attendance_status || "confirmed");
+        setWorkProgressPercent(firstRecord.work_progress_percent ?? 100);
+      } else {
+        setHasExistingAttendance(false);
+        setExistingAttendanceStatus(null);
+      }
 
       // Populate selected laborers from existing attendance
       const existingSelected = new Map<string, SelectedLaborer>();
@@ -465,28 +550,32 @@ export default function AttendanceDrawer({
       const { data: marketData, error: marketError } = await (
         supabase.from("market_laborer_attendance") as any
       )
-        .select("id, role_id, count, work_days, rate_per_person, in_time, lunch_out, lunch_in, out_time, work_hours, break_hours, total_hours, day_units, labor_roles(name)")
+        .select(
+          "id, role_id, count, work_days, rate_per_person, in_time, lunch_out, lunch_in, out_time, work_hours, break_hours, total_hours, day_units, labor_roles(name)"
+        )
         .eq("site_id", siteId)
         .eq("date", dateToLoad);
 
       let marketCount = 0;
       if (!marketError && marketData) {
-        const existingMarket: MarketLaborerEntry[] = marketData.map((m: any) => ({
-          id: m.id,
-          roleId: m.role_id,
-          roleName: m.labor_roles?.name || "Unknown",
-          count: m.count,
-          workDays: m.work_days || 1,
-          ratePerPerson: m.rate_per_person,
-          inTime: m.in_time || "08:00",
-          lunchOut: m.lunch_out || "12:30",
-          lunchIn: m.lunch_in || "13:30",
-          outTime: m.out_time || "18:00",
-          workHours: m.work_hours || 0,
-          breakHours: m.break_hours || 0,
-          totalHours: m.total_hours || 0,
-          dayUnits: m.day_units || 1,
-        }));
+        const existingMarket: MarketLaborerEntry[] = marketData.map(
+          (m: any) => ({
+            id: m.id,
+            roleId: m.role_id,
+            roleName: m.labor_roles?.name || "Unknown",
+            count: m.count,
+            workDays: m.work_days || 1,
+            ratePerPerson: m.rate_per_person,
+            inTime: m.in_time || "08:00",
+            lunchOut: m.lunch_out || "12:30",
+            lunchIn: m.lunch_in || "13:30",
+            outTime: m.out_time || "18:00",
+            workHours: m.work_hours || 0,
+            breakHours: m.break_hours || 0,
+            totalHours: m.total_hours || 0,
+            dayUnits: m.day_units || 1,
+          })
+        );
         setMarketLaborers(existingMarket);
         marketCount = existingMarket.reduce((acc, m) => acc + m.count, 0);
       } else {
@@ -511,8 +600,9 @@ export default function AttendanceDrawer({
       // Load existing tea shop entry for this date
       if (teaShops.length > 0) {
         const shopToUse = selectedTeaShop || teaShops[0];
-        const { data: teaEntryData } = await (supabase
-          .from("tea_shop_entries") as any)
+        const { data: teaEntryData } = await (
+          supabase.from("tea_shop_entries") as any
+        )
           .select("*")
           .eq("tea_shop_id", shopToUse.id)
           .eq("date", dateToLoad)
@@ -528,7 +618,9 @@ export default function AttendanceDrawer({
       const namedCount = existingSelected.size;
       if (namedCount > 0 || marketCount > 0) {
         setSuccess(
-          `Loaded ${namedCount} named laborer${namedCount !== 1 ? "s" : ""} and ${marketCount} market laborer${marketCount !== 1 ? "s" : ""}`
+          `Loaded ${namedCount} named laborer${
+            namedCount !== 1 ? "s" : ""
+          } and ${marketCount} market laborer${marketCount !== 1 ? "s" : ""}`
         );
         setTimeout(() => setSuccess(null), 3000);
       }
@@ -542,7 +634,12 @@ export default function AttendanceDrawer({
 
   // Apply default times to all laborers (preserves existing dayUnits)
   const applyDefaultTimesToAll = useCallback(() => {
-    const timeCalc = calculateTimeHours(defaultInTime, defaultOutTime, defaultLunchOut, defaultLunchIn);
+    const timeCalc = calculateTimeHours(
+      defaultInTime,
+      defaultOutTime,
+      defaultLunchOut,
+      defaultLunchIn
+    );
 
     setSelectedLaborers((prev) => {
       const newMap = new Map(prev);
@@ -655,7 +752,12 @@ export default function AttendanceDrawer({
   }, [selectedLaborers, marketLaborers, laborers]);
 
   const handleLaborerToggle = (laborer: LaborerWithCategory) => {
-    const timeCalc = calculateTimeHours(defaultInTime, defaultOutTime, defaultLunchOut, defaultLunchIn);
+    const timeCalc = calculateTimeHours(
+      defaultInTime,
+      defaultOutTime,
+      defaultLunchOut,
+      defaultLunchIn
+    );
 
     setSelectedLaborers((prev) => {
       const newMap = new Map(prev);
@@ -685,7 +787,12 @@ export default function AttendanceDrawer({
       (role) => !marketLaborers.some((m) => m.roleId === role.id)
     );
     const role = unusedRole || laborRoles[0];
-    const timeCalc = calculateTimeHours(defaultInTime, defaultOutTime, defaultLunchOut, defaultLunchIn);
+    const timeCalc = calculateTimeHours(
+      defaultInTime,
+      defaultOutTime,
+      defaultLunchOut,
+      defaultLunchIn
+    );
 
     setMarketLaborers((prev) => [
       ...prev,
@@ -743,7 +850,12 @@ export default function AttendanceDrawer({
           const outTime = preset.outTime;
           const lunchOut = preset.lunchOut || "";
           const lunchIn = preset.lunchIn || "";
-          const timeCalc = calculateTimeHours(inTime, outTime, lunchOut, lunchIn);
+          const timeCalc = calculateTimeHours(
+            inTime,
+            outTime,
+            lunchOut,
+            lunchIn
+          );
           updated = {
             ...updated,
             dayUnits: newDayUnits,
@@ -753,7 +865,9 @@ export default function AttendanceDrawer({
             lunchIn,
             ...timeCalc,
           };
-        } else if (["inTime", "lunchOut", "lunchIn", "outTime"].includes(field)) {
+        } else if (
+          ["inTime", "lunchOut", "lunchIn", "outTime"].includes(field)
+        ) {
           // When times change, recalculate hours but preserve dayUnits
           updated = { ...updated, [field]: value };
           const timeCalc = calculateTimeHours(
@@ -826,8 +940,9 @@ export default function AttendanceDrawer({
     setTeaShopDialogOpen(false);
     // Refresh tea shop entry
     if (selectedTeaShop && selectedDate) {
-      const { data: teaEntryData } = await (supabase
-        .from("tea_shop_entries") as any)
+      const { data: teaEntryData } = await (
+        supabase.from("tea_shop_entries") as any
+      )
         .select("*")
         .eq("tea_shop_id", selectedTeaShop.id)
         .eq("date", selectedDate)
@@ -839,7 +954,10 @@ export default function AttendanceDrawer({
     }
   };
 
-  const handleSave = async () => {
+  // Check for existing attendance and show confirmation dialog
+  const handleSaveClick = async () => {
+    console.log("[AttendanceDrawer] handleSaveClick called");
+
     if (selectedLaborers.size === 0 && marketLaborers.length === 0) {
       setError("Please select at least one laborer or add market laborers");
       return;
@@ -850,211 +968,457 @@ export default function AttendanceDrawer({
       return;
     }
 
+    // For new dates, check if attendance already exists
+    if (!initialDate) {
+      const { data: existingData } = await supabase
+        .from("daily_attendance")
+        .select("id")
+        .eq("site_id", siteId)
+        .eq("date", selectedDate)
+        .limit(1);
+
+      setHasExistingAttendance(!!(existingData && existingData.length > 0));
+    }
+
+    // Show confirmation dialog
+    setConfirmDialogOpen(true);
+  };
+
+  // Execute the actual save after confirmation
+  const executeSave = async () => {
+    console.log("[AttendanceDrawer] executeSave called");
+
     setSaving(true);
     setError(null);
     setSuccess(null);
 
     try {
+      console.log("[AttendanceDrawer] Starting save process...");
+
+      // Helper to convert empty strings to null for time fields
+      const timeOrNull = (val: string | undefined | null): string | null =>
+        val && val.trim() !== "" ? val : null;
+
       // 1. Save named laborers to daily_attendance
-      const namedRecords = Array.from(selectedLaborers.values()).map((s) => ({
-        date: selectedDate,
-        laborer_id: s.laborerId,
-        site_id: siteId,
-        section_id: sectionId,
-        work_days: s.dayUnits, // Use calculated day units
-        hours_worked: s.workHours,
-        daily_rate_applied: s.dailyRate,
-        daily_earnings: s.dayUnits * s.dailyRate,
-        entered_by: userProfile?.id || null,
-        recorded_by: userProfile?.name || "Unknown",
-        recorded_by_user_id: userProfile?.id || null,
-        is_paid: false,
-        synced_to_expense: true,
-        // Time tracking fields
-        in_time: s.inTime,
-        lunch_out: s.lunchOut,
-        lunch_in: s.lunchIn,
-        out_time: s.outTime,
-        work_hours: s.workHours,
-        break_hours: s.breakHours,
-        total_hours: s.totalHours,
-        day_units: s.dayUnits,
-      }));
+      // Handle audit fields: preserve original creator when editing, add updated_by
+      const isEditing = !!initialDate;
+      console.log(
+        "[AttendanceDrawer] isEditing:",
+        isEditing,
+        "originalCreator:",
+        originalCreator
+      );
+
+      // Determine attendance status based on mode
+      const attendanceStatus = mode === "morning" ? "morning_entry" : "confirmed";
+      const now = new Date().toISOString();
+
+      const namedRecords = Array.from(selectedLaborers.values()).map((s) => {
+        const record: Record<string, unknown> = {
+          date: selectedDate,
+          laborer_id: s.laborerId,
+          site_id: siteId,
+          section_id: sectionId,
+          work_days: s.dayUnits,
+          hours_worked: s.workHours || 0,
+          daily_rate_applied: s.dailyRate,
+          daily_earnings: s.dayUnits * s.dailyRate,
+          recorded_by: userProfile?.name || "Unknown",
+          is_paid: false,
+          synced_to_expense: true,
+          // Time tracking fields
+          in_time: timeOrNull(s.inTime),
+          lunch_out: timeOrNull(s.lunchOut),
+          lunch_in: timeOrNull(s.lunchIn),
+          out_time: timeOrNull(s.outTime),
+          work_hours: s.workHours || 0,
+          break_hours: s.breakHours || 0,
+          total_hours: s.totalHours || 0,
+          day_units: s.dayUnits,
+          // Two-phase attendance fields
+          attendance_status: attendanceStatus,
+          work_progress_percent: workProgressPercent,
+          ...(mode === "morning" ? { morning_entry_at: now } : {}),
+          ...(mode === "evening" || mode === "full" ? { confirmed_at: now } : {}),
+        };
+
+        // Audit tracking - entered_by is UUID FK to users table
+        // Always set entered_by to a valid UUID (current user's ID)
+        if (userProfile?.id) {
+          record.entered_by = userProfile.id;
+          record.recorded_by_user_id = userProfile.id;
+
+          // For edits, add updated_by tracking
+          if (isEditing) {
+            record.updated_by = userProfile.name;
+            record.updated_by_user_id = userProfile.id;
+          }
+        }
+        return record;
+      });
+
+      console.log(
+        "[AttendanceDrawer] namedRecords prepared:",
+        namedRecords.length
+      );
 
       // Delete existing records for this date/site first
-      await (supabase.from("daily_attendance") as any)
+      console.log(
+        "[AttendanceDrawer] Deleting existing attendance for date:",
+        selectedDate,
+        "site_id:",
+        siteId
+      );
+
+      // Add timeout wrapper to detect hanging queries
+      const deletePromise = supabase
+        .from("daily_attendance")
         .delete()
         .eq("site_id", siteId)
         .eq("date", selectedDate);
 
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("Delete query timed out after 15s")), 15000)
+      );
+
+      try {
+        const { error: deleteError } = await Promise.race([
+          deletePromise,
+          timeoutPromise,
+        ]) as { error: unknown };
+
+        if (deleteError) {
+          console.error(
+            "[AttendanceDrawer] Error deleting existing attendance:",
+            deleteError
+          );
+          // Continue anyway - might not have existing records
+        } else {
+          console.log("[AttendanceDrawer] Delete completed successfully");
+        }
+      } catch (timeoutErr) {
+        console.error("[AttendanceDrawer] Delete timed out:", timeoutErr);
+        // Continue anyway - the delete might still complete in background
+      }
+
       if (namedRecords.length > 0) {
+        console.log(
+          "[AttendanceDrawer] Inserting named records:",
+          namedRecords
+        );
         const { error: attendanceError } = await (
           supabase.from("daily_attendance") as any
         ).insert(namedRecords);
-        if (attendanceError) throw attendanceError;
+        if (attendanceError) {
+          console.error("[AttendanceDrawer] Insert error:", attendanceError);
+          throw attendanceError;
+        }
+        console.log("[AttendanceDrawer] Named records inserted successfully");
       }
 
       // 2. Save market laborers
-      await (supabase.from("market_laborer_attendance") as any)
+      console.log("[AttendanceDrawer] Deleting existing market attendance...");
+      const marketDeletePromise = supabase
+        .from("market_laborer_attendance")
         .delete()
         .eq("site_id", siteId)
         .eq("date", selectedDate);
 
-      if (marketLaborers.length > 0) {
-        const marketRecords = marketLaborers.map((m) => ({
-          site_id: siteId,
-          section_id: sectionId,
-          date: selectedDate,
-          role_id: m.roleId,
-          count: m.count,
-          work_days: m.dayUnits,
-          rate_per_person: m.ratePerPerson,
-          total_cost: m.count * m.ratePerPerson * m.dayUnits,
-          entered_by: userProfile?.name || "Unknown",
-          entered_by_user_id: userProfile?.id || null,
-          // Time tracking fields
-          in_time: m.inTime,
-          lunch_out: m.lunchOut,
-          lunch_in: m.lunchIn,
-          out_time: m.outTime,
-          work_hours: m.workHours,
-          break_hours: m.breakHours,
-          total_hours: m.totalHours,
-          day_units: m.dayUnits,
-        }));
+      const marketTimeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("Market delete timed out after 15s")), 15000)
+      );
 
+      try {
+        const { error: marketDeleteError } = await Promise.race([
+          marketDeletePromise,
+          marketTimeoutPromise,
+        ]) as { error: unknown };
+
+        if (marketDeleteError) {
+          console.error(
+            "[AttendanceDrawer] Error deleting existing market attendance:",
+            marketDeleteError
+          );
+          // Continue anyway
+        } else {
+          console.log("[AttendanceDrawer] Market attendance delete completed");
+        }
+      } catch (marketTimeoutErr) {
+        console.error("[AttendanceDrawer] Market delete timed out:", marketTimeoutErr);
+      }
+
+      if (marketLaborers.length > 0) {
+        console.log("[AttendanceDrawer] Preparing market laborer records...");
+        const marketRecords = marketLaborers.map((m) => {
+          const record: Record<string, unknown> = {
+            site_id: siteId,
+            section_id: sectionId,
+            date: selectedDate,
+            role_id: m.roleId,
+            count: m.count,
+            work_days: m.dayUnits,
+            rate_per_person: m.ratePerPerson,
+            total_cost: m.count * m.ratePerPerson * m.dayUnits,
+            // Audit fields: entered_by stores the human-readable name, entered_by_user_id stores the uuid
+            entered_by: userProfile?.name || "Unknown",
+            // Time tracking fields
+            in_time: timeOrNull(m.inTime),
+            lunch_out: timeOrNull(m.lunchOut),
+            lunch_in: timeOrNull(m.lunchIn),
+            out_time: timeOrNull(m.outTime),
+            work_hours: m.workHours || 0,
+            break_hours: m.breakHours || 0,
+            total_hours: m.totalHours || 0,
+            day_units: m.dayUnits,
+            // Two-phase attendance fields
+            attendance_status: attendanceStatus,
+            ...(mode === "morning" ? { morning_entry_at: now } : {}),
+            ...(mode === "evening" || mode === "full" ? { confirmed_at: now } : {}),
+          };
+
+          // Audit tracking for market laborers
+          if (userProfile?.id) {
+            // Always set entered_by_user_id to the current user's uuid
+            record.entered_by_user_id = userProfile.id;
+          }
+          if (isEditing && userProfile?.name) {
+            // On edit, set updated_by fields (name as text, uuid as FK where applicable)
+            record.updated_by = userProfile.name;
+            if (userProfile.id) {
+              record.updated_by_user_id = userProfile.id;
+            }
+          }
+          return record;
+        });
+
+        console.log(
+          "[AttendanceDrawer] Inserting market records:",
+          marketRecords
+        );
         const { error: marketError } = await (
           supabase.from("market_laborer_attendance") as any
         ).insert(marketRecords);
-        if (marketError) throw marketError;
+        if (marketError) {
+          console.error("[AttendanceDrawer] Market insert error:", marketError);
+          // Surface detailed error to the UI to avoid infinite spinner
+          throw marketError;
+        }
+        console.log("[AttendanceDrawer] Market records inserted successfully");
       }
 
-      // 3. Save/Update daily work summary
-      const { error: summaryError } = await (
-        supabase.from("daily_work_summary") as any
-      ).upsert(
-        {
+      // 3. Save/Update daily work summary (non-critical)
+      try {
+        console.log("[AttendanceDrawer] Preparing work summary...");
+        console.log("[AttendanceDrawer] workDescription:", workDescription);
+
+        const summaryRecord: Record<string, unknown> = {
           site_id: siteId,
           date: selectedDate,
-          work_description: workDescription,
-          work_status: workStatus,
-          comments: comments,
-          first_in_time: defaultInTime,
-          last_out_time: defaultOutTime,
+          work_description: workDescription || null,
+          work_status: workStatus || null,
+          comments: comments || null,
+          first_in_time: timeOrNull(defaultInTime),
+          last_out_time: timeOrNull(defaultOutTime),
           daily_laborer_count: summary.dailyCount,
           contract_laborer_count: summary.contractCount,
           market_laborer_count: summary.marketCount,
           total_laborer_count: summary.totalCount,
           total_salary: summary.totalSalary,
-          total_snacks: 0, // Snacks now managed via Tea Shop
+          total_snacks: 0,
           total_expense: summary.totalExpense,
-          default_snacks_per_person: 0, // Snacks now managed via Tea Shop
+          default_snacks_per_person: 0,
           entered_by: userProfile?.name || "Unknown",
-          entered_by_user_id: userProfile?.id || null,
-        },
-        { onConflict: "site_id,date" }
-      );
+        };
+        if (userProfile?.id) {
+          summaryRecord.entered_by_user_id = userProfile.id;
+          // Always set updated_by for upsert operations
+          summaryRecord.updated_by = userProfile.name;
+          summaryRecord.updated_by_user_id = userProfile.id;
+        }
 
-      if (summaryError) {
-        console.error("Error saving work summary:", summaryError);
-        // Don't throw - this is non-critical
+        console.log("[AttendanceDrawer] Saving work summary:", summaryRecord);
+        const { error: summaryError } = await (
+          supabase.from("daily_work_summary") as any
+        ).upsert(summaryRecord, { onConflict: "site_id,date" });
+
+        if (summaryError) {
+          console.error("[AttendanceDrawer] Error saving work summary:", summaryError);
+          console.error("[AttendanceDrawer] Summary error details:", {
+            message: summaryError.message,
+            code: summaryError.code,
+            details: summaryError.details,
+            hint: summaryError.hint
+          });
+        } else {
+          console.log("[AttendanceDrawer] Work summary saved successfully");
+        }
+      } catch (summaryErr) {
+        console.error("[AttendanceDrawer] Work summary save exception:", summaryErr);
       }
 
-      // 4. AUTO-SYNC: Create expense record for labor
-      const totalAmount = summary.totalExpense;
-      if (totalAmount > 0) {
-        // First try to get existing labor category
-        let categoryId: string | null = null;
-        const { data: laborCategory } = await (
-          supabase.from("expense_categories") as any
-        )
-          .select("id")
-          .eq("module", "labor")
-          .single();
-
-        if (laborCategory) {
-          categoryId = (laborCategory as { id: string }).id;
-        } else {
-          // Create labor category if it doesn't exist
-          const { data: newCategory, error: createCategoryError } = await (
+      // 4. AUTO-SYNC: Create expense record for labor (non-blocking)
+      // Wrap in try-catch so attendance save succeeds even if expense sync fails
+      try {
+        const totalAmount = summary.totalExpense;
+        if (totalAmount > 0) {
+          // First try to get existing labor category
+          let categoryId: string | null = null;
+          const { data: laborCategory } = await (
             supabase.from("expense_categories") as any
           )
-            .insert({
-              name: "Labor",
-              module: "labor",
-              description: "Labor and attendance expenses",
-            })
-            .select()
-            .single();
-
-          if (!createCategoryError && newCategory) {
-            categoryId = (newCategory as { id: string }).id;
-          }
-        }
-
-        // Only create expense if we have a valid category
-        if (categoryId) {
-          await (supabase.from("expenses") as any)
-            .delete()
-            .eq("site_id", siteId)
-            .eq("date", selectedDate)
+            .select("id")
             .eq("module", "labor")
-            .like("description", "Daily labor%");
+            .maybeSingle(); // Use maybeSingle to avoid error when no match
 
-          const { data: expenseData, error: expenseError } = await (
-            supabase.from("expenses") as any
-          )
-            .insert({
-              module: "labor",
-              category_id: categoryId,
-              date: selectedDate,
-              amount: totalAmount,
-              site_id: siteId,
-              section_id: sectionId,
-              description: `Daily labor - ${summary.totalCount} laborers (Salary: ₹${summary.totalSalary.toLocaleString()})`,
-              payment_mode: "cash",
-              is_recurring: false,
-              is_cleared: false,
-              entered_by: userProfile?.name || "Unknown",
-              entered_by_user_id: userProfile?.id || null,
-            })
-            .select()
-            .single();
-
-          if (expenseError) {
-            console.error("Error creating expense:", expenseError);
-            // Don't throw - attendance was saved successfully
+          if (laborCategory) {
+            categoryId = (laborCategory as { id: string }).id;
           } else {
-            await (supabase.from("attendance_expense_sync") as any).upsert(
-              {
-                attendance_date: selectedDate,
-                site_id: siteId,
-                expense_id: expenseData?.id || null,
-                total_laborers: summary.totalCount,
-                total_work_days: summary.totalCount,
-                total_amount: totalAmount,
-                synced_by: userProfile?.name || "Unknown",
-                synced_by_user_id: userProfile?.id || null,
-              },
-              { onConflict: "attendance_date,site_id" }
-            );
+            // Try to create labor category if it doesn't exist
+            try {
+              const { data: newCategory } = await (
+                supabase.from("expense_categories") as any
+              )
+                .insert({
+                  name: "Labor",
+                  module: "labor",
+                  description: "Labor and attendance expenses",
+                })
+                .select()
+                .single();
+
+              if (newCategory) {
+                categoryId = (newCategory as { id: string }).id;
+              }
+            } catch (catErr) {
+              console.warn("Could not create expense category:", catErr);
+            }
           }
-        } else {
-          console.warn("Could not create expense - no category found or created");
+
+          // Only create expense if we have a valid category
+          if (categoryId) {
+            // Delete existing labor expense for this date
+            await (supabase.from("expenses") as any)
+              .delete()
+              .eq("site_id", siteId)
+              .eq("date", selectedDate)
+              .eq("module", "labor");
+
+            const { data: expenseData, error: expenseError } = await (
+              supabase.from("expenses") as any
+            )
+              .insert({
+                module: "labor",
+                category_id: categoryId,
+                date: selectedDate,
+                amount: totalAmount,
+                site_id: siteId,
+                section_id: sectionId,
+                description: `Daily labor - ${
+                  summary.totalCount
+                } laborers (Salary: ₹${summary.totalSalary.toLocaleString()})`,
+                payment_mode: "cash",
+                is_recurring: false,
+                is_cleared: false,
+                entered_by: userProfile?.name || "Unknown",
+                entered_by_user_id: userProfile?.id || null,
+              })
+              .select()
+              .single();
+
+            if (expenseError) {
+              console.error("Error creating expense:", expenseError);
+            } else if (expenseData) {
+              // Try to sync - ignore errors
+              try {
+                await (supabase.from("attendance_expense_sync") as any).upsert(
+                  {
+                    attendance_date: selectedDate,
+                    site_id: siteId,
+                    expense_id: expenseData.id,
+                    total_laborers: summary.totalCount,
+                    total_work_days: summary.totalCount,
+                    total_amount: totalAmount,
+                    synced_by: userProfile?.name || "Unknown",
+                    synced_by_user_id: userProfile?.id || null,
+                  },
+                  { onConflict: "attendance_date,site_id" }
+                );
+              } catch (syncErr) {
+                console.warn(
+                  "Expense sync table error (non-critical):",
+                  syncErr
+                );
+              }
+            }
+          }
         }
+      } catch (expenseErr) {
+        console.warn("Expense auto-sync failed (non-critical):", expenseErr);
+        // Don't throw - attendance was saved successfully
       }
 
       // Note: Tea shop entries are now managed via TeaShopEntryDialog
 
+      console.log("[AttendanceDrawer] All saves completed successfully!");
       setSuccess("Attendance saved successfully!");
       setTimeout(() => {
         onSuccess?.();
         handleClose();
       }, 1500);
-    } catch (err: any) {
-      console.error("Error saving attendance:", err);
-      setError("Failed to save: " + err.message);
+    } catch (err: unknown) {
+      console.error("[AttendanceDrawer] Error saving attendance:", err);
+
+      // Provide user-friendly error messages
+      let errorMessage = "Failed to save attendance";
+
+      // Type-safe error extraction
+      const errorObj = err as {
+        message?: string;
+        code?: string;
+        details?: string;
+        hint?: string;
+      };
+      const errMessage = errorObj?.message || "";
+      const errCode = errorObj?.code || "";
+      const errDetails = errorObj?.details || "";
+      const errHint = errorObj?.hint || "";
+
+      console.error("[AttendanceDrawer] Error details:", {
+        errMessage,
+        errCode,
+        errDetails,
+        errHint,
+      });
+
+      if (errMessage || errCode) {
+        if (errMessage.includes("foreign key") || errCode === "23503") {
+          errorMessage =
+            "Cannot modify: Some records are linked to payments or other data";
+        } else if (errMessage.includes("unique") || errCode === "23505") {
+          errorMessage =
+            "Duplicate entry detected. Please refresh and try again";
+        } else if (errMessage.includes("permission") || errCode === "42501") {
+          errorMessage = "Permission denied. Please contact administrator";
+        } else if (errMessage.includes("violates check constraint")) {
+          errorMessage =
+            "Invalid data: Please check work days value (must be 0.5, 1, 1.5, or 2)";
+        } else if (errCode === "23502") {
+          // Not null violation
+          errorMessage = `Missing required field: ${errDetails || errMessage}`;
+        } else if (errMessage) {
+          errorMessage = `Error: ${errMessage}`;
+        } else {
+          errorMessage = `Database error (${errCode}): ${
+            errDetails || "Unknown error"
+          }`;
+        }
+      } else if (err instanceof Error) {
+        errorMessage = `Error: ${err.message}`;
+      }
+
+      setError(errorMessage);
     } finally {
+      console.log("[AttendanceDrawer] Finally block - setting saving to false");
       setSaving(false);
     }
   };
@@ -1065,6 +1429,7 @@ export default function AttendanceDrawer({
   };
 
   return (
+    <>
     <Drawer
       anchor="right"
       open={open}
@@ -1091,29 +1456,91 @@ export default function AttendanceDrawer({
             color: "white",
           }}
         >
-          <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <Box
+            sx={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+            }}
+          >
             <Box>
               <Typography variant="h6" fontWeight={600}>
-                {initialDate
-                  ? `Edit Attendance - ${dayjs(initialDate).format("DD MMM YYYY (ddd)")}`
-                  : "Add Attendance"}
+                {mode === "morning"
+                  ? `🌅 Start Day - ${dayjs(selectedDate).format("DD MMM YYYY (ddd)")}`
+                  : mode === "evening"
+                    ? `🌆 Confirm Attendance - ${dayjs(selectedDate).format("DD MMM YYYY (ddd)")}`
+                    : initialDate
+                      ? `Edit Attendance - ${dayjs(initialDate).format("DD MMM YYYY (ddd)")}`
+                      : "Add Attendance"}
               </Typography>
-              {initialDate && (
-                <Typography variant="caption" sx={{ opacity: 0.9 }}>
-                  Manage laborers and time tracking for this date
-                </Typography>
-              )}
+              <Typography variant="caption" sx={{ opacity: 0.9 }}>
+                {mode === "morning"
+                  ? "Quick check-in: Mark who is present today"
+                  : mode === "evening"
+                    ? "Confirm actual work done and day units"
+                    : initialDate
+                      ? "Manage laborers and time tracking for this date"
+                      : siteName || "Select laborers and enter attendance"}
+              </Typography>
             </Box>
-            <IconButton onClick={handleClose} size="small" sx={{ color: "white" }}>
+            <IconButton
+              onClick={handleClose}
+              size="small"
+              sx={{ color: "white" }}
+            >
               <CloseIcon />
             </IconButton>
           </Box>
         </Box>
 
+        {/* Mode Indicator Banners */}
+        {mode === "morning" && (
+          <Alert
+            severity="warning"
+            icon={false}
+            sx={{
+              borderRadius: 0,
+              py: 1,
+              bgcolor: "warning.50",
+              "& .MuiAlert-message": { width: "100%" }
+            }}
+          >
+            <Typography variant="body2" fontWeight={600}>
+              🌅 Quick Morning Check-in
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              Just mark who is present today. Day units and times can be set in the evening.
+            </Typography>
+          </Alert>
+        )}
+        {mode === "evening" && (
+          <Alert
+            severity="info"
+            icon={false}
+            sx={{
+              borderRadius: 0,
+              py: 1,
+              bgcolor: "info.50",
+              "& .MuiAlert-message": { width: "100%" }
+            }}
+          >
+            <Typography variant="body2" fontWeight={600}>
+              🌆 Confirm Today&apos;s Attendance
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              Adjust day units and set work progress for accurate records.
+            </Typography>
+          </Alert>
+        )}
+
         {/* Content */}
         <Box sx={{ flex: 1, overflow: "auto", p: 2 }}>
           {error && (
-            <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
+            <Alert
+              severity="error"
+              sx={{ mb: 2 }}
+              onClose={() => setError(null)}
+            >
               {error}
             </Alert>
           )}
@@ -1169,83 +1596,121 @@ export default function AttendanceDrawer({
                 }}
               >
                 {/* Section Header */}
-                <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 2 }}>
+                <Box
+                  sx={{ display: "flex", alignItems: "center", gap: 1, mb: 2 }}
+                >
                   <PeopleIcon color="primary" />
                   <Typography variant="subtitle1" fontWeight={600}>
                     Laborers
                   </Typography>
                   {(selectedLaborers.size > 0 || marketLaborers.length > 0) && (
                     <Chip
-                      label={`${selectedLaborers.size + marketLaborers.reduce((acc, m) => acc + m.count, 0)} total`}
+                      label={`${
+                        selectedLaborers.size +
+                        marketLaborers.reduce((acc, m) => acc + m.count, 0)
+                      } total`}
                       size="small"
                       color="primary"
                     />
                   )}
                 </Box>
 
-                {/* Work Unit Row */}
-                <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 2, flexWrap: "wrap" }}>
-                  <Typography variant="body2" color="text.secondary" sx={{ minWidth: 70 }}>
-                    Work Day:
-                  </Typography>
-                  <ToggleButtonGroup
-                    value={defaultWorkUnit}
-                    exclusive
-                    onChange={(_, value) => {
-                      if (value !== null) {
-                        setDefaultWorkUnit(value);
-                        const preset = getPresetByValue(value);
-                        setDefaultInTime(preset.inTime);
-                        setDefaultOutTime(preset.outTime);
-                        setDefaultLunchOut(preset.lunchOut || "13:00");
-                        setDefaultLunchIn(preset.lunchIn || "14:00");
-                      }
-                    }}
-                    size="small"
+                {/* Work Unit Row - Hidden in morning mode */}
+                {mode !== "morning" && (
+                  <Box
                     sx={{
-                      "& .MuiToggleButton-root": {
-                        px: 1.5,
-                        py: 0.5,
-                        "&.Mui-selected": {
-                          bgcolor: "primary.main",
-                          color: "white",
-                          "&:hover": { bgcolor: "primary.dark" },
-                        },
-                      },
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 1,
+                      mb: 2,
+                      flexWrap: "wrap",
                     }}
                   >
-                    {WORK_UNIT_PRESETS.map((p) => (
-                      <ToggleButton key={p.value} value={p.value}>
-                        <Typography variant="body2" fontWeight={600}>{p.shortLabel}</Typography>
-                      </ToggleButton>
-                    ))}
-                  </ToggleButtonGroup>
-                  <Button
-                    size="small"
-                    variant="text"
-                    onClick={applyDefaultWorkUnitToAll}
-                    disabled={selectedLaborers.size === 0 && marketLaborers.length === 0}
-                    sx={{ ml: "auto" }}
-                  >
-                    Apply All
-                  </Button>
-                </Box>
+                    <Typography
+                      variant="body2"
+                      color="text.secondary"
+                      sx={{ minWidth: 70 }}
+                    >
+                      Work Day:
+                    </Typography>
+                    <ToggleButtonGroup
+                      value={defaultWorkUnit}
+                      exclusive
+                      onChange={(_, value) => {
+                        if (value !== null) {
+                          setDefaultWorkUnit(value);
+                          const preset = getPresetByValue(value);
+                          setDefaultInTime(preset.inTime);
+                          setDefaultOutTime(preset.outTime);
+                          setDefaultLunchOut(preset.lunchOut || "13:00");
+                          setDefaultLunchIn(preset.lunchIn || "14:00");
+                        }
+                      }}
+                      size="small"
+                      sx={{
+                        "& .MuiToggleButton-root": {
+                          px: 1.5,
+                          py: 0.5,
+                          "&.Mui-selected": {
+                            bgcolor: "primary.main",
+                            color: "white",
+                            "&:hover": { bgcolor: "primary.dark" },
+                          },
+                        },
+                      }}
+                    >
+                      {WORK_UNIT_PRESETS.map((p) => (
+                        <ToggleButton key={p.value} value={p.value}>
+                          <Typography variant="body2" fontWeight={600}>
+                            {p.shortLabel}
+                          </Typography>
+                        </ToggleButton>
+                      ))}
+                    </ToggleButtonGroup>
+                    <Button
+                      size="small"
+                      variant="text"
+                      onClick={applyDefaultWorkUnitToAll}
+                      disabled={
+                        selectedLaborers.size === 0 && marketLaborers.length === 0
+                      }
+                      sx={{ ml: "auto" }}
+                    >
+                      Apply All
+                    </Button>
+                  </Box>
+                )}
 
                 {/* Action Buttons Row */}
-                <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 2, flexWrap: "wrap" }}>
-                  <FormControlLabel
-                    control={
-                      <Checkbox
-                        checked={showGlobalCustomTimes}
-                        onChange={(e) => setShowGlobalCustomTimes(e.target.checked)}
-                        size="small"
-                      />
-                    }
-                    label={<Typography variant="body2">Custom times</Typography>}
-                  />
+                <Box
+                  sx={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 1,
+                    mb: 2,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  {/* Custom times checkbox - Hidden in morning mode */}
+                  {mode !== "morning" && (
+                    <FormControlLabel
+                      control={
+                        <Checkbox
+                          checked={showGlobalCustomTimes}
+                          onChange={(e) =>
+                            setShowGlobalCustomTimes(e.target.checked)
+                          }
+                          size="small"
+                        />
+                      }
+                      label={
+                        <Typography variant="body2">Custom times</Typography>
+                      }
+                    />
+                  )}
                   <Box sx={{ flex: 1 }} />
-                  {/* Tea Button */}
-                  {teaShops.length > 0 && (
+                  {/* Tea Button - Hidden in morning mode */}
+                  {mode !== "morning" && teaShops.length > 0 && (
                     <Button
                       variant={existingTeaEntry ? "contained" : "outlined"}
                       size="small"
@@ -1254,7 +1719,9 @@ export default function AttendanceDrawer({
                       onClick={() => setTeaShopDialogOpen(true)}
                       disabled={!selectedTeaShop}
                     >
-                      {existingTeaEntry ? `Tea ₹${teaShopTotal.toLocaleString()}` : "Tea"}
+                      {existingTeaEntry
+                        ? `Tea ₹${teaShopTotal.toLocaleString()}`
+                        : "Tea"}
                     </Button>
                   )}
                   <Button
@@ -1262,14 +1729,17 @@ export default function AttendanceDrawer({
                     size="small"
                     startIcon={<AddIcon />}
                     onClick={() => setLaborerDialogOpen(true)}
+                    disabled={mode === "evening"}
                   >
-                    Select
+                    {mode === "morning" ? "Select Laborers" : "Select"}
                   </Button>
                 </Box>
 
-                {/* Custom Times - Collapsible */}
-                <Collapse in={showGlobalCustomTimes}>
-                  <Box sx={{ bgcolor: "grey.50", p: 1.5, borderRadius: 1, mb: 2 }}>
+                {/* Custom Times - Collapsible - Hidden in morning mode */}
+                <Collapse in={showGlobalCustomTimes && mode !== "morning"}>
+                  <Box
+                    sx={{ bgcolor: "grey.50", p: 1.5, borderRadius: 1, mb: 2 }}
+                  >
                     <Grid container spacing={1.5} alignItems="center">
                       <Grid size={2.5}>
                         <TextField
@@ -1320,7 +1790,10 @@ export default function AttendanceDrawer({
                           size="small"
                           variant="outlined"
                           onClick={applyDefaultTimesToAll}
-                          disabled={selectedLaborers.size === 0 && marketLaborers.length === 0}
+                          disabled={
+                            selectedLaborers.size === 0 &&
+                            marketLaborers.length === 0
+                          }
                           fullWidth
                         >
                           Apply
@@ -1334,257 +1807,443 @@ export default function AttendanceDrawer({
 
                 {/* Named Laborers Subsection */}
                 <Box sx={{ mb: 2 }}>
-                  <Typography variant="body2" color="text.secondary" fontWeight={600} sx={{ mb: 1 }}>
+                  <Typography
+                    variant="body2"
+                    color="text.secondary"
+                    fontWeight={600}
+                    sx={{ mb: 1 }}
+                  >
                     Named Laborers ({selectedLaborers.size})
                   </Typography>
 
-                {selectedLaborers.size > 0 ? (
-                  <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                    {Array.from(selectedLaborers.values()).map((selection) => {
-                      const laborer = laborers.find((l) => l.id === selection.laborerId);
-                      if (!laborer) return null;
+                  {selectedLaborers.size > 0 ? (
+                    <Box
+                      sx={{ display: "flex", flexDirection: "column", gap: 2 }}
+                    >
+                      {Array.from(selectedLaborers.values()).map(
+                        (selection) => {
+                          const laborer = laborers.find(
+                            (l) => l.id === selection.laborerId
+                          );
+                          if (!laborer) return null;
 
-                      const isHalfDay = selection.dayUnits === 0.5;
-                      const preset = getPresetByValue(selection.dayUnits);
-                      const alignmentStatus = getAlignmentStatus(
-                        selection.workHours,
-                        preset,
-                        !!(selection.inTime && selection.outTime)
-                      );
+                          const isHalfDay = selection.dayUnits === 0.5;
+                          const preset = getPresetByValue(selection.dayUnits);
+                          const alignmentStatus = getAlignmentStatus(
+                            selection.workHours,
+                            preset,
+                            !!(selection.inTime && selection.outTime)
+                          );
 
-                      return (
-                        <Box
-                          key={selection.laborerId}
-                          sx={{
-                            p: 2,
-                            border: 1,
-                            borderColor: "divider",
-                            borderRadius: 2,
-                            borderLeft: 4,
-                            borderLeftColor: laborer.laborer_type === "contract" ? "info.main" : "warning.main",
-                            bgcolor: "background.paper",
-                          }}
-                        >
-                          {/* Header Row */}
-                          <Box sx={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", mb: 1.5 }}>
-                            <Box>
-                              <Typography variant="subtitle2" fontWeight={600}>
-                                {laborer.name}
-                              </Typography>
-                              <Box sx={{ display: "flex", gap: 0.5, alignItems: "center", flexWrap: "wrap" }}>
-                                <Typography variant="caption" color="text.secondary">
-                                  {laborer.category_name}
-                                </Typography>
-                                <Typography variant="caption" color="text.secondary">•</Typography>
-                                <Typography variant="caption" color="text.secondary">
-                                  {laborer.team_name || "No Team"}
-                                </Typography>
-                                <Chip
-                                  label={laborer.laborer_type === "contract" ? "Contract" : "Daily"}
-                                  size="small"
-                                  color={laborer.laborer_type === "contract" ? "info" : "warning"}
-                                  sx={{ height: 18, fontSize: "0.6rem", ml: 0.5 }}
-                                />
-                              </Box>
-                            </Box>
-                            <IconButton size="small" onClick={() => handleLaborerToggle(laborer)}>
-                              <DeleteIcon fontSize="small" />
-                            </IconButton>
-                          </Box>
-
-                          {/* Work Unit Selection - PRIMARY */}
-                          <Box sx={{ mb: 1.5 }}>
-                            <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: "block" }}>
-                              WORK DAY UNIT
-                            </Typography>
-                            <ToggleButtonGroup
-                              value={selection.dayUnits}
-                              exclusive
-                              onChange={(_, value) => {
-                                if (value !== null) {
-                                  handleLaborerFieldChange(selection.laborerId, "dayUnits", value);
-                                }
-                              }}
-                              size="small"
-                              fullWidth
+                          return (
+                            <Box
+                              key={selection.laborerId}
                               sx={{
-                                "& .MuiToggleButton-root": {
-                                  flex: 1,
-                                  py: 0.75,
-                                  flexDirection: "column",
-                                  "&.Mui-selected": {
-                                    bgcolor: "primary.main",
-                                    color: "white",
-                                    "&:hover": { bgcolor: "primary.dark" },
-                                  },
-                                },
+                                p: 2,
+                                border: 1,
+                                borderColor: "divider",
+                                borderRadius: 2,
+                                borderLeft: 4,
+                                borderLeftColor:
+                                  laborer.laborer_type === "contract"
+                                    ? "info.main"
+                                    : "warning.main",
+                                bgcolor: "background.paper",
                               }}
                             >
-                              {WORK_UNIT_PRESETS.map((p) => (
-                                <ToggleButton key={p.value} value={p.value}>
-                                  <Typography variant="body2" fontWeight={700}>{p.shortLabel}</Typography>
-                                  <Typography variant="caption" sx={{ fontSize: "0.6rem", lineHeight: 1 }}>{p.label}</Typography>
-                                </ToggleButton>
-                              ))}
-                            </ToggleButtonGroup>
-                          </Box>
-
-                          {/* Earnings Row with Settings Button */}
-                          <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", py: 1, px: 1.5, bgcolor: "grey.50", borderRadius: 1 }}>
-                            <Typography variant="body2" color="text.secondary">
-                              Rate: <strong>₹{selection.dailyRate.toLocaleString()}</strong>
-                            </Typography>
-                            <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                              <Typography variant="body2" fontWeight={700} color="success.main">
-                                ₹{(selection.dayUnits * selection.dailyRate).toLocaleString()}
-                              </Typography>
-                              {/* Settings button to expand time fields */}
-                              <Tooltip title={expandedLaborerTimes.has(selection.laborerId) ? "Hide custom times" : "Set custom times"}>
+                              {/* Header Row */}
+                              <Box
+                                sx={{
+                                  display: "flex",
+                                  alignItems: "flex-start",
+                                  justifyContent: "space-between",
+                                  mb: 1.5,
+                                }}
+                              >
+                                <Box>
+                                  <Typography
+                                    variant="subtitle2"
+                                    fontWeight={600}
+                                  >
+                                    {laborer.name}
+                                  </Typography>
+                                  <Box
+                                    sx={{
+                                      display: "flex",
+                                      gap: 0.5,
+                                      alignItems: "center",
+                                      flexWrap: "wrap",
+                                    }}
+                                  >
+                                    <Typography
+                                      variant="caption"
+                                      color="text.secondary"
+                                    >
+                                      {laborer.category_name}
+                                    </Typography>
+                                    <Typography
+                                      variant="caption"
+                                      color="text.secondary"
+                                    >
+                                      •
+                                    </Typography>
+                                    <Typography
+                                      variant="caption"
+                                      color="text.secondary"
+                                    >
+                                      {laborer.team_name || "No Team"}
+                                    </Typography>
+                                    <Chip
+                                      label={
+                                        laborer.laborer_type === "contract"
+                                          ? "Contract"
+                                          : "Daily"
+                                      }
+                                      size="small"
+                                      color={
+                                        laborer.laborer_type === "contract"
+                                          ? "info"
+                                          : "warning"
+                                      }
+                                      sx={{
+                                        height: 18,
+                                        fontSize: "0.6rem",
+                                        ml: 0.5,
+                                      }}
+                                    />
+                                  </Box>
+                                </Box>
                                 <IconButton
                                   size="small"
-                                  onClick={() => {
-                                    setExpandedLaborerTimes((prev) => {
-                                      const newSet = new Set(prev);
-                                      if (newSet.has(selection.laborerId)) {
-                                        newSet.delete(selection.laborerId);
-                                      } else {
-                                        newSet.add(selection.laborerId);
+                                  onClick={() => handleLaborerToggle(laborer)}
+                                >
+                                  <DeleteIcon fontSize="small" />
+                                </IconButton>
+                              </Box>
+
+                              {/* Work Unit Selection - PRIMARY - Hidden in morning mode */}
+                              {mode !== "morning" && (
+                                <Box sx={{ mb: 1.5 }}>
+                                  <Typography
+                                    variant="caption"
+                                    color="text.secondary"
+                                    sx={{ mb: 0.5, display: "block" }}
+                                  >
+                                    WORK DAY UNIT
+                                  </Typography>
+                                  <ToggleButtonGroup
+                                    value={selection.dayUnits}
+                                    exclusive
+                                    onChange={(_, value) => {
+                                      if (value !== null) {
+                                        handleLaborerFieldChange(
+                                          selection.laborerId,
+                                          "dayUnits",
+                                          value
+                                        );
                                       }
-                                      return newSet;
-                                    });
-                                  }}
+                                    }}
+                                    size="small"
+                                    fullWidth
+                                    sx={{
+                                      "& .MuiToggleButton-root": {
+                                        flex: 1,
+                                        py: 0.75,
+                                        flexDirection: "column",
+                                        "&.Mui-selected": {
+                                          bgcolor: "primary.main",
+                                          color: "white",
+                                          "&:hover": { bgcolor: "primary.dark" },
+                                        },
+                                      },
+                                    }}
+                                  >
+                                    {WORK_UNIT_PRESETS.map((p) => (
+                                      <ToggleButton key={p.value} value={p.value}>
+                                        <Typography
+                                          variant="body2"
+                                          fontWeight={700}
+                                        >
+                                          {p.shortLabel}
+                                        </Typography>
+                                        <Typography
+                                          variant="caption"
+                                          sx={{
+                                            fontSize: "0.6rem",
+                                            lineHeight: 1,
+                                          }}
+                                        >
+                                          {p.label}
+                                        </Typography>
+                                      </ToggleButton>
+                                    ))}
+                                  </ToggleButtonGroup>
+                                </Box>
+                              )}
+
+                              {/* Earnings Row with Settings Button - Hidden in morning mode */}
+                              {mode !== "morning" && (
+                                <Box
                                   sx={{
-                                    bgcolor: expandedLaborerTimes.has(selection.laborerId) ? "primary.100" : "transparent",
+                                    display: "flex",
+                                    justifyContent: "space-between",
+                                    alignItems: "center",
+                                    py: 1,
+                                    px: 1.5,
+                                    bgcolor: "grey.50",
+                                    borderRadius: 1,
                                   }}
                                 >
-                                  {expandedLaborerTimes.has(selection.laborerId) ? (
-                                    <CollapseIcon fontSize="small" />
-                                  ) : (
-                                    <SettingsIcon fontSize="small" />
-                                  )}
-                                </IconButton>
-                              </Tooltip>
-                            </Box>
-                          </Box>
+                                  <Typography
+                                    variant="body2"
+                                    color="text.secondary"
+                                  >
+                                    Rate:{" "}
+                                    <strong>
+                                      ₹{selection.dailyRate.toLocaleString()}
+                                    </strong>
+                                  </Typography>
+                                  <Box
+                                    sx={{
+                                      display: "flex",
+                                      alignItems: "center",
+                                      gap: 1,
+                                    }}
+                                  >
+                                    <Typography
+                                      variant="body2"
+                                      fontWeight={700}
+                                      color="success.main"
+                                    >
+                                      ₹
+                                      {(
+                                        selection.dayUnits * selection.dailyRate
+                                      ).toLocaleString()}
+                                    </Typography>
+                                    {/* Settings button to expand time fields */}
+                                    <Tooltip
+                                      title={
+                                        expandedLaborerTimes.has(
+                                          selection.laborerId
+                                        )
+                                          ? "Hide custom times"
+                                          : "Set custom times"
+                                      }
+                                    >
+                                      <IconButton
+                                        size="small"
+                                        onClick={() => {
+                                          setExpandedLaborerTimes((prev) => {
+                                            const newSet = new Set(prev);
+                                            if (newSet.has(selection.laborerId)) {
+                                              newSet.delete(selection.laborerId);
+                                            } else {
+                                              newSet.add(selection.laborerId);
+                                            }
+                                            return newSet;
+                                          });
+                                        }}
+                                        sx={{
+                                          bgcolor: expandedLaborerTimes.has(
+                                            selection.laborerId
+                                          )
+                                            ? "primary.100"
+                                            : "transparent",
+                                        }}
+                                      >
+                                        {expandedLaborerTimes.has(
+                                          selection.laborerId
+                                        ) ? (
+                                          <CollapseIcon fontSize="small" />
+                                        ) : (
+                                          <SettingsIcon fontSize="small" />
+                                        )}
+                                      </IconButton>
+                                    </Tooltip>
+                                  </Box>
+                                </Box>
+                              )}
 
-                          {/* Collapsible Time Fields */}
-                          <Collapse in={expandedLaborerTimes.has(selection.laborerId)}>
-                            <Box sx={{ mt: 1.5, p: 1.5, bgcolor: "grey.50", borderRadius: 1 }}>
-                              <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: "block" }}>
-                                Custom Time (this laborer only)
-                              </Typography>
-                              <Grid container spacing={1}>
-                                <Grid size={isHalfDay ? 6 : 3}>
-                                  <TextField
-                                    fullWidth
-                                    size="small"
-                                    type="time"
-                                    label="In"
-                                    value={selection.inTime}
-                                    onChange={(e) =>
-                                      handleLaborerFieldChange(selection.laborerId, "inTime", e.target.value)
-                                    }
-                                    slotProps={{ inputLabel: { shrink: true } }}
-                                  />
-                                </Grid>
-                                {/* Only show lunch fields for non-half-day */}
-                                {!isHalfDay && (
-                                  <>
-                                    <Grid size={3}>
-                                      <TextField
-                                        fullWidth
-                                        size="small"
-                                        type="time"
-                                        label="L-Out"
-                                        value={selection.lunchOut}
-                                        onChange={(e) =>
-                                          handleLaborerFieldChange(selection.laborerId, "lunchOut", e.target.value)
-                                        }
-                                        slotProps={{ inputLabel: { shrink: true } }}
-                                      />
-                                    </Grid>
-                                    <Grid size={3}>
-                                      <TextField
-                                        fullWidth
-                                        size="small"
-                                        type="time"
-                                        label="L-In"
-                                        value={selection.lunchIn}
-                                        onChange={(e) =>
-                                          handleLaborerFieldChange(selection.laborerId, "lunchIn", e.target.value)
-                                        }
-                                        slotProps={{ inputLabel: { shrink: true } }}
-                                      />
-                                    </Grid>
-                                  </>
+                              {/* Collapsible Time Fields - Hidden in morning mode */}
+                              <Collapse
+                                in={mode !== "morning" && expandedLaborerTimes.has(
+                                  selection.laborerId
                                 )}
-                                <Grid size={isHalfDay ? 6 : 3}>
-                                  <TextField
-                                    fullWidth
-                                    size="small"
-                                    type="time"
-                                    label="Out"
-                                    value={selection.outTime}
-                                    onChange={(e) =>
-                                      handleLaborerFieldChange(selection.laborerId, "outTime", e.target.value)
-                                    }
-                                    slotProps={{ inputLabel: { shrink: true } }}
-                                  />
-                                </Grid>
-                              </Grid>
+                              >
+                                <Box
+                                  sx={{
+                                    mt: 1.5,
+                                    p: 1.5,
+                                    bgcolor: "grey.50",
+                                    borderRadius: 1,
+                                  }}
+                                >
+                                  <Typography
+                                    variant="caption"
+                                    color="text.secondary"
+                                    sx={{ mb: 1, display: "block" }}
+                                  >
+                                    Custom Time (this laborer only)
+                                  </Typography>
+                                  <Grid container spacing={1}>
+                                    <Grid size={isHalfDay ? 6 : 3}>
+                                      <TextField
+                                        fullWidth
+                                        size="small"
+                                        type="time"
+                                        label="In"
+                                        value={selection.inTime}
+                                        onChange={(e) =>
+                                          handleLaborerFieldChange(
+                                            selection.laborerId,
+                                            "inTime",
+                                            e.target.value
+                                          )
+                                        }
+                                        slotProps={{
+                                          inputLabel: { shrink: true },
+                                        }}
+                                      />
+                                    </Grid>
+                                    {/* Only show lunch fields for non-half-day */}
+                                    {!isHalfDay && (
+                                      <>
+                                        <Grid size={3}>
+                                          <TextField
+                                            fullWidth
+                                            size="small"
+                                            type="time"
+                                            label="L-Out"
+                                            value={selection.lunchOut}
+                                            onChange={(e) =>
+                                              handleLaborerFieldChange(
+                                                selection.laborerId,
+                                                "lunchOut",
+                                                e.target.value
+                                              )
+                                            }
+                                            slotProps={{
+                                              inputLabel: { shrink: true },
+                                            }}
+                                          />
+                                        </Grid>
+                                        <Grid size={3}>
+                                          <TextField
+                                            fullWidth
+                                            size="small"
+                                            type="time"
+                                            label="L-In"
+                                            value={selection.lunchIn}
+                                            onChange={(e) =>
+                                              handleLaborerFieldChange(
+                                                selection.laborerId,
+                                                "lunchIn",
+                                                e.target.value
+                                              )
+                                            }
+                                            slotProps={{
+                                              inputLabel: { shrink: true },
+                                            }}
+                                          />
+                                        </Grid>
+                                      </>
+                                    )}
+                                    <Grid size={isHalfDay ? 6 : 3}>
+                                      <TextField
+                                        fullWidth
+                                        size="small"
+                                        type="time"
+                                        label="Out"
+                                        value={selection.outTime}
+                                        onChange={(e) =>
+                                          handleLaborerFieldChange(
+                                            selection.laborerId,
+                                            "outTime",
+                                            e.target.value
+                                          )
+                                        }
+                                        slotProps={{
+                                          inputLabel: { shrink: true },
+                                        }}
+                                      />
+                                    </Grid>
+                                  </Grid>
+                                </Box>
+                              </Collapse>
                             </Box>
-                          </Collapse>
-                        </Box>
-                      );
-                    })}
-                  </Box>
-                ) : (
-                  <Alert severity="info">
-                    Click &quot;Select Laborers&quot; to add workers for this day
-                  </Alert>
-                )}
-              </Box>
+                          );
+                        }
+                      )}
+                    </Box>
+                  ) : (
+                    <Alert severity="info">
+                      Click &quot;Select Laborers&quot; to add workers for this
+                      day
+                    </Alert>
+                  )}
+                </Box>
 
-              {/* Laborer Selection Dialog */}
-              <LaborerSelectionDialog
-                open={laborerDialogOpen}
-                onClose={() => setLaborerDialogOpen(false)}
-                siteId={siteId}
-                selectedLaborers={selectedLaborers}
-                onConfirm={(selected) => {
-                  // Merge new selections with existing time data
-                  const merged = new Map<string, SelectedLaborer>();
-                  const timeCalc = calculateTimeHours(defaultInTime, defaultOutTime, defaultLunchOut, defaultLunchIn);
+                {/* Laborer Selection Dialog */}
+                <LaborerSelectionDialog
+                  open={laborerDialogOpen}
+                  onClose={() => setLaborerDialogOpen(false)}
+                  siteId={siteId}
+                  selectedLaborers={selectedLaborers}
+                  onConfirm={(selected) => {
+                    // Merge new selections with existing time data
+                    const merged = new Map<string, SelectedLaborer>();
+                    const timeCalc = calculateTimeHours(
+                      defaultInTime,
+                      defaultOutTime,
+                      defaultLunchOut,
+                      defaultLunchIn
+                    );
 
-                  selected.forEach((sel, key) => {
-                    const existing = selectedLaborers.get(key);
-                    if (existing) {
-                      merged.set(key, { ...existing, ...sel });
-                    } else {
-                      merged.set(key, {
-                        ...sel,
-                        inTime: defaultInTime,
-                        lunchOut: defaultLunchOut,
-                        lunchIn: defaultLunchIn,
-                        outTime: defaultOutTime,
-                        ...timeCalc,
-                        dayUnits: 1, // Default to Full Day for new selections
-                      });
-                    }
-                  });
-                  setSelectedLaborers(merged);
-                  setLaborerDialogOpen(false);
-                }}
-              />
+                    selected.forEach((sel, key) => {
+                      const existing = selectedLaborers.get(key);
+                      if (existing) {
+                        merged.set(key, { ...existing, ...sel });
+                      } else {
+                        merged.set(key, {
+                          ...sel,
+                          inTime: defaultInTime,
+                          lunchOut: defaultLunchOut,
+                          lunchIn: defaultLunchIn,
+                          outTime: defaultOutTime,
+                          ...timeCalc,
+                          dayUnits: 1, // Default to Full Day for new selections
+                        });
+                      }
+                    });
+                    setSelectedLaborers(merged);
+                    setLaborerDialogOpen(false);
+                  }}
+                />
 
                 <Divider sx={{ my: 2 }} />
 
                 {/* Market Laborers Subsection */}
-                <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 1 }}>
-                  <Typography variant="body2" color="text.secondary" fontWeight={600}>
-                    Market Laborers ({marketLaborers.reduce((acc, m) => acc + m.count, 0)})
+                <Box
+                  sx={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    mb: 1,
+                  }}
+                >
+                  <Typography
+                    variant="body2"
+                    color="text.secondary"
+                    fontWeight={600}
+                  >
+                    Market Laborers (
+                    {marketLaborers.reduce((acc, m) => acc + m.count, 0)})
                   </Typography>
-                  <Button size="small" startIcon={<AddIcon />} onClick={handleAddMarketLaborer}>
+                  <Button
+                    size="small"
+                    startIcon={<AddIcon />}
+                    onClick={handleAddMarketLaborer}
+                  >
                     Add Group
                   </Button>
                 </Box>
@@ -1617,7 +2276,13 @@ export default function AttendanceDrawer({
                             <InputLabel>Role</InputLabel>
                             <Select
                               value={entry.roleId}
-                              onChange={(e) => handleMarketLaborerChange(entry.id, "roleId", e.target.value)}
+                              onChange={(e) =>
+                                handleMarketLaborerChange(
+                                  entry.id,
+                                  "roleId",
+                                  e.target.value
+                                )
+                              }
                               label="Role"
                             >
                               {laborRoles.map((role) => (
@@ -1635,105 +2300,194 @@ export default function AttendanceDrawer({
                             label="Count"
                             type="number"
                             value={entry.count}
-                            onChange={(e) => handleMarketLaborerChange(entry.id, "count", Number(e.target.value))}
+                            onChange={(e) =>
+                              handleMarketLaborerChange(
+                                entry.id,
+                                "count",
+                                Number(e.target.value)
+                              )
+                            }
                             slotProps={{ htmlInput: { min: 1 } }}
                           />
                         </Grid>
-                        <Grid size={3}>
-                          <TextField
-                            fullWidth
+                        {/* Rate/Person - Hidden in morning mode */}
+                        {mode !== "morning" && (
+                          <Grid size={3}>
+                            <TextField
+                              fullWidth
+                              size="small"
+                              label="Rate/Person"
+                              type="number"
+                              value={entry.ratePerPerson}
+                              onChange={(e) =>
+                                handleMarketLaborerChange(
+                                  entry.id,
+                                  "ratePerPerson",
+                                  Number(e.target.value)
+                                )
+                              }
+                              slotProps={{
+                                input: {
+                                  startAdornment: (
+                                    <InputAdornment position="start">
+                                      ₹
+                                    </InputAdornment>
+                                  ),
+                                },
+                              }}
+                            />
+                          </Grid>
+                        )}
+                        {/* Total - Hidden in morning mode */}
+                        {mode !== "morning" && (
+                          <Grid size={2}>
+                            <Box sx={{ textAlign: "center" }}>
+                              <Typography
+                                variant="caption"
+                                color="text.secondary"
+                              >
+                                Total
+                              </Typography>
+                              <Typography
+                                variant="body2"
+                                fontWeight={700}
+                                color="success.main"
+                              >
+                                ₹
+                                {(
+                                  entry.count *
+                                  entry.ratePerPerson *
+                                  entry.dayUnits
+                                ).toLocaleString()}
+                              </Typography>
+                            </Box>
+                          </Grid>
+                        )}
+                        <Grid
+                          size={1}
+                          sx={{ display: "flex", justifyContent: "center" }}
+                        >
+                          <IconButton
                             size="small"
-                            label="Rate/Person"
-                            type="number"
-                            value={entry.ratePerPerson}
-                            onChange={(e) => handleMarketLaborerChange(entry.id, "ratePerPerson", Number(e.target.value))}
-                            slotProps={{
-                              input: { startAdornment: <InputAdornment position="start">₹</InputAdornment> },
-                            }}
-                          />
-                        </Grid>
-                        <Grid size={2}>
-                          <Box sx={{ textAlign: "center" }}>
-                            <Typography variant="caption" color="text.secondary">
-                              Total
-                            </Typography>
-                            <Typography variant="body2" fontWeight={700} color="success.main">
-                              ₹{(entry.count * entry.ratePerPerson * entry.dayUnits).toLocaleString()}
-                            </Typography>
-                          </Box>
-                        </Grid>
-                        <Grid size={1} sx={{ display: "flex", justifyContent: "center" }}>
-                          <IconButton size="small" color="error" onClick={() => handleRemoveMarketLaborer(entry.id)}>
+                            color="error"
+                            onClick={() => handleRemoveMarketLaborer(entry.id)}
+                          >
                             <DeleteIcon fontSize="small" />
                           </IconButton>
                         </Grid>
                       </Grid>
 
-                      {/* Work Unit Selection */}
-                      <Box sx={{ mt: 2, mb: 1.5 }}>
-                        <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: "block" }}>
-                          WORK DAY UNIT
-                        </Typography>
-                        <ToggleButtonGroup
-                          value={entry.dayUnits}
-                          exclusive
-                          onChange={(_, value) => {
-                            if (value !== null) {
-                              handleMarketLaborerChange(entry.id, "dayUnits", value);
-                            }
-                          }}
-                          size="small"
-                          fullWidth
-                          sx={{
-                            "& .MuiToggleButton-root": {
-                              flex: 1,
-                              py: 0.5,
-                              flexDirection: "column",
-                              "&.Mui-selected": {
-                                bgcolor: "warning.main",
-                                color: "white",
-                                "&:hover": { bgcolor: "warning.dark" },
+                      {/* Work Unit Selection - Hidden in morning mode */}
+                      {mode !== "morning" && (
+                        <Box sx={{ mt: 2, mb: 1.5 }}>
+                          <Typography
+                            variant="caption"
+                            color="text.secondary"
+                            sx={{ mb: 0.5, display: "block" }}
+                          >
+                            WORK DAY UNIT
+                          </Typography>
+                          <ToggleButtonGroup
+                            value={entry.dayUnits}
+                            exclusive
+                            onChange={(_, value) => {
+                              if (value !== null) {
+                                handleMarketLaborerChange(
+                                  entry.id,
+                                  "dayUnits",
+                                  value
+                                );
+                              }
+                            }}
+                            size="small"
+                            fullWidth
+                            sx={{
+                              "& .MuiToggleButton-root": {
+                                flex: 1,
+                                py: 0.5,
+                                flexDirection: "column",
+                                "&.Mui-selected": {
+                                  bgcolor: "warning.main",
+                                  color: "white",
+                                  "&:hover": { bgcolor: "warning.dark" },
+                                },
                               },
-                            },
+                            }}
+                          >
+                            {WORK_UNIT_PRESETS.map((p) => (
+                              <ToggleButton key={p.value} value={p.value}>
+                                <Typography variant="body2" fontWeight={700}>
+                                  {p.shortLabel}
+                                </Typography>
+                                <Typography
+                                  variant="caption"
+                                  sx={{ fontSize: "0.6rem", lineHeight: 1 }}
+                                >
+                                  {p.label}
+                                </Typography>
+                              </ToggleButton>
+                            ))}
+                          </ToggleButtonGroup>
+                        </Box>
+                      )}
+
+                      {/* Settings button for custom times - Hidden in morning mode */}
+                      {mode !== "morning" && (
+                        <Box
+                          sx={{
+                            mt: 1,
+                            display: "flex",
+                            justifyContent: "flex-end",
                           }}
                         >
-                          {WORK_UNIT_PRESETS.map((p) => (
-                            <ToggleButton key={p.value} value={p.value}>
-                              <Typography variant="body2" fontWeight={700}>{p.shortLabel}</Typography>
-                              <Typography variant="caption" sx={{ fontSize: "0.6rem", lineHeight: 1 }}>{p.label}</Typography>
-                            </ToggleButton>
-                          ))}
-                        </ToggleButtonGroup>
-                      </Box>
-
-                      {/* Settings button for custom times */}
-                      <Box sx={{ mt: 1, display: "flex", justifyContent: "flex-end" }}>
-                        <Tooltip title={expandedLaborerTimes.has(entry.id) ? "Hide custom times" : "Set custom times"}>
-                          <Button
-                            size="small"
-                            variant="text"
-                            startIcon={expandedLaborerTimes.has(entry.id) ? <CollapseIcon /> : <SettingsIcon />}
-                            onClick={() => {
-                              setExpandedLaborerTimes((prev) => {
-                                const newSet = new Set(prev);
-                                if (newSet.has(entry.id)) {
-                                  newSet.delete(entry.id);
-                                } else {
-                                  newSet.add(entry.id);
-                                }
-                                return newSet;
-                              });
-                            }}
-                            sx={{ color: "text.secondary" }}
+                          <Tooltip
+                            title={
+                              expandedLaborerTimes.has(entry.id)
+                                ? "Hide custom times"
+                                : "Set custom times"
+                            }
                           >
-                            {expandedLaborerTimes.has(entry.id) ? "Hide" : "Custom Time"}
-                          </Button>
-                        </Tooltip>
-                      </Box>
+                            <Button
+                              size="small"
+                              variant="text"
+                              startIcon={
+                                expandedLaborerTimes.has(entry.id) ? (
+                                  <CollapseIcon />
+                                ) : (
+                                  <SettingsIcon />
+                                )
+                              }
+                              onClick={() => {
+                                setExpandedLaborerTimes((prev) => {
+                                  const newSet = new Set(prev);
+                                  if (newSet.has(entry.id)) {
+                                    newSet.delete(entry.id);
+                                  } else {
+                                    newSet.add(entry.id);
+                                  }
+                                  return newSet;
+                                });
+                              }}
+                              sx={{ color: "text.secondary" }}
+                            >
+                              {expandedLaborerTimes.has(entry.id)
+                                ? "Hide"
+                                : "Custom Time"}
+                            </Button>
+                          </Tooltip>
+                        </Box>
+                      )}
 
-                      {/* Collapsible Time row */}
-                      <Collapse in={expandedLaborerTimes.has(entry.id)}>
-                        <Box sx={{ mt: 1, p: 1.5, bgcolor: "background.paper", borderRadius: 1 }}>
+                      {/* Collapsible Time row - Hidden in morning mode */}
+                      <Collapse in={mode !== "morning" && expandedLaborerTimes.has(entry.id)}>
+                        <Box
+                          sx={{
+                            mt: 1,
+                            p: 1.5,
+                            bgcolor: "background.paper",
+                            borderRadius: 1,
+                          }}
+                        >
                           <Grid container spacing={1}>
                             <Grid size={isHalfDay ? 6 : 3}>
                               <TextField
@@ -1742,7 +2496,13 @@ export default function AttendanceDrawer({
                                 type="time"
                                 label="In"
                                 value={entry.inTime}
-                                onChange={(e) => handleMarketLaborerChange(entry.id, "inTime", e.target.value)}
+                                onChange={(e) =>
+                                  handleMarketLaborerChange(
+                                    entry.id,
+                                    "inTime",
+                                    e.target.value
+                                  )
+                                }
                                 slotProps={{ inputLabel: { shrink: true } }}
                               />
                             </Grid>
@@ -1755,7 +2515,13 @@ export default function AttendanceDrawer({
                                     type="time"
                                     label="L-Out"
                                     value={entry.lunchOut}
-                                    onChange={(e) => handleMarketLaborerChange(entry.id, "lunchOut", e.target.value)}
+                                    onChange={(e) =>
+                                      handleMarketLaborerChange(
+                                        entry.id,
+                                        "lunchOut",
+                                        e.target.value
+                                      )
+                                    }
                                     slotProps={{ inputLabel: { shrink: true } }}
                                   />
                                 </Grid>
@@ -1766,7 +2532,13 @@ export default function AttendanceDrawer({
                                     type="time"
                                     label="L-In"
                                     value={entry.lunchIn}
-                                    onChange={(e) => handleMarketLaborerChange(entry.id, "lunchIn", e.target.value)}
+                                    onChange={(e) =>
+                                      handleMarketLaborerChange(
+                                        entry.id,
+                                        "lunchIn",
+                                        e.target.value
+                                      )
+                                    }
                                     slotProps={{ inputLabel: { shrink: true } }}
                                   />
                                 </Grid>
@@ -1779,7 +2551,13 @@ export default function AttendanceDrawer({
                                 type="time"
                                 label="Out"
                                 value={entry.outTime}
-                                onChange={(e) => handleMarketLaborerChange(entry.id, "outTime", e.target.value)}
+                                onChange={(e) =>
+                                  handleMarketLaborerChange(
+                                    entry.id,
+                                    "outTime",
+                                    e.target.value
+                                  )
+                                }
                                 slotProps={{ inputLabel: { shrink: true } }}
                               />
                             </Grid>
@@ -1791,11 +2569,16 @@ export default function AttendanceDrawer({
                 })}
 
                 {marketLaborers.length === 0 && (
-                  <Typography variant="body2" color="text.secondary" sx={{ textAlign: "center", py: 2 }}>
+                  <Typography
+                    variant="body2"
+                    color="text.secondary"
+                    sx={{ textAlign: "center", py: 2 }}
+                  >
                     No market laborers added
                   </Typography>
                 )}
-              </Box>{/* End Laborers Section wrapper */}
+              </Box>
+              {/* End Laborers Section wrapper */}
 
               {/* Work Description Section - Light Gray Background */}
               <Box
@@ -1815,7 +2598,11 @@ export default function AttendanceDrawer({
                     justifyContent: "space-between",
                     cursor: "pointer",
                   }}
-                  onClick={() => setExpandedSection(expandedSection === "work" ? false : "work")}
+                  onClick={() =>
+                    setExpandedSection(
+                      expandedSection === "work" ? false : "work"
+                    )
+                  }
                 >
                   <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
                     <WorkIcon color="action" />
@@ -1823,11 +2610,20 @@ export default function AttendanceDrawer({
                       Work Description
                     </Typography>
                     {workDescription && (
-                      <Chip label="Filled" size="small" color="success" variant="outlined" />
+                      <Chip
+                        label="Filled"
+                        size="small"
+                        color="success"
+                        variant="outlined"
+                      />
                     )}
                   </Box>
                   <IconButton size="small">
-                    {expandedSection === "work" ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+                    {expandedSection === "work" ? (
+                      <ExpandLessIcon />
+                    ) : (
+                      <ExpandMoreIcon />
+                    )}
                   </IconButton>
                 </Box>
 
@@ -1872,14 +2668,72 @@ export default function AttendanceDrawer({
           )}
         </Box>
 
+        {/* Work Progress Slider - Shown in evening and full modes */}
+        {(mode === "evening" || mode === "full") && (
+          <Box
+            sx={{
+              px: 2,
+              py: 1.5,
+              borderTop: 1,
+              borderColor: "divider",
+              bgcolor: "info.50",
+            }}
+          >
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
+              <Typography variant="subtitle2" fontWeight={600}>
+                Work Progress
+              </Typography>
+              <Chip
+                label={`${workProgressPercent}%`}
+                size="small"
+                color={workProgressPercent >= 80 ? "success" : workProgressPercent >= 50 ? "warning" : "error"}
+              />
+            </Box>
+            <Slider
+              value={workProgressPercent}
+              onChange={(_, value) => setWorkProgressPercent(value as number)}
+              min={0}
+              max={100}
+              step={5}
+              marks={[
+                { value: 0, label: "0%" },
+                { value: 25, label: "25%" },
+                { value: 50, label: "50%" },
+                { value: 75, label: "75%" },
+                { value: 100, label: "100%" },
+              ]}
+              valueLabelDisplay="auto"
+              sx={{
+                "& .MuiSlider-markLabel": {
+                  fontSize: "0.65rem",
+                },
+              }}
+            />
+          </Box>
+        )}
+
         {/* Summary & Save */}
-        <Box sx={{ borderTop: 1, borderColor: "divider", p: 2, bgcolor: "grey.50" }}>
+        <Box
+          sx={{
+            borderTop: 1,
+            borderColor: "divider",
+            p: 2,
+            bgcolor: "grey.50",
+          }}
+        >
           <Typography variant="subtitle2" color="text.secondary" gutterBottom>
             SUMMARY
           </Typography>
           <Grid container spacing={2} sx={{ mb: 2 }}>
             <Grid size={4}>
-              <Box sx={{ textAlign: "center", p: 1, bgcolor: "primary.50", borderRadius: 1 }}>
+              <Box
+                sx={{
+                  textAlign: "center",
+                  p: 1,
+                  bgcolor: "primary.50",
+                  borderRadius: 1,
+                }}
+              >
                 <Typography variant="caption" color="text.secondary">
                   Laborers
                 </Typography>
@@ -1887,12 +2741,20 @@ export default function AttendanceDrawer({
                   {summary.totalCount}
                 </Typography>
                 <Typography variant="caption" color="text.secondary">
-                  D: {summary.dailyCount} | C: {summary.contractCount} | M: {summary.marketCount}
+                  D: {summary.dailyCount} | C: {summary.contractCount} | M:{" "}
+                  {summary.marketCount}
                 </Typography>
               </Box>
             </Grid>
             <Grid size={4}>
-              <Box sx={{ textAlign: "center", p: 1, bgcolor: "success.50", borderRadius: 1 }}>
+              <Box
+                sx={{
+                  textAlign: "center",
+                  p: 1,
+                  bgcolor: "success.50",
+                  borderRadius: 1,
+                }}
+              >
                 <Typography variant="caption" color="text.secondary">
                   Salary
                 </Typography>
@@ -1902,7 +2764,14 @@ export default function AttendanceDrawer({
               </Box>
             </Grid>
             <Grid size={4}>
-              <Box sx={{ textAlign: "center", p: 1, bgcolor: "warning.50", borderRadius: 1 }}>
+              <Box
+                sx={{
+                  textAlign: "center",
+                  p: 1,
+                  bgcolor: "warning.50",
+                  borderRadius: 1,
+                }}
+              >
                 <Typography variant="caption" color="text.secondary">
                   Tea Shop
                 </Typography>
@@ -1912,7 +2781,14 @@ export default function AttendanceDrawer({
               </Box>
             </Grid>
           </Grid>
-          <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 2 }}>
+          <Box
+            sx={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              mb: 2,
+            }}
+          >
             <Typography variant="subtitle1" fontWeight={700}>
               TOTAL EXPENSE:
             </Typography>
@@ -1925,12 +2801,27 @@ export default function AttendanceDrawer({
             fullWidth
             variant="contained"
             size="large"
-            onClick={handleSave}
-            disabled={saving || (selectedLaborers.size === 0 && marketLaborers.length === 0)}
+            onClick={handleSaveClick}
+            disabled={
+              saving ||
+              (selectedLaborers.size === 0 && marketLaborers.length === 0)
+            }
           >
-            {saving ? <CircularProgress size={24} color="inherit" /> : "Save Attendance"}
+            {saving ? (
+              <CircularProgress size={24} color="inherit" />
+            ) : mode === "morning" ? (
+              "✓ Mark as Started"
+            ) : mode === "evening" ? (
+              "✓ Confirm Attendance"
+            ) : (
+              "Save Attendance"
+            )}
           </Button>
-          <Typography variant="caption" color="text.secondary" sx={{ display: "block", textAlign: "center", mt: 1 }}>
+          <Typography
+            variant="caption"
+            color="text.secondary"
+            sx={{ display: "block", textAlign: "center", mt: 1 }}
+          >
             Auto-synced to Daily Expenses
           </Typography>
         </Box>
@@ -1948,12 +2839,44 @@ export default function AttendanceDrawer({
           preSelectedLaborers={Array.from(selectedLaborers.values())
             .map((sel) => {
               const lab = laborers.find((l) => l.id === sel.laborerId);
-              return lab ? { id: lab.id, name: lab.name, laborer_type: lab.laborer_type || "daily" } : null;
+              return lab
+                ? {
+                    id: lab.id,
+                    name: lab.name,
+                    laborer_type: lab.laborer_type || "daily",
+                  }
+                : null;
             })
-            .filter((l): l is { id: string; name: string; laborer_type: string } => l !== null)}
-          initialMarketCount={marketLaborers.reduce((sum, m) => sum + m.count, 0)}
+            .filter(
+              (l): l is { id: string; name: string; laborer_type: string } =>
+                l !== null
+            )}
+          initialMarketCount={marketLaborers.reduce(
+            (sum, m) => sum + m.count,
+            0
+          )}
         />
       )}
+
     </Drawer>
+
+    {/* Save Confirmation Dialog - outside Drawer for proper layering */}
+    <AttendanceSaveConfirmDialog
+      open={confirmDialogOpen}
+      onClose={() => setConfirmDialogOpen(false)}
+      onConfirm={() => {
+        setConfirmDialogOpen(false);
+        executeSave();
+      }}
+      onEdit={() => setConfirmDialogOpen(false)}
+      siteName={siteName}
+      sectionName={sections.find((s) => s.id === sectionId)?.name || ""}
+      date={selectedDate}
+      summary={summary}
+      teaShopTotal={teaShopTotal}
+      hasExistingAttendance={hasExistingAttendance}
+      saving={saving}
+    />
+    </>
   );
 }

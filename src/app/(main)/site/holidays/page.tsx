@@ -22,6 +22,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useSite } from "@/contexts/SiteContext";
 import { useAuth } from "@/contexts/AuthContext";
 import PageHeader from "@/components/layout/PageHeader";
+import { hasEditPermission } from "@/lib/permissions";
 import type { SiteHoliday } from "@/types/database.types";
 import dayjs from "dayjs";
 
@@ -42,8 +43,7 @@ export default function HolidaysPage() {
     reason: "",
   });
 
-  const canEdit =
-    userProfile?.role === "admin" || userProfile?.role === "office";
+  const canEdit = hasEditPermission(userProfile?.role);
 
   const fetchHolidays = async () => {
     if (!selectedSite) return;
@@ -73,7 +73,7 @@ export default function HolidaysPage() {
   const handleOpenDialog = (holiday?: SiteHoliday) => {
     if (holiday) {
       setEditingHoliday(holiday);
-      setForm({ date: holiday.date, reason: holiday.reason });
+      setForm({ date: holiday.date, reason: holiday.reason || "" });
     } else {
       setEditingHoliday(null);
       setForm({ date: dayjs().format("YYYY-MM-DD"), reason: "" });

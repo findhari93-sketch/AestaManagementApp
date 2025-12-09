@@ -45,6 +45,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSite } from "@/contexts/SiteContext";
 import PageHeader from "@/components/layout/PageHeader";
+import { hasEditPermission } from "@/lib/permissions";
 import SubcontractPaymentBreakdown from "@/components/subcontracts/SubcontractPaymentBreakdown";
 import type {
   Subcontract,
@@ -124,8 +125,7 @@ export default function SiteSubcontractsPage() {
   const [siteEngineers, setSiteEngineers] = useState<any[]>([]);
   const [selectedSiteEngineer, setSelectedSiteEngineer] = useState<string>("");
 
-  const canEdit =
-    userProfile?.role === "admin" || userProfile?.role === "office";
+  const canEdit = hasEditPermission(userProfile?.role);
 
   // Fetch teams, laborers, and site engineers
   useEffect(() => {
@@ -254,7 +254,7 @@ export default function SiteSubcontractsPage() {
         rate_per_unit: subcontract.rate_per_unit || 0,
         total_units: subcontract.total_units || 0,
         weekly_advance_rate: subcontract.weekly_advance_rate || 0,
-        start_date: subcontract.start_date,
+        start_date: subcontract.start_date || "",
         expected_end_date: subcontract.expected_end_date || "",
         status: subcontract.status,
         is_rate_based: isRateBased,
@@ -500,6 +500,7 @@ export default function SiteSubcontractsPage() {
     const colorMap: Record<ContractStatus, any> = {
       draft: "default",
       active: "primary",
+      on_hold: "warning",
       completed: "success",
       cancelled: "error",
     };

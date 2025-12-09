@@ -30,6 +30,7 @@ import {
   Tooltip,
   Popover,
   Divider,
+  Fab,
 } from "@mui/material";
 import {
   ExpandMore,
@@ -44,11 +45,13 @@ import {
 import AttendanceDrawer from "@/components/attendance/AttendanceDrawer";
 import TeaShopEntryDialog from "@/components/tea-shop/TeaShopEntryDialog";
 import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
+import AuditAvatarGroup from "@/components/common/AuditAvatarGroup";
 import type { TeaShopAccount } from "@/types/database.types";
 import { createClient } from "@/lib/supabase/client";
 import { useSite } from "@/contexts/SiteContext";
 import { useAuth } from "@/contexts/AuthContext";
 import PageHeader from "@/components/layout/PageHeader";
+import { hasEditPermission } from "@/lib/permissions";
 import type { LaborerType, DailyWorkSummary } from "@/types/database.types";
 import dayjs from "dayjs";
 
@@ -68,7 +71,7 @@ interface AttendanceRecord {
   daily_earnings: number;
   is_paid: boolean;
   subcontract_title?: string | null;
-  // New fields
+  // Time tracking fields
   in_time?: string | null;
   lunch_out?: string | null;
   lunch_in?: string | null;
@@ -78,6 +81,18 @@ interface AttendanceRecord {
   total_hours?: number | null;
   day_units?: number;
   snacks_amount?: number;
+  // Two-phase attendance fields
+  attendance_status?: "morning_entry" | "confirmed" | null;
+  work_progress_percent?: number | null;
+  // Audit tracking fields
+  entered_by?: string | null;
+  entered_by_user_id?: string | null;
+  entered_by_avatar?: string | null;
+  updated_by?: string | null;
+  updated_by_user_id?: string | null;
+  updated_by_avatar?: string | null;
+  created_at?: string;
+  updated_at?: string;
 }
 
 interface TeaShopData {
@@ -107,6 +122,15 @@ interface DateSummary {
   totalSalary: number;
   totalSnacks: number;
   totalExpense: number;
+  // Amounts by laborer type
+  dailyLaborerAmount: number;
+  contractLaborerAmount: number;
+  marketLaborerAmount: number;
+  // Payment breakdown
+  paidCount: number;
+  pendingCount: number;
+  paidAmount: number;
+  pendingAmount: number;
   // Work description
   workDescription: string | null;
   workStatus: string | null;
@@ -116,6 +140,9 @@ interface DateSummary {
   isExpanded?: boolean;
   // Tea shop data
   teaShop: TeaShopData | null;
+  // Two-phase attendance status
+  attendanceStatus: "morning_entry" | "confirmed" | "mixed";
+  workProgressPercent: number;
 }
 
 export default function AttendancePage() {
@@ -129,6 +156,7 @@ export default function AttendancePage() {
   const [workSummaries, setWorkSummaries] = useState<Map<string, DailyWorkSummary>>(new Map());
   const [viewMode, setViewMode] = useState<"date-wise" | "detailed">("date-wise");
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [drawerMode, setDrawerMode] = useState<"morning" | "evening" | "full">("full");
 
   // Date filters in title bar
   const [dateFrom, setDateFrom] = useState(dayjs().subtract(7, "days").format("YYYY-MM-DD"));
@@ -156,18 +184,34 @@ export default function AttendancePage() {
   const [teaShopAccount, setTeaShopAccount] = useState<TeaShopAccount | null>(null);
   const [teaShopEditingEntry, setTeaShopEditingEntry] = useState<any>(null);
 
-  const canEdit = userProfile?.role === "admin" || userProfile?.role === "office";
+  const canEdit = hasEditPermission(userProfile?.role);
 
   // Calculate totals for the filtered period
   const periodTotals = useMemo(() => {
     let totalSalary = 0;
     let totalTeaShop = 0;
     let totalLaborers = 0;
+    let totalPaidCount = 0;
+    let totalPendingCount = 0;
+    let totalPaidAmount = 0;
+    let totalPendingAmount = 0;
+    // Laborer type amounts
+    let totalDailyAmount = 0;
+    let totalContractAmount = 0;
+    let totalMarketAmount = 0;
 
     dateSummaries.forEach((s) => {
       totalSalary += s.totalSalary;
       totalTeaShop += s.teaShop?.total || 0;
       totalLaborers += s.totalLaborerCount;
+      totalPaidCount += s.paidCount;
+      totalPendingCount += s.pendingCount;
+      totalPaidAmount += s.paidAmount;
+      totalPendingAmount += s.pendingAmount;
+      // Laborer type amounts
+      totalDailyAmount += s.dailyLaborerAmount;
+      totalContractAmount += s.contractLaborerAmount;
+      totalMarketAmount += s.marketLaborerAmount;
     });
 
     const totalExpense = totalSalary + totalTeaShop;
@@ -178,6 +222,15 @@ export default function AttendancePage() {
       totalExpense,
       totalLaborers,
       avgPerDay: dateSummaries.length > 0 ? totalExpense / dateSummaries.length : 0,
+      // Payment breakdown
+      totalPaidCount,
+      totalPendingCount,
+      totalPaidAmount,
+      totalPendingAmount,
+      // Laborer type totals
+      totalDailyAmount,
+      totalContractAmount,
+      totalMarketAmount,
     };
   }, [dateSummaries]);
 
@@ -186,15 +239,19 @@ export default function AttendancePage() {
 
     setLoading(true);
     try {
-      // Fetch daily attendance with new fields
+      // Fetch daily attendance with audit fields and two-phase status
       const { data: attendanceData, error } = await supabase
         .from("daily_attendance")
         .select(`
           id, date, laborer_id, work_days, hours_worked, daily_rate_applied, daily_earnings, is_paid, subcontract_id,
           in_time, lunch_out, lunch_in, out_time, work_hours, break_hours, total_hours, day_units, snacks_amount,
+          attendance_status, work_progress_percent,
+          entered_by, recorded_by, recorded_by_user_id, updated_by, updated_by_user_id, created_at, updated_at,
           laborers!inner(name, team_id, category_id, role_id, laborer_type, team:teams!laborers_team_id_fkey(name), labor_categories(name), labor_roles(name)),
           building_sections!inner(name),
-          subcontracts(title)
+          subcontracts(title),
+          recorded_by_user:users!daily_attendance_recorded_by_user_id_fkey(avatar_url),
+          updated_by_user:users!daily_attendance_updated_by_user_id_fkey(avatar_url)
         `)
         .eq("site_id", selectedSite.id)
         .gte("date", dateFrom)
@@ -276,7 +333,7 @@ export default function AttendancePage() {
         marketMap.set(m.date, existing);
       });
 
-      // Map attendance records
+      // Map attendance records (including audit fields)
       const records: AttendanceRecord[] = (attendanceData || []).map((record: any) => ({
         id: record.id,
         date: record.date,
@@ -302,6 +359,18 @@ export default function AttendancePage() {
         total_hours: record.total_hours,
         day_units: record.day_units,
         snacks_amount: record.snacks_amount || 0,
+        // Two-phase attendance fields
+        attendance_status: record.attendance_status || "confirmed",
+        work_progress_percent: record.work_progress_percent ?? 100,
+        // Audit fields
+        entered_by: record.recorded_by || null,
+        entered_by_user_id: record.recorded_by_user_id || null,
+        entered_by_avatar: record.recorded_by_user?.avatar_url || null,
+        updated_by: record.updated_by || null,
+        updated_by_user_id: record.updated_by_user_id || null,
+        updated_by_avatar: record.updated_by_user?.avatar_url || null,
+        created_at: record.created_at,
+        updated_at: record.updated_at,
       }));
 
       setAttendanceRecords(records);
@@ -310,19 +379,32 @@ export default function AttendancePage() {
       const dateMap = new Map<string, DateSummary>();
       records.forEach((record) => {
         const existing = dateMap.get(record.date);
+
         if (existing) {
           existing.records.push(record);
           // Update counts
           if (record.laborer_type === "contract") {
             existing.contractLaborerCount++;
+            existing.contractLaborerAmount += record.daily_earnings;
           } else {
             existing.dailyLaborerCount++;
+            existing.dailyLaborerAmount += record.daily_earnings;
           }
           existing.totalLaborerCount = existing.dailyLaborerCount + existing.contractLaborerCount + existing.marketLaborerCount;
           // Update amounts
           existing.totalSalary += record.daily_earnings;
           existing.totalSnacks += record.snacks_amount || 0;
           existing.totalExpense = existing.totalSalary + existing.totalSnacks;
+          // Update payment breakdown (for daily laborers only - contract laborers tracked separately)
+          if (record.laborer_type !== "contract") {
+            if (record.is_paid) {
+              existing.paidCount++;
+              existing.paidAmount += record.daily_earnings;
+            } else {
+              existing.pendingCount++;
+              existing.pendingAmount += record.daily_earnings;
+            }
+          }
           // Update times
           if (record.in_time && (!existing.firstInTime || record.in_time < existing.firstInTime)) {
             existing.firstInTime = record.in_time;
@@ -342,6 +424,12 @@ export default function AttendancePage() {
           const categoryBreakdown: { [key: string]: { count: number; amount: number } } = {};
           categoryBreakdown[record.category_name] = { count: 1, amount: record.daily_earnings };
 
+          // Initial payment breakdown for this date
+          const initialPaidCount = record.laborer_type !== "contract" && record.is_paid ? 1 : 0;
+          const initialPendingCount = record.laborer_type !== "contract" && !record.is_paid ? 1 : 0;
+          const initialPaidAmount = record.laborer_type !== "contract" && record.is_paid ? record.daily_earnings : 0;
+          const initialPendingAmount = record.laborer_type !== "contract" && !record.is_paid ? record.daily_earnings : 0;
+
           dateMap.set(record.date, {
             date: record.date,
             records: [record],
@@ -354,12 +442,23 @@ export default function AttendancePage() {
             totalSalary: record.daily_earnings + (market?.salary || 0),
             totalSnacks: (record.snacks_amount || 0) + (market?.snacks || 0),
             totalExpense: record.daily_earnings + (record.snacks_amount || 0) + (market?.salary || 0) + (market?.snacks || 0),
+            // Amounts by laborer type
+            dailyLaborerAmount: record.laborer_type === "daily_market" ? record.daily_earnings : 0,
+            contractLaborerAmount: record.laborer_type === "contract" ? record.daily_earnings : 0,
+            marketLaborerAmount: market?.salary || 0,
+            // Payment breakdown
+            paidCount: initialPaidCount,
+            pendingCount: initialPendingCount,
+            paidAmount: initialPaidAmount,
+            pendingAmount: initialPendingAmount,
             workDescription: workSummary?.work_description || null,
             workStatus: workSummary?.work_status || null,
             comments: workSummary?.comments || null,
             categoryBreakdown,
             isExpanded: false,
             teaShop: teaShop || null,
+            attendanceStatus: record.attendance_status || "confirmed",
+            workProgressPercent: record.work_progress_percent ?? 100,
           });
         }
       });
@@ -381,12 +480,23 @@ export default function AttendancePage() {
             totalSalary: market.salary,
             totalSnacks: market.snacks,
             totalExpense: market.salary + market.snacks,
+            // Amounts by laborer type (market only)
+            dailyLaborerAmount: 0,
+            contractLaborerAmount: 0,
+            marketLaborerAmount: market.salary,
+            // Market laborers payment tracking (pending by default)
+            paidCount: 0,
+            pendingCount: market.count,
+            paidAmount: 0,
+            pendingAmount: market.salary,
             workDescription: workSummary?.work_description || null,
             workStatus: workSummary?.work_status || null,
             comments: workSummary?.comments || null,
             categoryBreakdown: {},
             isExpanded: false,
             teaShop: teaShop || null,
+            attendanceStatus: "confirmed",
+            workProgressPercent: 100,
           });
         }
       });
@@ -453,8 +563,9 @@ export default function AttendancePage() {
     }
   };
 
-  const handleOpenDrawerForDate = (date: string) => {
+  const handleOpenDrawerForDate = (date: string, mode: "morning" | "evening" | "full" = "full") => {
     setSelectedDateForDrawer(date);
+    setDrawerMode(mode);
     setDrawerOpen(true);
   };
 
@@ -526,6 +637,56 @@ export default function AttendancePage() {
     try {
       const { error } = await supabase.from("daily_attendance").delete().eq("id", id);
       if (error) throw error;
+      fetchAttendanceHistory();
+    } catch (error: any) {
+      alert("Failed to delete: " + error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Delete all attendance for a specific date
+  const handleDeleteDateAttendance = async (date: string) => {
+    const recordCount = dateSummaries.find((s) => s.date === date)?.totalLaborerCount || 0;
+    if (
+      !confirm(
+        `Are you sure you want to delete ALL attendance records for ${dayjs(date).format("DD MMM YYYY")}?\n\nThis will delete ${recordCount} laborer records, market laborer entries, tea shop entries, and work summary for this date.\n\nThis action cannot be undone.`
+      )
+    )
+      return;
+
+    setLoading(true);
+    try {
+      // Delete daily attendance records
+      const { error: dailyError } = await supabase
+        .from("daily_attendance")
+        .delete()
+        .eq("site_id", selectedSite!.id)
+        .eq("date", date);
+      if (dailyError) throw dailyError;
+
+      // Delete market laborer attendance
+      const { error: marketError } = await (supabase.from("market_laborer_attendance") as any)
+        .delete()
+        .eq("site_id", selectedSite!.id)
+        .eq("date", date);
+      if (marketError) throw marketError;
+
+      // Delete tea shop entries for this date
+      const { error: teaError } = await (supabase.from("tea_shop_entries") as any)
+        .delete()
+        .eq("site_id", selectedSite!.id)
+        .eq("date", date);
+      if (teaError) throw teaError;
+
+      // Delete daily work summary
+      const { error: summaryError } = await supabase
+        .from("daily_work_summary")
+        .delete()
+        .eq("site_id", selectedSite!.id)
+        .eq("date", date);
+      if (summaryError) throw summaryError;
+
       fetchAttendanceHistory();
     } catch (error: any) {
       alert("Failed to delete: " + error.message);
@@ -692,14 +853,16 @@ export default function AttendancePage() {
             />
             <Button
               variant="contained"
-              color="primary"
-              startIcon={<AddIcon />}
+              color="warning"
+              startIcon={<AccessTime />}
               onClick={() => {
                 setSelectedDateForDrawer(undefined);
+                setDrawerMode("morning");
                 setDrawerOpen(true);
               }}
+              sx={{ mr: 1 }}
             >
-              Add Attendance
+              🌅 Start Day
             </Button>
             <Button
               variant={viewMode === "date-wise" ? "contained" : "outlined"}
@@ -741,6 +904,45 @@ export default function AttendancePage() {
             ₹{periodTotals.totalTeaShop.toLocaleString()}
           </Typography>
         </Box>
+        <Divider orientation="vertical" flexItem />
+        <Box>
+          <Typography variant="caption" color="text.secondary">Daily</Typography>
+          <Typography variant="h6" fontWeight={600} color="warning.main">
+            ₹{periodTotals.totalDailyAmount.toLocaleString()}
+          </Typography>
+        </Box>
+        <Box>
+          <Typography variant="caption" color="text.secondary">Contract</Typography>
+          <Typography variant="h6" fontWeight={600} color="info.main">
+            ₹{periodTotals.totalContractAmount.toLocaleString()}
+          </Typography>
+        </Box>
+        <Box>
+          <Typography variant="caption" color="text.secondary">Market</Typography>
+          <Typography variant="h6" fontWeight={600} sx={{ color: "secondary.main" }}>
+            ₹{periodTotals.totalMarketAmount.toLocaleString()}
+          </Typography>
+        </Box>
+        <Divider orientation="vertical" flexItem />
+        <Box>
+          <Typography variant="caption" color="text.secondary">Paid</Typography>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            <Typography variant="h6" fontWeight={600} color="success.main">
+              ₹{periodTotals.totalPaidAmount.toLocaleString()}
+            </Typography>
+            <Chip label={periodTotals.totalPaidCount} size="small" color="success" variant="outlined" />
+          </Box>
+        </Box>
+        <Box>
+          <Typography variant="caption" color="text.secondary">Pending</Typography>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            <Typography variant="h6" fontWeight={600} color="warning.main">
+              ₹{periodTotals.totalPendingAmount.toLocaleString()}
+            </Typography>
+            <Chip label={periodTotals.totalPendingCount} size="small" color="warning" variant="outlined" />
+          </Box>
+        </Box>
+        <Divider orientation="vertical" flexItem />
         <Box>
           <Typography variant="caption" color="text.secondary">Avg/Day</Typography>
           <Typography variant="h6" fontWeight={600}>
@@ -869,15 +1071,59 @@ export default function AttendancePage() {
                         </Tooltip>
                       </TableCell>
                       <TableCell>
-                        <Typography variant="caption" noWrap sx={{ maxWidth: 100, display: "block" }}>
-                          {summary.workStatus || "-"}
-                        </Typography>
+                        {summary.attendanceStatus === "morning_entry" ? (
+                          <Chip
+                            label="🌅 Morning Only"
+                            size="small"
+                            color="warning"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenDrawerForDate(summary.date, "evening");
+                            }}
+                            sx={{ cursor: "pointer" }}
+                          />
+                        ) : (
+                          <Chip
+                            label="✓ Confirmed"
+                            size="small"
+                            color="success"
+                            variant="outlined"
+                          />
+                        )}
                       </TableCell>
                     </TableRow>
                     <TableRow>
                       <TableCell colSpan={13} sx={{ py: 0, border: 0 }}>
                         <Collapse in={summary.isExpanded} timeout="auto" unmountOnExit>
                           <Box sx={{ p: 2, bgcolor: "grey.50" }}>
+                            {/* Laborer Type Breakdown */}
+                            <Box sx={{ display: "flex", gap: 2, mb: 2, flexWrap: "wrap" }}>
+                              {summary.dailyLaborerCount > 0 && (
+                                <Chip
+                                  label={`Daily: ₹${summary.dailyLaborerAmount.toLocaleString()} (${summary.dailyLaborerCount})`}
+                                  size="small"
+                                  color="warning"
+                                  variant="filled"
+                                />
+                              )}
+                              {summary.contractLaborerCount > 0 && (
+                                <Chip
+                                  label={`Contract: ₹${summary.contractLaborerAmount.toLocaleString()} (${summary.contractLaborerCount})`}
+                                  size="small"
+                                  color="info"
+                                  variant="filled"
+                                />
+                              )}
+                              {summary.marketLaborerCount > 0 && (
+                                <Chip
+                                  label={`Market: ₹${summary.marketLaborerAmount.toLocaleString()} (${summary.marketLaborerCount})`}
+                                  size="small"
+                                  color="secondary"
+                                  variant="filled"
+                                />
+                              )}
+                            </Box>
+
                             {/* Header with Manage Button */}
                             <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 2 }}>
                               <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}>
@@ -891,16 +1137,55 @@ export default function AttendancePage() {
                                   />
                                 ))}
                               </Box>
-                              {canEdit && (
-                                <Button
-                                  variant="contained"
-                                  size="small"
-                                  startIcon={<Edit />}
-                                  onClick={() => handleOpenDrawerForDate(summary.date)}
-                                >
-                                  Edit Attendance
-                                </Button>
-                              )}
+                              <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
+                                {/* Audit Avatar - show who created/edited this entry */}
+                                {summary.records.length > 0 && (
+                                  <AuditAvatarGroup
+                                    createdByName={summary.records[0]?.entered_by}
+                                    createdByAvatar={summary.records[0]?.entered_by_avatar}
+                                    createdAt={summary.records[0]?.created_at}
+                                    updatedByName={summary.records[0]?.updated_by}
+                                    updatedByAvatar={summary.records[0]?.updated_by_avatar}
+                                    updatedAt={summary.records[0]?.updated_at}
+                                    compact
+                                    size="small"
+                                  />
+                                )}
+                                {canEdit && summary.attendanceStatus === "morning_entry" && (
+                                  <Button
+                                    variant="contained"
+                                    color="success"
+                                    size="small"
+                                    onClick={() => handleOpenDrawerForDate(summary.date, "evening")}
+                                  >
+                                    🌆 Confirm Attendance
+                                  </Button>
+                                )}
+                                {canEdit && summary.attendanceStatus !== "morning_entry" && (
+                                  <Button
+                                    variant="contained"
+                                    size="small"
+                                    startIcon={<Edit />}
+                                    onClick={() => handleOpenDrawerForDate(summary.date, "full")}
+                                  >
+                                    Edit Attendance
+                                  </Button>
+                                )}
+                                {canEdit && (
+                                  <Tooltip title="Delete all attendance for this day">
+                                    <IconButton
+                                      size="small"
+                                      color="error"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleDeleteDateAttendance(summary.date);
+                                      }}
+                                    >
+                                      <Delete fontSize="small" />
+                                    </IconButton>
+                                  </Tooltip>
+                                )}
+                              </Box>
                             </Box>
 
                             {/* Work Description */}
@@ -1053,13 +1338,16 @@ export default function AttendancePage() {
         onClose={() => {
           setDrawerOpen(false);
           setSelectedDateForDrawer(undefined);
+          setDrawerMode("full");
         }}
         siteId={selectedSite.id}
         date={selectedDateForDrawer}
         onSuccess={() => {
           fetchAttendanceHistory();
           setSelectedDateForDrawer(undefined);
+          setDrawerMode("full");
         }}
+        mode={drawerMode}
       />
 
       {/* Tea Shop Entry Dialog (Direct) */}
@@ -1235,6 +1523,31 @@ export default function AttendancePage() {
           </Box>
         )}
       </Popover>
+
+      {/* Floating Action Button for Add Attendance */}
+      {canEdit && (
+        <Fab
+          color="primary"
+          onClick={() => {
+            setSelectedDateForDrawer(undefined);
+            setDrawerMode("full");
+            setDrawerOpen(true);
+          }}
+          sx={{
+            position: "fixed",
+            bottom: 24,
+            right: 24,
+            opacity: 0.7,
+            transition: "all 0.2s ease",
+            "&:hover": {
+              opacity: 1,
+              transform: "scale(1.1)",
+            },
+          }}
+        >
+          <AddIcon />
+        </Fab>
+      )}
     </Box>
   );
 }

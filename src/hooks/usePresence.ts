@@ -152,7 +152,7 @@ export function useOptimisticLock() {
       const supabase = createClient();
 
       try {
-        const { data, error } = await supabase
+        const { data, error } = await (supabase as any)
           .from(tableName)
           .select("updated_at")
           .eq("id", recordId)

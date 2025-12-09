@@ -48,6 +48,7 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import PageHeader from "@/components/layout/PageHeader";
+import { hasEditPermission } from "@/lib/permissions";
 import type {
   SiteEngineerTransaction,
   SiteEngineerSettlement,
@@ -77,6 +78,18 @@ interface SettlementWithDetails extends SiteEngineerSettlement {
   engineer_name?: string;
 }
 
+interface PendingAttendanceSettlement {
+  transaction_id: string;
+  engineer_id: string;
+  engineer_name: string;
+  site_id: string;
+  site_name: string;
+  amount: number;
+  record_count: number;
+  created_at: string;
+  proof_url: string | null;
+}
+
 interface TabPanelProps {
   children?: React.ReactNode;
   index: number;
@@ -95,12 +108,14 @@ function TabPanel(props: TabPanelProps) {
 export default function EngineerWalletPage() {
   const [transactions, setTransactions] = useState<TransactionWithDetails[]>([]);
   const [settlements, setSettlements] = useState<SettlementWithDetails[]>([]);
+  const [pendingAttendance, setPendingAttendance] = useState<PendingAttendanceSettlement[]>([]);
   const [engineers, setEngineers] = useState<User[]>([]);
   const [sites, setSites] = useState<Site[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [tabValue, setTabValue] = useState(0);
+  const [settlingTransactionId, setSettlingTransactionId] = useState<string | null>(null);
   const [openTransactionDialog, setOpenTransactionDialog] = useState(false);
   const [openSettlementDialog, setOpenSettlementDialog] = useState(false);
   const [selectedEngineer, setSelectedEngineer] = useState<User | null>(null);
@@ -108,7 +123,7 @@ export default function EngineerWalletPage() {
   const { userProfile } = useAuth();
   const supabase = createClient();
 
-  const canEdit = userProfile?.role === "admin" || userProfile?.role === "office";
+  const canEdit = hasEditPermission(userProfile?.role);
 
   // Transaction Form State
   const [transactionForm, setTransactionForm] = useState({
@@ -190,6 +205,69 @@ export default function EngineerWalletPage() {
         })
       );
       setSettlements(formattedSettlements);
+
+      // Fetch pending attendance settlements - find attendance with engineer_transaction_id but not paid
+      // First get unique transaction IDs from unpaid attendance
+      const { data: unpaidDailyAttendance } = await (supabase.from("daily_attendance") as any)
+        .select("engineer_transaction_id, amount")
+        .not("engineer_transaction_id", "is", null)
+        .eq("is_paid", false);
+
+      const { data: unpaidMarketAttendance } = await (supabase.from("market_laborer_attendance") as any)
+        .select("engineer_transaction_id, total_wages")
+        .not("engineer_transaction_id", "is", null)
+        .eq("is_paid", false);
+
+      // Aggregate by transaction ID
+      const txAggregates: Record<string, { count: number; amount: number }> = {};
+      ((unpaidDailyAttendance || []) as any[]).forEach((a: any) => {
+        if (!txAggregates[a.engineer_transaction_id]) {
+          txAggregates[a.engineer_transaction_id] = { count: 0, amount: 0 };
+        }
+        txAggregates[a.engineer_transaction_id].count += 1;
+        txAggregates[a.engineer_transaction_id].amount += a.amount || 0;
+      });
+      ((unpaidMarketAttendance || []) as any[]).forEach((a: any) => {
+        if (!txAggregates[a.engineer_transaction_id]) {
+          txAggregates[a.engineer_transaction_id] = { count: 0, amount: 0 };
+        }
+        txAggregates[a.engineer_transaction_id].count += 1;
+        txAggregates[a.engineer_transaction_id].amount += a.total_wages || 0;
+      });
+
+      const txIds = Object.keys(txAggregates);
+      if (txIds.length > 0) {
+        const { data: pendingTxData } = await (supabase.from("site_engineer_transactions") as any)
+          .select(`
+            id,
+            user_id,
+            site_id,
+            amount,
+            created_at,
+            proof_url,
+            is_settled,
+            user:users!site_engineer_transactions_user_id_fkey(name),
+            site:sites(name)
+          `)
+          .in("id", txIds)
+          .order("created_at", { ascending: false });
+
+        const pendingAttendanceData: PendingAttendanceSettlement[] = ((pendingTxData || []) as any[])
+          .map((t: any) => ({
+            transaction_id: t.id,
+            engineer_id: t.user_id,
+            engineer_name: t.user?.name || "Unknown",
+            site_id: t.site_id,
+            site_name: t.site?.name || "Unknown Site",
+            amount: txAggregates[t.id]?.amount || t.amount,
+            record_count: txAggregates[t.id]?.count || 0,
+            created_at: t.created_at,
+            proof_url: t.proof_url,
+          }));
+        setPendingAttendance(pendingAttendanceData);
+      } else {
+        setPendingAttendance([]);
+      }
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -378,6 +456,42 @@ export default function EngineerWalletPage() {
       setOpenTransactionDialog(false);
     } catch (err: any) {
       setError(err.message);
+    }
+  };
+
+  // Settle attendance payments - marks linked attendance as paid
+  const handleSettleAttendance = async (transactionId: string) => {
+    setSettlingTransactionId(transactionId);
+    try {
+      setError("");
+
+      // Mark the transaction as settled
+      await (supabase.from("site_engineer_transactions") as any)
+        .update({ is_settled: true })
+        .eq("id", transactionId);
+
+      // Mark all linked daily attendance as paid
+      await (supabase.from("daily_attendance") as any)
+        .update({
+          is_paid: true,
+          payment_date: dayjs().format("YYYY-MM-DD"),
+        })
+        .eq("engineer_transaction_id", transactionId);
+
+      // Mark all linked market attendance as paid
+      await (supabase.from("market_laborer_attendance") as any)
+        .update({
+          is_paid: true,
+          payment_date: dayjs().format("YYYY-MM-DD"),
+        })
+        .eq("engineer_transaction_id", transactionId);
+
+      setSuccess("Attendance settled successfully");
+      await fetchData();
+    } catch (err: any) {
+      setError("Failed to settle: " + err.message);
+    } finally {
+      setSettlingTransactionId(null);
     }
   };
 
@@ -740,6 +854,16 @@ export default function EngineerWalletPage() {
           <Tabs value={tabValue} onChange={(_, v) => setTabValue(v)}>
             <Tab label="Transactions" />
             <Tab label="Settlements" />
+            <Tab
+              label={
+                <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                  Pending Attendance
+                  {pendingAttendance.length > 0 && (
+                    <Chip label={pendingAttendance.length} size="small" color="warning" />
+                  )}
+                </Box>
+              }
+            />
           </Tabs>
 
           <TabPanel value={tabValue} index={0}>
@@ -772,9 +896,9 @@ export default function EngineerWalletPage() {
                         <TableCell>{t.user_name}</TableCell>
                         <TableCell>
                           <Chip
-                            label={getTransactionTypeLabel(t.transaction_type)}
+                            label={getTransactionTypeLabel(t.transaction_type as SiteEngineerTransactionType)}
                             size="small"
-                            color={getTransactionTypeColor(t.transaction_type)}
+                            color={getTransactionTypeColor(t.transaction_type as SiteEngineerTransactionType)}
                           />
                         </TableCell>
                         <TableCell>{t.site_name}</TableCell>
@@ -868,6 +992,95 @@ export default function EngineerWalletPage() {
                 </TableBody>
               </Table>
             </TableContainer>
+          </TabPanel>
+
+          {/* Pending Attendance Settlements Tab */}
+          <TabPanel value={tabValue} index={2}>
+            {pendingAttendance.length === 0 ? (
+              <Alert severity="info" sx={{ mb: 2 }}>
+                No pending attendance settlements. All attendance payments have been settled.
+              </Alert>
+            ) : (
+              <>
+                <Alert severity="warning" sx={{ mb: 2 }}>
+                  These are attendance payments sent to engineers that haven&apos;t been settled yet.
+                  When the engineer pays the laborers, click &quot;Settle&quot; to mark as paid.
+                </Alert>
+                <TableContainer>
+                  <Table>
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Date Sent</TableCell>
+                        <TableCell>Engineer</TableCell>
+                        <TableCell>Site</TableCell>
+                        <TableCell align="center">Records</TableCell>
+                        <TableCell align="right">Amount</TableCell>
+                        <TableCell>Proof</TableCell>
+                        <TableCell align="center">Action</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {pendingAttendance.map((p) => (
+                        <TableRow key={p.transaction_id}>
+                          <TableCell>{dayjs(p.created_at).format("DD MMM YYYY")}</TableCell>
+                          <TableCell>
+                            <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                              <PersonIcon fontSize="small" color="action" />
+                              {p.engineer_name}
+                            </Box>
+                          </TableCell>
+                          <TableCell>{p.site_name}</TableCell>
+                          <TableCell align="center">
+                            <Chip label={`${p.record_count} laborers`} size="small" variant="outlined" />
+                          </TableCell>
+                          <TableCell align="right">
+                            <Typography fontWeight={600} color="warning.main">
+                              ₹{p.amount.toLocaleString()}
+                            </Typography>
+                          </TableCell>
+                          <TableCell>
+                            {p.proof_url ? (
+                              <Tooltip title="View payment proof">
+                                <IconButton
+                                  size="small"
+                                  onClick={() => window.open(p.proof_url!, "_blank")}
+                                >
+                                  <ReceiptIcon fontSize="small" />
+                                </IconButton>
+                              </Tooltip>
+                            ) : (
+                              "-"
+                            )}
+                          </TableCell>
+                          <TableCell align="center">
+                            <Button
+                              variant="contained"
+                              color="success"
+                              size="small"
+                              startIcon={<CheckIcon />}
+                              onClick={() => handleSettleAttendance(p.transaction_id)}
+                              disabled={settlingTransactionId === p.transaction_id || !canEdit}
+                            >
+                              {settlingTransactionId === p.transaction_id ? "Settling..." : "Settle"}
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+
+                {/* Summary */}
+                <Box sx={{ mt: 2, p: 2, bgcolor: "background.default", borderRadius: 1 }}>
+                  <Typography variant="subtitle2" color="text.secondary">
+                    Total Pending: {pendingAttendance.length} transactions |{" "}
+                    <Typography component="span" fontWeight={600} color="warning.main">
+                      ₹{pendingAttendance.reduce((sum, p) => sum + p.amount, 0).toLocaleString()}
+                    </Typography>
+                  </Typography>
+                </Box>
+              </>
+            )}
           </TabPanel>
         </CardContent>
       </Card>

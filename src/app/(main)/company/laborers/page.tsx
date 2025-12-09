@@ -2,7 +2,7 @@
 
 export const dynamic = "force-dynamic";
 
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect, useCallback } from "react";
 import {
   Box,
   Button,
@@ -30,14 +30,16 @@ import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import PageHeader from "@/components/layout/PageHeader";
-import type {
-  Laborer,
-  LaborCategory,
-  LaborRole,
-  Team,
-  LaborerType,
-} from "@/types/database.types";
+import { hasEditPermission } from "@/lib/permissions";
+import type { Tables } from "@/types/database.types";
 import dayjs from "dayjs";
+
+// Type aliases using Supabase Tables helper
+type Laborer = Tables<"laborers">;
+type LaborCategory = Tables<"labor_categories">;
+type LaborRole = Tables<"labor_roles">;
+type Team = Tables<"teams">;
+type LaborerType = "daily_market" | "contract";
 
 type LaborerWithDetails = Laborer & {
   category_name: string;
@@ -59,7 +61,7 @@ export default function LaborersPage() {
   const [success, setSuccess] = useState("");
 
   const { userProfile } = useAuth();
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
 
   const [formData, setFormData] = useState({
     name: "",
@@ -75,7 +77,7 @@ export default function LaborersPage() {
     joining_date: dayjs().format("YYYY-MM-DD"),
   });
 
-  const fetchLaborers = async () => {
+  const fetchLaborers = useCallback(async () => {
     try {
       setLoading(true);
       const { data, error } = await supabase
@@ -100,9 +102,9 @@ export default function LaborersPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [supabase]);
 
-  const fetchOptions = async () => {
+  const fetchOptions = useCallback(async () => {
     const [catRes, roleRes, teamRes] = await Promise.all([
       supabase.from("labor_categories").select("*").order("name"),
       supabase.from("labor_roles").select("*").order("name"),
@@ -111,12 +113,12 @@ export default function LaborersPage() {
     setCategories(catRes.data || []);
     setRoles(roleRes.data || []);
     setTeams(teamRes.data || []);
-  };
+  }, [supabase]);
 
   useEffect(() => {
     fetchLaborers();
     fetchOptions();
-  }, []);
+  }, [fetchLaborers, fetchOptions]);
 
   const handleOpenDialog = (laborer?: LaborerWithDetails) => {
     if (laborer) {
@@ -127,12 +129,12 @@ export default function LaborersPage() {
         category_id: laborer.category_id,
         role_id: laborer.role_id,
         employment_type: laborer.employment_type,
-        laborer_type: laborer.laborer_type || "daily_market",
+        laborer_type: (laborer.laborer_type as LaborerType) || "daily_market",
         daily_rate: laborer.daily_rate,
         team_id: laborer.team_id || "",
         associated_team_id: laborer.associated_team_id || "",
         status: laborer.status,
-        joining_date: laborer.joining_date,
+        joining_date: laborer.joining_date || dayjs().format("YYYY-MM-DD"),
       });
     } else {
       setEditingLaborer(null);
@@ -189,23 +191,25 @@ export default function LaborersPage() {
     }
   };
 
-  const handleDeactivate = async (id: string) => {
-    if (!confirm("Deactivate this laborer?")) return;
-    try {
-      setLoading(true);
-      await (supabase.from("laborers") as any)
-        .update({ status: "inactive" })
-        .eq("id", id);
-      await fetchLaborers();
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const handleDeactivate = useCallback(
+    async (id: string) => {
+      if (!confirm("Deactivate this laborer?")) return;
+      try {
+        setLoading(true);
+        await (supabase.from("laborers") as any)
+          .update({ status: "inactive" })
+          .eq("id", id);
+        await fetchLaborers();
+      } catch (err: any) {
+        setError(err.message);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [supabase, fetchLaborers]
+  );
 
-  const canEdit =
-    userProfile?.role === "admin" || userProfile?.role === "office";
+  const canEdit = hasEditPermission(userProfile?.role);
   const filteredRoles = roles.filter(
     (r) => r.category_id === formData.category_id
   );
@@ -313,7 +317,7 @@ export default function LaborersPage() {
         ),
       },
     ],
-    [canEdit]
+    [canEdit, handleDeactivate]
   );
 
   return (
@@ -450,25 +454,47 @@ export default function LaborersPage() {
                         ...formData,
                         laborer_type: e.target.value as LaborerType,
                         // Clear associated team if switching to daily_market
-                        associated_team_id: e.target.value === "daily_market" ? "" : formData.associated_team_id,
+                        associated_team_id:
+                          e.target.value === "daily_market"
+                            ? ""
+                            : formData.associated_team_id,
                       })
                     }
                     label="Laborer Type"
                   >
-                    <MenuItem value="daily_market">Daily Market (Hired separately - paid directly)</MenuItem>
-                    <MenuItem value="contract">Contract (Mesthri&apos;s team - paid via Mesthri)</MenuItem>
+                    <MenuItem value="daily_market">
+                      Daily Market (Hired separately - paid directly)
+                    </MenuItem>
+                    <MenuItem value="contract">
+                      Contract (Mesthri&apos;s team - paid via Mesthri)
+                    </MenuItem>
                   </Select>
                 </FormControl>
               </Grid>
               <Grid size={{ xs: 12, sm: 6 }}>
-                <FormControl fullWidth disabled={formData.laborer_type !== "contract"}>
-                  <InputLabel>Mesthri&apos;s Team {formData.laborer_type === "contract" ? "(Required)" : "(N/A)"}</InputLabel>
+                <FormControl
+                  fullWidth
+                  disabled={formData.laborer_type !== "contract"}
+                >
+                  <InputLabel>
+                    Mesthri&apos;s Team{" "}
+                    {formData.laborer_type === "contract"
+                      ? "(Required)"
+                      : "(N/A)"}
+                  </InputLabel>
                   <Select
                     value={formData.associated_team_id}
                     onChange={(e) =>
-                      setFormData({ ...formData, associated_team_id: e.target.value })
+                      setFormData({
+                        ...formData,
+                        associated_team_id: e.target.value,
+                      })
                     }
-                    label={`Mesthri's Team ${formData.laborer_type === "contract" ? "(Required)" : "(N/A)"}`}
+                    label={`Mesthri's Team ${
+                      formData.laborer_type === "contract"
+                        ? "(Required)"
+                        : "(N/A)"
+                    }`}
                   >
                     <MenuItem value="">None</MenuItem>
                     {teams.map((t) => (

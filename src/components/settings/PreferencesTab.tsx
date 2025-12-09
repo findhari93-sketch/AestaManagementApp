@@ -72,7 +72,7 @@ export default function PreferencesTab({ onSuccess, onError }: PreferencesTabPro
   useEffect(() => {
     if (userProfile) {
       setPreferences({
-        theme_preference: userProfile.theme_preference || "light",
+        theme_preference: (userProfile.theme_preference as ThemePreference) || "light",
         email_notifications: userProfile.email_notifications ?? true,
         timezone: userProfile.timezone || "Asia/Kolkata",
         date_format: userProfile.date_format || "DD/MM/YYYY",

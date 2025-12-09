@@ -46,8 +46,10 @@ import { createClient } from "@/lib/supabase/client";
 import { useSite } from "@/contexts/SiteContext";
 import { useAuth } from "@/contexts/AuthContext";
 import PageHeader from "@/components/layout/PageHeader";
+import { hasEditPermission } from "@/lib/permissions";
 import TeaShopDrawer from "@/components/tea-shop/TeaShopDrawer";
 import TeaShopEntryDialog from "@/components/tea-shop/TeaShopEntryDialog";
+import AuditAvatarGroup from "@/components/common/AuditAvatarGroup";
 import TeaShopSettlementDialog from "@/components/tea-shop/TeaShopSettlementDialog";
 import type { TeaShopAccount, TeaShopEntry, TeaShopSettlement } from "@/types/database.types";
 import dayjs from "dayjs";
@@ -92,7 +94,7 @@ export default function TeaShopPage() {
   const [dateFrom, setDateFrom] = useState(dayjs().subtract(7, "days").format("YYYY-MM-DD"));
   const [dateTo, setDateTo] = useState(dayjs().format("YYYY-MM-DD"));
 
-  const canEdit = userProfile?.role === "admin" || userProfile?.role === "office";
+  const canEdit = hasEditPermission(userProfile?.role);
 
   // Calculate summary stats
   const stats = useMemo(() => {
@@ -100,26 +102,26 @@ export default function TeaShopPage() {
       (e) => e.date >= dateFrom && e.date <= dateTo
     );
 
-    const totalEntries = filteredEntries.reduce((sum, e) => sum + e.total_amount, 0);
-    const totalTea = filteredEntries.reduce((sum, e) => sum + e.tea_total, 0);
-    const totalSnacks = filteredEntries.reduce((sum, e) => sum + e.snacks_total, 0);
+    const totalEntries = filteredEntries.reduce((sum, e) => sum + (e.total_amount || 0), 0);
+    const totalTea = filteredEntries.reduce((sum, e) => sum + (e.tea_total || 0), 0);
+    const totalSnacks = filteredEntries.reduce((sum, e) => sum + (e.snacks_total || 0), 0);
 
     // Calculate pending balance (all entries minus all settlements)
-    const allEntriesTotal = entries.reduce((sum, e) => sum + e.total_amount, 0);
-    const allSettledTotal = settlements.reduce((sum, s) => sum + s.amount_paid, 0);
+    const allEntriesTotal = entries.reduce((sum, e) => sum + (e.total_amount || 0), 0);
+    const allSettledTotal = settlements.reduce((sum, s) => sum + (s.amount_paid || 0), 0);
     const pendingBalance = allEntriesTotal - allSettledTotal;
 
     // This week
     const weekStart = dayjs().startOf("week").format("YYYY-MM-DD");
     const thisWeekTotal = entries
       .filter((e) => e.date >= weekStart)
-      .reduce((sum, e) => sum + e.total_amount, 0);
+      .reduce((sum, e) => sum + (e.total_amount || 0), 0);
 
     // This month
     const monthStart = dayjs().startOf("month").format("YYYY-MM-DD");
     const thisMonthTotal = entries
       .filter((e) => e.date >= monthStart)
-      .reduce((sum, e) => sum + e.total_amount, 0);
+      .reduce((sum, e) => sum + (e.total_amount || 0), 0);
 
     // Last payment
     const lastSettlement = settlements.length > 0
@@ -448,6 +450,7 @@ export default function TeaShopPage() {
                       <TableCell sx={{ fontWeight: 700 }} align="right">Tea</TableCell>
                       <TableCell sx={{ fontWeight: 700 }} align="right">Snacks</TableCell>
                       <TableCell sx={{ fontWeight: 700 }} align="right">Total</TableCell>
+                      <TableCell sx={{ fontWeight: 700 }} align="center">By</TableCell>
                       <TableCell sx={{ fontWeight: 700 }} align="center">Actions</TableCell>
                     </TableRow>
                   </TableHead>
@@ -492,12 +495,22 @@ export default function TeaShopPage() {
                           })()}
                         </TableCell>
                         <TableCell align="center">{entry.tea_rounds}</TableCell>
-                        <TableCell align="right">₹{entry.tea_total.toLocaleString()}</TableCell>
-                        <TableCell align="right">₹{entry.snacks_total.toLocaleString()}</TableCell>
+                        <TableCell align="right">₹{(entry.tea_total || 0).toLocaleString()}</TableCell>
+                        <TableCell align="right">₹{(entry.snacks_total || 0).toLocaleString()}</TableCell>
                         <TableCell align="right">
                           <Typography fontWeight={600}>
-                            ₹{entry.total_amount.toLocaleString()}
+                            ₹{(entry.total_amount || 0).toLocaleString()}
                           </Typography>
+                        </TableCell>
+                        <TableCell align="center">
+                          <AuditAvatarGroup
+                            createdByName={entry.entered_by}
+                            createdAt={entry.created_at}
+                            updatedByName={(entry as any).updated_by}
+                            updatedAt={entry.updated_at}
+                            compact
+                            size="small"
+                          />
                         </TableCell>
                         <TableCell align="center">
                           <Box sx={{ display: "flex", gap: 0.5, justifyContent: "center" }}>
@@ -570,13 +583,13 @@ export default function TeaShopPage() {
                       <TableCell align="right">₹{settlement.total_due.toLocaleString()}</TableCell>
                       <TableCell align="right">
                         <Typography fontWeight={600} color="success.main">
-                          ₹{settlement.amount_paid.toLocaleString()}
+                          ₹{(settlement.amount_paid || 0).toLocaleString()}
                         </Typography>
                       </TableCell>
                       <TableCell align="right">
-                        {settlement.balance_remaining > 0 ? (
+                        {(settlement.balance_remaining || 0) > 0 ? (
                           <Typography color="error.main">
-                            ₹{settlement.balance_remaining.toLocaleString()}
+                            ₹{(settlement.balance_remaining || 0).toLocaleString()}
                           </Typography>
                         ) : (
                           <Typography color="success.main">₹0</Typography>

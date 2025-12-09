@@ -97,10 +97,10 @@ export default function TeaShopSettlementDialog({
         // Edit mode - populate from settlement
         setPeriodStart(settlement.period_start);
         setPeriodEnd(settlement.period_end);
-        setAmountPaying(settlement.amount_paid);
+        setAmountPaying(settlement.amount_paid || 0);
         setPaymentDate(settlement.payment_date);
-        setPaymentMode(settlement.payment_mode);
-        setPayerType(settlement.payer_type);
+        setPaymentMode((settlement.payment_mode as PaymentMode) || "cash");
+        setPayerType(settlement.payer_type === "site_engineer" ? "site_engineer" : "company_direct");
         setSelectedEngineerId(settlement.site_engineer_id || "");
         setCreateWalletTransaction(false); // Don't create new transaction when editing
         setNotes(settlement.notes || "");
@@ -167,7 +167,7 @@ export default function TeaShopSettlementDialog({
   }, [entries, periodStart, periodEnd]);
 
   const entriesTotalInPeriod = useMemo(() => {
-    return entriesInPeriod.reduce((sum, e) => sum + e.total_amount, 0);
+    return entriesInPeriod.reduce((sum, e) => sum + (e.total_amount || 0), 0);
   }, [entriesInPeriod]);
 
   const previousBalance = pendingBalance - entriesTotalInPeriod;

@@ -348,9 +348,9 @@ export default function TeaShopEntryDialog({
 
       if (entry) {
         setDate(entry.date);
-        setTeaRounds(entry.tea_rounds);
-        setTeaRatePerRound(entry.tea_rate_per_round);
-        setSnackItems(entry.snacks_items || []);
+        setTeaRounds(entry.tea_rounds || 0);
+        setTeaRatePerRound(entry.tea_rate_per_round || 0);
+        setSnackItems((entry.snacks_items as unknown as SnackItem[]) || []);
         setNotes(entry.notes || "");
         setMarketLaborerCount(entry.market_laborer_count || 0);
         setMarketTeaAmount(entry.market_laborer_tea_amount || 0);
@@ -575,11 +575,11 @@ export default function TeaShopEntryDialog({
     try {
       const totalPeopleCount = selectedWorkingCount + nonWorkingLaborers.length + marketLaborerCount;
 
-      const entryData = {
+      const entryData: Record<string, unknown> = {
         tea_shop_id: shop.id,
         site_id: shop.site_id,
         date,
-        amount: grandTotal, // Required NOT NULL column in database
+        amount: grandTotal,
         tea_rounds: teaRounds,
         tea_people_count: totalPeopleCount,
         tea_rate_per_round: teaRatePerRound,
@@ -587,8 +587,8 @@ export default function TeaShopEntryDialog({
         snacks_items: snackItems,
         snacks_total: snacksTotal,
         total_amount: grandTotal,
-        num_rounds: teaRounds, // Legacy column mapping
-        num_people: totalPeopleCount, // Legacy column mapping
+        num_rounds: teaRounds,
+        num_people: totalPeopleCount,
         market_laborer_count: marketLaborerCount,
         market_laborer_tea_amount: marketTeaAmount,
         market_laborer_snacks_amount: marketSnacksAmount,
@@ -599,14 +599,22 @@ export default function TeaShopEntryDialog({
         working_laborer_total: workingTotal,
         notes: notes.trim() || null,
         entered_by: userProfile?.name || null,
+        entered_by_user_id: userProfile?.id || null,
       };
 
       let entryId: string;
 
       if (entry) {
+        // Update existing entry - add updated_by fields
+        const updateData = {
+          ...entryData,
+          updated_by: userProfile?.name || null,
+          updated_by_user_id: userProfile?.id || null,
+        };
+
         const { error: updateError } = await (supabase
           .from("tea_shop_entries") as any)
-          .update(entryData)
+          .update(updateData)
           .eq("id", entry.id);
 
         if (updateError) throw updateError;
@@ -617,6 +625,7 @@ export default function TeaShopEntryDialog({
           .delete()
           .eq("entry_id", entry.id);
       } else {
+        // New entry
         const { data: insertData, error: insertError } = await (supabase
           .from("tea_shop_entries") as any)
           .insert(entryData)
@@ -667,8 +676,8 @@ export default function TeaShopEntryDialog({
 
       for (const detail of workingDetails) {
         if (detail.total_amount > 0) {
-          const { data: workLog } = await (supabase
-            .from("work_logs") as any)
+          const { data: workLog } = await ((supabase as any)
+            .from("work_logs"))
             .select("id, snacks_amount")
             .eq("laborer_id", detail.laborer_id)
             .eq("work_date", date)
@@ -677,8 +686,8 @@ export default function TeaShopEntryDialog({
 
           if (workLog) {
             const newSnacksAmount = (workLog.snacks_amount || 0) + detail.total_amount;
-            await (supabase
-              .from("work_logs") as any)
+            await ((supabase as any)
+              .from("work_logs"))
               .update({ snacks_amount: newSnacksAmount })
               .eq("id", workLog.id);
           }
@@ -688,7 +697,22 @@ export default function TeaShopEntryDialog({
       onSuccess?.();
     } catch (err: any) {
       console.error("Error saving entry:", err);
-      setError(err.message || "Failed to save entry");
+
+      // Provide user-friendly error messages
+      let errorMessage = "Failed to save entry";
+      if (err.message) {
+        if (err.code === "23505") {
+          errorMessage = "An entry already exists for this date. Please edit the existing entry instead.";
+        } else if (err.code === "23503") {
+          errorMessage = "Cannot save: Invalid shop or site reference";
+        } else if (err.message.includes("permission") || err.code === "42501") {
+          errorMessage = "Permission denied. Please contact administrator";
+        } else {
+          errorMessage = `Error: ${err.message}`;
+        }
+      }
+
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }

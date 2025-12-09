@@ -109,7 +109,12 @@ async function fetchRecentAttendance(
     .limit(5);
 
   if (error) throw error;
-  return data || [];
+  return (data || []).map(d => ({
+    date: d.date || "",
+    laborer_name: d.laborer_name || "",
+    work_days: d.work_days || 0,
+    daily_earnings: d.daily_earnings || 0,
+  }));
 }
 
 // Fetch pending salaries
@@ -124,7 +129,12 @@ async function fetchPendingSalaries(siteId: string): Promise<PendingSalary[]> {
     .limit(5);
 
   if (error) throw error;
-  return data || [];
+  return (data || []).map(d => ({
+    laborer_name: d.laborer_name || "",
+    week_ending: d.week_ending || "",
+    balance_due: d.balance_due || 0,
+    status: d.status || "",
+  }));
 }
 
 // Optimized: Fetch weekly trend data with 2 queries instead of 14

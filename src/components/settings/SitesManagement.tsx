@@ -76,10 +76,10 @@ export default function SitesManagement() {
       setEditingSite(site);
       setFormData({
         name: site.name,
-        address: site.address,
-        city: site.city,
-        site_type: site.site_type,
-        status: site.status,
+        address: site.address || "",
+        city: site.city || "",
+        site_type: site.site_type || "residential",
+        status: site.status || "active",
         start_date: site.start_date || "",
         target_completion_date: site.target_completion_date || "",
         nearby_tea_shop_name: site.nearby_tea_shop_name || "",

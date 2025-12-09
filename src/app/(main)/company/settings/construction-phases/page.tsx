@@ -36,6 +36,7 @@ import {
 import PageHeader from "@/components/layout/PageHeader";
 import { useAuth } from "@/contexts/AuthContext";
 import { createClient } from "@/lib/supabase/client";
+import { hasEditPermission } from "@/lib/permissions";
 import type {
   ConstructionPhase,
   ConstructionSubphase,
@@ -641,8 +642,7 @@ export default function ConstructionPhasesPage() {
     sequence_order: 0,
   });
 
-  const canEdit =
-    userProfile?.role === "admin" || userProfile?.role === "office";
+  const canEdit = hasEditPermission(userProfile?.role);
 
   // Panning handlers for flow chart
   const handleMouseDown = (e: React.MouseEvent) => {

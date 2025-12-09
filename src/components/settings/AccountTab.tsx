@@ -173,7 +173,7 @@ export default function AccountTab({ onSuccess, onError }: AccountTabProps) {
 
           {userProfile.assigned_sites.length > 0 ? (
             <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
-              {userProfile.assigned_sites.map((siteId, index) => (
+              {userProfile.assigned_sites.map((siteId: string, index: number) => (
                 <Chip key={index} label={`Site ${index + 1}`} size="small" />
               ))}
             </Box>

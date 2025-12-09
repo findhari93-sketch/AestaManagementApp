@@ -31,6 +31,7 @@ import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import PageHeader from "@/components/layout/PageHeader";
+import { hasEditPermission } from "@/lib/permissions";
 import type { Team, LaborerType } from "@/types/database.types";
 import dayjs from "dayjs";
 
@@ -66,11 +67,10 @@ export default function TeamsPage() {
     name: "",
     leader_name: "",
     leader_phone: "",
-    status: "active" as "active" | "inactive",
+    status: "active" as "active" | "inactive" | "completed",
   });
 
-  const canEdit =
-    userProfile?.role === "admin" || userProfile?.role === "office";
+  const canEdit = hasEditPermission(userProfile?.role);
 
   const fetchTeams = async () => {
     try {

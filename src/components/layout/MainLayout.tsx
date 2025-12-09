@@ -43,6 +43,7 @@ import {
   Person as PersonIcon,
   PaymentOutlined as PaymentIcon,
   LocalCafe as LocalCafeIcon,
+  Payments as PaymentsIcon,
 } from "@mui/icons-material";
 import { useRouter, usePathname } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
@@ -65,6 +66,11 @@ const siteNavItems: NavItem[] = [
     text: "Attendance",
     icon: <AccessTimeIcon />,
     path: "/site/attendance",
+  },
+  {
+    text: "Daily Payments",
+    icon: <PaymentsIcon />,
+    path: "/site/payments",
   },
   { text: "Holidays", icon: <EventBusyIcon />, path: "/site/holidays" },
   {

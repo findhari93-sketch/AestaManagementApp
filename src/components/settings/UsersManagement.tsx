@@ -50,7 +50,7 @@ export default function UsersManagement() {
     phone: "",
     role: "site_engineer" as "admin" | "office" | "site_engineer",
     assigned_sites: [] as string[],
-    status: "active" as "active" | "inactive",
+    status: "active" as "active" | "inactive" | "suspended",
     password: "",
   });
 

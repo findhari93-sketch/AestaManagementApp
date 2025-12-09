@@ -28,7 +28,14 @@
       "Bash(ls:*)",
       "Bash(grep:*)",
       "Bash(git reset:*)",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Bash(npm run lint:*)",
+      "Bash(npx supabase:*)",
+      "Bash(code --install-extension:*)",
+      "Bash(cat:*)",
+      "Bash(node check-db.mjs:*)",
+      "Bash(node check-db.js:*)",
+      "Bash(npx eslint:*)"
     ],
     "deny": [],
     "ask": []

@@ -32,6 +32,7 @@ import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import PageHeader from "@/components/layout/PageHeader";
+import { hasEditPermission } from "@/lib/permissions";
 import type { SalaryPeriod } from "@/types/database.types";
 import dayjs from "dayjs";
 import weekOfYear from "dayjs/plugin/weekOfYear";
@@ -60,8 +61,7 @@ export default function CompanySalaryPage() {
   const { userProfile } = useAuth();
   const supabase = createClient();
 
-  const canEdit =
-    userProfile?.role === "admin" || userProfile?.role === "office";
+  const canEdit = hasEditPermission(userProfile?.role);
 
   // Calculate default week ending (Saturday)
   const getDefaultWeekEnding = () => {

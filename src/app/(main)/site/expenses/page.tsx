@@ -40,6 +40,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useSite } from "@/contexts/SiteContext";
 import { useAuth } from "@/contexts/AuthContext";
 import PageHeader from "@/components/layout/PageHeader";
+import { hasEditPermission } from "@/lib/permissions";
 import type {
   Expense,
   ExpenseModule,
@@ -80,8 +81,7 @@ export default function ExpensesPage() {
     is_cleared: false,
   });
 
-  const canEdit =
-    userProfile?.role === "admin" || userProfile?.role === "office";
+  const canEdit = hasEditPermission(userProfile?.role);
 
   useEffect(() => {
     const fetchCategories = async () => {
@@ -138,7 +138,7 @@ export default function ExpensesPage() {
         amount: expense.amount,
         vendor_name: expense.vendor_name || "",
         description: expense.description || "",
-        payment_mode: expense.payment_mode,
+        payment_mode: expense.payment_mode || "cash",
         is_cleared: expense.is_cleared,
       });
     } else {
