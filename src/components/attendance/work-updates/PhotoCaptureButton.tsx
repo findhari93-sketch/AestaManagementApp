@@ -3,7 +3,6 @@
 import { useRef, useState } from "react";
 import {
   Box,
-  Button,
   CircularProgress,
   Typography,
   IconButton,
@@ -12,6 +11,7 @@ import {
   PhotoCamera as PhotoCameraIcon,
   Close as CloseIcon,
   Replay as RetakeIcon,
+  Error as ErrorIcon,
 } from "@mui/icons-material";
 import { compressImage, getWorkUpdatePhotoPath } from "./imageUtils";
 import { SupabaseClient } from "@supabase/supabase-js";
@@ -30,6 +30,14 @@ interface PhotoCaptureButtonProps {
   label?: string;
 }
 
+// Helper to create a timeout promise
+const withTimeout = <T,>(promise: Promise<T>, ms: number, errorMsg: string): Promise<T> => {
+  const timeout = new Promise<never>((_, reject) => {
+    setTimeout(() => reject(new Error(errorMsg)), ms);
+  });
+  return Promise.race([promise, timeout]);
+};
+
 export default function PhotoCaptureButton({
   supabase,
   siteId,
@@ -46,6 +54,7 @@ export default function PhotoCaptureButton({
   const inputRef = useRef<HTMLInputElement>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [error, setError] = useState<string | null>(null);
 
   const handleCapture = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -58,22 +67,33 @@ export default function PhotoCaptureButton({
 
     setIsUploading(true);
     setUploadProgress(10);
+    setError(null);
 
     try {
-      // Compress the image
+      // Compress the image with timeout
       setUploadProgress(30);
-      const compressed = await compressImage(file, 500, 1920, 1920, 0.8);
+      const compressed = await withTimeout(
+        compressImage(file, 500, 1920, 1920, 0.8),
+        15000,
+        "Image compression timed out"
+      );
 
-      // Upload to Supabase
+      // Upload to Supabase with timeout
       setUploadProgress(50);
       const filePath = getWorkUpdatePhotoPath(siteId, date, period, photoIndex);
 
-      const { error: uploadError } = await supabase.storage
+      const uploadPromise = supabase.storage
         .from("work-updates")
         .upload(filePath, compressed, {
           cacheControl: "3600",
           upsert: true,
         });
+
+      const { error: uploadError } = await withTimeout(
+        uploadPromise,
+        30000,
+        "Upload timed out - check your internet connection"
+      );
 
       if (uploadError) {
         throw uploadError;
@@ -88,11 +108,12 @@ export default function PhotoCaptureButton({
 
       setUploadProgress(100);
       onPhotoCapture(publicUrl);
-    } catch (error) {
-      console.error("Error uploading photo:", error);
-      // Show error to user
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      alert(`Upload failed: ${errorMessage}\n\nMake sure the 'work-updates' bucket exists in Supabase Storage.`);
+    } catch (err) {
+      console.error("Error uploading photo:", err);
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      setError(errorMessage);
+      // Clear error after 5 seconds
+      setTimeout(() => setError(null), 5000);
     } finally {
       setIsUploading(false);
       setUploadProgress(0);
@@ -189,13 +210,13 @@ export default function PhotoCaptureButton({
           height: 60,
           borderRadius: 1,
           border: "2px dashed",
-          borderColor: "grey.400",
+          borderColor: error ? "error.main" : "grey.400",
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
           justifyContent: "center",
           cursor: disabled || isUploading ? "not-allowed" : "pointer",
-          bgcolor: "grey.50",
+          bgcolor: error ? "error.50" : "grey.50",
           "&:hover": {
             borderColor: disabled ? "grey.400" : "primary.main",
             bgcolor: disabled ? "grey.50" : "primary.50",
@@ -206,6 +227,8 @@ export default function PhotoCaptureButton({
         {fileInput}
         {isUploading ? (
           <CircularProgress size={20} />
+        ) : error ? (
+          <ErrorIcon sx={{ fontSize: 20, color: "error.main" }} />
         ) : (
           <>
             <PhotoCameraIcon
@@ -231,13 +254,13 @@ export default function PhotoCaptureButton({
         minHeight: 80,
         borderRadius: 2,
         border: "2px dashed",
-        borderColor: "grey.400",
+        borderColor: error ? "error.main" : "grey.400",
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
         justifyContent: "center",
         cursor: disabled || isUploading ? "not-allowed" : "pointer",
-        bgcolor: "grey.50",
+        bgcolor: error ? "error.50" : "grey.50",
         p: 1,
         "&:hover": {
           borderColor: disabled ? "grey.400" : "primary.main",
@@ -252,6 +275,18 @@ export default function PhotoCaptureButton({
           <CircularProgress size={24} />
           <Typography variant="caption" display="block" color="text.secondary">
             {uploadProgress}%
+          </Typography>
+        </Box>
+      ) : error ? (
+        <Box sx={{ textAlign: "center" }}>
+          <ErrorIcon sx={{ fontSize: 24, color: "error.main" }} />
+          <Typography
+            variant="caption"
+            color="error"
+            display="block"
+            sx={{ fontSize: 9, lineHeight: 1.1 }}
+          >
+            Failed
           </Typography>
         </Box>
       ) : (
