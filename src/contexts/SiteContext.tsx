@@ -63,22 +63,13 @@ function storeSites(sites: Site[]): void {
 }
 
 export function SiteProvider({ children }: { children: React.ReactNode }) {
-  // Initialize from localStorage cache immediately for instant restoration
-  // This prevents the "no site selected" flash during navigation
-  const [sites, setSites] = useState<Site[]>(() => getStoredSites());
-
-  const [selectedSite, setSelectedSiteState] = useState<Site | null>(() => {
-    const cachedSites = getStoredSites();
-    const savedSiteId = getStoredSiteId();
-    if (savedSiteId && cachedSites.length > 0) {
-      const found = cachedSites.find((s) => s.id === savedSiteId);
-      return found || cachedSites[0] || null;
-    }
-    return cachedSites[0] || null;
-  });
-
+  // Initialize with empty values to match server render (prevents hydration mismatch)
+  // localStorage restoration happens in useEffect after hydration
+  const [sites, setSites] = useState<Site[]>([]);
+  const [selectedSite, setSelectedSiteState] = useState<Site | null>(null);
   const [loading, setLoading] = useState(true);
   const [isInitialized, setIsInitialized] = useState(false);
+  const [isHydrated, setIsHydrated] = useState(false);
   const { userProfile } = useAuth();
   const [supabase] = useState(() => createClient());
 
@@ -154,7 +145,31 @@ export function SiteProvider({ children }: { children: React.ReactNode }) {
     }
   }, [userProfile, supabase]);
 
+  // Restore from localStorage AFTER hydration (prevents hydration mismatch)
   useEffect(() => {
+    // Mark as hydrated
+    setIsHydrated(true);
+
+    // Restore cached sites and selection from localStorage
+    const cachedSites = getStoredSites();
+    const savedSiteId = getStoredSiteId();
+
+    if (cachedSites.length > 0) {
+      setSites(cachedSites);
+
+      if (savedSiteId) {
+        const found = cachedSites.find((s) => s.id === savedSiteId);
+        setSelectedSiteState(found || cachedSites[0] || null);
+      } else {
+        setSelectedSiteState(cachedSites[0] || null);
+      }
+    }
+  }, []); // Run once after hydration
+
+  useEffect(() => {
+    // Only fetch after hydration is complete
+    if (!isHydrated) return;
+
     if (userProfile) {
       fetchSites();
     } else {
@@ -165,7 +180,7 @@ export function SiteProvider({ children }: { children: React.ReactNode }) {
       setLoading(false);
       setIsInitialized(true);
     }
-  }, [userProfile, fetchSites]);
+  }, [userProfile, fetchSites, isHydrated]);
 
   const refreshSites = useCallback(async () => {
     await fetchSites();
