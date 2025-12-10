@@ -47,7 +47,9 @@ import TeaShopEntryDialog from "@/components/tea-shop/TeaShopEntryDialog";
 import PaymentDialog from "@/components/payments/PaymentDialog";
 import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
 import AuditAvatarGroup from "@/components/common/AuditAvatarGroup";
+import { PhotoBadge, WorkUpdateViewer } from "@/components/attendance/work-updates";
 import type { TeaShopAccount } from "@/types/database.types";
+import type { WorkUpdates } from "@/types/work-updates.types";
 import type { DailyPaymentRecord } from "@/types/payment.types";
 import { createClient } from "@/lib/supabase/client";
 import { useSite } from "@/contexts/SiteContext";
@@ -137,6 +139,8 @@ interface DateSummary {
   workDescription: string | null;
   workStatus: string | null;
   comments: string | null;
+  // Work updates with photos
+  workUpdates: WorkUpdates | null;
   // Category breakdown
   categoryBreakdown: { [key: string]: { count: number; amount: number } };
   isExpanded?: boolean;
@@ -188,6 +192,13 @@ export default function AttendancePage() {
   const [teaShopDialogDate, setTeaShopDialogDate] = useState<string | undefined>(undefined);
   const [teaShopAccount, setTeaShopAccount] = useState<TeaShopAccount | null>(null);
   const [teaShopEditingEntry, setTeaShopEditingEntry] = useState<any>(null);
+
+  // Work update viewer state
+  const [workUpdateViewerOpen, setWorkUpdateViewerOpen] = useState(false);
+  const [selectedWorkUpdate, setSelectedWorkUpdate] = useState<{
+    workUpdates: WorkUpdates | null;
+    date: string;
+  } | null>(null);
 
   const canEdit = hasEditPermission(userProfile?.role);
 
@@ -459,6 +470,7 @@ export default function AttendancePage() {
             workDescription: workSummary?.work_description || null,
             workStatus: workSummary?.work_status || null,
             comments: workSummary?.comments || null,
+            workUpdates: ((workSummary as DailyWorkSummary & { work_updates?: unknown })?.work_updates as WorkUpdates) || null,
             categoryBreakdown,
             isExpanded: false,
             teaShop: teaShop || null,
@@ -497,6 +509,7 @@ export default function AttendancePage() {
             workDescription: workSummary?.work_description || null,
             workStatus: workSummary?.work_status || null,
             comments: workSummary?.comments || null,
+            workUpdates: ((workSummary as DailyWorkSummary & { work_updates?: unknown })?.work_updates as WorkUpdates) || null,
             categoryBreakdown: {},
             isExpanded: false,
             teaShop: teaShop || null,
@@ -1115,11 +1128,29 @@ export default function AttendancePage() {
                         </Typography>
                       </TableCell>
                       <TableCell>
-                        <Tooltip title={summary.workDescription || "No description"}>
-                          <Typography variant="caption" noWrap sx={{ maxWidth: 150, display: "block" }}>
-                            {summary.workDescription || "-"}
-                          </Typography>
-                        </Tooltip>
+                        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                          <Tooltip title={summary.workDescription || summary.workUpdates?.morning?.description || "No description"}>
+                            <Typography variant="caption" noWrap sx={{ maxWidth: 100, display: "block" }}>
+                              {summary.workDescription || summary.workUpdates?.morning?.description || "-"}
+                            </Typography>
+                          </Tooltip>
+                          {summary.workUpdates && (
+                            <PhotoBadge
+                              photoCount={
+                                (summary.workUpdates.morning?.photos?.length || 0) +
+                                (summary.workUpdates.evening?.photos?.length || 0)
+                              }
+                              completionPercent={summary.workUpdates.evening?.completionPercent}
+                              onClick={() => {
+                                setSelectedWorkUpdate({
+                                  workUpdates: summary.workUpdates,
+                                  date: summary.date,
+                                });
+                                setWorkUpdateViewerOpen(true);
+                              }}
+                            />
+                          )}
+                        </Box>
                       </TableCell>
                       <TableCell>
                         {summary.attendanceStatus === "morning_entry" ? (
@@ -1448,6 +1479,18 @@ export default function AttendancePage() {
           }}
         />
       )}
+
+      {/* Work Update Viewer Dialog */}
+      <WorkUpdateViewer
+        open={workUpdateViewerOpen}
+        onClose={() => {
+          setWorkUpdateViewerOpen(false);
+          setSelectedWorkUpdate(null);
+        }}
+        workUpdates={selectedWorkUpdate?.workUpdates || null}
+        siteName={selectedSite?.name}
+        date={selectedWorkUpdate?.date || ""}
+      />
 
       {/* Edit Attendance Dialog */}
       <Dialog open={editDialogOpen} onClose={() => setEditDialogOpen(false)} maxWidth="sm" fullWidth>

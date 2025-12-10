@@ -53,6 +53,8 @@ import dayjs from "dayjs";
 import LaborerSelectionDialog from "./LaborerSelectionDialog";
 import TeaShopEntryDialog from "../tea-shop/TeaShopEntryDialog";
 import AttendanceSaveConfirmDialog from "./AttendanceSaveConfirmDialog";
+import { WorkUpdatesSection } from "./work-updates";
+import type { WorkUpdates } from "@/types/work-updates.types";
 import type {
   TeaShopEntry,
   TeaShopAccount as TeaShopAccountType,
@@ -282,10 +284,13 @@ export default function AttendanceDrawer({
   // Default work unit for bulk assignment
   const [defaultWorkUnit, setDefaultWorkUnit] = useState<number>(1);
 
-  // Work description fields (per day)
+  // Work description fields (per day) - legacy fields kept for backward compatibility
   const [workDescription, setWorkDescription] = useState("");
   const [workStatus, setWorkStatus] = useState("");
   const [comments, setComments] = useState("");
+
+  // New work updates with photo documentation
+  const [workUpdates, setWorkUpdates] = useState<WorkUpdates | null>(null);
 
   // Data state
   const [laborers, setLaborers] = useState<LaborerWithCategory[]>([]);
@@ -586,7 +591,7 @@ export default function AttendanceDrawer({
       const { data: summaryData } = await (
         supabase.from("daily_work_summary") as any
       )
-        .select("work_description, work_status, comments")
+        .select("work_description, work_status, comments, work_updates")
         .eq("site_id", siteId)
         .eq("date", dateToLoad)
         .single();
@@ -595,6 +600,12 @@ export default function AttendanceDrawer({
         setWorkDescription(summaryData.work_description || "");
         setWorkStatus(summaryData.work_status || "");
         setComments(summaryData.comments || "");
+        // Load new work updates if available
+        if (summaryData.work_updates) {
+          setWorkUpdates(summaryData.work_updates as WorkUpdates);
+        } else {
+          setWorkUpdates(null);
+        }
       }
 
       // Load existing tea shop entry for this date
@@ -1217,6 +1228,7 @@ export default function AttendanceDrawer({
           work_description: workDescription || null,
           work_status: workStatus || null,
           comments: comments || null,
+          work_updates: workUpdates || null,
           first_in_time: timeOrNull(defaultInTime),
           last_out_time: timeOrNull(defaultOutTime),
           daily_laborer_count: summary.dailyCount,
@@ -2580,90 +2592,19 @@ export default function AttendanceDrawer({
               </Box>
               {/* End Laborers Section wrapper */}
 
-              {/* Work Description Section - Light Gray Background */}
-              <Box
-                sx={{
-                  mb: 2,
-                  p: 2,
-                  bgcolor: "grey.50",
-                  borderRadius: 2,
-                  border: "1px solid",
-                  borderColor: "grey.200",
-                }}
-              >
-                <Box
-                  sx={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    cursor: "pointer",
-                  }}
-                  onClick={() =>
-                    setExpandedSection(
-                      expandedSection === "work" ? false : "work"
-                    )
-                  }
-                >
-                  <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                    <WorkIcon color="action" />
-                    <Typography variant="subtitle1" fontWeight={600}>
-                      Work Description
-                    </Typography>
-                    {workDescription && (
-                      <Chip
-                        label="Filled"
-                        size="small"
-                        color="success"
-                        variant="outlined"
-                      />
-                    )}
-                  </Box>
-                  <IconButton size="small">
-                    {expandedSection === "work" ? (
-                      <ExpandLessIcon />
-                    ) : (
-                      <ExpandMoreIcon />
-                    )}
-                  </IconButton>
-                </Box>
-
-                <Collapse in={expandedSection === "work"}>
-                  <Box sx={{ mt: 2 }}>
-                    <TextField
-                      fullWidth
-                      multiline
-                      rows={2}
-                      size="small"
-                      label="Work Planned for Today"
-                      placeholder="e.g., Plastering 2nd floor, Electrical wiring..."
-                      value={workDescription}
-                      onChange={(e) => setWorkDescription(e.target.value)}
-                      sx={{ mb: 2 }}
-                    />
-                    <TextField
-                      fullWidth
-                      multiline
-                      rows={2}
-                      size="small"
-                      label="Work Status / Completion"
-                      placeholder="e.g., 80% completed, pending electrical..."
-                      value={workStatus}
-                      onChange={(e) => setWorkStatus(e.target.value)}
-                      sx={{ mb: 2 }}
-                    />
-                    <TextField
-                      fullWidth
-                      multiline
-                      rows={2}
-                      size="small"
-                      label="Comments / Notes"
-                      placeholder="Any additional notes..."
-                      value={comments}
-                      onChange={(e) => setComments(e.target.value)}
-                    />
-                  </Box>
-                </Collapse>
-              </Box>
+              {/* Work Updates Section - Morning/Evening Photo Documentation */}
+              <WorkUpdatesSection
+                supabase={supabase}
+                siteId={siteId}
+                date={selectedDate}
+                mode={mode}
+                initialData={workUpdates}
+                onChange={setWorkUpdates}
+                expanded={expandedSection === "work"}
+                onExpandChange={(expanded) =>
+                  setExpandedSection(expanded ? "work" : false)
+                }
+              />
             </>
           )}
         </Box>
