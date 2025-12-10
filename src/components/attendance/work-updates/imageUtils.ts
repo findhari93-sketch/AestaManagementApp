@@ -1,6 +1,7 @@
 /**
  * Image Compression Utilities for Work Updates
  * Reusable functions for compressing images before upload
+ * Optimized for mobile camera photos (often 10MB+)
  */
 
 // Sanitize filename for storage
@@ -17,13 +18,30 @@ export const sanitizeFilename = (filename: string): string => {
   return sanitized + ext;
 };
 
-// Compress image using Canvas API
+// Detect if file is likely from mobile camera (large size)
+export const isMobileCameraPhoto = (file: File): boolean => {
+  return file.size > 2 * 1024 * 1024; // > 2MB is likely mobile camera
+};
+
+// Get optimal compression settings based on file size
+export const getCompressionSettings = (file: File) => {
+  const isMobile = isMobileCameraPhoto(file);
+  return {
+    maxSizeKB: isMobile ? 300 : 500,      // Smaller target for mobile
+    maxWidth: isMobile ? 1200 : 1920,     // Lower resolution for mobile
+    maxHeight: isMobile ? 1200 : 1920,
+    quality: isMobile ? 0.7 : 0.8,        // Lower quality for mobile
+    timeout: isMobile ? 20000 : 10000,    // Longer timeout for large files
+  };
+};
+
+// Compress image using Canvas API - optimized for mobile
 export const compressImage = (
   file: File,
-  maxSizeKB: number = 500,
-  maxWidth: number = 1920,
-  maxHeight: number = 1920,
-  quality: number = 0.8
+  maxSizeKB?: number,
+  maxWidth?: number,
+  maxHeight?: number,
+  quality?: number
 ): Promise<File> => {
   return new Promise((resolve) => {
     // Skip compression for non-image files
@@ -32,17 +50,27 @@ export const compressImage = (
       return;
     }
 
+    // Get optimal settings based on file size
+    const settings = getCompressionSettings(file);
+    const targetMaxSizeKB = maxSizeKB ?? settings.maxSizeKB;
+    const targetMaxWidth = maxWidth ?? settings.maxWidth;
+    const targetMaxHeight = maxHeight ?? settings.maxHeight;
+    const targetQuality = quality ?? settings.quality;
+
+    console.log(`[ImageUtils] Compressing: ${(file.size / 1024 / 1024).toFixed(2)}MB, mobile: ${isMobileCameraPhoto(file)}, target: ${targetMaxSizeKB}KB`);
+
     // Skip if already small enough
-    if (file.size <= maxSizeKB * 1024) {
+    if (file.size <= targetMaxSizeKB * 1024) {
+      console.log("[ImageUtils] File already small enough, skipping compression");
       resolve(file);
       return;
     }
 
-    // Timeout to prevent hanging
+    // Timeout to prevent hanging - longer for mobile photos
     const timeout = setTimeout(() => {
-      console.warn("Image compression timed out, using original file");
+      console.warn("[ImageUtils] Compression timed out, using original file");
       resolve(file);
-    }, 10000);
+    }, settings.timeout);
 
     const reader = new FileReader();
     reader.readAsDataURL(file);
@@ -55,17 +83,19 @@ export const compressImage = (
           // Calculate new dimensions maintaining aspect ratio
           let { width, height } = img;
 
-          if (width > maxWidth) {
-            height = Math.round((height * maxWidth) / width);
-            width = maxWidth;
+          if (width > targetMaxWidth) {
+            height = Math.round((height * targetMaxWidth) / width);
+            width = targetMaxWidth;
           }
-          if (height > maxHeight) {
-            width = Math.round((width * maxHeight) / height);
-            height = maxHeight;
+          if (height > targetMaxHeight) {
+            width = Math.round((width * targetMaxHeight) / height);
+            height = targetMaxHeight;
           }
 
           width = Math.max(1, width);
           height = Math.max(1, height);
+
+          console.log(`[ImageUtils] Resizing from ${img.width}x${img.height} to ${width}x${height}`);
 
           // Create canvas and draw
           const canvas = document.createElement("canvas");
@@ -89,6 +119,7 @@ export const compressImage = (
               clearTimeout(timeout);
 
               if (!blob) {
+                console.warn("[ImageUtils] Canvas toBlob failed");
                 resolve(file);
                 return;
               }
@@ -102,9 +133,12 @@ export const compressImage = (
                 lastModified: Date.now(),
               });
 
-              // If still too large, try lower quality
-              if (compressedFile.size > maxSizeKB * 1024 && quality > 0.3) {
-                compressImage(file, maxSizeKB, maxWidth, maxHeight, quality - 0.1)
+              console.log(`[ImageUtils] Compressed to ${(compressedFile.size / 1024).toFixed(0)}KB (quality: ${targetQuality})`);
+
+              // If still too large, try lower quality (recursive)
+              if (compressedFile.size > targetMaxSizeKB * 1024 && targetQuality > 0.3) {
+                console.log(`[ImageUtils] Still too large, reducing quality to ${targetQuality - 0.1}`);
+                compressImage(file, targetMaxSizeKB, targetMaxWidth, targetMaxHeight, targetQuality - 0.1)
                   .then(resolve)
                   .catch(() => resolve(file));
               } else {
@@ -112,19 +146,22 @@ export const compressImage = (
               }
             },
             outputType,
-            quality
+            targetQuality
           );
-        } catch {
+        } catch (err) {
+          console.error("[ImageUtils] Compression error:", err);
           clearTimeout(timeout);
           resolve(file);
         }
       };
       img.onerror = () => {
+        console.error("[ImageUtils] Image load error");
         clearTimeout(timeout);
         resolve(file);
       };
     };
     reader.onerror = () => {
+      console.error("[ImageUtils] FileReader error");
       clearTimeout(timeout);
       resolve(file);
     };

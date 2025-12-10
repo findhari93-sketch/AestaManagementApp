@@ -200,6 +200,16 @@ export default function AttendancePage() {
     date: string;
   } | null>(null);
 
+  // Delete confirmation dialog state
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteDialogData, setDeleteDialogData] = useState<{
+    date: string;
+    siteName: string;
+    dailyCount: number;
+    marketCount: number;
+    totalAmount: number;
+  } | null>(null);
+
   const canEdit = hasEditPermission(userProfile?.role);
 
   // Calculate totals for the filtered period
@@ -693,37 +703,49 @@ export default function AttendancePage() {
     }
   };
 
-  // Delete all attendance for a specific date
-  const handleDeleteDateAttendance = async (date: string) => {
-    const recordCount = dateSummaries.find((s) => s.date === date)?.totalLaborerCount || 0;
-    if (
-      !confirm(
-        `Are you sure you want to delete ALL attendance records for ${dayjs(date).format("DD MMM YYYY")}?\n\nThis will delete ${recordCount} laborer records, market laborer entries, tea shop entries, and work summary for this date.\n\nThis action cannot be undone.`
-      )
-    )
-      return;
+  // Open delete confirmation dialog
+  const handleDeleteDateAttendance = (date: string) => {
+    const summary = dateSummaries.find((s) => s.date === date);
+    if (!summary || !selectedSite) return;
 
+    setDeleteDialogData({
+      date,
+      siteName: selectedSite.name,
+      dailyCount: summary.dailyLaborerCount + summary.contractLaborerCount,
+      marketCount: summary.marketLaborerCount,
+      totalAmount: summary.totalSalary + (summary.teaShop?.total || 0),
+    });
+    setDeleteDialogOpen(true);
+  };
+
+  // Perform the actual delete
+  const confirmDeleteDateAttendance = async () => {
+    if (!deleteDialogData || !selectedSite) return;
+
+    const { date } = deleteDialogData;
+    setDeleteDialogOpen(false);
     setLoading(true);
+
     try {
       // Delete daily attendance records
       const { error: dailyError } = await supabase
         .from("daily_attendance")
         .delete()
-        .eq("site_id", selectedSite!.id)
+        .eq("site_id", selectedSite.id)
         .eq("date", date);
       if (dailyError) throw dailyError;
 
       // Delete market laborer attendance
       const { error: marketError } = await (supabase.from("market_laborer_attendance") as any)
         .delete()
-        .eq("site_id", selectedSite!.id)
+        .eq("site_id", selectedSite.id)
         .eq("date", date);
       if (marketError) throw marketError;
 
       // Delete tea shop entries for this date
       const { error: teaError } = await (supabase.from("tea_shop_entries") as any)
         .delete()
-        .eq("site_id", selectedSite!.id)
+        .eq("site_id", selectedSite.id)
         .eq("date", date);
       if (teaError) throw teaError;
 
@@ -731,7 +753,7 @@ export default function AttendancePage() {
       const { error: summaryError } = await supabase
         .from("daily_work_summary")
         .delete()
-        .eq("site_id", selectedSite!.id)
+        .eq("site_id", selectedSite.id)
         .eq("date", date);
       if (summaryError) throw summaryError;
 
@@ -740,6 +762,7 @@ export default function AttendancePage() {
       alert("Failed to delete: " + error.message);
     } finally {
       setLoading(false);
+      setDeleteDialogData(null);
     }
   };
 
@@ -781,7 +804,13 @@ export default function AttendancePage() {
         accessorKey: "out_time",
         header: "Out",
         size: 70,
-        Cell: ({ cell }) => formatTime(cell.getValue<string>()),
+        Cell: ({ cell, row }) => {
+          // Hide out time for morning entries (not yet confirmed)
+          if (row.original.attendance_status === "morning_entry") {
+            return "-";
+          }
+          return formatTime(cell.getValue<string>());
+        },
       },
       {
         accessorKey: "work_hours",
@@ -1086,7 +1115,9 @@ export default function AttendancePage() {
                         <Typography variant="caption">{formatTime(summary.firstInTime)}</Typography>
                       </TableCell>
                       <TableCell align="center">
-                        <Typography variant="caption">{formatTime(summary.lastOutTime)}</Typography>
+                        <Typography variant="caption">
+                          {summary.attendanceStatus === "morning_entry" ? "-" : formatTime(summary.lastOutTime)}
+                        </Typography>
                       </TableCell>
                       <TableCell align="right">
                         <Typography variant="body2" fontWeight={600} color="success.main">
@@ -1325,7 +1356,9 @@ export default function AttendancePage() {
                                       <TableCell>{record.category_name}</TableCell>
                                       <TableCell>{record.team_name || "-"}</TableCell>
                                       <TableCell align="center">{formatTime(record.in_time)}</TableCell>
-                                      <TableCell align="center">{formatTime(record.out_time)}</TableCell>
+                                      <TableCell align="center">
+                                        {record.attendance_status === "morning_entry" ? "-" : formatTime(record.out_time)}
+                                      </TableCell>
                                       <TableCell align="center">
                                         {record.work_hours ? `${record.work_hours}h` : "-"}
                                       </TableCell>
@@ -1648,6 +1681,97 @@ export default function AttendancePage() {
         allowSubcontractLink
         onSuccess={handlePaymentSuccess}
       />
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog
+        open={deleteDialogOpen}
+        onClose={() => {
+          setDeleteDialogOpen(false);
+          setDeleteDialogData(null);
+        }}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle sx={{ display: "flex", alignItems: "center", gap: 1, color: "error.main" }}>
+          <Delete />
+          Delete Attendance Record
+        </DialogTitle>
+        <DialogContent>
+          {deleteDialogData && (
+            <Box sx={{ mt: 1 }}>
+              <Alert severity="warning" sx={{ mb: 2 }}>
+                You are about to delete <strong>ALL</strong> attendance records for this date.
+                This action cannot be undone.
+              </Alert>
+
+              <Box sx={{ bgcolor: "grey.50", p: 2, borderRadius: 1, mb: 2 }}>
+                <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1.5 }}>
+                  <Typography variant="body2" color="text.secondary" sx={{ minWidth: 80 }}>
+                    Site:
+                  </Typography>
+                  <Typography variant="body1" fontWeight={600}>
+                    {deleteDialogData.siteName}
+                  </Typography>
+                </Box>
+
+                <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1.5 }}>
+                  <Typography variant="body2" color="text.secondary" sx={{ minWidth: 80 }}>
+                    Date:
+                  </Typography>
+                  <Typography variant="body1" fontWeight={600}>
+                    {dayjs(deleteDialogData.date).format("dddd, DD MMMM YYYY")}
+                  </Typography>
+                </Box>
+
+                <Divider sx={{ my: 1.5 }} />
+
+                <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
+                  <Typography variant="body2" color="text.secondary" sx={{ minWidth: 80 }}>
+                    Laborers:
+                  </Typography>
+                  <Typography variant="body1">
+                    {deleteDialogData.dailyCount} daily
+                    {deleteDialogData.marketCount > 0 && `, ${deleteDialogData.marketCount} market`}
+                  </Typography>
+                </Box>
+
+                <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                  <Typography variant="body2" color="text.secondary" sx={{ minWidth: 80 }}>
+                    Total:
+                  </Typography>
+                  <Typography variant="body1" fontWeight={700} color="error.main">
+                    ₹{deleteDialogData.totalAmount.toLocaleString()}
+                  </Typography>
+                </Box>
+              </Box>
+
+              <Typography variant="caption" color="text.secondary">
+                This will also delete all tea shop entries and work summaries for this date.
+              </Typography>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button
+            onClick={() => {
+              setDeleteDialogOpen(false);
+              setDeleteDialogData(null);
+            }}
+            variant="outlined"
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={confirmDeleteDateAttendance}
+            variant="contained"
+            color="error"
+            startIcon={<Delete />}
+            disabled={loading}
+          >
+            Delete All
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Floating Action Button for Add Attendance */}
       {canEdit && (

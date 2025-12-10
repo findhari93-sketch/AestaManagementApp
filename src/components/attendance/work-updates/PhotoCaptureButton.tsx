@@ -13,7 +13,7 @@ import {
   Replay as RetakeIcon,
   Error as ErrorIcon,
 } from "@mui/icons-material";
-import { compressImage, getWorkUpdatePhotoPath } from "./imageUtils";
+import { compressImage, getWorkUpdatePhotoPath, isMobileCameraPhoto } from "./imageUtils";
 import { SupabaseClient } from "@supabase/supabase-js";
 
 interface PhotoCaptureButtonProps {
@@ -56,11 +56,51 @@ export default function PhotoCaptureButton({
   const [uploadProgress, setUploadProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
+  // Upload with retry logic
+  const uploadWithRetry = async (
+    filePath: string,
+    file: File,
+    maxRetries: number = 2
+  ): Promise<{ error: Error | null; data: unknown }> => {
+    let lastError: Error | null = null;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      console.log(`[PhotoCapture] Upload attempt ${attempt}/${maxRetries}`);
+
+      try {
+        const { error: uploadError, data: uploadData } = await supabase.storage
+          .from("work-updates")
+          .upload(filePath, file, {
+            cacheControl: "3600",
+            upsert: true,
+          });
+
+        if (!uploadError) {
+          return { error: null, data: uploadData };
+        }
+
+        lastError = new Error(uploadError.message || "Upload failed");
+        console.warn(`[PhotoCapture] Attempt ${attempt} failed:`, uploadError.message);
+
+        // Wait before retry (exponential backoff)
+        if (attempt < maxRetries) {
+          await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+        }
+      } catch (err) {
+        lastError = err instanceof Error ? err : new Error(String(err));
+        console.warn(`[PhotoCapture] Attempt ${attempt} exception:`, lastError.message);
+      }
+    }
+
+    return { error: lastError, data: null };
+  };
+
   const handleCapture = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    console.log("[PhotoCapture] Starting upload for file:", file.name, "size:", file.size);
+    const isMobile = isMobileCameraPhoto(file);
+    console.log(`[PhotoCapture] Starting upload for file: ${file.name}, size: ${(file.size / 1024 / 1024).toFixed(2)}MB, mobile: ${isMobile}`);
 
     // Reset input so same file can be selected again
     if (inputRef.current) {
@@ -72,38 +112,38 @@ export default function PhotoCaptureButton({
     setError(null);
 
     try {
-      // Compress the image with timeout
+      // Compress the image - uses auto settings for mobile
       console.log("[PhotoCapture] Compressing image...");
       setUploadProgress(30);
-      const compressed = await withTimeout(
-        compressImage(file, 500, 1920, 1920, 0.8),
-        15000,
-        "Image compression timed out"
-      );
-      console.log("[PhotoCapture] Compressed size:", compressed.size);
 
-      // Upload to Supabase with timeout
+      // Longer timeout for mobile photos (25s for compression)
+      const compressionTimeout = isMobile ? 25000 : 15000;
+      const compressed = await withTimeout(
+        compressImage(file), // Let compressImage auto-detect settings
+        compressionTimeout,
+        "Image compression timed out - try a smaller photo"
+      );
+      console.log(`[PhotoCapture] Compressed to ${(compressed.size / 1024).toFixed(0)}KB`);
+
+      // Upload to Supabase with retry and longer timeout for mobile
       setUploadProgress(50);
       const filePath = getWorkUpdatePhotoPath(siteId, date, period, photoIndex);
       console.log("[PhotoCapture] Uploading to path:", filePath);
 
-      const uploadPromise = supabase.storage
-        .from("work-updates")
-        .upload(filePath, compressed, {
-          cacheControl: "3600",
-          upsert: true,
-        });
+      // Longer timeout for mobile uploads (60s vs 30s)
+      const uploadTimeout = isMobile ? 60000 : 30000;
+      const uploadPromise = uploadWithRetry(filePath, compressed, 2);
 
       const { error: uploadError, data: uploadData } = await withTimeout(
         uploadPromise,
-        30000,
-        "Upload timed out - check your internet connection"
+        uploadTimeout,
+        "Upload timed out - check your internet connection and try again"
       );
 
       console.log("[PhotoCapture] Upload result:", { error: uploadError, data: uploadData });
 
       if (uploadError) {
-        console.error("[PhotoCapture] Upload error details:", JSON.stringify(uploadError));
+        console.error("[PhotoCapture] Upload error details:", uploadError.message);
         throw uploadError;
       }
 
@@ -114,7 +154,7 @@ export default function PhotoCaptureButton({
         data: { publicUrl },
       } = supabase.storage.from("work-updates").getPublicUrl(filePath);
 
-      console.log("[PhotoCapture] Public URL:", publicUrl);
+      console.log("[PhotoCapture] Success! Public URL:", publicUrl);
       setUploadProgress(100);
       onPhotoCapture(publicUrl);
     } catch (err: unknown) {
@@ -129,8 +169,8 @@ export default function PhotoCaptureButton({
       }
       console.error("[PhotoCapture] Error message:", errorMessage);
       setError(errorMessage);
-      // Clear error after 8 seconds
-      setTimeout(() => setError(null), 8000);
+      // Clear error after 10 seconds
+      setTimeout(() => setError(null), 10000);
     } finally {
       setIsUploading(false);
       setUploadProgress(0);

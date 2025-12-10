@@ -12,11 +12,15 @@ import {
   Chip,
   Paper,
   LinearProgress,
+  ToggleButtonGroup,
+  ToggleButton,
 } from "@mui/material";
 import {
   Close as CloseIcon,
   WbSunny as MorningIcon,
   NightsStay as EveningIcon,
+  Compare as CompareIcon,
+  ViewList as ListIcon,
 } from "@mui/icons-material";
 import { WorkUpdates } from "@/types/work-updates.types";
 import PhotoThumbnailStrip from "./PhotoThumbnailStrip";
@@ -46,6 +50,7 @@ export default function WorkUpdateViewer({
   const [fullscreenPeriod, setFullscreenPeriod] = useState<
     "morning" | "evening"
   >("morning");
+  const [viewMode, setViewMode] = useState<"list" | "compare">("list");
 
   const handleMorningPhotoClick = (index: number) => {
     if (workUpdates?.morning?.photos) {
@@ -79,6 +84,11 @@ export default function WorkUpdateViewer({
 
   const hasMorning = workUpdates.morning !== null;
   const hasEvening = workUpdates.evening !== null;
+  const hasBothPhotos =
+    hasMorning &&
+    hasEvening &&
+    workUpdates.morning!.photos.length > 0 &&
+    workUpdates.evening!.photos.length > 0;
 
   return (
     <>
@@ -106,118 +116,301 @@ export default function WorkUpdateViewer({
               {formattedDate}
             </Typography>
           </Box>
-          <IconButton onClick={onClose} size="small">
-            <CloseIcon />
-          </IconButton>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            {/* View mode toggle - only show when both morning and evening have photos */}
+            {hasBothPhotos && (
+              <ToggleButtonGroup
+                value={viewMode}
+                exclusive
+                onChange={(_, value) => value && setViewMode(value)}
+                size="small"
+              >
+                <ToggleButton value="list">
+                  <ListIcon sx={{ fontSize: 18 }} />
+                </ToggleButton>
+                <ToggleButton value="compare">
+                  <CompareIcon sx={{ fontSize: 18 }} />
+                </ToggleButton>
+              </ToggleButtonGroup>
+            )}
+            <IconButton onClick={onClose} size="small">
+              <CloseIcon />
+            </IconButton>
+          </Box>
         </DialogTitle>
 
         <DialogContent dividers>
-          {/* Morning Section */}
-          {hasMorning && workUpdates.morning && (
-            <Paper
-              variant="outlined"
-              sx={{
-                p: 2,
-                mb: 2,
-                bgcolor: "warning.50",
-                borderColor: "warning.200",
-              }}
-            >
-              <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1.5 }}>
-                <MorningIcon sx={{ color: "warning.main", fontSize: 20 }} />
-                <Typography variant="subtitle2" color="warning.dark">
-                  Morning Plan
-                </Typography>
-                {workUpdates.morning.timestamp && (
-                  <Chip
-                    label={dayjs(workUpdates.morning.timestamp).format("h:mm A")}
-                    size="small"
-                    variant="outlined"
-                    sx={{ ml: "auto" }}
-                  />
-                )}
-              </Box>
-
-              {workUpdates.morning.description && (
-                <Typography variant="body2" sx={{ mb: 1.5 }}>
-                  {workUpdates.morning.description}
-                </Typography>
-              )}
-
-              {workUpdates.morning.photos.length > 0 && (
-                <PhotoThumbnailStrip
-                  photos={workUpdates.morning.photos}
-                  size="medium"
-                  maxVisible={5}
-                  onPhotoClick={handleMorningPhotoClick}
-                  showDescriptions
-                />
-              )}
-            </Paper>
-          )}
-
-          {/* Evening Section */}
-          {hasEvening && workUpdates.evening && (
-            <Paper
-              variant="outlined"
-              sx={{
-                p: 2,
-                bgcolor: "info.50",
-                borderColor: "info.200",
-              }}
-            >
-              <Box
+          {/* Comparison View */}
+          {viewMode === "compare" && hasBothPhotos && (
+            <Box>
+              {/* Progress and Summary Header */}
+              <Paper
+                variant="outlined"
                 sx={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 1,
-                  mb: 1.5,
+                  p: 1.5,
+                  mb: 2,
+                  bgcolor: "grey.50",
                 }}
               >
-                <EveningIcon sx={{ color: "info.main", fontSize: 20 }} />
-                <Typography variant="subtitle2" color="info.dark">
-                  Evening Update
-                </Typography>
-                <Chip
-                  label={`${workUpdates.evening.completionPercent}%`}
-                  size="small"
-                  color={getProgressColor(workUpdates.evening.completionPercent)}
-                />
-                {workUpdates.evening.timestamp && (
-                  <Chip
-                    label={dayjs(workUpdates.evening.timestamp).format("h:mm A")}
-                    size="small"
-                    variant="outlined"
-                    sx={{ ml: "auto" }}
-                  />
+                <Box sx={{ display: "flex", alignItems: "center", gap: 2, mb: 1 }}>
+                  <Box sx={{ flex: 1 }}>
+                    <Typography variant="caption" color="text.secondary">
+                      Completion
+                    </Typography>
+                    <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                      <LinearProgress
+                        variant="determinate"
+                        value={workUpdates.evening!.completionPercent}
+                        color={getProgressColor(workUpdates.evening!.completionPercent)}
+                        sx={{ flex: 1, height: 8, borderRadius: 1 }}
+                      />
+                      <Chip
+                        label={`${workUpdates.evening!.completionPercent}%`}
+                        size="small"
+                        color={getProgressColor(workUpdates.evening!.completionPercent)}
+                      />
+                    </Box>
+                  </Box>
+                </Box>
+                {workUpdates.evening!.summary && (
+                  <Typography variant="body2" color="text.secondary">
+                    {workUpdates.evening!.summary}
+                  </Typography>
                 )}
-              </Box>
+              </Paper>
 
-              {/* Progress bar */}
-              <Box sx={{ mb: 1.5 }}>
-                <LinearProgress
-                  variant="determinate"
-                  value={workUpdates.evening.completionPercent}
-                  color={getProgressColor(workUpdates.evening.completionPercent)}
-                  sx={{ height: 8, borderRadius: 1 }}
-                />
-              </Box>
+              {/* Side-by-side Photo Comparison */}
+              <Typography variant="subtitle2" sx={{ mb: 1.5, display: "flex", alignItems: "center", gap: 1 }}>
+                <CompareIcon sx={{ fontSize: 18 }} />
+                Progress Comparison
+              </Typography>
+              <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                {workUpdates.morning!.photos.map((morningPhoto, index) => {
+                  const eveningPhoto = workUpdates.evening!.photos[index];
+                  return (
+                    <Paper
+                      key={morningPhoto.id}
+                      variant="outlined"
+                      sx={{
+                        display: "flex",
+                        p: 1,
+                        gap: 1,
+                        alignItems: "stretch",
+                      }}
+                    >
+                      {/* Morning Photo */}
+                      <Box
+                        sx={{
+                          flex: 1,
+                          display: "flex",
+                          flexDirection: "column",
+                          alignItems: "center",
+                          gap: 0.5,
+                        }}
+                      >
+                        <Chip
+                          icon={<MorningIcon sx={{ fontSize: 14 }} />}
+                          label="Morning"
+                          size="small"
+                          color="warning"
+                          variant="outlined"
+                        />
+                        <Box
+                          component="img"
+                          src={morningPhoto.url}
+                          alt={`Morning ${index + 1}`}
+                          onClick={() => handleMorningPhotoClick(index)}
+                          sx={{
+                            width: "100%",
+                            height: 150,
+                            borderRadius: 1,
+                            objectFit: "cover",
+                            cursor: "pointer",
+                            "&:hover": { opacity: 0.9 },
+                          }}
+                        />
+                        {morningPhoto.description && (
+                          <Typography variant="caption" color="text.secondary" textAlign="center">
+                            {morningPhoto.description}
+                          </Typography>
+                        )}
+                      </Box>
 
-              {workUpdates.evening.summary && (
-                <Typography variant="body2" sx={{ mb: 1.5 }}>
-                  {workUpdates.evening.summary}
-                </Typography>
+                      {/* Arrow */}
+                      <Box sx={{ display: "flex", alignItems: "center", px: 1 }}>
+                        <Typography color="text.disabled" sx={{ fontSize: 24 }}>
+                          →
+                        </Typography>
+                      </Box>
+
+                      {/* Evening Photo */}
+                      <Box
+                        sx={{
+                          flex: 1,
+                          display: "flex",
+                          flexDirection: "column",
+                          alignItems: "center",
+                          gap: 0.5,
+                        }}
+                      >
+                        <Chip
+                          icon={<EveningIcon sx={{ fontSize: 14 }} />}
+                          label="Evening"
+                          size="small"
+                          color="info"
+                          variant="outlined"
+                        />
+                        {eveningPhoto ? (
+                          <Box
+                            component="img"
+                            src={eveningPhoto.url}
+                            alt={`Evening ${index + 1}`}
+                            onClick={() => handleEveningPhotoClick(index)}
+                            sx={{
+                              width: "100%",
+                              height: 150,
+                              borderRadius: 1,
+                              objectFit: "cover",
+                              cursor: "pointer",
+                              "&:hover": { opacity: 0.9 },
+                            }}
+                          />
+                        ) : (
+                          <Box
+                            sx={{
+                              width: "100%",
+                              height: 150,
+                              borderRadius: 1,
+                              bgcolor: "grey.200",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                            }}
+                          >
+                            <Typography variant="caption" color="text.disabled">
+                              No photo
+                            </Typography>
+                          </Box>
+                        )}
+                      </Box>
+                    </Paper>
+                  );
+                })}
+              </Box>
+            </Box>
+          )}
+
+          {/* List View (default) */}
+          {viewMode === "list" && (
+            <>
+              {/* Morning Section */}
+              {hasMorning && workUpdates.morning && (
+                <Paper
+                  variant="outlined"
+                  sx={{
+                    p: 2,
+                    mb: 2,
+                    bgcolor: "warning.50",
+                    borderColor: "warning.200",
+                  }}
+                >
+                  <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1.5 }}>
+                    <MorningIcon sx={{ color: "warning.main", fontSize: 20 }} />
+                    <Typography variant="subtitle2" color="warning.dark">
+                      Morning Plan
+                    </Typography>
+                    {workUpdates.morning.timestamp && (
+                      <Chip
+                        label={dayjs(workUpdates.morning.timestamp).format("h:mm A")}
+                        size="small"
+                        variant="outlined"
+                        sx={{ ml: "auto" }}
+                      />
+                    )}
+                  </Box>
+
+                  {workUpdates.morning.description && (
+                    <Typography variant="body2" sx={{ mb: 1.5 }}>
+                      {workUpdates.morning.description}
+                    </Typography>
+                  )}
+
+                  {workUpdates.morning.photos.length > 0 && (
+                    <PhotoThumbnailStrip
+                      photos={workUpdates.morning.photos}
+                      size="medium"
+                      maxVisible={5}
+                      onPhotoClick={handleMorningPhotoClick}
+                      showDescriptions
+                    />
+                  )}
+                </Paper>
               )}
 
-              {workUpdates.evening.photos.length > 0 && (
-                <PhotoThumbnailStrip
-                  photos={workUpdates.evening.photos}
-                  size="medium"
-                  maxVisible={5}
-                  onPhotoClick={handleEveningPhotoClick}
-                />
+              {/* Evening Section */}
+              {hasEvening && workUpdates.evening && (
+                <Paper
+                  variant="outlined"
+                  sx={{
+                    p: 2,
+                    bgcolor: "info.50",
+                    borderColor: "info.200",
+                  }}
+                >
+                  <Box
+                    sx={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 1,
+                      mb: 1.5,
+                    }}
+                  >
+                    <EveningIcon sx={{ color: "info.main", fontSize: 20 }} />
+                    <Typography variant="subtitle2" color="info.dark">
+                      Evening Update
+                    </Typography>
+                    <Chip
+                      label={`${workUpdates.evening.completionPercent}%`}
+                      size="small"
+                      color={getProgressColor(workUpdates.evening.completionPercent)}
+                    />
+                    {workUpdates.evening.timestamp && (
+                      <Chip
+                        label={dayjs(workUpdates.evening.timestamp).format("h:mm A")}
+                        size="small"
+                        variant="outlined"
+                        sx={{ ml: "auto" }}
+                      />
+                    )}
+                  </Box>
+
+                  {/* Progress bar */}
+                  <Box sx={{ mb: 1.5 }}>
+                    <LinearProgress
+                      variant="determinate"
+                      value={workUpdates.evening.completionPercent}
+                      color={getProgressColor(workUpdates.evening.completionPercent)}
+                      sx={{ height: 8, borderRadius: 1 }}
+                    />
+                  </Box>
+
+                  {workUpdates.evening.summary && (
+                    <Typography variant="body2" sx={{ mb: 1.5 }}>
+                      {workUpdates.evening.summary}
+                    </Typography>
+                  )}
+
+                  {workUpdates.evening.photos.length > 0 && (
+                    <PhotoThumbnailStrip
+                      photos={workUpdates.evening.photos}
+                      size="medium"
+                      maxVisible={5}
+                      onPhotoClick={handleEveningPhotoClick}
+                    />
+                  )}
+                </Paper>
               )}
-            </Paper>
+            </>
           )}
 
           {/* No data state */}

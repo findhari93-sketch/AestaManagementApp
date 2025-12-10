@@ -220,7 +220,7 @@ export default function EveningUpdateForm({
         disabled={disabled}
       />
 
-      {/* Evening Photos */}
+      {/* Evening Photos - Side-by-side comparison with morning */}
       {morningData?.photos && morningData.photos.length > 0 && (
         <Box>
           <Typography
@@ -236,28 +236,134 @@ export default function EveningUpdateForm({
           <Box
             sx={{
               display: "flex",
-              gap: 1,
-              flexWrap: "wrap",
+              flexDirection: "column",
+              gap: 1.5,
             }}
           >
-            {photoSlots.map((slot, index) => (
-              <PhotoSlot
-                key={slot.id}
-                supabase={supabase}
-                siteId={siteId}
-                date={date}
-                period="evening"
-                slotIndex={index + 1}
-                photoUrl={slot.photo?.url || null}
-                description=""
-                onPhotoCapture={(url) => handlePhotoCapture(index, url)}
-                onPhotoRemove={() => handlePhotoRemove(index)}
-                onDescriptionChange={() => {}}
-                showDescription={false}
-                disabled={disabled}
-                compact
-              />
-            ))}
+            {photoSlots.slice(0, morningData.photos.length).map((slot, index) => {
+              const morningPhoto = morningData.photos[index];
+              return (
+                <Paper
+                  key={slot.id}
+                  variant="outlined"
+                  sx={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 1.5,
+                    p: 1,
+                    bgcolor: "grey.50",
+                  }}
+                >
+                  {/* Morning Photo (Reference) */}
+                  <Box
+                    sx={{
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "center",
+                      gap: 0.5,
+                    }}
+                  >
+                    <Typography variant="caption" color="warning.dark" fontWeight={500}>
+                      Morning
+                    </Typography>
+                    {morningPhoto ? (
+                      <Box
+                        component="img"
+                        src={morningPhoto.url}
+                        alt={`Morning ${index + 1}`}
+                        onClick={() => handleMorningPhotoClick(index)}
+                        sx={{
+                          width: 60,
+                          height: 60,
+                          borderRadius: 1,
+                          objectFit: "cover",
+                          border: "2px solid",
+                          borderColor: "warning.main",
+                          cursor: "pointer",
+                          "&:hover": {
+                            opacity: 0.8,
+                          },
+                        }}
+                      />
+                    ) : (
+                      <Box
+                        sx={{
+                          width: 60,
+                          height: 60,
+                          borderRadius: 1,
+                          bgcolor: "grey.200",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                        }}
+                      >
+                        <Typography variant="caption" color="text.disabled">
+                          -
+                        </Typography>
+                      </Box>
+                    )}
+                    {morningPhoto?.description && (
+                      <Typography
+                        variant="caption"
+                        color="text.secondary"
+                        sx={{
+                          maxWidth: 70,
+                          textAlign: "center",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {morningPhoto.description}
+                      </Typography>
+                    )}
+                  </Box>
+
+                  {/* Arrow indicator */}
+                  <Typography color="text.disabled" sx={{ fontSize: 20 }}>
+                    →
+                  </Typography>
+
+                  {/* Evening Photo (Capture) */}
+                  <Box
+                    sx={{
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "center",
+                      gap: 0.5,
+                    }}
+                  >
+                    <Typography variant="caption" color="info.dark" fontWeight={500}>
+                      Evening
+                    </Typography>
+                    <PhotoSlot
+                      supabase={supabase}
+                      siteId={siteId}
+                      date={date}
+                      period="evening"
+                      slotIndex={index + 1}
+                      photoUrl={slot.photo?.url || null}
+                      description=""
+                      onPhotoCapture={(url) => handlePhotoCapture(index, url)}
+                      onPhotoRemove={() => handlePhotoRemove(index)}
+                      onDescriptionChange={() => {}}
+                      showDescription={false}
+                      disabled={disabled}
+                      compact
+                    />
+                  </Box>
+
+                  {/* Task label */}
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    sx={{ ml: "auto", pr: 1 }}
+                  >
+                    Task {index + 1}
+                  </Typography>
+                </Paper>
+              );
+            })}
           </Box>
         </Box>
       )}

@@ -121,6 +121,7 @@ interface LaborRole {
   id: string;
   name: string;
   default_daily_rate: number;
+  is_market_role: boolean;
 }
 
 // Work Unit Presets - User selects work unit FIRST, times auto-populate
@@ -338,6 +339,8 @@ export default function AttendanceDrawer({
   const [existingAttendanceStatus, setExistingAttendanceStatus] = useState<
     "morning_entry" | "confirmed" | null
   >(null);
+  // Evening mode: plan followed toggle (true = as planned, false = modified)
+  const [planFollowed, setPlanFollowed] = useState(true);
 
   // Calculate tea shop total from existing entry
   const teaShopTotal = existingTeaEntry?.total_amount || 0;
@@ -397,6 +400,7 @@ export default function AttendanceDrawer({
     // Reset two-phase state
     setWorkProgressPercent(100);
     setExistingAttendanceStatus(null);
+    setPlanFollowed(true);
   };
 
   const fetchData = async () => {
@@ -450,10 +454,11 @@ export default function AttendanceDrawer({
         setSectionId(sectionsArray[0].id);
       }
 
-      // Fetch labor roles for market laborers
+      // Fetch labor roles for market laborers (only roles marked as market roles)
       const { data: rolesData, error: rolesError } = await supabase
         .from("labor_roles")
-        .select("id, name, default_daily_rate")
+        .select("id, name, default_daily_rate, is_market_role")
+        .eq("is_market_role", true)
         .order("name");
 
       if (rolesError) throw rolesError;
@@ -1627,8 +1632,262 @@ export default function AttendanceDrawer({
                   )}
                 </Box>
 
-                {/* Work Unit Row - Hidden in morning mode */}
-                {mode !== "morning" && (
+                {/* Morning Mode: Start Time & Planned Work */}
+                {mode === "morning" && (
+                  <Box sx={{ mb: 2 }}>
+                    {/* Start Time Input */}
+                    <Box
+                      sx={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 1,
+                        mb: 2,
+                      }}
+                    >
+                      <Typography
+                        variant="body2"
+                        color="text.secondary"
+                        sx={{ minWidth: 100 }}
+                      >
+                        Work Start Time:
+                      </Typography>
+                      <TextField
+                        size="small"
+                        type="time"
+                        value={defaultInTime}
+                        onChange={(e) => setDefaultInTime(e.target.value)}
+                        slotProps={{ inputLabel: { shrink: true } }}
+                        sx={{ width: 130 }}
+                      />
+                      <Button
+                        size="small"
+                        variant="text"
+                        onClick={() => {
+                          // Apply start time to all selected laborers
+                          setSelectedLaborers((prev) => {
+                            const updated = new Map(prev);
+                            updated.forEach((laborer, id) => {
+                              updated.set(id, { ...laborer, inTime: defaultInTime });
+                            });
+                            return updated;
+                          });
+                          setMarketLaborers((prev) =>
+                            prev.map((m) => ({ ...m, inTime: defaultInTime }))
+                          );
+                        }}
+                        disabled={
+                          selectedLaborers.size === 0 && marketLaborers.length === 0
+                        }
+                      >
+                        Apply to All
+                      </Button>
+                    </Box>
+                    {/* Planned Work Day Units */}
+                    <Box
+                      sx={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 1,
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <Typography
+                        variant="body2"
+                        color="text.secondary"
+                        sx={{ minWidth: 140 }}
+                      >
+                        Planned Work for Today:
+                      </Typography>
+                      <ToggleButtonGroup
+                        value={defaultWorkUnit}
+                        exclusive
+                        onChange={(_, value) => {
+                          if (value !== null) {
+                            setDefaultWorkUnit(value);
+                          }
+                        }}
+                        size="small"
+                        sx={{
+                          "& .MuiToggleButton-root": {
+                            px: 1.5,
+                            py: 0.5,
+                            "&.Mui-selected": {
+                              bgcolor: "warning.main",
+                              color: "white",
+                              "&:hover": { bgcolor: "warning.dark" },
+                            },
+                          },
+                        }}
+                      >
+                        {WORK_UNIT_PRESETS.map((p) => (
+                          <ToggleButton key={p.value} value={p.value}>
+                            <Typography variant="body2" fontWeight={600}>
+                              {p.shortLabel}
+                            </Typography>
+                          </ToggleButton>
+                        ))}
+                      </ToggleButtonGroup>
+                      <Typography variant="caption" color="text.secondary">
+                        days
+                      </Typography>
+                    </Box>
+                  </Box>
+                )}
+
+                {/* Evening Mode: As Planned / Modified Toggle */}
+                {mode === "evening" && (
+                  <Box sx={{ mb: 2 }}>
+                    {/* Show planned value */}
+                    <Box
+                      sx={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 1,
+                        mb: 1.5,
+                      }}
+                    >
+                      <Typography variant="body2" color="text.secondary">
+                        Planned:
+                      </Typography>
+                      <Chip
+                        label={`${defaultWorkUnit} Day${defaultWorkUnit !== 1 ? "s" : ""}`}
+                        size="small"
+                        color="warning"
+                        variant="outlined"
+                      />
+                    </Box>
+                    {/* As Planned / Modified Toggle */}
+                    <Box
+                      sx={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 1,
+                        mb: planFollowed ? 0 : 1.5,
+                      }}
+                    >
+                      <Typography
+                        variant="body2"
+                        color="text.secondary"
+                        sx={{ minWidth: 130 }}
+                      >
+                        Was the plan executed?
+                      </Typography>
+                      <ToggleButtonGroup
+                        value={planFollowed}
+                        exclusive
+                        onChange={(_, value) => {
+                          if (value !== null) {
+                            setPlanFollowed(value);
+                          }
+                        }}
+                        size="small"
+                        sx={{
+                          "& .MuiToggleButton-root": {
+                            px: 2,
+                            py: 0.5,
+                            "&.Mui-selected": {
+                              bgcolor: "success.main",
+                              color: "white",
+                              "&:hover": { bgcolor: "success.dark" },
+                            },
+                          },
+                        }}
+                      >
+                        <ToggleButton value={true}>
+                          <CheckCircleIcon sx={{ fontSize: 16, mr: 0.5 }} />
+                          <Typography variant="body2" fontWeight={600}>
+                            As Planned
+                          </Typography>
+                        </ToggleButton>
+                        <ToggleButton
+                          value={false}
+                          sx={{
+                            "&.Mui-selected": {
+                              bgcolor: "info.main !important",
+                              "&:hover": { bgcolor: "info.dark !important" },
+                            },
+                          }}
+                        >
+                          <SettingsIcon sx={{ fontSize: 16, mr: 0.5 }} />
+                          <Typography variant="body2" fontWeight={600}>
+                            Modified
+                          </Typography>
+                        </ToggleButton>
+                      </ToggleButtonGroup>
+                    </Box>
+                    {/* Show day unit selector only when Modified is selected */}
+                    <Collapse in={!planFollowed}>
+                      <Box
+                        sx={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 1,
+                          flexWrap: "wrap",
+                          pl: 0,
+                        }}
+                      >
+                        <Typography
+                          variant="body2"
+                          color="text.secondary"
+                          sx={{ minWidth: 70 }}
+                        >
+                          Actual:
+                        </Typography>
+                        <ToggleButtonGroup
+                          value={defaultWorkUnit}
+                          exclusive
+                          onChange={(_, value) => {
+                            if (value !== null) {
+                              setDefaultWorkUnit(value);
+                              const preset = getPresetByValue(value);
+                              setDefaultInTime(preset.inTime);
+                              setDefaultOutTime(preset.outTime);
+                              setDefaultLunchOut(preset.lunchOut || "13:00");
+                              setDefaultLunchIn(preset.lunchIn || "14:00");
+                            }
+                          }}
+                          size="small"
+                          sx={{
+                            "& .MuiToggleButton-root": {
+                              px: 1.5,
+                              py: 0.5,
+                              "&.Mui-selected": {
+                                bgcolor: "info.main",
+                                color: "white",
+                                "&:hover": { bgcolor: "info.dark" },
+                              },
+                            },
+                          }}
+                        >
+                          {WORK_UNIT_PRESETS.map((p) => (
+                            <ToggleButton key={p.value} value={p.value}>
+                              <Typography variant="body2" fontWeight={600}>
+                                {p.shortLabel}
+                              </Typography>
+                            </ToggleButton>
+                          ))}
+                        </ToggleButtonGroup>
+                        <Typography variant="caption" color="text.secondary">
+                          days
+                        </Typography>
+                        <Button
+                          size="small"
+                          variant="text"
+                          onClick={applyDefaultWorkUnitToAll}
+                          disabled={
+                            selectedLaborers.size === 0 && marketLaborers.length === 0
+                          }
+                          sx={{ ml: "auto" }}
+                        >
+                          Apply All
+                        </Button>
+                      </Box>
+                    </Collapse>
+                  </Box>
+                )}
+
+                {/* Full Mode: Work Unit Row */}
+                {mode === "full" && (
                   <Box
                     sx={{
                       display: "flex",
