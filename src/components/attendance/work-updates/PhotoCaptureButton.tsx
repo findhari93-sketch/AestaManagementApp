@@ -60,6 +60,8 @@ export default function PhotoCaptureButton({
     const file = e.target.files?.[0];
     if (!file) return;
 
+    console.log("[PhotoCapture] Starting upload for file:", file.name, "size:", file.size);
+
     // Reset input so same file can be selected again
     if (inputRef.current) {
       inputRef.current.value = "";
@@ -71,16 +73,19 @@ export default function PhotoCaptureButton({
 
     try {
       // Compress the image with timeout
+      console.log("[PhotoCapture] Compressing image...");
       setUploadProgress(30);
       const compressed = await withTimeout(
         compressImage(file, 500, 1920, 1920, 0.8),
         15000,
         "Image compression timed out"
       );
+      console.log("[PhotoCapture] Compressed size:", compressed.size);
 
       // Upload to Supabase with timeout
       setUploadProgress(50);
       const filePath = getWorkUpdatePhotoPath(siteId, date, period, photoIndex);
+      console.log("[PhotoCapture] Uploading to path:", filePath);
 
       const uploadPromise = supabase.storage
         .from("work-updates")
@@ -89,13 +94,16 @@ export default function PhotoCaptureButton({
           upsert: true,
         });
 
-      const { error: uploadError } = await withTimeout(
+      const { error: uploadError, data: uploadData } = await withTimeout(
         uploadPromise,
         30000,
         "Upload timed out - check your internet connection"
       );
 
+      console.log("[PhotoCapture] Upload result:", { error: uploadError, data: uploadData });
+
       if (uploadError) {
+        console.error("[PhotoCapture] Upload error details:", JSON.stringify(uploadError));
         throw uploadError;
       }
 
@@ -106,14 +114,23 @@ export default function PhotoCaptureButton({
         data: { publicUrl },
       } = supabase.storage.from("work-updates").getPublicUrl(filePath);
 
+      console.log("[PhotoCapture] Public URL:", publicUrl);
       setUploadProgress(100);
       onPhotoCapture(publicUrl);
-    } catch (err) {
-      console.error("Error uploading photo:", err);
-      const errorMessage = err instanceof Error ? err.message : String(err);
+    } catch (err: unknown) {
+      console.error("[PhotoCapture] Error:", err);
+      // Extract detailed error message
+      let errorMessage = "Upload failed";
+      if (err instanceof Error) {
+        errorMessage = err.message;
+      } else if (typeof err === "object" && err !== null) {
+        const errObj = err as Record<string, unknown>;
+        errorMessage = (errObj.message as string) || (errObj.error as string) || JSON.stringify(err);
+      }
+      console.error("[PhotoCapture] Error message:", errorMessage);
       setError(errorMessage);
-      // Clear error after 5 seconds
-      setTimeout(() => setError(null), 5000);
+      // Clear error after 8 seconds
+      setTimeout(() => setError(null), 8000);
     } finally {
       setIsUploading(false);
       setUploadProgress(0);
