@@ -8,12 +8,16 @@ import {
   Typography,
   Chip,
   SelectChangeEvent,
+  useMediaQuery,
+  useTheme,
 } from '@mui/material'
 import { LocationOn } from '@mui/icons-material'
 import { useSite } from '@/contexts/SiteContext'
 
 export default function SiteSelector() {
   const { sites, selectedSite, setSelectedSite, loading } = useSite()
+  const theme = useTheme()
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'))
 
   const handleChange = (event: SelectChangeEvent) => {
     const site = sites.find((s) => s.id === event.target.value)
@@ -45,7 +49,7 @@ export default function SiteSelector() {
   }
 
   return (
-    <FormControl size="small" sx={{ minWidth: 250 }}>
+    <FormControl size="small" sx={{ minWidth: { xs: 100, sm: 250 }, maxWidth: { xs: 160, sm: 'none' } }}>
       <Select
         value={selectedSite?.id || ''}
         onChange={handleChange}
@@ -55,37 +59,51 @@ export default function SiteSelector() {
           '& .MuiSelect-select': {
             display: 'flex',
             alignItems: 'center',
-            gap: 1,
+            gap: { xs: 0.5, sm: 1 },
+            py: { xs: 0.5, sm: 1 },
           },
         }}
         renderValue={(value) => {
           const site = sites.find((s) => s.id === value)
           if (!site) return 'Select Site'
           return (
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <LocationOn sx={{ fontSize: 20, color: 'primary.main' }} />
-              <Box>
-                <Typography variant="body2" fontWeight={500}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 0.5, sm: 1 }, overflow: 'hidden' }}>
+              <LocationOn sx={{ fontSize: { xs: 16, sm: 20 }, color: 'primary.main', flexShrink: 0 }} />
+              <Box sx={{ minWidth: 0, overflow: 'hidden' }}>
+                <Typography
+                  variant="body2"
+                  fontWeight={500}
+                  sx={{
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    fontSize: { xs: '0.75rem', sm: '0.875rem' }
+                  }}
+                >
                   {site.name}
                 </Typography>
-                <Typography variant="caption" color="text.secondary">
-                  {site.city}
-                </Typography>
+                {!isMobile && (
+                  <Typography variant="caption" color="text.secondary">
+                    {site.city}
+                  </Typography>
+                )}
               </Box>
-              <Chip
-                label={site.status}
-                size="small"
-                color={
-                  site.status === 'active'
-                    ? 'success'
-                    : site.status === 'planning'
-                    ? 'info'
-                    : site.status === 'on_hold'
-                    ? 'warning'
-                    : 'default'
-                }
-                sx={{ ml: 'auto', height: 20, fontSize: '0.625rem' }}
-              />
+              {!isMobile && (
+                <Chip
+                  label={site.status}
+                  size="small"
+                  color={
+                    site.status === 'active'
+                      ? 'success'
+                      : site.status === 'planning'
+                      ? 'info'
+                      : site.status === 'on_hold'
+                      ? 'warning'
+                      : 'default'
+                  }
+                  sx={{ ml: 'auto', height: 20, fontSize: '0.625rem', flexShrink: 0 }}
+                />
+              )}
             </Box>
           )
         }}

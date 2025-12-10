@@ -31,6 +31,8 @@ import {
   Popover,
   Divider,
   Fab,
+  useMediaQuery,
+  useTheme,
 } from "@mui/material";
 import {
   ExpandMore,
@@ -155,6 +157,8 @@ export default function AttendancePage() {
   const { selectedSite } = useSite();
   const { userProfile } = useAuth();
   const supabase = createClient();
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
   const [loading, setLoading] = useState(false);
   const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
@@ -924,129 +928,169 @@ export default function AttendancePage() {
         onRefresh={fetchAttendanceHistory}
         isLoading={loading}
         actions={
-          <Box sx={{ display: "flex", gap: 2, alignItems: "center" }}>
-            {/* Date Filters in Header */}
-            <TextField
-              label="From"
-              type="date"
-              value={dateFrom}
-              onChange={(e) => setDateFrom(e.target.value)}
-              slotProps={{ inputLabel: { shrink: true } }}
-              size="small"
-              sx={{ width: 150, bgcolor: "white" }}
-            />
-            <TextField
-              label="To"
-              type="date"
-              value={dateTo}
-              onChange={(e) => setDateTo(e.target.value)}
-              slotProps={{ inputLabel: { shrink: true } }}
-              size="small"
-              sx={{ width: 150, bgcolor: "white" }}
-            />
-            <Button
-              variant="contained"
-              color="warning"
-              startIcon={<AccessTime />}
-              onClick={() => {
-                setSelectedDateForDrawer(undefined);
-                setDrawerMode("morning");
-                setDrawerOpen(true);
-              }}
-              sx={{ mr: 1 }}
-            >
-              🌅 Start Day
-            </Button>
-            <Button
-              variant={viewMode === "date-wise" ? "contained" : "outlined"}
-              onClick={() => setViewMode("date-wise")}
-              size="small"
-              color="inherit"
-            >
-              Date-wise
-            </Button>
-            <Button
-              variant={viewMode === "detailed" ? "contained" : "outlined"}
-              onClick={() => setViewMode("detailed")}
-              size="small"
-              color="inherit"
-            >
-              Detailed
-            </Button>
+          <Box sx={{
+            display: "flex",
+            flexDirection: { xs: 'column', sm: 'row' },
+            gap: { xs: 1, sm: 2 },
+            alignItems: { xs: 'stretch', sm: 'center' },
+            width: { xs: '100%', sm: 'auto' }
+          }}>
+            {/* Date Filters - Row 1 on mobile */}
+            <Box sx={{ display: 'flex', gap: 1, flex: { xs: '1 1 100%', sm: '0 0 auto' } }}>
+              <TextField
+                label="From"
+                type="date"
+                value={dateFrom}
+                onChange={(e) => setDateFrom(e.target.value)}
+                slotProps={{ inputLabel: { shrink: true } }}
+                size="small"
+                sx={{ width: { xs: '50%', sm: 130 }, bgcolor: "white" }}
+              />
+              <TextField
+                label="To"
+                type="date"
+                value={dateTo}
+                onChange={(e) => setDateTo(e.target.value)}
+                slotProps={{ inputLabel: { shrink: true } }}
+                size="small"
+                sx={{ width: { xs: '50%', sm: 130 }, bgcolor: "white" }}
+              />
+            </Box>
+            {/* Buttons - Row 2 on mobile */}
+            <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', justifyContent: { xs: 'space-between', sm: 'flex-start' } }}>
+              <Button
+                variant="contained"
+                color="warning"
+                startIcon={!isMobile && <AccessTime />}
+                onClick={() => {
+                  setSelectedDateForDrawer(undefined);
+                  setDrawerMode("morning");
+                  setDrawerOpen(true);
+                }}
+                size={isMobile ? 'small' : 'medium'}
+                sx={{ flex: { xs: 1, sm: 'none' }, minWidth: { xs: 'auto', sm: 'auto' } }}
+              >
+                {isMobile ? '🌅 Start' : '🌅 Start Day'}
+              </Button>
+              <Button
+                variant={viewMode === "date-wise" ? "contained" : "outlined"}
+                onClick={() => setViewMode("date-wise")}
+                size="small"
+                color="inherit"
+              >
+                {isMobile ? 'Date' : 'Date-wise'}
+              </Button>
+              <Button
+                variant={viewMode === "detailed" ? "contained" : "outlined"}
+                onClick={() => setViewMode("detailed")}
+                size="small"
+                color="inherit"
+              >
+                {isMobile ? 'Detail' : 'Detailed'}
+              </Button>
+            </Box>
           </Box>
         }
       />
 
       {/* Period Summary Bar */}
-      <Paper sx={{ p: 2, mb: 2, display: "flex", gap: 4, alignItems: "center", flexWrap: "wrap" }}>
-        <Box>
-          <Typography variant="caption" color="text.secondary">Period Total</Typography>
-          <Typography variant="h5" fontWeight={700} color="primary.main">
-            ₹{periodTotals.totalExpense.toLocaleString()}
-          </Typography>
-        </Box>
-        <Box>
-          <Typography variant="caption" color="text.secondary">Salary</Typography>
-          <Typography variant="h6" fontWeight={600} color="success.main">
-            ₹{periodTotals.totalSalary.toLocaleString()}
-          </Typography>
-        </Box>
-        <Box>
-          <Typography variant="caption" color="text.secondary">Tea Shop</Typography>
-          <Typography variant="h6" fontWeight={600} color="secondary.main">
-            ₹{periodTotals.totalTeaShop.toLocaleString()}
-          </Typography>
-        </Box>
-        <Divider orientation="vertical" flexItem />
-        <Box>
-          <Typography variant="caption" color="text.secondary">Daily</Typography>
-          <Typography variant="h6" fontWeight={600} color="warning.main">
-            ₹{periodTotals.totalDailyAmount.toLocaleString()}
-          </Typography>
-        </Box>
-        <Box>
-          <Typography variant="caption" color="text.secondary">Contract</Typography>
-          <Typography variant="h6" fontWeight={600} color="info.main">
-            ₹{periodTotals.totalContractAmount.toLocaleString()}
-          </Typography>
-        </Box>
-        <Box>
-          <Typography variant="caption" color="text.secondary">Market</Typography>
-          <Typography variant="h6" fontWeight={600} sx={{ color: "secondary.main" }}>
-            ₹{periodTotals.totalMarketAmount.toLocaleString()}
-          </Typography>
-        </Box>
-        <Divider orientation="vertical" flexItem />
-        <Box>
-          <Typography variant="caption" color="text.secondary">Paid</Typography>
-          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-            <Typography variant="h6" fontWeight={600} color="success.main">
-              ₹{periodTotals.totalPaidAmount.toLocaleString()}
+      <Paper sx={{ p: { xs: 1.5, sm: 2 }, mb: 2 }}>
+        <Box sx={{
+          display: 'grid',
+          gridTemplateColumns: {
+            xs: 'repeat(2, 1fr)',
+            sm: 'repeat(4, 1fr)',
+            md: 'repeat(5, 1fr)',
+            lg: 'repeat(10, 1fr)'
+          },
+          gap: { xs: 1.5, sm: 2 }
+        }}>
+          <Box>
+            <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.65rem', sm: '0.75rem' } }}>
+              Period Total
             </Typography>
-            <Chip label={periodTotals.totalPaidCount} size="small" color="success" variant="outlined" />
-          </Box>
-        </Box>
-        <Box>
-          <Typography variant="caption" color="text.secondary">Pending</Typography>
-          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-            <Typography variant="h6" fontWeight={600} color="warning.main">
-              ₹{periodTotals.totalPendingAmount.toLocaleString()}
+            <Typography sx={{ fontSize: { xs: '1rem', sm: '1.25rem' }, fontWeight: 700, color: 'primary.main' }}>
+              ₹{periodTotals.totalExpense.toLocaleString()}
             </Typography>
-            <Chip label={periodTotals.totalPendingCount} size="small" color="warning" variant="outlined" />
           </Box>
-        </Box>
-        <Divider orientation="vertical" flexItem />
-        <Box>
-          <Typography variant="caption" color="text.secondary">Avg/Day</Typography>
-          <Typography variant="h6" fontWeight={600}>
-            ₹{periodTotals.avgPerDay.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-          </Typography>
-        </Box>
-        <Box>
-          <Typography variant="caption" color="text.secondary">Days</Typography>
-          <Typography variant="h6" fontWeight={600}>
-            {dateSummaries.length}
-          </Typography>
+          <Box>
+            <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.65rem', sm: '0.75rem' } }}>
+              Salary
+            </Typography>
+            <Typography sx={{ fontSize: { xs: '0.875rem', sm: '1.125rem' }, fontWeight: 600, color: 'success.main' }}>
+              ₹{periodTotals.totalSalary.toLocaleString()}
+            </Typography>
+          </Box>
+          <Box>
+            <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.65rem', sm: '0.75rem' } }}>
+              Tea Shop
+            </Typography>
+            <Typography sx={{ fontSize: { xs: '0.875rem', sm: '1.125rem' }, fontWeight: 600, color: 'secondary.main' }}>
+              ₹{periodTotals.totalTeaShop.toLocaleString()}
+            </Typography>
+          </Box>
+          <Box>
+            <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.65rem', sm: '0.75rem' } }}>
+              Daily
+            </Typography>
+            <Typography sx={{ fontSize: { xs: '0.875rem', sm: '1.125rem' }, fontWeight: 600, color: 'warning.main' }}>
+              ₹{periodTotals.totalDailyAmount.toLocaleString()}
+            </Typography>
+          </Box>
+          <Box>
+            <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.65rem', sm: '0.75rem' } }}>
+              Contract
+            </Typography>
+            <Typography sx={{ fontSize: { xs: '0.875rem', sm: '1.125rem' }, fontWeight: 600, color: 'info.main' }}>
+              ₹{periodTotals.totalContractAmount.toLocaleString()}
+            </Typography>
+          </Box>
+          <Box>
+            <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.65rem', sm: '0.75rem' } }}>
+              Market
+            </Typography>
+            <Typography sx={{ fontSize: { xs: '0.875rem', sm: '1.125rem' }, fontWeight: 600, color: 'secondary.main' }}>
+              ₹{periodTotals.totalMarketAmount.toLocaleString()}
+            </Typography>
+          </Box>
+          <Box>
+            <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.65rem', sm: '0.75rem' } }}>
+              Paid
+            </Typography>
+            <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+              <Typography sx={{ fontSize: { xs: '0.875rem', sm: '1.125rem' }, fontWeight: 600, color: 'success.main' }}>
+                ₹{periodTotals.totalPaidAmount.toLocaleString()}
+              </Typography>
+              <Chip label={periodTotals.totalPaidCount} size="small" color="success" variant="outlined" sx={{ height: { xs: 18, sm: 24 }, '& .MuiChip-label': { px: 0.5, fontSize: { xs: '0.6rem', sm: '0.75rem' } } }} />
+            </Box>
+          </Box>
+          <Box>
+            <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.65rem', sm: '0.75rem' } }}>
+              Pending
+            </Typography>
+            <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+              <Typography sx={{ fontSize: { xs: '0.875rem', sm: '1.125rem' }, fontWeight: 600, color: 'warning.main' }}>
+                ₹{periodTotals.totalPendingAmount.toLocaleString()}
+              </Typography>
+              <Chip label={periodTotals.totalPendingCount} size="small" color="warning" variant="outlined" sx={{ height: { xs: 18, sm: 24 }, '& .MuiChip-label': { px: 0.5, fontSize: { xs: '0.6rem', sm: '0.75rem' } } }} />
+            </Box>
+          </Box>
+          <Box>
+            <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.65rem', sm: '0.75rem' } }}>
+              Avg/Day
+            </Typography>
+            <Typography sx={{ fontSize: { xs: '0.875rem', sm: '1.125rem' }, fontWeight: 600 }}>
+              ₹{periodTotals.avgPerDay.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+            </Typography>
+          </Box>
+          <Box>
+            <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.65rem', sm: '0.75rem' } }}>
+              Days
+            </Typography>
+            <Typography sx={{ fontSize: { xs: '0.875rem', sm: '1.125rem' }, fontWeight: 600 }}>
+              {dateSummaries.length}
+            </Typography>
+          </Box>
         </Box>
       </Paper>
 
@@ -1056,24 +1100,58 @@ export default function AttendancePage() {
           <CircularProgress />
         </Box>
       ) : viewMode === "date-wise" ? (
-        <Paper sx={{ borderRadius: 2, overflow: "hidden" }}>
-          <TableContainer sx={{ maxHeight: "calc(100vh - 350px)" }}>
-            <Table stickyHeader size="small">
+        <Paper sx={{ borderRadius: 2, overflow: "hidden", position: 'relative' }}>
+          <TableContainer
+            sx={{
+              maxHeight: { xs: "calc(100vh - 400px)", sm: "calc(100vh - 350px)" },
+              overflowX: 'auto',
+              WebkitOverflowScrolling: 'touch',
+            }}
+          >
+            <Table stickyHeader size="small" sx={{ minWidth: 900 }}>
               <TableHead>
                 <TableRow sx={{ bgcolor: "#1565c0" }}>
-                  <TableCell sx={{ width: 40, bgcolor: "#1565c0", color: "#fff", fontWeight: 700 }}></TableCell>
-                  <TableCell sx={{ bgcolor: "#1565c0", color: "#fff", fontWeight: 700 }}>Date</TableCell>
-                  <TableCell sx={{ bgcolor: "#1565c0", color: "#fff", fontWeight: 700 }} align="center">Daily</TableCell>
-                  <TableCell sx={{ bgcolor: "#1565c0", color: "#fff", fontWeight: 700 }} align="center">Contract</TableCell>
-                  <TableCell sx={{ bgcolor: "#1565c0", color: "#fff", fontWeight: 700 }} align="center">Market</TableCell>
-                  <TableCell sx={{ bgcolor: "#1565c0", color: "#fff", fontWeight: 700 }} align="center">Total</TableCell>
-                  <TableCell sx={{ bgcolor: "#1565c0", color: "#fff", fontWeight: 700 }} align="center">In</TableCell>
-                  <TableCell sx={{ bgcolor: "#1565c0", color: "#fff", fontWeight: 700 }} align="center">Out</TableCell>
-                  <TableCell sx={{ bgcolor: "#1565c0", color: "#fff", fontWeight: 700 }} align="right">Salary</TableCell>
-                  <TableCell sx={{ bgcolor: "#1565c0", color: "#fff", fontWeight: 700 }} align="center">Tea Shop</TableCell>
-                  <TableCell sx={{ bgcolor: "#1565c0", color: "#fff", fontWeight: 700 }} align="right">Expense</TableCell>
-                  <TableCell sx={{ bgcolor: "#1565c0", color: "#fff", fontWeight: 700, minWidth: 150 }}>Work</TableCell>
-                  <TableCell sx={{ bgcolor: "#1565c0", color: "#fff", fontWeight: 700, minWidth: 100 }}>Status</TableCell>
+                  {/* Sticky expand column */}
+                  <TableCell sx={{
+                    width: 40,
+                    minWidth: 40,
+                    bgcolor: "#1565c0",
+                    color: "#fff",
+                    fontWeight: 700,
+                    position: 'sticky',
+                    left: 0,
+                    zIndex: 3,
+                  }}></TableCell>
+                  {/* Sticky date column */}
+                  <TableCell sx={{
+                    bgcolor: "#1565c0",
+                    color: "#fff",
+                    fontWeight: 700,
+                    position: 'sticky',
+                    left: 40,
+                    zIndex: 3,
+                    minWidth: { xs: 60, sm: 80 },
+                    '&::after': {
+                      content: '""',
+                      position: 'absolute',
+                      right: 0,
+                      top: 0,
+                      bottom: 0,
+                      width: 4,
+                      background: 'linear-gradient(to right, rgba(0,0,0,0.15), transparent)',
+                    }
+                  }}>Date</TableCell>
+                  <TableCell sx={{ bgcolor: "#1565c0", color: "#fff", fontWeight: 700, minWidth: 50 }} align="center">Daily</TableCell>
+                  <TableCell sx={{ bgcolor: "#1565c0", color: "#fff", fontWeight: 700, minWidth: 55 }} align="center">Contract</TableCell>
+                  <TableCell sx={{ bgcolor: "#1565c0", color: "#fff", fontWeight: 700, minWidth: 50 }} align="center">Market</TableCell>
+                  <TableCell sx={{ bgcolor: "#1565c0", color: "#fff", fontWeight: 700, minWidth: 45 }} align="center">Total</TableCell>
+                  <TableCell sx={{ bgcolor: "#1565c0", color: "#fff", fontWeight: 700, minWidth: 45 }} align="center">In</TableCell>
+                  <TableCell sx={{ bgcolor: "#1565c0", color: "#fff", fontWeight: 700, minWidth: 45 }} align="center">Out</TableCell>
+                  <TableCell sx={{ bgcolor: "#1565c0", color: "#fff", fontWeight: 700, minWidth: 70 }} align="right">Salary</TableCell>
+                  <TableCell sx={{ bgcolor: "#1565c0", color: "#fff", fontWeight: 700, minWidth: 80 }} align="center">Tea Shop</TableCell>
+                  <TableCell sx={{ bgcolor: "#1565c0", color: "#fff", fontWeight: 700, minWidth: 70 }} align="right">Expense</TableCell>
+                  <TableCell sx={{ bgcolor: "#1565c0", color: "#fff", fontWeight: 700, minWidth: 120 }}>Work</TableCell>
+                  <TableCell sx={{ bgcolor: "#1565c0", color: "#fff", fontWeight: 700, minWidth: 90 }}>Status</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -1084,16 +1162,37 @@ export default function AttendancePage() {
                       onClick={() => toggleDateExpanded(summary.date)}
                       sx={{ cursor: "pointer", "&:hover": { bgcolor: "action.hover" } }}
                     >
-                      <TableCell>
+                      {/* Sticky expand cell */}
+                      <TableCell sx={{
+                        position: 'sticky',
+                        left: 0,
+                        bgcolor: 'background.paper',
+                        zIndex: 1,
+                      }}>
                         <IconButton size="small">
                           {summary.isExpanded ? <ExpandLess /> : <ExpandMore />}
                         </IconButton>
                       </TableCell>
-                      <TableCell>
-                        <Typography variant="body2" fontWeight={600}>
+                      {/* Sticky date cell */}
+                      <TableCell sx={{
+                        position: 'sticky',
+                        left: 40,
+                        bgcolor: 'background.paper',
+                        zIndex: 1,
+                        '&::after': {
+                          content: '""',
+                          position: 'absolute',
+                          right: 0,
+                          top: 0,
+                          bottom: 0,
+                          width: 4,
+                          background: 'linear-gradient(to right, rgba(0,0,0,0.08), transparent)',
+                        }
+                      }}>
+                        <Typography variant="body2" fontWeight={600} sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>
                           {dayjs(summary.date).format("DD MMM")}
                         </Typography>
-                        <Typography variant="caption" color="text.secondary">
+                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.65rem', sm: '0.75rem' } }}>
                           {dayjs(summary.date).format("ddd")}
                         </Typography>
                       </TableCell>

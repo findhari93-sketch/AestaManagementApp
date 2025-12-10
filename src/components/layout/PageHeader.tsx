@@ -1,6 +1,6 @@
 'use client'
 
-import { Box, Typography, IconButton, Tooltip } from '@mui/material'
+import { Box, Typography, IconButton, Tooltip, useMediaQuery, useTheme } from '@mui/material'
 import { ArrowBack, Refresh } from '@mui/icons-material'
 import { useRouter } from 'next/navigation'
 
@@ -22,6 +22,8 @@ export default function PageHeader({
   actions,
 }: PageHeaderProps) {
   const router = useRouter()
+  const theme = useTheme()
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'))
 
   const handleBack = () => {
     router.back()
@@ -31,43 +33,55 @@ export default function PageHeader({
     <Box
       sx={{
         display: 'flex',
+        flexDirection: { xs: 'column', sm: 'row' },
         justifyContent: 'space-between',
-        alignItems: 'flex-start',
-        mb: 3,
+        alignItems: { xs: 'stretch', sm: 'flex-start' },
+        gap: { xs: 1.5, sm: 0 },
+        mb: { xs: 2, sm: 3 },
       }}
     >
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 0.5, sm: 1 } }}>
         {showBack && (
           <Tooltip title="Go back">
             <IconButton
               onClick={handleBack}
+              size={isMobile ? 'small' : 'medium'}
               sx={{
-                mr: 1,
+                mr: { xs: 0.5, sm: 1 },
                 bgcolor: 'action.hover',
                 '&:hover': { bgcolor: 'action.selected' },
               }}
             >
-              <ArrowBack />
+              <ArrowBack fontSize={isMobile ? 'small' : 'medium'} />
             </IconButton>
           </Tooltip>
         )}
         <Box>
-          <Typography variant="h5" fontWeight={600}>
+          <Typography
+            variant={isMobile ? 'h6' : 'h5'}
+            fontWeight={600}
+            sx={{ fontSize: { xs: '1rem', sm: '1.25rem', md: '1.5rem' } }}
+          >
             {title}
           </Typography>
           {subtitle && (
-            <Typography variant="body2" color="text.secondary">
+            <Typography
+              variant="body2"
+              color="text.secondary"
+              sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}
+            >
               {subtitle}
             </Typography>
           )}
         </Box>
       </Box>
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 0.5, sm: 1 }, flexWrap: 'wrap' }}>
         {onRefresh && (
           <Tooltip title="Refresh data">
             <IconButton
               onClick={onRefresh}
               disabled={isLoading}
+              size={isMobile ? 'small' : 'medium'}
               sx={{
                 bgcolor: 'action.hover',
                 '&:hover': { bgcolor: 'action.selected' },
@@ -78,7 +92,7 @@ export default function PageHeader({
                 },
               }}
             >
-              <Refresh />
+              <Refresh fontSize={isMobile ? 'small' : 'medium'} />
             </IconButton>
           </Tooltip>
         )}

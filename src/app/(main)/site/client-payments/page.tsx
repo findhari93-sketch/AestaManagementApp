@@ -31,6 +31,10 @@ import {
   FormControl,
   InputLabel,
   Tooltip,
+  useTheme,
+  useMediaQuery,
+  Fab,
+  Grid,
 } from "@mui/material";
 import {
   Add,
@@ -64,6 +68,8 @@ export default function ClientPaymentTracking() {
 
   const { selectedSite } = useSite();
   const selectedSiteId = selectedSite?.id;
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
   const [loading, setLoading] = useState(true);
   const [selectedPlan, setSelectedPlan] = useState<ClientPaymentPlan | null>(
     null
@@ -803,56 +809,71 @@ export default function ClientPaymentTracking() {
       )}
 
       {/* Payment table */}
-      <Paper sx={{ p: 2 }}>
+      <Paper sx={{ p: isMobile ? 1 : 2 }}>
         <Box
           sx={{
             display: "flex",
+            flexDirection: { xs: 'column', sm: 'row' },
             justifyContent: "space-between",
-            alignItems: "center",
+            alignItems: { xs: 'stretch', sm: 'center' },
+            gap: 1,
             mb: 2,
           }}
         >
           <Box>
-            <Typography variant="h6" fontWeight={700}>
+            <Typography variant={isMobile ? "subtitle1" : "h6"} fontWeight={700}>
               Client Payments
             </Typography>
-            <Typography variant="caption" color="text.secondary">
-              Log every received payment with mode, reference, and optional
-              receipt.
-            </Typography>
+            {!isMobile && (
+              <Typography variant="caption" color="text.secondary">
+                Log every received payment with mode, reference, and optional
+                receipt.
+              </Typography>
+            )}
           </Box>
-          <Stack direction="row" spacing={1}>
-            <Button
-              variant="outlined"
-              startIcon={<Timeline />}
-              onClick={() => setPlanDrawerOpen(true)}
-            >
-              {paymentPhases.length
-                ? "Show Payment Plan"
-                : "Create Payment Plan"}
-            </Button>
-            <Button
-              variant="contained"
-              startIcon={<Add />}
-              onClick={() => setPaymentDialogOpen(true)}
-            >
-              Add Payment
-            </Button>
-          </Stack>
+          {!isMobile && (
+            <Stack direction="row" spacing={1}>
+              <Button
+                variant="outlined"
+                startIcon={<Timeline />}
+                onClick={() => setPlanDrawerOpen(true)}
+                size="small"
+              >
+                {paymentPhases.length
+                  ? "Show Payment Plan"
+                  : "Create Payment Plan"}
+              </Button>
+              <Button
+                variant="contained"
+                startIcon={<Add />}
+                onClick={() => setPaymentDialogOpen(true)}
+                size="small"
+              >
+                Add Payment
+              </Button>
+            </Stack>
+          )}
         </Box>
 
-        <TableContainer>
-          <Table>
+        <TableContainer sx={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+          <Table size={isMobile ? "small" : "medium"} sx={{ minWidth: isMobile ? 700 : 'auto' }}>
             <TableHead>
               <TableRow sx={{ bgcolor: "action.hover" }}>
-                <TableCell>Date</TableCell>
-                <TableCell>Mode</TableCell>
-                <TableCell align="right">Amount</TableCell>
-                <TableCell>Reference</TableCell>
-                <TableCell>Phase Reached</TableCell>
-                <TableCell>Status</TableCell>
-                <TableCell>Receipt</TableCell>
-                <TableCell>Actions</TableCell>
+                <TableCell sx={{
+                  position: isMobile ? 'sticky' : 'static',
+                  left: 0,
+                  bgcolor: 'action.hover',
+                  zIndex: 1,
+                  fontWeight: 700,
+                  fontSize: isMobile ? '0.7rem' : 'inherit',
+                }}>Date</TableCell>
+                <TableCell sx={{ fontWeight: 700, fontSize: isMobile ? '0.7rem' : 'inherit' }}>Mode</TableCell>
+                <TableCell align="right" sx={{ fontWeight: 700, fontSize: isMobile ? '0.7rem' : 'inherit' }}>Amount</TableCell>
+                <TableCell sx={{ fontWeight: 700, fontSize: isMobile ? '0.7rem' : 'inherit' }}>{isMobile ? 'Ref' : 'Reference'}</TableCell>
+                <TableCell sx={{ fontWeight: 700, fontSize: isMobile ? '0.7rem' : 'inherit' }}>Phase</TableCell>
+                <TableCell sx={{ fontWeight: 700, fontSize: isMobile ? '0.7rem' : 'inherit' }}>{isMobile ? 'St' : 'Status'}</TableCell>
+                {!isMobile && <TableCell sx={{ fontWeight: 700 }}>Receipt</TableCell>}
+                <TableCell sx={{ fontWeight: 700, fontSize: isMobile ? '0.7rem' : 'inherit' }}>Act</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -1015,6 +1036,7 @@ export default function ClientPaymentTracking() {
         onClose={() => setPlanDialogOpen(false)}
         maxWidth="sm"
         fullWidth
+        fullScreen={isMobile}
       >
         <DialogTitle>Create Payment Plan</DialogTitle>
         <DialogContent sx={{ pt: 2 }}>
@@ -1055,6 +1077,7 @@ export default function ClientPaymentTracking() {
         onClose={() => setPhaseDialogOpen(false)}
         maxWidth="sm"
         fullWidth
+        fullScreen={isMobile}
       >
         <DialogTitle>Add Payment Phase</DialogTitle>
         <DialogContent sx={{ pt: 2 }}>
@@ -1126,6 +1149,7 @@ export default function ClientPaymentTracking() {
         }}
         maxWidth="sm"
         fullWidth
+        fullScreen={isMobile}
       >
         <DialogTitle>
           {editingPaymentId ? "Edit Payment" : "Record Client Payment"}
@@ -1256,6 +1280,22 @@ export default function ClientPaymentTracking() {
           {snackbar.message}
         </Alert>
       </Snackbar>
+
+      {/* Mobile FAB */}
+      {isMobile && (
+        <Fab
+          color="primary"
+          onClick={() => setPaymentDialogOpen(true)}
+          sx={{
+            position: "fixed",
+            bottom: 16,
+            right: 16,
+            zIndex: 1000,
+          }}
+        >
+          <Add />
+        </Fab>
+      )}
     </Box>
   );
 }

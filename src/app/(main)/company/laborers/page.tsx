@@ -20,6 +20,9 @@ import {
   Select,
   Grid,
   Alert,
+  useMediaQuery,
+  useTheme,
+  Fab,
 } from "@mui/material";
 import {
   Add as AddIcon,
@@ -62,6 +65,8 @@ export default function LaborersPage() {
 
   const { userProfile } = useAuth();
   const supabase = useMemo(() => createClient(), []);
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
 
   const [formData, setFormData] = useState({
     name: "",
@@ -216,24 +221,36 @@ export default function LaborersPage() {
 
   const columns = useMemo<MRT_ColumnDef<LaborerWithDetails>[]>(
     () => [
-      { accessorKey: "name", header: "Name", size: 180 },
+      {
+        accessorKey: "name",
+        header: "Name",
+        size: isMobile ? 100 : 180,
+      },
       {
         accessorKey: "phone",
         header: "Phone",
-        size: 130,
+        size: 110,
         Cell: ({ cell }) => cell.getValue<string>() || "-",
       },
-      { accessorKey: "category_name", header: "Category", size: 130 },
-      { accessorKey: "role_name", header: "Role", size: 150 },
+      {
+        accessorKey: "category_name",
+        header: isMobile ? "Cat" : "Category",
+        size: isMobile ? 60 : 130,
+      },
+      {
+        accessorKey: "role_name",
+        header: "Role",
+        size: isMobile ? 70 : 150,
+      },
       {
         accessorKey: "laborer_type",
-        header: "Laborer Type",
-        size: 140,
+        header: isMobile ? "Type" : "Laborer Type",
+        size: isMobile ? 50 : 140,
         Cell: ({ cell }) => {
           const type = cell.getValue<string>() || "daily_market";
           return (
             <Chip
-              label={type === "contract" ? "CONTRACT" : "DAILY MARKET"}
+              label={isMobile ? (type === "contract" ? "C" : "D") : (type === "contract" ? "CONTRACT" : "DAILY")}
               size="small"
               color={type === "contract" ? "primary" : "warning"}
               variant={type === "contract" ? "filled" : "outlined"}
@@ -243,42 +260,48 @@ export default function LaborersPage() {
       },
       {
         accessorKey: "employment_type",
-        header: "Employment",
-        size: 120,
+        header: isMobile ? "Emp" : "Employment",
+        size: isMobile ? 70 : 120,
         Cell: ({ cell }) => (
           <Chip
-            label={cell.getValue<string>().replace("_", " ").toUpperCase()}
+            label={isMobile
+              ? cell.getValue<string>().charAt(0).toUpperCase()
+              : cell.getValue<string>().replace("_", " ").toUpperCase()}
             size="small"
           />
         ),
       },
       {
         accessorKey: "daily_rate",
-        header: "Daily Rate",
-        size: 110,
+        header: isMobile ? "Rate" : "Daily Rate",
+        size: isMobile ? 60 : 110,
         Cell: ({ cell }) => (
-          <Typography fontWeight={600}>₹{cell.getValue<number>()}</Typography>
+          <Typography fontWeight={600} sx={{ fontSize: isMobile ? '0.7rem' : 'inherit' }}>
+            ₹{cell.getValue<number>()}
+          </Typography>
         ),
       },
       {
         accessorKey: "associated_team_name",
-        header: "Mesthri Team",
-        size: 140,
+        header: isMobile ? "Mesthri" : "Mesthri Team",
+        size: isMobile ? 70 : 140,
         Cell: ({ cell }) => cell.getValue<string>() || "-",
       },
       {
         accessorKey: "team_name",
-        header: "Work Team",
-        size: 130,
+        header: isMobile ? "Team" : "Work Team",
+        size: isMobile ? 70 : 130,
         Cell: ({ cell }) => cell.getValue<string>() || "-",
       },
       {
         accessorKey: "status",
-        header: "Status",
-        size: 100,
+        header: isMobile ? "St" : "Status",
+        size: isMobile ? 45 : 100,
         Cell: ({ cell }) => (
           <Chip
-            label={cell.getValue<string>().toUpperCase()}
+            label={isMobile
+              ? (cell.getValue<string>() === "active" ? "A" : "I")
+              : cell.getValue<string>().toUpperCase()}
             size="small"
             color={cell.getValue<string>() === "active" ? "success" : "default"}
           />
@@ -287,15 +310,15 @@ export default function LaborersPage() {
       {
         accessorKey: "joining_date",
         header: "Joined",
-        size: 120,
+        size: 90,
         Cell: ({ cell }) => dayjs(cell.getValue<string>()).format("DD MMM YY"),
       },
       {
         id: "mrt-row-actions",
-        header: "Actions",
-        size: 120,
+        header: "",
+        size: isMobile ? 70 : 100,
         Cell: ({ row }) => (
-          <Box sx={{ display: "flex", gap: 0.5 }}>
+          <Box sx={{ display: "flex", gap: 0.25 }}>
             <IconButton
               size="small"
               onClick={() => handleOpenDialog(row.original)}
@@ -317,7 +340,7 @@ export default function LaborersPage() {
         ),
       },
     ],
-    [canEdit, handleDeactivate]
+    [canEdit, handleDeactivate, isMobile]
   );
 
   return (
@@ -328,14 +351,17 @@ export default function LaborersPage() {
         onRefresh={fetchLaborers}
         isLoading={loading}
         actions={
-          <Button
-            variant="contained"
-            startIcon={<AddIcon />}
-            onClick={() => handleOpenDialog()}
-            disabled={!canEdit}
-          >
-            Add Laborer
-          </Button>
+          !isMobile && (
+            <Button
+              variant="contained"
+              startIcon={<AddIcon />}
+              onClick={() => handleOpenDialog()}
+              disabled={!canEdit}
+              size="small"
+            >
+              Add Laborer
+            </Button>
+          )
         }
       />
 
@@ -355,6 +381,11 @@ export default function LaborersPage() {
         data={laborers}
         isLoading={loading}
         pageSize={20}
+        pinnedColumns={{
+          left: ["name"],
+          right: ["mrt-row-actions"],
+        }}
+        mobileHiddenColumns={["phone", "joining_date"]}
       />
 
       <Dialog
@@ -362,6 +393,7 @@ export default function LaborersPage() {
         onClose={() => setOpenDialog(false)}
         maxWidth="md"
         fullWidth
+        fullScreen={isMobile}
       >
         <DialogTitle>
           {editingLaborer ? "Edit Laborer" : "Add Laborer"}
@@ -602,6 +634,22 @@ export default function LaborersPage() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Mobile FAB */}
+      {isMobile && canEdit && (
+        <Fab
+          color="primary"
+          onClick={() => handleOpenDialog()}
+          sx={{
+            position: "fixed",
+            bottom: 16,
+            right: 16,
+            zIndex: 1000,
+          }}
+        >
+          <AddIcon />
+        </Fab>
+      )}
     </Box>
   );
 }

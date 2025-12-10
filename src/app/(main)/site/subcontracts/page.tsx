@@ -29,6 +29,9 @@ import {
   ToggleButtonGroup,
   ToggleButton,
   Paper,
+  useTheme,
+  useMediaQuery,
+  Fab,
 } from "@mui/material";
 import {
   Add,
@@ -70,6 +73,8 @@ export default function SiteSubcontractsPage() {
   const { userProfile } = useAuth();
   const { selectedSite } = useSite();
   const supabase = createClient();
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
 
   const [subcontracts, setSubcontracts] = useState<SubcontractWithDetails[]>(
     []
@@ -512,14 +517,14 @@ export default function SiteSubcontractsPage() {
     () => [
       {
         accessorKey: "title",
-        header: "Subcontract Title",
-        size: 220,
+        header: "Title",
+        size: isMobile ? 120 : 220,
         Cell: ({ cell, row }) => (
           <Box>
-            <Typography variant="body2" fontWeight={600}>
+            <Typography variant="body2" fontWeight={600} sx={{ fontSize: isMobile ? '0.7rem' : 'inherit' }}>
               {cell.getValue<string>()}
             </Typography>
-            <Typography variant="caption" color="text.secondary">
+            <Typography variant="caption" color="text.secondary" sx={{ fontSize: isMobile ? '0.6rem' : 'inherit' }}>
               {row.original.contract_type === "mesthri"
                 ? row.original.team_name
                 : row.original.laborer_name}
@@ -529,11 +534,11 @@ export default function SiteSubcontractsPage() {
       },
       {
         accessorKey: "contract_type",
-        header: "Type",
-        size: 110,
+        header: isMobile ? "Type" : "Type",
+        size: isMobile ? 55 : 110,
         Cell: ({ cell }) => (
           <Chip
-            label={cell.getValue<string>().toUpperCase()}
+            label={isMobile ? (cell.getValue<string>() === "mesthri" ? "M" : "S") : cell.getValue<string>().toUpperCase()}
             size="small"
             color={
               cell.getValue<string>() === "mesthri" ? "primary" : "secondary"
@@ -543,10 +548,10 @@ export default function SiteSubcontractsPage() {
       },
       {
         accessorKey: "total_value",
-        header: "Subcontract Value",
-        size: 150,
+        header: isMobile ? "Value" : "Subcontract Value",
+        size: isMobile ? 80 : 150,
         Cell: ({ cell }) => (
-          <Typography variant="body2" fontWeight={700}>
+          <Typography variant="body2" fontWeight={700} sx={{ fontSize: isMobile ? '0.7rem' : 'inherit' }}>
             ₹{cell.getValue<number>().toLocaleString()}
           </Typography>
         ),
@@ -554,30 +559,34 @@ export default function SiteSubcontractsPage() {
       {
         accessorKey: "total_paid",
         header: "Paid",
-        size: 120,
+        size: isMobile ? 70 : 120,
         Cell: ({ cell }) => (
-          <Typography variant="body2" fontWeight={600} color="success.main">
+          <Typography variant="body2" fontWeight={600} color="success.main" sx={{ fontSize: isMobile ? '0.7rem' : 'inherit' }}>
             ₹{(cell.getValue<number>() || 0).toLocaleString()}
           </Typography>
         ),
       },
       {
         accessorKey: "balance_due",
-        header: "Balance",
-        size: 120,
+        header: isMobile ? "Due" : "Balance",
+        size: isMobile ? 70 : 120,
         Cell: ({ cell }) => (
-          <Typography variant="body2" fontWeight={600} color="error.main">
+          <Typography variant="body2" fontWeight={600} color="error.main" sx={{ fontSize: isMobile ? '0.7rem' : 'inherit' }}>
             ₹{(cell.getValue<number>() || 0).toLocaleString()}
           </Typography>
         ),
       },
       {
         accessorKey: "completion_percentage",
-        header: "Progress",
-        size: 130,
+        header: isMobile ? "%" : "Progress",
+        size: isMobile ? 50 : 130,
         Cell: ({ cell }) => {
           const percentage = cell.getValue<number>() || 0;
-          return (
+          return isMobile ? (
+            <Typography variant="caption" fontWeight={600}>
+              {percentage.toFixed(0)}%
+            </Typography>
+          ) : (
             <Box sx={{ width: "100%" }}>
               <Typography variant="caption">{percentage.toFixed(0)}%</Typography>
               <LinearProgress
@@ -598,11 +607,13 @@ export default function SiteSubcontractsPage() {
       },
       {
         accessorKey: "status",
-        header: "Status",
-        size: 110,
+        header: isMobile ? "St" : "Status",
+        size: isMobile ? 50 : 110,
         Cell: ({ cell }) => (
           <Chip
-            label={cell.getValue<string>().toUpperCase()}
+            label={isMobile
+              ? cell.getValue<string>().charAt(0).toUpperCase()
+              : cell.getValue<string>().toUpperCase()}
             size="small"
             color={getStatusColor(cell.getValue<ContractStatus>())}
           />
@@ -610,11 +621,11 @@ export default function SiteSubcontractsPage() {
       },
       {
         accessorKey: "is_rate_based",
-        header: "Value Type",
-        size: 130,
+        header: "Type",
+        size: 100,
         Cell: ({ cell }) => (
           <Chip
-            label={cell.getValue<boolean>() ? "Rate-Based" : "Lump Sum"}
+            label={cell.getValue<boolean>() ? "Rate" : "Lump"}
             size="small"
             color={cell.getValue<boolean>() ? "primary" : "secondary"}
             variant="outlined"
@@ -623,10 +634,10 @@ export default function SiteSubcontractsPage() {
       },
       {
         id: "mrt-row-actions",
-        header: "Actions",
-        size: 180,
+        header: "",
+        size: isMobile ? 100 : 180,
         Cell: ({ row }) => (
-          <Box sx={{ display: "flex", gap: 0.5 }}>
+          <Box sx={{ display: "flex", gap: 0.25 }}>
             <IconButton
               size="small"
               onClick={() => handleViewSubcontract(row.original)}
@@ -650,19 +661,21 @@ export default function SiteSubcontractsPage() {
             >
               <PaymentIcon fontSize="small" />
             </IconButton>
-            <IconButton
-              size="small"
-              color="error"
-              onClick={() => handleDelete(row.original.id)}
-              disabled={!canEdit || loading}
-            >
-              <Delete fontSize="small" />
-            </IconButton>
+            {!isMobile && (
+              <IconButton
+                size="small"
+                color="error"
+                onClick={() => handleDelete(row.original.id)}
+                disabled={!canEdit || loading}
+              >
+                <Delete fontSize="small" />
+              </IconButton>
+            )}
           </Box>
         ),
       },
     ],
-    [canEdit, loading]
+    [canEdit, loading, isMobile]
   );
 
   // Calculate stats
@@ -702,14 +715,17 @@ export default function SiteSubcontractsPage() {
         onRefresh={fetchSubcontracts}
         isLoading={loading}
         actions={
-          <Button
-            variant="contained"
-            startIcon={<Add />}
-            onClick={() => handleOpenDialog()}
-            disabled={!canEdit}
-          >
-            New Subcontract
-          </Button>
+          !isMobile && (
+            <Button
+              variant="contained"
+              startIcon={<Add />}
+              onClick={() => handleOpenDialog()}
+              disabled={!canEdit}
+              size="small"
+            >
+              New Subcontract
+            </Button>
+          )
         }
       />
 
@@ -804,7 +820,12 @@ export default function SiteSubcontractsPage() {
         columns={columns}
         data={subcontracts}
         isLoading={loading}
-        enableExpanding
+        enableExpanding={!isMobile}
+        pinnedColumns={{
+          left: ["title"],
+          right: ["mrt-row-actions"],
+        }}
+        mobileHiddenColumns={["is_rate_based"]}
         renderDetailPanel={({ row }) => (
           <SubcontractPaymentBreakdown
             subcontractId={row.original.id}
@@ -819,6 +840,7 @@ export default function SiteSubcontractsPage() {
         onClose={handleCloseDialog}
         maxWidth="md"
         fullWidth
+        fullScreen={isMobile}
       >
         <DialogTitle>
           {editingSubcontract ? "Edit Subcontract" : "New Subcontract"}
@@ -1162,6 +1184,7 @@ export default function SiteSubcontractsPage() {
         onClose={() => setViewDialogOpen(false)}
         maxWidth="md"
         fullWidth
+        fullScreen={isMobile}
       >
         <DialogTitle>Subcontract Details</DialogTitle>
         <DialogContent>
@@ -1288,6 +1311,7 @@ export default function SiteSubcontractsPage() {
         onClose={() => setPaymentDialogOpen(false)}
         maxWidth="md"
         fullWidth
+        fullScreen={isMobile}
       >
         <DialogTitle>Record Payment to Mesthri</DialogTitle>
         <DialogContent>
@@ -1533,6 +1557,22 @@ export default function SiteSubcontractsPage() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Mobile FAB */}
+      {isMobile && canEdit && (
+        <Fab
+          color="primary"
+          onClick={() => handleOpenDialog()}
+          sx={{
+            position: "fixed",
+            bottom: 16,
+            right: 16,
+            zIndex: 1000,
+          }}
+        >
+          <Add />
+        </Fab>
+      )}
     </Box>
   );
 }

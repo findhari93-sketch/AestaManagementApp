@@ -190,6 +190,17 @@ const theme = createTheme({
           fontWeight: 500,
           borderRadius: 8,
           padding: "8px 16px",
+          "@media (max-width: 600px)": {
+            padding: "6px 12px",
+            fontSize: "0.75rem",
+          },
+        },
+        sizeSmall: {
+          "@media (max-width: 600px)": {
+            padding: "4px 8px",
+            fontSize: "0.7rem",
+            minWidth: "unset",
+          },
         },
         contained: {
           boxShadow: "none",
@@ -246,11 +257,19 @@ const theme = createTheme({
         root: {
           padding: "8px 16px",
           borderBottom: "1px solid rgba(0, 0, 0, 0.12)",
+          "@media (max-width: 600px)": {
+            padding: "4px 8px",
+            fontSize: "0.7rem",
+          },
         },
         head: {
           fontWeight: 600,
           backgroundColor: "#f5f5f5",
           color: "rgba(0, 0, 0, 0.87)",
+          "@media (max-width: 600px)": {
+            fontSize: "0.65rem",
+            fontWeight: 700,
+          },
         },
         body: {
           color: "rgba(0, 0, 0, 0.87)",
@@ -279,6 +298,16 @@ const theme = createTheme({
           fontWeight: 500,
           height: 24,
           fontSize: "0.75rem",
+          "@media (max-width: 600px)": {
+            height: 18,
+            fontSize: "0.6rem",
+          },
+        },
+        sizeSmall: {
+          "@media (max-width: 600px)": {
+            height: 16,
+            fontSize: "0.55rem",
+          },
         },
         filled: {
           backgroundColor: "#1976d2",
@@ -415,6 +444,17 @@ export function createAppTheme(mode: ThemePreference) {
             fontWeight: 500,
             borderRadius: 8,
             padding: "8px 16px",
+            "@media (max-width: 600px)": {
+              padding: "6px 12px",
+              fontSize: "0.75rem",
+            },
+          },
+          sizeSmall: {
+            "@media (max-width: 600px)": {
+              padding: "4px 8px",
+              fontSize: "0.7rem",
+              minWidth: "unset",
+            },
           },
           contained: {
             boxShadow: "none",
@@ -486,9 +526,17 @@ export function createAppTheme(mode: ThemePreference) {
               mode === "dark"
                 ? "1px solid rgba(255, 255, 255, 0.12)"
                 : "1px solid rgba(0, 0, 0, 0.12)",
+            "@media (max-width: 600px)": {
+              padding: "4px 8px",
+              fontSize: "0.7rem",
+            },
           },
           head: {
             fontWeight: 600,
+            "@media (max-width: 600px)": {
+              fontSize: "0.65rem",
+              fontWeight: 700,
+            },
           },
         },
       },
@@ -511,6 +559,16 @@ export function createAppTheme(mode: ThemePreference) {
             fontWeight: 500,
             height: 24,
             fontSize: "0.75rem",
+            "@media (max-width: 600px)": {
+              height: 18,
+              fontSize: "0.6rem",
+            },
+          },
+          sizeSmall: {
+            "@media (max-width: 600px)": {
+              height: 16,
+              fontSize: "0.55rem",
+            },
           },
         },
       },

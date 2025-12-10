@@ -29,6 +29,9 @@ import {
   Select,
   MenuItem,
   Tooltip,
+  useTheme,
+  useMediaQuery,
+  Fab,
 } from "@mui/material";
 import {
   Add as AddIcon,
@@ -73,6 +76,8 @@ export default function TeaShopPage() {
   const { selectedSite } = useSite();
   const { userProfile } = useAuth();
   const supabase = createClient();
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
 
   const [loading, setLoading] = useState(false);
   const [tabValue, setTabValue] = useState(0);
@@ -286,8 +291,8 @@ export default function TeaShopPage() {
         onRefresh={fetchData}
         isLoading={loading}
         actions={
-          <Box sx={{ display: "flex", gap: 1 }}>
-            {shop && (
+          <Box sx={{ display: "flex", gap: 0.5 }}>
+            {shop && !isMobile && (
               <>
                 <Button
                   variant="contained"
@@ -298,6 +303,7 @@ export default function TeaShopPage() {
                     setEntryDialogOpen(true);
                   }}
                   disabled={!canEdit}
+                  size="small"
                 >
                   Add Entry
                 </Button>
@@ -306,12 +312,13 @@ export default function TeaShopPage() {
                   startIcon={<PaymentIcon />}
                   onClick={() => setSettlementDialogOpen(true)}
                   disabled={!canEdit || stats.pendingBalance <= 0}
+                  size="small"
                 >
                   Pay Shop
                 </Button>
               </>
             )}
-            <IconButton onClick={() => setShopDrawerOpen(true)} disabled={!canEdit}>
+            <IconButton onClick={() => setShopDrawerOpen(true)} disabled={!canEdit} size="small">
               <Settings />
             </IconButton>
           </Box>
@@ -319,52 +326,54 @@ export default function TeaShopPage() {
       />
 
       {/* Summary Cards */}
-      <Grid container spacing={2} sx={{ mb: 3 }}>
+      <Grid container spacing={isMobile ? 1 : 2} sx={{ mb: isMobile ? 2 : 3 }}>
         <Grid size={{ xs: 6, sm: 3 }}>
-          <Paper sx={{ p: 2, textAlign: "center", bgcolor: stats.pendingBalance > 0 ? "error.50" : "success.50" }}>
-            <Typography variant="caption" color="text.secondary">
-              Pending Balance
+          <Paper sx={{ p: isMobile ? 1 : 2, textAlign: "center", bgcolor: stats.pendingBalance > 0 ? "error.50" : "success.50" }}>
+            <Typography variant="caption" color="text.secondary" sx={{ fontSize: isMobile ? '0.65rem' : 'inherit' }}>
+              Pending
             </Typography>
-            <Typography variant="h5" fontWeight={700} color={stats.pendingBalance > 0 ? "error.main" : "success.main"}>
+            <Typography variant={isMobile ? "h6" : "h5"} fontWeight={700} color={stats.pendingBalance > 0 ? "error.main" : "success.main"}>
               ₹{stats.pendingBalance.toLocaleString()}
             </Typography>
           </Paper>
         </Grid>
         <Grid size={{ xs: 6, sm: 3 }}>
-          <Paper sx={{ p: 2, textAlign: "center" }}>
-            <Typography variant="caption" color="text.secondary">
+          <Paper sx={{ p: isMobile ? 1 : 2, textAlign: "center" }}>
+            <Typography variant="caption" color="text.secondary" sx={{ fontSize: isMobile ? '0.65rem' : 'inherit' }}>
               This Week
             </Typography>
-            <Typography variant="h5" fontWeight={700} color="primary.main">
+            <Typography variant={isMobile ? "h6" : "h5"} fontWeight={700} color="primary.main">
               ₹{stats.thisWeekTotal.toLocaleString()}
             </Typography>
           </Paper>
         </Grid>
         <Grid size={{ xs: 6, sm: 3 }}>
-          <Paper sx={{ p: 2, textAlign: "center" }}>
-            <Typography variant="caption" color="text.secondary">
+          <Paper sx={{ p: isMobile ? 1 : 2, textAlign: "center" }}>
+            <Typography variant="caption" color="text.secondary" sx={{ fontSize: isMobile ? '0.65rem' : 'inherit' }}>
               This Month
             </Typography>
-            <Typography variant="h5" fontWeight={700} color="primary.main">
+            <Typography variant={isMobile ? "h6" : "h5"} fontWeight={700} color="primary.main">
               ₹{stats.thisMonthTotal.toLocaleString()}
             </Typography>
           </Paper>
         </Grid>
         <Grid size={{ xs: 6, sm: 3 }}>
-          <Paper sx={{ p: 2, textAlign: "center" }}>
-            <Typography variant="caption" color="text.secondary">
-              Last Payment
+          <Paper sx={{ p: isMobile ? 1 : 2, textAlign: "center" }}>
+            <Typography variant="caption" color="text.secondary" sx={{ fontSize: isMobile ? '0.65rem' : 'inherit' }}>
+              Last Pay
             </Typography>
-            <Typography variant="h6" fontWeight={600}>
+            <Typography variant={isMobile ? "body1" : "h6"} fontWeight={600}>
               {stats.lastSettlement
                 ? `₹${stats.lastSettlement.amount_paid.toLocaleString()}`
                 : "None"}
             </Typography>
-            <Typography variant="caption" color="text.secondary">
-              {stats.lastSettlement
-                ? dayjs(stats.lastSettlement.payment_date).format("DD MMM")
-                : "-"}
-            </Typography>
+            {!isMobile && (
+              <Typography variant="caption" color="text.secondary">
+                {stats.lastSettlement
+                  ? dayjs(stats.lastSettlement.payment_date).format("DD MMM")
+                  : "-"}
+              </Typography>
+            )}
           </Paper>
         </Grid>
       </Grid>
@@ -440,30 +449,44 @@ export default function TeaShopPage() {
                 <CircularProgress />
               </Box>
             ) : (
-              <TableContainer>
-                <Table size="small">
+              <TableContainer sx={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+                <Table size="small" sx={{ minWidth: isMobile ? 600 : 'auto' }}>
                   <TableHead>
                     <TableRow sx={{ bgcolor: "grey.100" }}>
-                      <TableCell sx={{ fontWeight: 700 }}>Date</TableCell>
-                      <TableCell sx={{ fontWeight: 700 }} align="center">Attendance</TableCell>
-                      <TableCell sx={{ fontWeight: 700 }} align="center">Tea Rounds</TableCell>
-                      <TableCell sx={{ fontWeight: 700 }} align="right">Tea</TableCell>
-                      <TableCell sx={{ fontWeight: 700 }} align="right">Snacks</TableCell>
-                      <TableCell sx={{ fontWeight: 700 }} align="right">Total</TableCell>
-                      <TableCell sx={{ fontWeight: 700 }} align="center">By</TableCell>
-                      <TableCell sx={{ fontWeight: 700 }} align="center">Actions</TableCell>
+                      <TableCell sx={{
+                        fontWeight: 700,
+                        position: isMobile ? 'sticky' : 'static',
+                        left: 0,
+                        bgcolor: 'grey.100',
+                        zIndex: 1,
+                        fontSize: isMobile ? '0.7rem' : 'inherit',
+                      }}>Date</TableCell>
+                      <TableCell sx={{ fontWeight: 700, fontSize: isMobile ? '0.7rem' : 'inherit' }} align="center">{isMobile ? 'Att' : 'Attendance'}</TableCell>
+                      <TableCell sx={{ fontWeight: 700, fontSize: isMobile ? '0.7rem' : 'inherit' }} align="center">{isMobile ? 'Rnd' : 'Tea Rounds'}</TableCell>
+                      <TableCell sx={{ fontWeight: 700, fontSize: isMobile ? '0.7rem' : 'inherit' }} align="right">Tea</TableCell>
+                      <TableCell sx={{ fontWeight: 700, fontSize: isMobile ? '0.7rem' : 'inherit' }} align="right">{isMobile ? 'Snk' : 'Snacks'}</TableCell>
+                      <TableCell sx={{ fontWeight: 700, fontSize: isMobile ? '0.7rem' : 'inherit' }} align="right">Total</TableCell>
+                      {!isMobile && <TableCell sx={{ fontWeight: 700 }} align="center">By</TableCell>}
+                      <TableCell sx={{ fontWeight: 700, fontSize: isMobile ? '0.7rem' : 'inherit' }} align="center">Act</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
                     {filteredEntries.map((entry) => (
                       <TableRow key={entry.id} hover>
-                        <TableCell>
-                          <Typography variant="body2" fontWeight={600}>
+                        <TableCell sx={{
+                          position: isMobile ? 'sticky' : 'static',
+                          left: 0,
+                          bgcolor: 'background.paper',
+                          zIndex: 1,
+                        }}>
+                          <Typography variant="body2" fontWeight={600} sx={{ fontSize: isMobile ? '0.7rem' : 'inherit' }}>
                             {dayjs(entry.date).format("DD MMM")}
                           </Typography>
-                          <Typography variant="caption" color="text.secondary">
-                            {dayjs(entry.date).format("ddd")}
-                          </Typography>
+                          {!isMobile && (
+                            <Typography variant="caption" color="text.secondary">
+                              {dayjs(entry.date).format("ddd")}
+                            </Typography>
+                          )}
                         </TableCell>
                         <TableCell align="center">
                           {(() => {
@@ -502,16 +525,18 @@ export default function TeaShopPage() {
                             ₹{(entry.total_amount || 0).toLocaleString()}
                           </Typography>
                         </TableCell>
-                        <TableCell align="center">
-                          <AuditAvatarGroup
-                            createdByName={entry.entered_by}
-                            createdAt={entry.created_at}
-                            updatedByName={(entry as any).updated_by}
-                            updatedAt={entry.updated_at}
-                            compact
-                            size="small"
-                          />
-                        </TableCell>
+                        {!isMobile && (
+                          <TableCell align="center">
+                            <AuditAvatarGroup
+                              createdByName={entry.entered_by}
+                              createdAt={entry.created_at}
+                              updatedByName={(entry as any).updated_by}
+                              updatedAt={entry.updated_at}
+                              compact
+                              size="small"
+                            />
+                          </TableCell>
+                        )}
                         <TableCell align="center">
                           <Box sx={{ display: "flex", gap: 0.5, justifyContent: "center" }}>
                             <IconButton
@@ -704,6 +729,25 @@ export default function TeaShopPage() {
             }}
           />
         </>
+      )}
+
+      {/* Mobile FAB */}
+      {isMobile && shop && canEdit && (
+        <Fab
+          color="primary"
+          onClick={() => {
+            setEditingEntry(null);
+            setEntryDialogOpen(true);
+          }}
+          sx={{
+            position: "fixed",
+            bottom: 16,
+            right: 16,
+            zIndex: 1000,
+          }}
+        >
+          <AddIcon />
+        </Fab>
       )}
     </Box>
   );

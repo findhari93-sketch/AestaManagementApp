@@ -363,13 +363,13 @@ export default function MainLayout({
           }),
         }}
       >
-        <Toolbar>
+        <Toolbar sx={{ px: { xs: 1, sm: 2 }, minHeight: { xs: 56, sm: 64 } }}>
           {/* Menu Toggle */}
           <IconButton
             color="inherit"
             edge="start"
             onClick={handleDrawerToggle}
-            sx={{ mr: 2 }}
+            sx={{ mr: { xs: 0.5, sm: 2 } }}
           >
             <MenuIcon />
           </IconButton>
@@ -386,14 +386,14 @@ export default function MainLayout({
 
           {/* User Avatar & Menu */}
           <Tooltip title="Account settings">
-            <IconButton onClick={handleUserMenuOpen} sx={{ ml: 2 }}>
+            <IconButton onClick={handleUserMenuOpen} sx={{ ml: { xs: 1, sm: 2 } }}>
               <Avatar
                 src={userProfile?.avatar_url || undefined}
                 sx={{
                   bgcolor: "primary.main",
-                  width: 38,
-                  height: 38,
-                  fontSize: "0.9rem",
+                  width: { xs: 32, sm: 38 },
+                  height: { xs: 32, sm: 38 },
+                  fontSize: { xs: "0.8rem", sm: "0.9rem" },
                 }}
               >
                 {userProfile?.name?.charAt(0).toUpperCase() || "U"}
@@ -526,7 +526,7 @@ export default function MainLayout({
         component="main"
         sx={{
           flexGrow: 1,
-          p: 3,
+          p: { xs: 1.5, sm: 2, md: 3 },
           width: { md: `calc(100% - ${currentDrawerWidth}px)` },
           minHeight: "100vh",
           bgcolor: "background.default",
@@ -536,7 +536,7 @@ export default function MainLayout({
           }),
         }}
       >
-        <Toolbar />
+        <Toolbar sx={{ minHeight: { xs: 56, sm: 64 } }} />
         {children}
       </Box>
     </Box>
