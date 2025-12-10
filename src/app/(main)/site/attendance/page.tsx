@@ -959,16 +959,17 @@ export default function AttendancePage() {
               <Button
                 variant="contained"
                 color="warning"
-                startIcon={!isMobile && <AccessTime />}
+                startIcon={<AccessTime sx={{ display: { xs: 'none', sm: 'inline-flex' } }} />}
                 onClick={() => {
                   setSelectedDateForDrawer(undefined);
                   setDrawerMode("morning");
                   setDrawerOpen(true);
                 }}
-                size={isMobile ? 'small' : 'medium'}
+                size="small"
                 sx={{ flex: { xs: 1, sm: 'none' }, minWidth: { xs: 'auto', sm: 'auto' } }}
               >
-                {isMobile ? '🌅 Start' : '🌅 Start Day'}
+                <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>🌅 Start Day</Box>
+                <Box component="span" sx={{ display: { xs: 'inline', sm: 'none' } }}>🌅 Start</Box>
               </Button>
               <Button
                 variant={viewMode === "date-wise" ? "contained" : "outlined"}
@@ -976,7 +977,8 @@ export default function AttendancePage() {
                 size="small"
                 color="inherit"
               >
-                {isMobile ? 'Date' : 'Date-wise'}
+                <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>Date-wise</Box>
+                <Box component="span" sx={{ display: { xs: 'inline', sm: 'none' } }}>Date</Box>
               </Button>
               <Button
                 variant={viewMode === "detailed" ? "contained" : "outlined"}
@@ -984,7 +986,8 @@ export default function AttendancePage() {
                 size="small"
                 color="inherit"
               >
-                {isMobile ? 'Detail' : 'Detailed'}
+                <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>Detailed</Box>
+                <Box component="span" sx={{ display: { xs: 'inline', sm: 'none' } }}>Detail</Box>
               </Button>
             </Box>
           </Box>

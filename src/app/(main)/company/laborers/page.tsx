@@ -631,21 +631,21 @@ export default function LaborersPage() {
         </DialogActions>
       </Dialog>
 
-      {/* Mobile FAB */}
-      {isMobile && canEdit && (
-        <Fab
-          color="primary"
-          onClick={() => handleOpenDialog()}
-          sx={{
-            position: "fixed",
-            bottom: 16,
-            right: 16,
-            zIndex: 1000,
-          }}
-        >
-          <AddIcon />
-        </Fab>
-      )}
+      {/* Mobile FAB - always rendered, visibility controlled by CSS */}
+      <Fab
+        color="primary"
+        onClick={() => handleOpenDialog()}
+        disabled={!canEdit}
+        sx={{
+          display: canEdit ? { xs: 'flex', sm: 'none' } : 'none',
+          position: "fixed",
+          bottom: 16,
+          right: 16,
+          zIndex: 1000,
+        }}
+      >
+        <AddIcon />
+      </Fab>
     </Box>
   );
 }

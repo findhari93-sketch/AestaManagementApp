@@ -657,16 +657,15 @@ export default function SiteSubcontractsPage() {
             >
               <PaymentIcon fontSize="small" />
             </IconButton>
-            {!isMobile && (
-              <IconButton
-                size="small"
-                color="error"
-                onClick={() => handleDelete(row.original.id)}
-                disabled={!canEdit || loading}
-              >
-                <Delete fontSize="small" />
-              </IconButton>
-            )}
+            <IconButton
+              size="small"
+              color="error"
+              onClick={() => handleDelete(row.original.id)}
+              disabled={!canEdit || loading}
+              sx={{ display: { xs: 'none', sm: 'inline-flex' } }}
+            >
+              <Delete fontSize="small" />
+            </IconButton>
           </Box>
         ),
       },
@@ -711,17 +710,16 @@ export default function SiteSubcontractsPage() {
         onRefresh={fetchSubcontracts}
         isLoading={loading}
         actions={
-          !isMobile && (
-            <Button
-              variant="contained"
-              startIcon={<Add />}
-              onClick={() => handleOpenDialog()}
-              disabled={!canEdit}
-              size="small"
-            >
-              New Subcontract
-            </Button>
-          )
+          <Button
+            variant="contained"
+            startIcon={<Add />}
+            onClick={() => handleOpenDialog()}
+            disabled={!canEdit}
+            size="small"
+            sx={{ display: { xs: 'none', sm: 'inline-flex' } }}
+          >
+            New Subcontract
+          </Button>
         }
       />
 
@@ -1554,21 +1552,21 @@ export default function SiteSubcontractsPage() {
         </DialogActions>
       </Dialog>
 
-      {/* Mobile FAB */}
-      {isMobile && canEdit && (
-        <Fab
-          color="primary"
-          onClick={() => handleOpenDialog()}
-          sx={{
-            position: "fixed",
-            bottom: 16,
-            right: 16,
-            zIndex: 1000,
-          }}
-        >
-          <Add />
-        </Fab>
-      )}
+      {/* Mobile FAB - always rendered, visibility controlled by CSS */}
+      <Fab
+        color="primary"
+        onClick={() => handleOpenDialog()}
+        disabled={!canEdit}
+        sx={{
+          display: canEdit ? { xs: 'flex', sm: 'none' } : 'none',
+          position: "fixed",
+          bottom: 16,
+          right: 16,
+          zIndex: 1000,
+        }}
+      >
+        <Add />
+      </Fab>
     </Box>
   );
 }

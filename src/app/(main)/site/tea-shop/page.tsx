@@ -20,18 +20,9 @@ import {
   TableContainer,
   TableHead,
   TableRow,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
   Tooltip,
   Fab,
 } from "@mui/material";
-import { useIsMobile } from "@/hooks/useIsMobile";
 import {
   Add as AddIcon,
   Edit,
@@ -40,7 +31,6 @@ import {
   LocalCafe,
   Fastfood,
   Settings,
-  Refresh,
   Warning as WarningIcon,
   Group as GroupIcon,
 } from "@mui/icons-material";
@@ -75,7 +65,6 @@ export default function TeaShopPage() {
   const { selectedSite } = useSite();
   const { userProfile } = useAuth();
   const supabase = createClient();
-  const isMobile = useIsMobile();
 
   const [loading, setLoading] = useState(false);
   const [tabValue, setTabValue] = useState(0);
@@ -290,32 +279,35 @@ export default function TeaShopPage() {
         isLoading={loading}
         actions={
           <Box sx={{ display: "flex", gap: 0.5 }}>
-            {shop && !isMobile && (
-              <>
-                <Button
-                  variant="contained"
-                  color="primary"
-                  startIcon={<AddIcon />}
-                  onClick={() => {
-                    setEditingEntry(null);
-                    setEntryDialogOpen(true);
-                  }}
-                  disabled={!canEdit}
-                  size="small"
-                >
-                  Add Entry
-                </Button>
-                <Button
-                  variant="outlined"
-                  startIcon={<PaymentIcon />}
-                  onClick={() => setSettlementDialogOpen(true)}
-                  disabled={!canEdit || stats.pendingBalance <= 0}
-                  size="small"
-                >
-                  Pay Shop
-                </Button>
-              </>
-            )}
+            {/* Desktop buttons - hidden on mobile via CSS */}
+            <Box sx={{ display: { xs: 'none', sm: 'flex' }, gap: 0.5 }}>
+              {shop && (
+                <>
+                  <Button
+                    variant="contained"
+                    color="primary"
+                    startIcon={<AddIcon />}
+                    onClick={() => {
+                      setEditingEntry(null);
+                      setEntryDialogOpen(true);
+                    }}
+                    disabled={!canEdit}
+                    size="small"
+                  >
+                    Add Entry
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    startIcon={<PaymentIcon />}
+                    onClick={() => setSettlementDialogOpen(true)}
+                    disabled={!canEdit || stats.pendingBalance <= 0}
+                    size="small"
+                  >
+                    Pay Shop
+                  </Button>
+                </>
+              )}
+            </Box>
             <IconButton onClick={() => setShopDrawerOpen(true)} disabled={!canEdit} size="small">
               <Settings />
             </IconButton>
@@ -324,54 +316,75 @@ export default function TeaShopPage() {
       />
 
       {/* Summary Cards */}
-      <Grid container spacing={isMobile ? 1 : 2} sx={{ mb: isMobile ? 2 : 3 }}>
+      <Grid container spacing={{ xs: 1, sm: 2 }} sx={{ mb: { xs: 2, sm: 3 } }}>
         <Grid size={{ xs: 6, sm: 3 }}>
-          <Paper sx={{ p: isMobile ? 1 : 2, textAlign: "center", bgcolor: stats.pendingBalance > 0 ? "error.50" : "success.50" }}>
-            <Typography variant="caption" color="text.secondary" sx={{ fontSize: isMobile ? '0.65rem' : 'inherit' }}>
+          <Paper sx={{ p: { xs: 1, sm: 2 }, textAlign: "center", bgcolor: stats.pendingBalance > 0 ? "error.50" : "success.50" }}>
+            <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.65rem', sm: '0.75rem' } }}>
               Pending
             </Typography>
-            <Typography variant={isMobile ? "h6" : "h5"} fontWeight={700} color={stats.pendingBalance > 0 ? "error.main" : "success.main"}>
+            <Typography
+              variant="h6"
+              fontWeight={700}
+              color={stats.pendingBalance > 0 ? "error.main" : "success.main"}
+              sx={{ fontSize: { xs: '1rem', sm: '1.25rem' } }}
+            >
               ₹{stats.pendingBalance.toLocaleString()}
             </Typography>
           </Paper>
         </Grid>
         <Grid size={{ xs: 6, sm: 3 }}>
-          <Paper sx={{ p: isMobile ? 1 : 2, textAlign: "center" }}>
-            <Typography variant="caption" color="text.secondary" sx={{ fontSize: isMobile ? '0.65rem' : 'inherit' }}>
+          <Paper sx={{ p: { xs: 1, sm: 2 }, textAlign: "center" }}>
+            <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.65rem', sm: '0.75rem' } }}>
               This Week
             </Typography>
-            <Typography variant={isMobile ? "h6" : "h5"} fontWeight={700} color="primary.main">
+            <Typography
+              variant="h6"
+              fontWeight={700}
+              color="primary.main"
+              sx={{ fontSize: { xs: '1rem', sm: '1.25rem' } }}
+            >
               ₹{stats.thisWeekTotal.toLocaleString()}
             </Typography>
           </Paper>
         </Grid>
         <Grid size={{ xs: 6, sm: 3 }}>
-          <Paper sx={{ p: isMobile ? 1 : 2, textAlign: "center" }}>
-            <Typography variant="caption" color="text.secondary" sx={{ fontSize: isMobile ? '0.65rem' : 'inherit' }}>
+          <Paper sx={{ p: { xs: 1, sm: 2 }, textAlign: "center" }}>
+            <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.65rem', sm: '0.75rem' } }}>
               This Month
             </Typography>
-            <Typography variant={isMobile ? "h6" : "h5"} fontWeight={700} color="primary.main">
+            <Typography
+              variant="h6"
+              fontWeight={700}
+              color="primary.main"
+              sx={{ fontSize: { xs: '1rem', sm: '1.25rem' } }}
+            >
               ₹{stats.thisMonthTotal.toLocaleString()}
             </Typography>
           </Paper>
         </Grid>
         <Grid size={{ xs: 6, sm: 3 }}>
-          <Paper sx={{ p: isMobile ? 1 : 2, textAlign: "center" }}>
-            <Typography variant="caption" color="text.secondary" sx={{ fontSize: isMobile ? '0.65rem' : 'inherit' }}>
+          <Paper sx={{ p: { xs: 1, sm: 2 }, textAlign: "center" }}>
+            <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.65rem', sm: '0.75rem' } }}>
               Last Pay
             </Typography>
-            <Typography variant={isMobile ? "body1" : "h6"} fontWeight={600}>
+            <Typography
+              variant="body1"
+              fontWeight={600}
+              sx={{ fontSize: { xs: '0.875rem', sm: '1rem' } }}
+            >
               {stats.lastSettlement
                 ? `₹${stats.lastSettlement.amount_paid.toLocaleString()}`
                 : "None"}
             </Typography>
-            {!isMobile && (
-              <Typography variant="caption" color="text.secondary">
-                {stats.lastSettlement
-                  ? dayjs(stats.lastSettlement.payment_date).format("DD MMM")
-                  : "-"}
-              </Typography>
-            )}
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              sx={{ display: { xs: 'none', sm: 'block' } }}
+            >
+              {stats.lastSettlement
+                ? dayjs(stats.lastSettlement.payment_date).format("DD MMM")
+                : "-"}
+            </Typography>
           </Paper>
         </Grid>
       </Grid>
@@ -421,7 +434,7 @@ export default function TeaShopPage() {
                 sx={{ width: 160 }}
               />
               <Box sx={{ flex: 1 }} />
-              <Box sx={{ display: "flex", gap: 1, alignItems: "center" }}>
+              <Box sx={{ display: { xs: 'none', sm: 'flex' }, gap: 1, alignItems: "center" }}>
                 <Chip
                   icon={<LocalCafe />}
                   label={`Tea: ₹${stats.totalTea.toLocaleString()}`}
@@ -448,43 +461,45 @@ export default function TeaShopPage() {
               </Box>
             ) : (
               <TableContainer sx={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
-                <Table size="small" sx={{ minWidth: isMobile ? 600 : 'auto' }}>
+                <Table size="small" sx={{ minWidth: 600 }}>
                   <TableHead>
                     <TableRow sx={{ bgcolor: "grey.100" }}>
                       <TableCell sx={{
                         fontWeight: 700,
-                        position: isMobile ? 'sticky' : 'static',
+                        position: 'sticky',
                         left: 0,
                         bgcolor: 'grey.100',
                         zIndex: 1,
-                        fontSize: isMobile ? '0.7rem' : 'inherit',
+                        fontSize: { xs: '0.7rem', sm: '0.875rem' },
                       }}>Date</TableCell>
-                      <TableCell sx={{ fontWeight: 700, fontSize: isMobile ? '0.7rem' : 'inherit' }} align="center">{isMobile ? 'Att' : 'Attendance'}</TableCell>
-                      <TableCell sx={{ fontWeight: 700, fontSize: isMobile ? '0.7rem' : 'inherit' }} align="center">{isMobile ? 'Rnd' : 'Tea Rounds'}</TableCell>
-                      <TableCell sx={{ fontWeight: 700, fontSize: isMobile ? '0.7rem' : 'inherit' }} align="right">Tea</TableCell>
-                      <TableCell sx={{ fontWeight: 700, fontSize: isMobile ? '0.7rem' : 'inherit' }} align="right">{isMobile ? 'Snk' : 'Snacks'}</TableCell>
-                      <TableCell sx={{ fontWeight: 700, fontSize: isMobile ? '0.7rem' : 'inherit' }} align="right">Total</TableCell>
-                      {!isMobile && <TableCell sx={{ fontWeight: 700 }} align="center">By</TableCell>}
-                      <TableCell sx={{ fontWeight: 700, fontSize: isMobile ? '0.7rem' : 'inherit' }} align="center">Act</TableCell>
+                      <TableCell sx={{ fontWeight: 700, fontSize: { xs: '0.7rem', sm: '0.875rem' } }} align="center">Att</TableCell>
+                      <TableCell sx={{ fontWeight: 700, fontSize: { xs: '0.7rem', sm: '0.875rem' } }} align="center">Rnds</TableCell>
+                      <TableCell sx={{ fontWeight: 700, fontSize: { xs: '0.7rem', sm: '0.875rem' } }} align="right">Tea</TableCell>
+                      <TableCell sx={{ fontWeight: 700, fontSize: { xs: '0.7rem', sm: '0.875rem' } }} align="right">Snk</TableCell>
+                      <TableCell sx={{ fontWeight: 700, fontSize: { xs: '0.7rem', sm: '0.875rem' } }} align="right">Total</TableCell>
+                      <TableCell sx={{ fontWeight: 700, display: { xs: 'none', md: 'table-cell' } }} align="center">By</TableCell>
+                      <TableCell sx={{ fontWeight: 700, fontSize: { xs: '0.7rem', sm: '0.875rem' } }} align="center">Act</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
                     {filteredEntries.map((entry) => (
                       <TableRow key={entry.id} hover>
                         <TableCell sx={{
-                          position: isMobile ? 'sticky' : 'static',
+                          position: 'sticky',
                           left: 0,
                           bgcolor: 'background.paper',
                           zIndex: 1,
                         }}>
-                          <Typography variant="body2" fontWeight={600} sx={{ fontSize: isMobile ? '0.7rem' : 'inherit' }}>
+                          <Typography variant="body2" fontWeight={600} sx={{ fontSize: { xs: '0.7rem', sm: '0.875rem' } }}>
                             {dayjs(entry.date).format("DD MMM")}
                           </Typography>
-                          {!isMobile && (
-                            <Typography variant="caption" color="text.secondary">
-                              {dayjs(entry.date).format("ddd")}
-                            </Typography>
-                          )}
+                          <Typography
+                            variant="caption"
+                            color="text.secondary"
+                            sx={{ display: { xs: 'none', sm: 'block' } }}
+                          >
+                            {dayjs(entry.date).format("ddd")}
+                          </Typography>
                         </TableCell>
                         <TableCell align="center">
                           {(() => {
@@ -494,7 +509,7 @@ export default function TeaShopPage() {
                                 <Tooltip title="No attendance found for this date">
                                   <Chip
                                     icon={<WarningIcon fontSize="small" />}
-                                    label="No Att"
+                                    label="N/A"
                                     size="small"
                                     color="warning"
                                     variant="outlined"
@@ -515,26 +530,24 @@ export default function TeaShopPage() {
                             );
                           })()}
                         </TableCell>
-                        <TableCell align="center">{entry.tea_rounds}</TableCell>
-                        <TableCell align="right">₹{(entry.tea_total || 0).toLocaleString()}</TableCell>
-                        <TableCell align="right">₹{(entry.snacks_total || 0).toLocaleString()}</TableCell>
+                        <TableCell align="center" sx={{ fontSize: { xs: '0.7rem', sm: '0.875rem' } }}>{entry.tea_rounds}</TableCell>
+                        <TableCell align="right" sx={{ fontSize: { xs: '0.7rem', sm: '0.875rem' } }}>₹{(entry.tea_total || 0).toLocaleString()}</TableCell>
+                        <TableCell align="right" sx={{ fontSize: { xs: '0.7rem', sm: '0.875rem' } }}>₹{(entry.snacks_total || 0).toLocaleString()}</TableCell>
                         <TableCell align="right">
-                          <Typography fontWeight={600}>
+                          <Typography fontWeight={600} sx={{ fontSize: { xs: '0.7rem', sm: '0.875rem' } }}>
                             ₹{(entry.total_amount || 0).toLocaleString()}
                           </Typography>
                         </TableCell>
-                        {!isMobile && (
-                          <TableCell align="center">
-                            <AuditAvatarGroup
-                              createdByName={entry.entered_by}
-                              createdAt={entry.created_at}
-                              updatedByName={(entry as any).updated_by}
-                              updatedAt={entry.updated_at}
-                              compact
-                              size="small"
-                            />
-                          </TableCell>
-                        )}
+                        <TableCell align="center" sx={{ display: { xs: 'none', md: 'table-cell' } }}>
+                          <AuditAvatarGroup
+                            createdByName={entry.entered_by}
+                            createdAt={entry.created_at}
+                            updatedByName={(entry as any).updated_by}
+                            updatedAt={entry.updated_at}
+                            compact
+                            size="small"
+                          />
+                        </TableCell>
                         <TableCell align="center">
                           <Box sx={{ display: "flex", gap: 0.5, justifyContent: "center" }}>
                             <IconButton
@@ -552,6 +565,7 @@ export default function TeaShopPage() {
                               color="error"
                               onClick={() => handleDeleteEntry(entry.id)}
                               disabled={!canEdit}
+                              sx={{ display: { xs: 'none', sm: 'inline-flex' } }}
                             >
                               <Delete fontSize="small" />
                             </IconButton>
@@ -576,51 +590,51 @@ export default function TeaShopPage() {
 
           {/* Settlements Tab */}
           <TabPanel value={tabValue} index={1}>
-            <TableContainer>
-              <Table size="small">
+            <TableContainer sx={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+              <Table size="small" sx={{ minWidth: 800 }}>
                 <TableHead>
                   <TableRow sx={{ bgcolor: "grey.100" }}>
-                    <TableCell sx={{ fontWeight: 700 }}>Payment Date</TableCell>
-                    <TableCell sx={{ fontWeight: 700 }}>Period</TableCell>
-                    <TableCell sx={{ fontWeight: 700 }} align="right">Total Due</TableCell>
-                    <TableCell sx={{ fontWeight: 700 }} align="right">Amount Paid</TableCell>
-                    <TableCell sx={{ fontWeight: 700 }} align="right">Balance</TableCell>
-                    <TableCell sx={{ fontWeight: 700 }} align="center">Paid By</TableCell>
-                    <TableCell sx={{ fontWeight: 700 }} align="center">Mode</TableCell>
-                    <TableCell sx={{ fontWeight: 700 }}>Notes</TableCell>
-                    <TableCell sx={{ fontWeight: 700 }} align="center">Actions</TableCell>
+                    <TableCell sx={{ fontWeight: 700, fontSize: { xs: '0.7rem', sm: '0.875rem' } }}>Payment Date</TableCell>
+                    <TableCell sx={{ fontWeight: 700, fontSize: { xs: '0.7rem', sm: '0.875rem' } }}>Period</TableCell>
+                    <TableCell sx={{ fontWeight: 700, fontSize: { xs: '0.7rem', sm: '0.875rem' } }} align="right">Total Due</TableCell>
+                    <TableCell sx={{ fontWeight: 700, fontSize: { xs: '0.7rem', sm: '0.875rem' } }} align="right">Amount Paid</TableCell>
+                    <TableCell sx={{ fontWeight: 700, fontSize: { xs: '0.7rem', sm: '0.875rem' } }} align="right">Balance</TableCell>
+                    <TableCell sx={{ fontWeight: 700, fontSize: { xs: '0.7rem', sm: '0.875rem' } }} align="center">Paid By</TableCell>
+                    <TableCell sx={{ fontWeight: 700, fontSize: { xs: '0.7rem', sm: '0.875rem' } }} align="center">Mode</TableCell>
+                    <TableCell sx={{ fontWeight: 700, display: { xs: 'none', md: 'table-cell' } }}>Notes</TableCell>
+                    <TableCell sx={{ fontWeight: 700, fontSize: { xs: '0.7rem', sm: '0.875rem' } }} align="center">Actions</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
                   {settlements.map((settlement) => (
                     <TableRow key={settlement.id} hover>
                       <TableCell>
-                        <Typography variant="body2" fontWeight={600}>
+                        <Typography variant="body2" fontWeight={600} sx={{ fontSize: { xs: '0.7rem', sm: '0.875rem' } }}>
                           {dayjs(settlement.payment_date).format("DD MMM YYYY")}
                         </Typography>
                       </TableCell>
-                      <TableCell>
+                      <TableCell sx={{ fontSize: { xs: '0.7rem', sm: '0.875rem' } }}>
                         {dayjs(settlement.period_start).format("DD MMM")} -{" "}
                         {dayjs(settlement.period_end).format("DD MMM")}
                       </TableCell>
-                      <TableCell align="right">₹{settlement.total_due.toLocaleString()}</TableCell>
+                      <TableCell align="right" sx={{ fontSize: { xs: '0.7rem', sm: '0.875rem' } }}>₹{settlement.total_due.toLocaleString()}</TableCell>
                       <TableCell align="right">
-                        <Typography fontWeight={600} color="success.main">
+                        <Typography fontWeight={600} color="success.main" sx={{ fontSize: { xs: '0.7rem', sm: '0.875rem' } }}>
                           ₹{(settlement.amount_paid || 0).toLocaleString()}
                         </Typography>
                       </TableCell>
                       <TableCell align="right">
                         {(settlement.balance_remaining || 0) > 0 ? (
-                          <Typography color="error.main">
+                          <Typography color="error.main" sx={{ fontSize: { xs: '0.7rem', sm: '0.875rem' } }}>
                             ₹{(settlement.balance_remaining || 0).toLocaleString()}
                           </Typography>
                         ) : (
-                          <Typography color="success.main">₹0</Typography>
+                          <Typography color="success.main" sx={{ fontSize: { xs: '0.7rem', sm: '0.875rem' } }}>₹0</Typography>
                         )}
                       </TableCell>
                       <TableCell align="center">
                         <Chip
-                          label={settlement.payer_type === "site_engineer" ? "Engineer" : "Company"}
+                          label={settlement.payer_type === "site_engineer" ? "Eng" : "Co"}
                           size="small"
                           color={settlement.payer_type === "site_engineer" ? "info" : "primary"}
                           variant="outlined"
@@ -633,7 +647,7 @@ export default function TeaShopPage() {
                           variant="outlined"
                         />
                       </TableCell>
-                      <TableCell>
+                      <TableCell sx={{ display: { xs: 'none', md: 'table-cell' } }}>
                         <Tooltip title={settlement.notes || ""}>
                           <Typography
                             variant="caption"
@@ -658,6 +672,7 @@ export default function TeaShopPage() {
                             color="error"
                             onClick={() => handleDeleteSettlement(settlement.id)}
                             disabled={!canEdit}
+                            sx={{ display: { xs: 'none', sm: 'inline-flex' } }}
                           >
                             <Delete fontSize="small" />
                           </IconButton>
@@ -729,24 +744,23 @@ export default function TeaShopPage() {
         </>
       )}
 
-      {/* Mobile FAB */}
-      {isMobile && shop && canEdit && (
-        <Fab
-          color="primary"
-          onClick={() => {
-            setEditingEntry(null);
-            setEntryDialogOpen(true);
-          }}
-          sx={{
-            position: "fixed",
-            bottom: 16,
-            right: 16,
-            zIndex: 1000,
-          }}
-        >
-          <AddIcon />
-        </Fab>
-      )}
+      {/* Mobile FAB - always rendered, visibility controlled by CSS */}
+      <Fab
+        color="primary"
+        onClick={() => {
+          setEditingEntry(null);
+          setEntryDialogOpen(true);
+        }}
+        sx={{
+          display: shop && canEdit ? { xs: 'flex', sm: 'none' } : 'none',
+          position: "fixed",
+          bottom: 16,
+          right: 16,
+          zIndex: 1000,
+        }}
+      >
+        <AddIcon />
+      </Fab>
     </Box>
   );
 }

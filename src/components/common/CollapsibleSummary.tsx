@@ -9,7 +9,6 @@ import {
   useTheme,
 } from '@mui/material';
 import { ExpandMore, ExpandLess } from '@mui/icons-material';
-import { useIsMobile } from '@/hooks/useIsMobile';
 
 export interface SummaryItem {
   label: string;
@@ -24,7 +23,7 @@ interface CollapsibleSummaryProps {
   primaryLabel: string;
   items: SummaryItem[];
   defaultExpanded?: boolean;
-  storageKey?: string; // For remembering expand state
+  storageKey?: string;
   primaryColor?: 'primary' | 'success' | 'error' | 'warning' | 'info';
 }
 
@@ -38,10 +37,9 @@ export default function CollapsibleSummary({
   primaryColor = 'primary',
 }: CollapsibleSummaryProps) {
   const theme = useTheme();
-  const isMobile = useIsMobile();
   const [expanded, setExpanded] = useState(defaultExpanded);
 
-  // Load saved state from localStorage
+  // Load saved state from localStorage after hydration
   useEffect(() => {
     if (storageKey && typeof window !== 'undefined') {
       const saved = localStorage.getItem(`summary_${storageKey}`);
@@ -64,12 +62,12 @@ export default function CollapsibleSummary({
     return `${color}.main`;
   };
 
-  // Desktop: Always show expanded grid, no accordion
-  if (!isMobile) {
-    return (
+  return (
+    <>
+      {/* Desktop: Always show expanded grid (hidden on mobile) */}
       <Box
         sx={{
-          display: 'grid',
+          display: { xs: 'none', sm: 'grid' },
           gridTemplateColumns: {
             sm: 'repeat(3, 1fr)',
             md: 'repeat(4, 1fr)',
@@ -132,115 +130,114 @@ export default function CollapsibleSummary({
           </Box>
         ))}
       </Box>
-    );
-  }
 
-  // Mobile: Collapsible accordion
-  return (
-    <Box
-      sx={{
-        bgcolor: 'background.paper',
-        borderRadius: 1.5,
-        border: `1px solid ${theme.palette.divider}`,
-        mb: 1.5,
-        overflow: 'hidden',
-      }}
-    >
-      {/* Compact header - always visible */}
+      {/* Mobile: Collapsible accordion (hidden on desktop) */}
       <Box
-        onClick={handleToggle}
         sx={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          p: 1,
-          cursor: 'pointer',
-          bgcolor: expanded ? 'action.hover' : 'transparent',
-          '&:active': { bgcolor: 'action.selected' },
+          display: { xs: 'block', sm: 'none' },
+          bgcolor: 'background.paper',
+          borderRadius: 1.5,
+          border: `1px solid ${theme.palette.divider}`,
+          mb: 1.5,
+          overflow: 'hidden',
         }}
       >
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flex: 1 }}>
-          <Typography
-            variant="caption"
-            color="text.secondary"
-            sx={{ fontSize: '0.7rem', fontWeight: 500 }}
-          >
-            {title}:
-          </Typography>
-          <Typography
-            variant="body2"
-            fontWeight={700}
-            color={`${primaryColor}.main`}
-            sx={{ fontSize: '0.85rem' }}
-          >
-            {primaryValue}
-          </Typography>
-          <Typography
-            variant="caption"
-            color="text.secondary"
-            sx={{ fontSize: '0.65rem' }}
-          >
-            {primaryLabel}
-          </Typography>
-        </Box>
-        <IconButton size="small" sx={{ p: 0.25 }}>
-          {expanded ? (
-            <ExpandLess sx={{ fontSize: 18 }} />
-          ) : (
-            <ExpandMore sx={{ fontSize: 18 }} />
-          )}
-        </IconButton>
-      </Box>
-
-      {/* Expandable content */}
-      <Collapse in={expanded}>
+        {/* Compact header - always visible */}
         <Box
+          onClick={handleToggle}
           sx={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(2, 1fr)',
-            gap: 0.5,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
             p: 1,
-            pt: 0,
-            borderTop: `1px solid ${theme.palette.divider}`,
+            cursor: 'pointer',
+            bgcolor: expanded ? 'action.hover' : 'transparent',
+            '&:active': { bgcolor: 'action.selected' },
           }}
         >
-          {items.map((item, index) => (
-            <Box
-              key={index}
-              sx={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                py: 0.5,
-                px: 1,
-                bgcolor: 'action.hover',
-                borderRadius: 0.5,
-              }}
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flex: 1 }}>
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              sx={{ fontSize: '0.7rem', fontWeight: 500 }}
             >
-              <Typography
-                variant="caption"
-                color="text.secondary"
-                sx={{ fontSize: '0.65rem' }}
+              {title}:
+            </Typography>
+            <Typography
+              variant="body2"
+              fontWeight={700}
+              color={`${primaryColor}.main`}
+              sx={{ fontSize: '0.85rem' }}
+            >
+              {primaryValue}
+            </Typography>
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              sx={{ fontSize: '0.65rem' }}
+            >
+              {primaryLabel}
+            </Typography>
+          </Box>
+          <IconButton size="small" sx={{ p: 0.25 }}>
+            {expanded ? (
+              <ExpandLess sx={{ fontSize: 18 }} />
+            ) : (
+              <ExpandMore sx={{ fontSize: 18 }} />
+            )}
+          </IconButton>
+        </Box>
+
+        {/* Expandable content */}
+        <Collapse in={expanded}>
+          <Box
+            sx={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(2, 1fr)',
+              gap: 0.5,
+              p: 1,
+              pt: 0,
+              borderTop: `1px solid ${theme.palette.divider}`,
+            }}
+          >
+            {items.map((item, index) => (
+              <Box
+                key={index}
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  py: 0.5,
+                  px: 1,
+                  bgcolor: 'action.hover',
+                  borderRadius: 0.5,
+                }}
               >
-                {item.label}
-              </Typography>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}>
-                {item.icon && (
-                  <Box sx={{ fontSize: 12, display: 'flex' }}>{item.icon}</Box>
-                )}
                 <Typography
                   variant="caption"
-                  fontWeight={600}
-                  color={getColor(item.color)}
-                  sx={{ fontSize: '0.7rem' }}
+                  color="text.secondary"
+                  sx={{ fontSize: '0.65rem' }}
                 >
-                  {item.value}
+                  {item.label}
                 </Typography>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}>
+                  {item.icon && (
+                    <Box sx={{ fontSize: 12, display: 'flex' }}>{item.icon}</Box>
+                  )}
+                  <Typography
+                    variant="caption"
+                    fontWeight={600}
+                    color={getColor(item.color)}
+                    sx={{ fontSize: '0.7rem' }}
+                  >
+                    {item.value}
+                  </Typography>
+                </Box>
               </Box>
-            </Box>
-          ))}
-        </Box>
-      </Collapse>
-    </Box>
+            ))}
+          </Box>
+        </Collapse>
+      </Box>
+    </>
   );
 }

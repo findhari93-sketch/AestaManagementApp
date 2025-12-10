@@ -3,7 +3,6 @@
 import { Box, Typography, IconButton, Tooltip } from '@mui/material'
 import { ArrowBack, Refresh } from '@mui/icons-material'
 import { useRouter } from 'next/navigation'
-import { useIsMobile } from '@/hooks/useIsMobile'
 
 interface PageHeaderProps {
   title: string
@@ -23,7 +22,6 @@ export default function PageHeader({
   actions,
 }: PageHeaderProps) {
   const router = useRouter()
-  const isMobile = useIsMobile()
 
   const handleBack = () => {
     router.back()
@@ -45,20 +43,21 @@ export default function PageHeader({
           <Tooltip title="Go back">
             <IconButton
               onClick={handleBack}
-              size={isMobile ? 'small' : 'medium'}
+              size="small"
               sx={{
                 mr: { xs: 0.5, sm: 1 },
                 bgcolor: 'action.hover',
                 '&:hover': { bgcolor: 'action.selected' },
+                padding: { xs: 0.5, sm: 1 },
               }}
             >
-              <ArrowBack fontSize={isMobile ? 'small' : 'medium'} />
+              <ArrowBack sx={{ fontSize: { xs: 18, sm: 24 } }} />
             </IconButton>
           </Tooltip>
         )}
         <Box>
           <Typography
-            variant={isMobile ? 'h6' : 'h5'}
+            variant="h6"
             fontWeight={600}
             sx={{ fontSize: { xs: '1rem', sm: '1.25rem', md: '1.5rem' } }}
           >
@@ -81,10 +80,11 @@ export default function PageHeader({
             <IconButton
               onClick={onRefresh}
               disabled={isLoading}
-              size={isMobile ? 'small' : 'medium'}
+              size="small"
               sx={{
                 bgcolor: 'action.hover',
                 '&:hover': { bgcolor: 'action.selected' },
+                padding: { xs: 0.5, sm: 1 },
                 animation: isLoading ? 'spin 1s linear infinite' : 'none',
                 '@keyframes spin': {
                   '0%': { transform: 'rotate(0deg)' },
@@ -92,7 +92,7 @@ export default function PageHeader({
                 },
               }}
             >
-              <Refresh fontSize={isMobile ? 'small' : 'medium'} />
+              <Refresh sx={{ fontSize: { xs: 18, sm: 24 } }} />
             </IconButton>
           </Tooltip>
         )}

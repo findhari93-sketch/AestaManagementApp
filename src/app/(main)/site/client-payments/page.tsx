@@ -819,59 +819,59 @@ export default function ClientPaymentTracking() {
           }}
         >
           <Box>
-            <Typography variant={isMobile ? "subtitle1" : "h6"} fontWeight={700}>
+            <Typography variant="subtitle1" fontWeight={700} sx={{ fontSize: { xs: '1rem', sm: '1.25rem' } }}>
               Client Payments
             </Typography>
-            {!isMobile && (
-              <Typography variant="caption" color="text.secondary">
-                Log every received payment with mode, reference, and optional
-                receipt.
-              </Typography>
-            )}
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              sx={{ display: { xs: 'none', sm: 'block' } }}
+            >
+              Log every received payment with mode, reference, and optional
+              receipt.
+            </Typography>
           </Box>
-          {!isMobile && (
-            <Stack direction="row" spacing={1}>
-              <Button
-                variant="outlined"
-                startIcon={<Timeline />}
-                onClick={() => setPlanDrawerOpen(true)}
-                size="small"
-              >
-                {paymentPhases.length
-                  ? "Show Payment Plan"
-                  : "Create Payment Plan"}
-              </Button>
-              <Button
-                variant="contained"
-                startIcon={<Add />}
-                onClick={() => setPaymentDialogOpen(true)}
-                size="small"
-              >
-                Add Payment
-              </Button>
-            </Stack>
-          )}
+          <Stack direction="row" spacing={1} sx={{ display: { xs: 'none', sm: 'flex' } }}>
+            <Button
+              variant="outlined"
+              startIcon={<Timeline />}
+              onClick={() => setPlanDrawerOpen(true)}
+              size="small"
+            >
+              {paymentPhases.length
+                ? "Show Payment Plan"
+                : "Create Payment Plan"}
+            </Button>
+            <Button
+              variant="contained"
+              startIcon={<Add />}
+              onClick={() => setPaymentDialogOpen(true)}
+              size="small"
+            >
+              Add Payment
+            </Button>
+          </Stack>
         </Box>
 
         <TableContainer sx={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
-          <Table size={isMobile ? "small" : "medium"} sx={{ minWidth: isMobile ? 700 : 'auto' }}>
+          <Table size="small" sx={{ minWidth: 700 }}>
             <TableHead>
               <TableRow sx={{ bgcolor: "action.hover" }}>
                 <TableCell sx={{
-                  position: isMobile ? 'sticky' : 'static',
+                  position: 'sticky',
                   left: 0,
                   bgcolor: 'action.hover',
                   zIndex: 1,
                   fontWeight: 700,
-                  fontSize: isMobile ? '0.7rem' : 'inherit',
+                  fontSize: { xs: '0.7rem', sm: '0.875rem' },
                 }}>Date</TableCell>
-                <TableCell sx={{ fontWeight: 700, fontSize: isMobile ? '0.7rem' : 'inherit' }}>Mode</TableCell>
-                <TableCell align="right" sx={{ fontWeight: 700, fontSize: isMobile ? '0.7rem' : 'inherit' }}>Amount</TableCell>
-                <TableCell sx={{ fontWeight: 700, fontSize: isMobile ? '0.7rem' : 'inherit' }}>{isMobile ? 'Ref' : 'Reference'}</TableCell>
-                <TableCell sx={{ fontWeight: 700, fontSize: isMobile ? '0.7rem' : 'inherit' }}>Phase</TableCell>
-                <TableCell sx={{ fontWeight: 700, fontSize: isMobile ? '0.7rem' : 'inherit' }}>{isMobile ? 'St' : 'Status'}</TableCell>
-                {!isMobile && <TableCell sx={{ fontWeight: 700 }}>Receipt</TableCell>}
-                <TableCell sx={{ fontWeight: 700, fontSize: isMobile ? '0.7rem' : 'inherit' }}>Act</TableCell>
+                <TableCell sx={{ fontWeight: 700, fontSize: { xs: '0.7rem', sm: '0.875rem' } }}>Mode</TableCell>
+                <TableCell align="right" sx={{ fontWeight: 700, fontSize: { xs: '0.7rem', sm: '0.875rem' } }}>Amount</TableCell>
+                <TableCell sx={{ fontWeight: 700, fontSize: { xs: '0.7rem', sm: '0.875rem' } }}>Ref</TableCell>
+                <TableCell sx={{ fontWeight: 700, fontSize: { xs: '0.7rem', sm: '0.875rem' } }}>Phase</TableCell>
+                <TableCell sx={{ fontWeight: 700, fontSize: { xs: '0.7rem', sm: '0.875rem' } }}>Status</TableCell>
+                <TableCell sx={{ fontWeight: 700, display: { xs: 'none', md: 'table-cell' } }}>Receipt</TableCell>
+                <TableCell sx={{ fontWeight: 700, fontSize: { xs: '0.7rem', sm: '0.875rem' } }}>Act</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -1279,21 +1279,20 @@ export default function ClientPaymentTracking() {
         </Alert>
       </Snackbar>
 
-      {/* Mobile FAB */}
-      {isMobile && (
-        <Fab
-          color="primary"
-          onClick={() => setPaymentDialogOpen(true)}
-          sx={{
-            position: "fixed",
-            bottom: 16,
-            right: 16,
-            zIndex: 1000,
-          }}
-        >
-          <Add />
-        </Fab>
-      )}
+      {/* Mobile FAB - always rendered, visibility controlled by CSS */}
+      <Fab
+        color="primary"
+        onClick={() => setPaymentDialogOpen(true)}
+        sx={{
+          display: { xs: 'flex', sm: 'none' },
+          position: "fixed",
+          bottom: 16,
+          right: 16,
+          zIndex: 1000,
+        }}
+      >
+        <Add />
+      </Fab>
     </Box>
   );
 }
