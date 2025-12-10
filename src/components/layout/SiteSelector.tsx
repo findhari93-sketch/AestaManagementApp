@@ -11,11 +11,9 @@ import {
 } from '@mui/material'
 import { LocationOn } from '@mui/icons-material'
 import { useSite } from '@/contexts/SiteContext'
-import { useIsMobile } from '@/hooks/useIsMobile'
 
 export default function SiteSelector() {
   const { sites, selectedSite, setSelectedSite, loading } = useSite()
-  const isMobile = useIsMobile()
 
   const handleChange = (event: SelectChangeEvent) => {
     const site = sites.find((s) => s.id === event.target.value)
@@ -80,28 +78,28 @@ export default function SiteSelector() {
                 >
                   {site.name}
                 </Typography>
-                {!isMobile && (
-                  <Typography variant="caption" color="text.secondary">
-                    {site.city}
-                  </Typography>
-                )}
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  sx={{ display: { xs: 'none', sm: 'block' } }}
+                >
+                  {site.city}
+                </Typography>
               </Box>
-              {!isMobile && (
-                <Chip
-                  label={site.status}
-                  size="small"
-                  color={
-                    site.status === 'active'
-                      ? 'success'
-                      : site.status === 'planning'
-                      ? 'info'
-                      : site.status === 'on_hold'
-                      ? 'warning'
-                      : 'default'
-                  }
-                  sx={{ ml: 'auto', height: 20, fontSize: '0.625rem', flexShrink: 0 }}
-                />
-              )}
+              <Chip
+                label={site.status}
+                size="small"
+                color={
+                  site.status === 'active'
+                    ? 'success'
+                    : site.status === 'planning'
+                    ? 'info'
+                    : site.status === 'on_hold'
+                    ? 'warning'
+                    : 'default'
+                }
+                sx={{ ml: 'auto', height: 20, fontSize: '0.625rem', flexShrink: 0, display: { xs: 'none', sm: 'flex' } }}
+              />
             </Box>
           )
         }}
