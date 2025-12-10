@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useRef, useState, useEffect } from "react";
 import {
   Box,
   Button,
@@ -74,6 +74,14 @@ export type FileUploaderProps = {
   onView?: (url: string) => void;
   /** Compact mode for smaller spaces */
   compact?: boolean;
+  /** Enable image compression before upload (default: true for images) */
+  compressImages?: boolean;
+  /** Max compressed size in KB (default: 500KB) */
+  maxCompressedSizeKB?: number;
+  /** Max width for compressed images (default: 1920px) */
+  maxImageWidth?: number;
+  /** Max height for compressed images (default: 1920px) */
+  maxImageHeight?: number;
 };
 
 const FILE_TYPE_CONFIG: Record<FileType, { accept: string; label: string }> = {
@@ -101,6 +109,141 @@ const formatFileSize = (bytes: number): string => {
   );
   const value = bytes / Math.pow(k, i);
   return `${value.toFixed(value >= 10 ? 0 : 1)} ${sizes[i]}`;
+};
+
+// Sanitize filename - remove special characters that can cause issues
+const sanitizeFilename = (filename: string): string => {
+  // Get extension
+  const lastDot = filename.lastIndexOf(".");
+  const name = lastDot > 0 ? filename.substring(0, lastDot) : filename;
+  const ext = lastDot > 0 ? filename.substring(lastDot) : "";
+
+  // Replace non-alphanumeric characters (except dash and underscore) with underscore
+  const sanitized = name
+    .replace(/[^a-zA-Z0-9\-_]/g, "_")
+    .replace(/_+/g, "_") // Replace multiple underscores with single
+    .substring(0, 50); // Limit length
+
+  return sanitized + ext;
+};
+
+// Image compression utility with timeout
+const compressImage = (
+  file: File,
+  maxSizeKB: number = 500,
+  maxWidth: number = 1920,
+  maxHeight: number = 1920,
+  quality: number = 0.8
+): Promise<File> => {
+  return new Promise((resolve, reject) => {
+    // Skip compression for non-image files
+    if (!file.type.startsWith("image/")) {
+      resolve(file);
+      return;
+    }
+
+    // Skip if already small enough (under maxSizeKB)
+    if (file.size <= maxSizeKB * 1024) {
+      resolve(file);
+      return;
+    }
+
+    // Add timeout to prevent hanging
+    const timeout = setTimeout(() => {
+      console.warn("Image compression timed out, using original file");
+      resolve(file);
+    }, 10000); // 10 second timeout
+
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = (event) => {
+      const img = new Image();
+      img.crossOrigin = "anonymous"; // Help with CORS issues
+      img.src = event.target?.result as string;
+      img.onload = () => {
+        try {
+          // Calculate new dimensions while maintaining aspect ratio
+          let { width, height } = img;
+
+          if (width > maxWidth) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
+          }
+          if (height > maxHeight) {
+            width = Math.round((width * maxHeight) / height);
+            height = maxHeight;
+          }
+
+          // Ensure minimum dimensions
+          width = Math.max(1, width);
+          height = Math.max(1, height);
+
+          // Create canvas and draw image
+          const canvas = document.createElement("canvas");
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext("2d");
+
+          if (!ctx) {
+            clearTimeout(timeout);
+            console.warn("Failed to get canvas context, using original file");
+            resolve(file);
+            return;
+          }
+
+          ctx.drawImage(img, 0, 0, width, height);
+
+          // Determine output type - always use JPEG for better compression
+          const outputType = file.type === "image/png" ? "image/png" : "image/jpeg";
+
+          // Convert to blob with compression
+          canvas.toBlob(
+            (blob) => {
+              clearTimeout(timeout);
+
+              if (!blob) {
+                console.warn("Failed to create blob, using original file");
+                resolve(file);
+                return;
+              }
+
+              // Sanitize filename and create new file
+              const sanitizedName = sanitizeFilename(file.name);
+              const compressedFile = new File([blob], sanitizedName, {
+                type: outputType,
+                lastModified: Date.now(),
+              });
+
+              // If still too large, try with lower quality
+              if (compressedFile.size > maxSizeKB * 1024 && quality > 0.3) {
+                compressImage(file, maxSizeKB, maxWidth, maxHeight, quality - 0.1)
+                  .then(resolve)
+                  .catch(() => resolve(file)); // On error, use original
+              } else {
+                resolve(compressedFile);
+              }
+            },
+            outputType,
+            quality
+          );
+        } catch (err) {
+          clearTimeout(timeout);
+          console.warn("Error during compression, using original file:", err);
+          resolve(file);
+        }
+      };
+      img.onerror = () => {
+        clearTimeout(timeout);
+        console.warn("Failed to load image for compression, using original file");
+        resolve(file); // Don't reject, just use original
+      };
+    };
+    reader.onerror = () => {
+      clearTimeout(timeout);
+      console.warn("Failed to read file for compression, using original file");
+      resolve(file); // Don't reject, just use original
+    };
+  });
 };
 
 const getFileIcon = (fileType?: string) => {
@@ -133,6 +276,10 @@ export default function FileUploader({
   showViewButton = true,
   onView,
   compact = false,
+  compressImages = true,
+  maxCompressedSizeKB = 500,
+  maxImageWidth = 1920,
+  maxImageHeight = 1920,
 }: FileUploaderProps) {
   const theme = useTheme();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -140,9 +287,12 @@ export default function FileUploader({
 
   const [isDragging, setIsDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [uploadSuccess, setUploadSuccess] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [pendingFile, setPendingFile] = useState<File | null>(null);
+  // Store last uploaded file to display until parent updates value prop
+  const [lastUploadedFile, setLastUploadedFile] = useState<UploadedFile | null>(null);
 
   const acceptMime = acceptString || FILE_TYPE_CONFIG[accept].accept;
   const acceptLabel = FILE_TYPE_CONFIG[accept].label;
@@ -177,11 +327,32 @@ export default function FileUploader({
 
       setUploading(true);
       setUploadProgress(0);
+      setUploadSuccess(false);
       setError(null);
 
       let progressInterval: NodeJS.Timeout | null = null;
 
       try {
+        // Compress image if enabled and file is an image
+        let fileToUpload = file;
+        if (compressImages && file.type.startsWith("image/")) {
+          setUploadProgress(5); // Show early progress for compression
+          try {
+            fileToUpload = await compressImage(
+              file,
+              maxCompressedSizeKB,
+              maxImageWidth,
+              maxImageHeight
+            );
+            console.log(
+              `Image compressed: ${formatFileSize(file.size)} -> ${formatFileSize(fileToUpload.size)}`
+            );
+          } catch (compressionError) {
+            console.warn("Image compression failed, uploading original:", compressionError);
+            // Continue with original file if compression fails
+          }
+        }
+
         // Simulate progress for better UX
         progressInterval = setInterval(() => {
           setUploadProgress((prev) => {
@@ -197,7 +368,7 @@ export default function FileUploader({
 
         const { data, error: uploadError } = await supabase.storage
           .from(bucketName)
-          .upload(filePath, file, {
+          .upload(filePath, fileToUpload, {
             cacheControl: "3600",
             upsert: true,
           });
@@ -213,6 +384,7 @@ export default function FileUploader({
         }
 
         setUploadProgress(100);
+        setUploadSuccess(true);
 
         // Get public URL (bucket must be public in Supabase)
         const {
@@ -221,15 +393,21 @@ export default function FileUploader({
 
         const uploadedFile: UploadedFile = {
           name: file.name,
-          size: file.size,
+          size: fileToUpload.size, // Use compressed size
           url: publicUrl,
           type: file.type,
         };
+
+        // Store locally so we can display it immediately
+        setLastUploadedFile(uploadedFile);
         onUpload?.(uploadedFile);
         setPendingFile(null);
 
-        // Keep progress visible briefly before resetting
-        setTimeout(() => setUploadProgress(0), 1500);
+        // Keep success state visible briefly before resetting
+        setTimeout(() => {
+          setUploadProgress(0);
+          setUploadSuccess(false);
+        }, 2000);
 
         return uploadedFile;
       } catch (err: any) {
@@ -250,6 +428,10 @@ export default function FileUploader({
       folderPath,
       fileNamePrefix,
       validateFile,
+      compressImages,
+      maxCompressedSizeKB,
+      maxImageWidth,
+      maxImageHeight,
       onUpload,
       onError,
     ]
@@ -318,24 +500,35 @@ export default function FileUploader({
 
   const handleRemove = () => {
     setPendingFile(null);
+    setLastUploadedFile(null);
     setError(null);
     setUploadProgress(0);
+    setUploadSuccess(false);
     onRemove?.();
   };
 
   const handleView = () => {
-    if (value?.url) {
+    const fileUrl = value?.url || lastUploadedFile?.url;
+    if (fileUrl) {
       if (onView) {
-        onView(value.url);
+        onView(fileUrl);
       } else {
-        window.open(value.url, "_blank");
+        window.open(fileUrl, "_blank");
       }
     }
   };
 
-  const hasFile = !!value || !!pendingFile;
+  // Clear lastUploadedFile when value is set by parent
+  useEffect(() => {
+    if (value) {
+      setLastUploadedFile(null);
+    }
+  }, [value]);
+
+  const hasFile = !!value || !!pendingFile || !!lastUploadedFile;
   const displayFile =
     value ||
+    lastUploadedFile ||
     (pendingFile
       ? {
           name: pendingFile.name,
@@ -343,6 +536,9 @@ export default function FileUploader({
           type: pendingFile.type,
         }
       : null);
+
+  // Determine if the file is successfully uploaded (either value from parent or lastUploadedFile)
+  const isUploaded = !!value || !!lastUploadedFile;
 
   return (
     <Box>
@@ -415,21 +611,41 @@ export default function FileUploader({
         {uploading ? (
           // Uploading State
           <Box sx={{ textAlign: "center" }}>
-            <CircularProgress
-              size={compact ? 36 : 48}
-              variant={uploadProgress > 0 ? "determinate" : "indeterminate"}
-              value={uploadProgress}
-              sx={{ mb: 1.5 }}
-            />
-            <Typography variant="body2" color="text.secondary">
-              Uploading...{" "}
-              {uploadProgress > 0 ? `${Math.round(uploadProgress)}%` : ""}
-            </Typography>
-            <LinearProgress
-              variant="determinate"
-              value={uploadProgress}
-              sx={{ mt: 1, maxWidth: 200, mx: "auto", borderRadius: 1 }}
-            />
+            {uploadSuccess ? (
+              // Upload completed successfully
+              <>
+                <CheckCircle
+                  sx={{
+                    fontSize: compact ? 36 : 48,
+                    color: "success.main",
+                    mb: 1,
+                  }}
+                />
+                <Typography variant="body2" color="success.main" fontWeight={600}>
+                  Upload Complete!
+                </Typography>
+              </>
+            ) : (
+              // Still uploading
+              <>
+                <CircularProgress
+                  size={compact ? 36 : 48}
+                  variant={uploadProgress > 0 ? "determinate" : "indeterminate"}
+                  value={uploadProgress}
+                  sx={{ mb: 1.5 }}
+                />
+                <Typography variant="body2" color="text.secondary">
+                  {uploadProgress < 20
+                    ? "Compressing image..."
+                    : `Uploading... ${Math.round(uploadProgress)}%`}
+                </Typography>
+                <LinearProgress
+                  variant="determinate"
+                  value={uploadProgress}
+                  sx={{ mt: 1, maxWidth: 200, mx: "auto", borderRadius: 1 }}
+                />
+              </>
+            )}
           </Box>
         ) : hasFile && displayFile ? (
           // File Selected/Uploaded State
@@ -438,7 +654,7 @@ export default function FileUploader({
               sx={{
                 p: 1.5,
                 borderRadius: 1,
-                bgcolor: value
+                bgcolor: isUploaded
                   ? alpha(theme.palette.success.main, 0.1)
                   : alpha(theme.palette.primary.main, 0.1),
                 display: "flex",
@@ -462,7 +678,7 @@ export default function FileUploader({
               <Typography variant="caption" color="text.secondary">
                 {formatFileSize(displayFile.size)}
               </Typography>
-              {value && (
+              {isUploaded && (
                 <Box
                   sx={{
                     display: "flex",
@@ -477,7 +693,7 @@ export default function FileUploader({
                   </Typography>
                 </Box>
               )}
-              {pendingFile && !value && (
+              {pendingFile && !isUploaded && (
                 <Box
                   sx={{
                     display: "flex",
@@ -493,7 +709,7 @@ export default function FileUploader({
               )}
             </Box>
             <Stack direction="row" spacing={0.5}>
-              {showViewButton && value?.url && (
+              {showViewButton && isUploaded && (value?.url || lastUploadedFile?.url) && (
                 <Tooltip title="View File">
                   <IconButton
                     size="small"

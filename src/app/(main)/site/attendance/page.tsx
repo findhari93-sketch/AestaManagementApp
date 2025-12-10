@@ -44,9 +44,11 @@ import {
 } from "@mui/icons-material";
 import AttendanceDrawer from "@/components/attendance/AttendanceDrawer";
 import TeaShopEntryDialog from "@/components/tea-shop/TeaShopEntryDialog";
+import PaymentDialog from "@/components/payments/PaymentDialog";
 import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
 import AuditAvatarGroup from "@/components/common/AuditAvatarGroup";
 import type { TeaShopAccount } from "@/types/database.types";
+import type { DailyPaymentRecord } from "@/types/payment.types";
 import { createClient } from "@/lib/supabase/client";
 import { useSite } from "@/contexts/SiteContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -168,8 +170,11 @@ export default function AttendancePage() {
   const [editForm, setEditForm] = useState({
     work_days: 1,
     daily_rate_applied: 0,
-    is_paid: false,
   });
+
+  // Payment dialog state
+  const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
+  const [paymentRecords, setPaymentRecords] = useState<DailyPaymentRecord[]>([]);
 
   // Date-specific drawer state
   const [selectedDateForDrawer, setSelectedDateForDrawer] = useState<string | undefined>(undefined);
@@ -529,9 +534,40 @@ export default function AttendancePage() {
     setEditForm({
       work_days: record.work_days,
       daily_rate_applied: record.daily_rate_applied,
-      is_paid: record.is_paid,
     });
     setEditDialogOpen(true);
+  };
+
+  // Handler to open payment dialog for a single record
+  const handleOpenPaymentDialog = (record: AttendanceRecord) => {
+    const paymentRecord: DailyPaymentRecord = {
+      id: `daily-${record.id}`,
+      sourceType: "daily",
+      sourceId: record.id,
+      date: record.date,
+      laborerId: record.laborer_id,
+      laborerName: record.laborer_name,
+      laborerType: "daily",
+      category: record.category_name,
+      role: record.role_name,
+      amount: record.daily_earnings,
+      isPaid: record.is_paid,
+      paidVia: null,
+      paymentDate: null,
+      paymentMode: null,
+      engineerTransactionId: null,
+      proofUrl: null,
+      subcontractId: null,
+      subcontractTitle: record.subcontract_title || null,
+    };
+    setPaymentRecords([paymentRecord]);
+    setPaymentDialogOpen(true);
+  };
+
+  const handlePaymentSuccess = () => {
+    setPaymentDialogOpen(false);
+    setPaymentRecords([]);
+    fetchAttendanceHistory();
   };
 
   const handleEditSubmit = async () => {
@@ -547,7 +583,6 @@ export default function AttendancePage() {
           daily_rate_applied: editForm.daily_rate_applied,
           daily_earnings,
           hours_worked: editForm.work_days * 8,
-          is_paid: editForm.is_paid,
         })
         .eq("id", editingRecord.id);
 
@@ -784,12 +819,17 @@ export default function AttendancePage() {
           if (isContract) {
             return <Chip label="In Contract" size="small" color="info" variant="outlined" />;
           }
+          if (isPaid) {
+            return <Chip label="PAID" size="small" color="success" variant="filled" />;
+          }
           return (
             <Chip
-              label={isPaid ? "PAID" : "PENDING"}
+              label="PENDING"
               size="small"
-              color={isPaid ? "success" : "default"}
-              variant={isPaid ? "filled" : "outlined"}
+              color="warning"
+              variant="outlined"
+              onClick={() => canEdit && handleOpenPaymentDialog(row.original)}
+              sx={{ cursor: canEdit ? "pointer" : "default" }}
             />
           );
         },
@@ -797,9 +837,20 @@ export default function AttendancePage() {
       {
         id: "actions",
         header: "Actions",
-        size: 90,
+        size: 120,
         Cell: ({ row }) => (
           <Box sx={{ display: "flex", gap: 0.5 }}>
+            {row.original.laborer_type !== "contract" && !row.original.is_paid && canEdit && (
+              <Button
+                size="small"
+                variant="outlined"
+                color="success"
+                onClick={() => handleOpenPaymentDialog(row.original)}
+                sx={{ minWidth: 50, px: 1, fontSize: 11 }}
+              >
+                Pay
+              </Button>
+            )}
             <IconButton size="small" onClick={() => handleOpenEditDialog(row.original)} disabled={!canEdit}>
               <Edit fontSize="small" />
             </IconButton>
@@ -1264,17 +1315,44 @@ export default function AttendancePage() {
                                       <TableCell align="center">
                                         {record.laborer_type === "contract" ? (
                                           <Chip label="In Contract" size="small" color="info" variant="outlined" />
+                                        ) : record.is_paid ? (
+                                          <Chip
+                                            label="PAID"
+                                            size="small"
+                                            color="success"
+                                            variant="filled"
+                                          />
                                         ) : (
                                           <Chip
-                                            label={record.is_paid ? "PAID" : "PENDING"}
+                                            label="PENDING"
                                             size="small"
-                                            color={record.is_paid ? "success" : "default"}
-                                            variant={record.is_paid ? "filled" : "outlined"}
+                                            color="warning"
+                                            variant="outlined"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              if (canEdit) handleOpenPaymentDialog(record);
+                                            }}
+                                            sx={{ cursor: canEdit ? "pointer" : "default" }}
                                           />
                                         )}
                                       </TableCell>
                                       <TableCell align="center">
                                         <Box sx={{ display: "flex", gap: 0.5, justifyContent: "center" }}>
+                                          {/* Record Payment button for pending daily laborers */}
+                                          {record.laborer_type !== "contract" && !record.is_paid && canEdit && (
+                                            <Button
+                                              size="small"
+                                              variant="outlined"
+                                              color="success"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleOpenPaymentDialog(record);
+                                              }}
+                                              sx={{ minWidth: 50, px: 1, fontSize: 11 }}
+                                            >
+                                              Pay
+                                            </Button>
+                                          )}
                                           <IconButton
                                             size="small"
                                             onClick={(e) => {
@@ -1415,18 +1493,10 @@ export default function AttendancePage() {
                 </Typography>
               </Box>
 
-              {editingRecord.laborer_type !== "contract" && (
-                <FormControl fullWidth size="small">
-                  <InputLabel>Payment Status</InputLabel>
-                  <Select
-                    value={editForm.is_paid ? "paid" : "pending"}
-                    onChange={(e) => setEditForm({ ...editForm, is_paid: e.target.value === "paid" })}
-                    label="Payment Status"
-                  >
-                    <MenuItem value="pending">Pending</MenuItem>
-                    <MenuItem value="paid">Paid</MenuItem>
-                  </Select>
-                </FormControl>
+              {editingRecord.laborer_type !== "contract" && !editingRecord.is_paid && (
+                <Alert severity="info" sx={{ mt: 1 }}>
+                  To record payment, close this dialog and click the &quot;Pay&quot; button or the PENDING chip.
+                </Alert>
               )}
             </Box>
           )}
@@ -1523,6 +1593,18 @@ export default function AttendancePage() {
           </Box>
         )}
       </Popover>
+
+      {/* Payment Dialog */}
+      <PaymentDialog
+        open={paymentDialogOpen}
+        onClose={() => {
+          setPaymentDialogOpen(false);
+          setPaymentRecords([]);
+        }}
+        dailyRecords={paymentRecords}
+        allowSubcontractLink
+        onSuccess={handlePaymentSuccess}
+      />
 
       {/* Floating Action Button for Add Attendance */}
       {canEdit && (

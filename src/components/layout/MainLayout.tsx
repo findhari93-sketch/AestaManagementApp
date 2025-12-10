@@ -68,7 +68,7 @@ const siteNavItems: NavItem[] = [
     path: "/site/attendance",
   },
   {
-    text: "Daily Payments",
+    text: "Salary Settlements",
     icon: <PaymentsIcon />,
     path: "/site/payments",
   },

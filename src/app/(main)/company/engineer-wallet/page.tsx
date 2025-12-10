@@ -460,21 +460,40 @@ export default function EngineerWalletPage() {
   };
 
   // Settle attendance payments - marks linked attendance as paid
-  const handleSettleAttendance = async (transactionId: string) => {
+  const handleSettleAttendance = async (transactionId: string, settlementMode: string = "cash") => {
     setSettlingTransactionId(transactionId);
     try {
       setError("");
 
-      // Mark the transaction as settled
+      const paymentDate = dayjs().format("YYYY-MM-DD");
+      const isAdmin = userProfile?.role === "admin" || userProfile?.role === "office";
+
+      // For cash payments without proof, require admin confirmation
+      // For UPI/bank payments, auto-confirm
+      const newStatus = settlementMode === "cash" ? "pending_confirmation" : "confirmed";
+
+      // Mark the transaction as settled/pending confirmation
       await (supabase.from("site_engineer_transactions") as any)
-        .update({ is_settled: true })
+        .update({
+          is_settled: newStatus === "confirmed",
+          settlement_status: newStatus,
+          settlement_mode: settlementMode,
+          settled_date: paymentDate,
+          settled_by: userProfile?.name,
+          // If admin is settling directly, also add confirmation
+          ...(isAdmin && newStatus === "confirmed" ? {
+            confirmed_by: userProfile?.name,
+            confirmed_by_user_id: userProfile?.id,
+            confirmed_at: new Date().toISOString(),
+          } : {}),
+        })
         .eq("id", transactionId);
 
       // Mark all linked daily attendance as paid
       await (supabase.from("daily_attendance") as any)
         .update({
           is_paid: true,
-          payment_date: dayjs().format("YYYY-MM-DD"),
+          payment_date: paymentDate,
         })
         .eq("engineer_transaction_id", transactionId);
 
@@ -482,16 +501,64 @@ export default function EngineerWalletPage() {
       await (supabase.from("market_laborer_attendance") as any)
         .update({
           is_paid: true,
-          payment_date: dayjs().format("YYYY-MM-DD"),
+          payment_date: paymentDate,
         })
         .eq("engineer_transaction_id", transactionId);
 
-      setSuccess("Attendance settled successfully");
+      if (newStatus === "pending_confirmation") {
+        setSuccess("Settlement recorded. Pending admin confirmation.");
+      } else {
+        setSuccess("Attendance settled and confirmed successfully");
+      }
       await fetchData();
     } catch (err: any) {
       setError("Failed to settle: " + err.message);
     } finally {
       setSettlingTransactionId(null);
+    }
+  };
+
+  // Confirm a cash settlement (admin only)
+  const handleConfirmSettlement = async (transactionId: string) => {
+    try {
+      setError("");
+
+      await (supabase.from("site_engineer_transactions") as any)
+        .update({
+          is_settled: true,
+          settlement_status: "confirmed",
+          confirmed_by: userProfile?.name,
+          confirmed_by_user_id: userProfile?.id,
+          confirmed_at: new Date().toISOString(),
+        })
+        .eq("id", transactionId);
+
+      setSuccess("Settlement confirmed");
+      await fetchData();
+    } catch (err: any) {
+      setError("Failed to confirm: " + err.message);
+    }
+  };
+
+  // Dispute a settlement (admin only)
+  const handleDisputeSettlement = async (transactionId: string, notes: string) => {
+    try {
+      setError("");
+
+      await (supabase.from("site_engineer_transactions") as any)
+        .update({
+          settlement_status: "disputed",
+          dispute_notes: notes,
+          confirmed_by: userProfile?.name,
+          confirmed_by_user_id: userProfile?.id,
+          confirmed_at: new Date().toISOString(),
+        })
+        .eq("id", transactionId);
+
+      setSuccess("Settlement marked as disputed");
+      await fetchData();
+    } catch (err: any) {
+      setError("Failed to dispute: " + err.message);
     }
   };
 

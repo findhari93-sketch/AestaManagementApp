@@ -2232,8 +2232,12 @@ export type Database = {
       site_engineer_transactions: {
         Row: {
           amount: number
+          confirmed_at: string | null
+          confirmed_by: string | null
+          confirmed_by_user_id: string | null
           created_at: string | null
           description: string | null
+          dispute_notes: string | null
           id: string
           is_settled: boolean | null
           notes: string | null
@@ -2247,6 +2251,9 @@ export type Database = {
           related_subcontract_id: string | null
           settled_by: string | null
           settled_date: string | null
+          settlement_mode: string | null
+          settlement_proof_url: string | null
+          settlement_status: string | null
           site_id: string | null
           transaction_date: string
           transaction_type: string
@@ -2255,8 +2262,12 @@ export type Database = {
         }
         Insert: {
           amount: number
+          confirmed_at?: string | null
+          confirmed_by?: string | null
+          confirmed_by_user_id?: string | null
           created_at?: string | null
           description?: string | null
+          dispute_notes?: string | null
           id?: string
           is_settled?: boolean | null
           notes?: string | null
@@ -2270,6 +2281,9 @@ export type Database = {
           related_subcontract_id?: string | null
           settled_by?: string | null
           settled_date?: string | null
+          settlement_mode?: string | null
+          settlement_proof_url?: string | null
+          settlement_status?: string | null
           site_id?: string | null
           transaction_date?: string
           transaction_type: string
@@ -2278,8 +2292,12 @@ export type Database = {
         }
         Update: {
           amount?: number
+          confirmed_at?: string | null
+          confirmed_by?: string | null
+          confirmed_by_user_id?: string | null
           created_at?: string | null
           description?: string | null
+          dispute_notes?: string | null
           id?: string
           is_settled?: boolean | null
           notes?: string | null
@@ -2293,6 +2311,9 @@ export type Database = {
           related_subcontract_id?: string | null
           settled_by?: string | null
           settled_date?: string | null
+          settlement_mode?: string | null
+          settlement_proof_url?: string | null
+          settlement_status?: string | null
           site_id?: string | null
           transaction_date?: string
           transaction_type?: string
