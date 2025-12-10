@@ -346,7 +346,7 @@ export default function MainLayout({
   );
 
   return (
-    <Box sx={{ display: "flex" }}>
+    <Box sx={{ display: "flex", width: '100%', maxWidth: '100vw', overflowX: 'hidden' }}>
       {/* Top App Bar */}
       <AppBar
         position="fixed"
@@ -525,9 +525,11 @@ export default function MainLayout({
         sx={{
           flexGrow: 1,
           p: { xs: 1.5, sm: 2, md: 3 },
-          width: { md: `calc(100% - ${currentDrawerWidth}px)` },
+          width: { xs: '100%', md: `calc(100% - ${currentDrawerWidth}px)` },
+          maxWidth: '100%',
           minHeight: "100vh",
           bgcolor: "background.default",
+          overflowX: 'hidden',
           transition: theme.transitions.create(["width", "margin"], {
             easing: theme.transitions.easing.sharp,
             duration: theme.transitions.duration.leavingScreen,

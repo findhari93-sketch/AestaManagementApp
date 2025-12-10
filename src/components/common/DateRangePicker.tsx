@@ -1,0 +1,452 @@
+"use client";
+
+import React, { useState, useRef, useEffect } from "react";
+import {
+  Box,
+  Button,
+  IconButton,
+  Popover,
+  Typography,
+  List,
+  ListItemButton,
+  ListItemText,
+  Divider,
+  Link,
+} from "@mui/material";
+import {
+  ChevronLeft as ChevronLeftIcon,
+  ChevronRight as ChevronRightIcon,
+  KeyboardArrowDown as ArrowDownIcon,
+} from "@mui/icons-material";
+import { DateRange, Range, RangeKeyDict } from "react-date-range";
+import {
+  startOfDay,
+  endOfDay,
+  subDays,
+  startOfWeek,
+  endOfWeek,
+  startOfMonth,
+  endOfMonth,
+  subMonths,
+  format,
+  addDays,
+  differenceInDays,
+} from "date-fns";
+import "react-date-range/dist/styles.css";
+import "react-date-range/dist/theme/default.css";
+
+interface DateRangePickerProps {
+  startDate: Date;
+  endDate: Date;
+  onChange: (startDate: Date, endDate: Date) => void;
+  minDate?: Date;
+  maxDate?: Date;
+}
+
+type PresetKey =
+  | "today"
+  | "yesterday"
+  | "thisWeek"
+  | "last7days"
+  | "lastWeek"
+  | "last14days"
+  | "thisMonth"
+  | "last30days"
+  | "lastMonth"
+  | "allTime";
+
+interface Preset {
+  key: PresetKey;
+  label: string;
+  getRange: () => { start: Date; end: Date };
+}
+
+const presets: Preset[] = [
+  {
+    key: "today",
+    label: "Today",
+    getRange: () => ({
+      start: startOfDay(new Date()),
+      end: endOfDay(new Date()),
+    }),
+  },
+  {
+    key: "yesterday",
+    label: "Yesterday",
+    getRange: () => ({
+      start: startOfDay(subDays(new Date(), 1)),
+      end: endOfDay(subDays(new Date(), 1)),
+    }),
+  },
+  {
+    key: "thisWeek",
+    label: "This week (Sun - Today)",
+    getRange: () => ({
+      start: startOfWeek(new Date()),
+      end: endOfDay(new Date()),
+    }),
+  },
+  {
+    key: "last7days",
+    label: "Last 7 days",
+    getRange: () => ({
+      start: startOfDay(subDays(new Date(), 6)),
+      end: endOfDay(new Date()),
+    }),
+  },
+  {
+    key: "lastWeek",
+    label: "Last week (Sun - Sat)",
+    getRange: () => ({
+      start: startOfWeek(subDays(new Date(), 7)),
+      end: endOfWeek(subDays(new Date(), 7)),
+    }),
+  },
+  {
+    key: "last14days",
+    label: "Last 14 days",
+    getRange: () => ({
+      start: startOfDay(subDays(new Date(), 13)),
+      end: endOfDay(new Date()),
+    }),
+  },
+  {
+    key: "thisMonth",
+    label: "This month",
+    getRange: () => ({
+      start: startOfMonth(new Date()),
+      end: endOfDay(new Date()),
+    }),
+  },
+  {
+    key: "last30days",
+    label: "Last 30 days",
+    getRange: () => ({
+      start: startOfDay(subDays(new Date(), 29)),
+      end: endOfDay(new Date()),
+    }),
+  },
+  {
+    key: "lastMonth",
+    label: "Last month",
+    getRange: () => ({
+      start: startOfMonth(subMonths(new Date(), 1)),
+      end: endOfMonth(subMonths(new Date(), 1)),
+    }),
+  },
+  {
+    key: "allTime",
+    label: "All time",
+    getRange: () => ({
+      start: new Date(2020, 0, 1), // Far back date
+      end: endOfDay(new Date()),
+    }),
+  },
+];
+
+// Find matching preset for current date range
+const findMatchingPreset = (start: Date, end: Date): PresetKey | null => {
+  for (const preset of presets) {
+    const range = preset.getRange();
+    if (
+      format(start, "yyyy-MM-dd") === format(range.start, "yyyy-MM-dd") &&
+      format(end, "yyyy-MM-dd") === format(range.end, "yyyy-MM-dd")
+    ) {
+      return preset.key;
+    }
+  }
+  return null;
+};
+
+// Get label for current selection
+const getSelectionLabel = (start: Date, end: Date): string => {
+  const matchingPreset = findMatchingPreset(start, end);
+  if (matchingPreset) {
+    const preset = presets.find((p) => p.key === matchingPreset);
+    if (preset && preset.key !== "allTime") {
+      return preset.label;
+    }
+  }
+  // Custom range - show dates
+  const startStr = format(start, "MMM d, yyyy");
+  const endStr = format(end, "MMM d, yyyy");
+  if (startStr === endStr) return startStr;
+  return `${format(start, "MMM d")} - ${format(end, "MMM d, yyyy")}`;
+};
+
+export default function DateRangePicker({
+  startDate,
+  endDate,
+  onChange,
+  minDate,
+  maxDate = new Date(),
+}: DateRangePickerProps) {
+  const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
+  const [tempRange, setTempRange] = useState<Range[]>([
+    {
+      startDate: startDate,
+      endDate: endDate,
+      key: "selection",
+    },
+  ]);
+  const [selectedPreset, setSelectedPreset] = useState<PresetKey | null>(
+    findMatchingPreset(startDate, endDate)
+  );
+
+  const open = Boolean(anchorEl);
+
+  // Sync temp range when props change
+  useEffect(() => {
+    setTempRange([
+      {
+        startDate: startDate,
+        endDate: endDate,
+        key: "selection",
+      },
+    ]);
+    setSelectedPreset(findMatchingPreset(startDate, endDate));
+  }, [startDate, endDate]);
+
+  const handleOpen = (event: React.MouseEvent<HTMLElement>) => {
+    setAnchorEl(event.currentTarget);
+    setTempRange([
+      {
+        startDate: startDate,
+        endDate: endDate,
+        key: "selection",
+      },
+    ]);
+  };
+
+  const handleClose = () => {
+    setAnchorEl(null);
+  };
+
+  const handleApply = () => {
+    if (tempRange[0].startDate && tempRange[0].endDate) {
+      onChange(tempRange[0].startDate, tempRange[0].endDate);
+    }
+    handleClose();
+  };
+
+  const handlePresetClick = (preset: Preset) => {
+    const range = preset.getRange();
+    setTempRange([
+      {
+        startDate: range.start,
+        endDate: range.end,
+        key: "selection",
+      },
+    ]);
+    setSelectedPreset(preset.key);
+  };
+
+  const handleRangeChange = (ranges: RangeKeyDict) => {
+    const selection = ranges.selection;
+    setTempRange([selection]);
+    // Clear preset when manually selecting
+    if (selection.startDate && selection.endDate) {
+      setSelectedPreset(findMatchingPreset(selection.startDate, selection.endDate));
+    }
+  };
+
+  // Navigate to previous/next range (based on current range duration)
+  const handleNavigate = (direction: "prev" | "next") => {
+    const daysDiff = differenceInDays(endDate, startDate) + 1;
+    if (direction === "prev") {
+      onChange(subDays(startDate, daysDiff), subDays(endDate, daysDiff));
+    } else {
+      const newEnd = addDays(endDate, daysDiff);
+      // Don't go past today
+      if (newEnd <= new Date()) {
+        onChange(addDays(startDate, daysDiff), newEnd);
+      } else {
+        onChange(addDays(startDate, daysDiff), new Date());
+      }
+    }
+  };
+
+  // Quick access to last 7 days
+  const handleShowLast7Days = () => {
+    const preset = presets.find((p) => p.key === "last7days")!;
+    const range = preset.getRange();
+    onChange(range.start, range.end);
+  };
+
+  const currentLabel = getSelectionLabel(startDate, endDate);
+
+  return (
+    <Box sx={{ display: "flex", alignItems: "center", gap: { xs: 0.5, sm: 1 } }}>
+      {/* Main dropdown trigger */}
+      <Box sx={{ display: "flex", alignItems: "center" }}>
+        {/* Prev arrow */}
+        <IconButton
+          size="small"
+          onClick={() => handleNavigate("prev")}
+          sx={{ p: { xs: 0.25, sm: 0.5 } }}
+        >
+          <ChevronLeftIcon fontSize="small" />
+        </IconButton>
+
+        {/* Date range button */}
+        <Button
+          variant="outlined"
+          size="small"
+          onClick={handleOpen}
+          endIcon={<ArrowDownIcon />}
+          sx={{
+            textTransform: "none",
+            minWidth: { xs: 120, sm: 180 },
+            justifyContent: "space-between",
+            px: { xs: 1, sm: 1.5 },
+            py: 0.5,
+            bgcolor: "white",
+            borderColor: "divider",
+            color: "text.primary",
+            fontSize: { xs: "0.75rem", sm: "0.875rem" },
+            "&:hover": {
+              bgcolor: "grey.50",
+              borderColor: "divider",
+            },
+          }}
+        >
+          <Typography
+            variant="body2"
+            noWrap
+            sx={{ fontSize: { xs: "0.75rem", sm: "0.875rem" } }}
+          >
+            {currentLabel}
+          </Typography>
+        </Button>
+
+        {/* Next arrow */}
+        <IconButton
+          size="small"
+          onClick={() => handleNavigate("next")}
+          disabled={format(endDate, "yyyy-MM-dd") === format(new Date(), "yyyy-MM-dd")}
+          sx={{ p: { xs: 0.25, sm: 0.5 } }}
+        >
+          <ChevronRightIcon fontSize="small" />
+        </IconButton>
+      </Box>
+
+      {/* Quick access link */}
+      <Link
+        component="button"
+        variant="body2"
+        onClick={handleShowLast7Days}
+        sx={{
+          fontSize: { xs: "0.7rem", sm: "0.8rem" },
+          whiteSpace: "nowrap",
+          display: { xs: "none", sm: "inline" },
+        }}
+      >
+        Show last 7 days
+      </Link>
+
+      {/* Popover with presets and calendar */}
+      <Popover
+        open={open}
+        anchorEl={anchorEl}
+        onClose={handleClose}
+        anchorOrigin={{
+          vertical: "bottom",
+          horizontal: "left",
+        }}
+        transformOrigin={{
+          vertical: "top",
+          horizontal: "left",
+        }}
+        PaperProps={{
+          sx: {
+            mt: 1,
+            maxWidth: { xs: "95vw", sm: "auto" },
+            maxHeight: { xs: "80vh", sm: "auto" },
+            overflow: "auto",
+          },
+        }}
+      >
+        <Box
+          sx={{
+            display: "flex",
+            flexDirection: { xs: "column", sm: "row" },
+            minWidth: { xs: 300, sm: 600 },
+          }}
+        >
+          {/* Presets list */}
+          <Box
+            sx={{
+              width: { xs: "100%", sm: 180 },
+              borderRight: { xs: 0, sm: 1 },
+              borderBottom: { xs: 1, sm: 0 },
+              borderColor: "divider",
+              maxHeight: { xs: 200, sm: 400 },
+              overflow: "auto",
+            }}
+          >
+            <List dense disablePadding>
+              {presets.map((preset) => (
+                <ListItemButton
+                  key={preset.key}
+                  selected={selectedPreset === preset.key}
+                  onClick={() => handlePresetClick(preset)}
+                  sx={{
+                    py: 0.75,
+                    "&.Mui-selected": {
+                      bgcolor: "primary.50",
+                      color: "primary.main",
+                      "&:hover": {
+                        bgcolor: "primary.100",
+                      },
+                    },
+                  }}
+                >
+                  <ListItemText
+                    primary={preset.label}
+                    primaryTypographyProps={{
+                      fontSize: "0.8rem",
+                      fontWeight: selectedPreset === preset.key ? 600 : 400,
+                    }}
+                  />
+                </ListItemButton>
+              ))}
+            </List>
+          </Box>
+
+          {/* Calendar */}
+          <Box sx={{ p: 1 }}>
+            <DateRange
+              ranges={tempRange}
+              onChange={handleRangeChange}
+              months={1}
+              direction="horizontal"
+              maxDate={maxDate}
+              minDate={minDate}
+              rangeColors={["#1976d2"]}
+              showDateDisplay={true}
+              editableDateInputs={true}
+            />
+          </Box>
+        </Box>
+
+        {/* Actions */}
+        <Divider />
+        <Box
+          sx={{
+            display: "flex",
+            justifyContent: "flex-end",
+            gap: 1,
+            p: 1.5,
+          }}
+        >
+          <Button size="small" onClick={handleClose}>
+            Cancel
+          </Button>
+          <Button size="small" variant="contained" onClick={handleApply}>
+            Apply
+          </Button>
+        </Box>
+      </Popover>
+    </Box>
+  );
+}

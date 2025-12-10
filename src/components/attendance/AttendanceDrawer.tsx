@@ -1463,92 +1463,37 @@ export default function AttendanceDrawer({
       }}
     >
       <Box sx={{ height: "100%", display: "flex", flexDirection: "column" }}>
-        {/* Header */}
+        {/* Compact Header */}
         <Box
           sx={{
-            p: 2,
+            px: 2,
+            py: 1.5,
             borderBottom: 1,
             borderColor: "divider",
-            bgcolor: "primary.main",
+            bgcolor: mode === "morning" ? "warning.main" : mode === "evening" ? "info.main" : "primary.main",
             color: "white",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
           }}
         >
-          <Box
-            sx={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-            }}
+          <Typography variant="subtitle1" fontWeight={600} sx={{ fontSize: { xs: '0.9rem', sm: '1rem' } }}>
+            {mode === "morning"
+              ? `🌅 Start Day - ${dayjs(selectedDate).format("DD MMM YYYY (ddd)")}`
+              : mode === "evening"
+                ? `🌆 Confirm - ${dayjs(selectedDate).format("DD MMM YYYY (ddd)")}`
+                : initialDate
+                  ? `Edit - ${dayjs(initialDate).format("DD MMM YYYY (ddd)")}`
+                  : "Add Attendance"}
+          </Typography>
+          <IconButton
+            onClick={handleClose}
+            size="small"
+            sx={{ color: "white", p: 0.5 }}
           >
-            <Box>
-              <Typography variant="h6" fontWeight={600}>
-                {mode === "morning"
-                  ? `🌅 Start Day - ${dayjs(selectedDate).format("DD MMM YYYY (ddd)")}`
-                  : mode === "evening"
-                    ? `🌆 Confirm Attendance - ${dayjs(selectedDate).format("DD MMM YYYY (ddd)")}`
-                    : initialDate
-                      ? `Edit Attendance - ${dayjs(initialDate).format("DD MMM YYYY (ddd)")}`
-                      : "Add Attendance"}
-              </Typography>
-              <Typography variant="caption" sx={{ opacity: 0.9 }}>
-                {mode === "morning"
-                  ? "Quick check-in: Mark who is present today"
-                  : mode === "evening"
-                    ? "Confirm actual work done and day units"
-                    : initialDate
-                      ? "Manage laborers and time tracking for this date"
-                      : siteName || "Select laborers and enter attendance"}
-              </Typography>
-            </Box>
-            <IconButton
-              onClick={handleClose}
-              size="small"
-              sx={{ color: "white" }}
-            >
-              <CloseIcon />
-            </IconButton>
-          </Box>
+            <CloseIcon fontSize="small" />
+          </IconButton>
         </Box>
-
-        {/* Mode Indicator Banners */}
-        {mode === "morning" && (
-          <Alert
-            severity="warning"
-            icon={false}
-            sx={{
-              borderRadius: 0,
-              py: 1,
-              bgcolor: "warning.50",
-              "& .MuiAlert-message": { width: "100%" }
-            }}
-          >
-            <Typography variant="body2" fontWeight={600}>
-              🌅 Quick Morning Check-in
-            </Typography>
-            <Typography variant="caption" color="text.secondary">
-              Just mark who is present today. Day units and times can be set in the evening.
-            </Typography>
-          </Alert>
-        )}
-        {mode === "evening" && (
-          <Alert
-            severity="info"
-            icon={false}
-            sx={{
-              borderRadius: 0,
-              py: 1,
-              bgcolor: "info.50",
-              "& .MuiAlert-message": { width: "100%" }
-            }}
-          >
-            <Typography variant="body2" fontWeight={600}>
-              🌆 Confirm Today&apos;s Attendance
-            </Typography>
-            <Typography variant="caption" color="text.secondary">
-              Adjust day units and set work progress for accurate records.
-            </Typography>
-          </Alert>
-        )}
 
         {/* Content */}
         <Box sx={{ flex: 1, overflow: "auto", p: 2 }}>
@@ -2839,6 +2784,20 @@ export default function AttendanceDrawer({
                   );
                 })}
 
+                {/* Bottom Add Group button - shows when at least 1 market laborer exists */}
+                {marketLaborers.length > 0 && (
+                  <Button
+                    size="small"
+                    startIcon={<AddIcon />}
+                    onClick={handleAddMarketLaborer}
+                    sx={{ mt: 1 }}
+                    fullWidth
+                    variant="outlined"
+                  >
+                    Add Another Group
+                  </Button>
+                )}
+
                 {marketLaborers.length === 0 && (
                   <Typography
                     variant="body2"
@@ -2868,132 +2827,37 @@ export default function AttendanceDrawer({
           )}
         </Box>
 
-        {/* Work Progress Slider - Shown in evening and full modes */}
-        {(mode === "evening" || mode === "full") && (
-          <Box
-            sx={{
-              px: 2,
-              py: 1.5,
-              borderTop: 1,
-              borderColor: "divider",
-              bgcolor: "info.50",
-            }}
-          >
-            <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
-              <Typography variant="subtitle2" fontWeight={600}>
-                Work Progress
-              </Typography>
-              <Chip
-                label={`${workProgressPercent}%`}
-                size="small"
-                color={workProgressPercent >= 80 ? "success" : workProgressPercent >= 50 ? "warning" : "error"}
-              />
-            </Box>
-            <Slider
-              value={workProgressPercent}
-              onChange={(_, value) => setWorkProgressPercent(value as number)}
-              min={0}
-              max={100}
-              step={5}
-              marks={[
-                { value: 0, label: "0%" },
-                { value: 25, label: "25%" },
-                { value: 50, label: "50%" },
-                { value: 75, label: "75%" },
-                { value: 100, label: "100%" },
-              ]}
-              valueLabelDisplay="auto"
-              sx={{
-                "& .MuiSlider-markLabel": {
-                  fontSize: "0.65rem",
-                },
-              }}
-            />
-          </Box>
-        )}
-
-        {/* Summary & Save */}
+        {/* Compact Summary & Save */}
         <Box
           sx={{
             borderTop: 1,
             borderColor: "divider",
-            p: 2,
+            px: 2,
+            py: 1.5,
             bgcolor: "grey.50",
           }}
         >
-          <Typography variant="subtitle2" color="text.secondary" gutterBottom>
-            SUMMARY
-          </Typography>
-          <Grid container spacing={2} sx={{ mb: 2 }}>
-            <Grid size={4}>
-              <Box
-                sx={{
-                  textAlign: "center",
-                  p: 1,
-                  bgcolor: "primary.50",
-                  borderRadius: 1,
-                }}
-              >
-                <Typography variant="caption" color="text.secondary">
-                  Laborers
-                </Typography>
-                <Typography variant="h6" fontWeight={700}>
-                  {summary.totalCount}
-                </Typography>
-                <Typography variant="caption" color="text.secondary">
-                  D: {summary.dailyCount} | C: {summary.contractCount} | M:{" "}
-                  {summary.marketCount}
-                </Typography>
-              </Box>
-            </Grid>
-            <Grid size={4}>
-              <Box
-                sx={{
-                  textAlign: "center",
-                  p: 1,
-                  bgcolor: "success.50",
-                  borderRadius: 1,
-                }}
-              >
-                <Typography variant="caption" color="text.secondary">
-                  Salary
-                </Typography>
-                <Typography variant="h6" fontWeight={700} color="success.main">
-                  ₹{summary.totalSalary.toLocaleString()}
-                </Typography>
-              </Box>
-            </Grid>
-            <Grid size={4}>
-              <Box
-                sx={{
-                  textAlign: "center",
-                  p: 1,
-                  bgcolor: "warning.50",
-                  borderRadius: 1,
-                }}
-              >
-                <Typography variant="caption" color="text.secondary">
-                  Tea Shop
-                </Typography>
-                <Typography variant="h6" fontWeight={700} color="warning.main">
-                  ₹{teaShopTotal.toLocaleString()}
-                </Typography>
-              </Box>
-            </Grid>
-          </Grid>
-          <Box
-            sx={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              mb: 2,
-            }}
-          >
-            <Typography variant="subtitle1" fontWeight={700}>
-              TOTAL EXPENSE:
+          {/* Line 1: Laborers count with breakdown */}
+          <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 0.5 }}>
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+              <Typography variant="body2" fontWeight={600}>
+                Laborers: {summary.totalCount}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                (D:{summary.dailyCount} | C:{summary.contractCount} | M:{summary.marketCount})
+              </Typography>
+            </Box>
+            <Typography variant="body2" fontWeight={700} color="primary.main">
+              Total: ₹{(summary.totalExpense + teaShopTotal).toLocaleString()}
             </Typography>
-            <Typography variant="h5" fontWeight={700} color="primary.main">
-              ₹{(summary.totalExpense + teaShopTotal).toLocaleString()}
+          </Box>
+          {/* Line 2: Salary and Tea Shop */}
+          <Box sx={{ display: "flex", alignItems: "center", gap: 2, mb: 1.5 }}>
+            <Typography variant="caption" color="success.main" fontWeight={600}>
+              Salary: ₹{summary.totalSalary.toLocaleString()}
+            </Typography>
+            <Typography variant="caption" color="warning.main" fontWeight={600}>
+              Tea: ₹{teaShopTotal.toLocaleString()}
             </Typography>
           </Box>
 

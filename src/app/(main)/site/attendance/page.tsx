@@ -59,6 +59,7 @@ import PageHeader from "@/components/layout/PageHeader";
 import { hasEditPermission } from "@/lib/permissions";
 import type { LaborerType, DailyWorkSummary } from "@/types/database.types";
 import dayjs from "dayjs";
+import DateRangePicker from "@/components/common/DateRangePicker";
 
 interface AttendanceRecord {
   id: string;
@@ -918,7 +919,7 @@ export default function AttendancePage() {
   }
 
   return (
-    <Box>
+    <Box sx={{ width: '100%', overflowX: 'hidden' }}>
       {/* Header with Date Filters */}
       <PageHeader
         title="Attendance"
@@ -933,27 +934,15 @@ export default function AttendancePage() {
             alignItems: { xs: 'stretch', sm: 'center' },
             width: { xs: '100%', sm: 'auto' }
           }}>
-            {/* Date Filters - Row 1 on mobile */}
-            <Box sx={{ display: 'flex', gap: 1, flex: { xs: '1 1 100%', sm: '0 0 auto' } }}>
-              <TextField
-                label="From"
-                type="date"
-                value={dateFrom}
-                onChange={(e) => setDateFrom(e.target.value)}
-                slotProps={{ inputLabel: { shrink: true } }}
-                size="small"
-                sx={{ width: { xs: '50%', sm: 130 }, bgcolor: "white" }}
-              />
-              <TextField
-                label="To"
-                type="date"
-                value={dateTo}
-                onChange={(e) => setDateTo(e.target.value)}
-                slotProps={{ inputLabel: { shrink: true } }}
-                size="small"
-                sx={{ width: { xs: '50%', sm: 130 }, bgcolor: "white" }}
-              />
-            </Box>
+            {/* Date Range Picker */}
+            <DateRangePicker
+              startDate={new Date(dateFrom)}
+              endDate={new Date(dateTo)}
+              onChange={(start, end) => {
+                setDateFrom(dayjs(start).format("YYYY-MM-DD"));
+                setDateTo(dayjs(end).format("YYYY-MM-DD"));
+              }}
+            />
             {/* Buttons - Row 2 on mobile */}
             <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', justifyContent: { xs: 'space-between', sm: 'flex-start' } }}>
               <Button
@@ -1101,15 +1090,29 @@ export default function AttendancePage() {
           <CircularProgress />
         </Box>
       ) : viewMode === "date-wise" ? (
-        <Paper sx={{ borderRadius: 2, overflow: "hidden", position: 'relative' }}>
+        <Paper sx={{ borderRadius: 2, overflow: "auto", position: 'relative', width: '100%' }}>
           <TableContainer
             sx={{
               maxHeight: { xs: "calc(100vh - 400px)", sm: "calc(100vh - 350px)" },
               overflowX: 'auto',
+              overflowY: 'auto',
               WebkitOverflowScrolling: 'touch',
+              width: '100%',
+              // Make scrollbar visible on mobile
+              '&::-webkit-scrollbar': {
+                height: 8,
+                display: 'block',
+              },
+              '&::-webkit-scrollbar-track': {
+                bgcolor: 'grey.100',
+              },
+              '&::-webkit-scrollbar-thumb': {
+                bgcolor: 'grey.400',
+                borderRadius: 4,
+              },
             }}
           >
-            <Table stickyHeader size="small" sx={{ minWidth: 900 }}>
+            <Table stickyHeader size="small" sx={{ minWidth: { xs: 600, sm: 800 } }}>
               <TableHead>
                 <TableRow sx={{ bgcolor: "#1565c0" }}>
                   {/* Sticky expand column */}
@@ -1146,12 +1149,12 @@ export default function AttendancePage() {
                   <TableCell sx={{ bgcolor: "#1565c0", color: "#fff", fontWeight: 700, minWidth: 55 }} align="center">Contract</TableCell>
                   <TableCell sx={{ bgcolor: "#1565c0", color: "#fff", fontWeight: 700, minWidth: 50 }} align="center">Market</TableCell>
                   <TableCell sx={{ bgcolor: "#1565c0", color: "#fff", fontWeight: 700, minWidth: 45 }} align="center">Total</TableCell>
-                  <TableCell sx={{ bgcolor: "#1565c0", color: "#fff", fontWeight: 700, minWidth: 45 }} align="center">In</TableCell>
-                  <TableCell sx={{ bgcolor: "#1565c0", color: "#fff", fontWeight: 700, minWidth: 45 }} align="center">Out</TableCell>
+                  <TableCell sx={{ bgcolor: "#1565c0", color: "#fff", fontWeight: 700, minWidth: 45, display: { xs: 'none', md: 'table-cell' } }} align="center">In</TableCell>
+                  <TableCell sx={{ bgcolor: "#1565c0", color: "#fff", fontWeight: 700, minWidth: 45, display: { xs: 'none', md: 'table-cell' } }} align="center">Out</TableCell>
                   <TableCell sx={{ bgcolor: "#1565c0", color: "#fff", fontWeight: 700, minWidth: 70 }} align="right">Salary</TableCell>
-                  <TableCell sx={{ bgcolor: "#1565c0", color: "#fff", fontWeight: 700, minWidth: 80 }} align="center">Tea Shop</TableCell>
+                  <TableCell sx={{ bgcolor: "#1565c0", color: "#fff", fontWeight: 700, minWidth: 80, display: { xs: 'none', sm: 'table-cell' } }} align="center">Tea Shop</TableCell>
                   <TableCell sx={{ bgcolor: "#1565c0", color: "#fff", fontWeight: 700, minWidth: 70 }} align="right">Expense</TableCell>
-                  <TableCell sx={{ bgcolor: "#1565c0", color: "#fff", fontWeight: 700, minWidth: 120 }}>Work</TableCell>
+                  <TableCell sx={{ bgcolor: "#1565c0", color: "#fff", fontWeight: 700, minWidth: 120, display: { xs: 'none', md: 'table-cell' } }}>Work</TableCell>
                   <TableCell sx={{ bgcolor: "#1565c0", color: "#fff", fontWeight: 700, minWidth: 90 }}>Status</TableCell>
                 </TableRow>
               </TableHead>
@@ -1211,10 +1214,10 @@ export default function AttendancePage() {
                           {summary.totalLaborerCount}
                         </Typography>
                       </TableCell>
-                      <TableCell align="center">
+                      <TableCell align="center" sx={{ display: { xs: 'none', md: 'table-cell' } }}>
                         <Typography variant="caption">{formatTime(summary.firstInTime)}</Typography>
                       </TableCell>
-                      <TableCell align="center">
+                      <TableCell align="center" sx={{ display: { xs: 'none', md: 'table-cell' } }}>
                         <Typography variant="caption">
                           {summary.attendanceStatus === "morning_entry" ? "-" : formatTime(summary.lastOutTime)}
                         </Typography>
@@ -1224,7 +1227,7 @@ export default function AttendancePage() {
                           ₹{summary.totalSalary.toLocaleString()}
                         </Typography>
                       </TableCell>
-                      <TableCell align="center">
+                      <TableCell align="center" sx={{ display: { xs: 'none', sm: 'table-cell' } }}>
                         {summary.teaShop ? (
                           <Chip
                             icon={<TeaIcon fontSize="small" />}
@@ -1258,7 +1261,7 @@ export default function AttendancePage() {
                           ₹{(summary.totalExpense + (summary.teaShop?.total || 0)).toLocaleString()}
                         </Typography>
                       </TableCell>
-                      <TableCell>
+                      <TableCell sx={{ display: { xs: 'none', md: 'table-cell' } }}>
                         <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
                           <Tooltip title={summary.workDescription || summary.workUpdates?.morning?.description || "No description"}>
                             <Typography variant="caption" noWrap sx={{ maxWidth: 100, display: "block" }}>
