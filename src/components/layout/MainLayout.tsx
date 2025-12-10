@@ -322,28 +322,26 @@ export default function MainLayout({
         })}
       </List>
 
-      {/* Collapse Button - Desktop only */}
-      {!isMobile && (
-        <>
-          <Divider />
-          <Box sx={{ p: 1 }}>
-            <ListItemButton
-              onClick={() => setSidebarCollapsed(true)}
-              sx={{
-                borderRadius: 2,
-                justifyContent: "center",
-              }}
-            >
-              <ChevronLeftIcon />
-              <ListItemText
-                primary="Collapse"
-                primaryTypographyProps={{ fontSize: "0.875rem" }}
-                sx={{ ml: 1 }}
-              />
-            </ListItemButton>
-          </Box>
-        </>
-      )}
+      {/* Collapse Button - Desktop only (use CSS display to avoid hydration mismatch) */}
+      <Box sx={{ display: { xs: 'none', md: 'block' } }}>
+        <Divider />
+        <Box sx={{ p: 1 }}>
+          <ListItemButton
+            onClick={() => setSidebarCollapsed(true)}
+            sx={{
+              borderRadius: 2,
+              justifyContent: "center",
+            }}
+          >
+            <ChevronLeftIcon />
+            <ListItemText
+              primary="Collapse"
+              primaryTypographyProps={{ fontSize: "0.875rem" }}
+              sx={{ ml: 1 }}
+            />
+          </ListItemButton>
+        </Box>
+      </Box>
     </Box>
   );
 
