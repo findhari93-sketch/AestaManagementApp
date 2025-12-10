@@ -29,10 +29,9 @@ import {
   Select,
   MenuItem,
   Tooltip,
-  useTheme,
-  useMediaQuery,
   Fab,
 } from "@mui/material";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import {
   Add as AddIcon,
   Edit,
@@ -76,8 +75,7 @@ export default function TeaShopPage() {
   const { selectedSite } = useSite();
   const { userProfile } = useAuth();
   const supabase = createClient();
-  const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
+  const isMobile = useIsMobile();
 
   const [loading, setLoading] = useState(false);
   const [tabValue, setTabValue] = useState(0);

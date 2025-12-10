@@ -7,7 +7,8 @@ import {
   type MRT_RowData,
   type MRT_TableOptions,
 } from "material-react-table";
-import { Box, useTheme, useMediaQuery } from "@mui/material";
+import { Box, useTheme } from "@mui/material";
+import { useIsMobile, useIsTablet } from "@/hooks/useIsMobile";
 
 // Default table configuration - centralized for entire app
 export const tableDefaults = {
@@ -108,8 +109,8 @@ export default function DataTable<TData extends MRT_RowData>({
   ...otherProps
 }: DataTableProps<TData>) {
   const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
-  const isTablet = useMediaQuery(theme.breakpoints.down('md'));
+  const isMobile = useIsMobile();
+  const isTablet = useIsTablet();
   const useCompact = compactMode && isMobile;
 
   // Build column visibility for mobile

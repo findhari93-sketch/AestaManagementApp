@@ -17,12 +17,12 @@ import {
   Avatar,
   Menu,
   MenuItem,
-  useMediaQuery,
-  useTheme,
   Tabs,
   Tab,
   Tooltip,
+  useTheme,
 } from "@mui/material";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import {
   Menu as MenuIcon,
   ChevronLeft as ChevronLeftIcon,
@@ -148,7 +148,7 @@ export default function MainLayout({
   const router = useRouter();
   const pathname = usePathname();
   const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down("md"));
+  const isMobile = useIsMobile("md");
 
   // Determine active tab based on current path
   useEffect(() => {

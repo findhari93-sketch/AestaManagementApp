@@ -31,9 +31,8 @@ import {
   Popover,
   Divider,
   Fab,
-  useMediaQuery,
-  useTheme,
 } from "@mui/material";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import {
   ExpandMore,
   ExpandLess,
@@ -157,8 +156,7 @@ export default function AttendancePage() {
   const { selectedSite } = useSite();
   const { userProfile } = useAuth();
   const supabase = createClient();
-  const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+  const isMobile = useIsMobile();
 
   const [loading, setLoading] = useState(false);
   const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);

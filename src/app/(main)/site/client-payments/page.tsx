@@ -31,11 +31,10 @@ import {
   FormControl,
   InputLabel,
   Tooltip,
-  useTheme,
-  useMediaQuery,
   Fab,
   Grid,
 } from "@mui/material";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import {
   Add,
   ReceiptLong,
@@ -68,8 +67,7 @@ export default function ClientPaymentTracking() {
 
   const { selectedSite } = useSite();
   const selectedSiteId = selectedSite?.id;
-  const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
+  const isMobile = useIsMobile();
   const [loading, setLoading] = useState(true);
   const [selectedPlan, setSelectedPlan] = useState<ClientPaymentPlan | null>(
     null

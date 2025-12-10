@@ -7,9 +7,9 @@ import {
   Collapse,
   IconButton,
   useTheme,
-  useMediaQuery,
 } from '@mui/material';
 import { ExpandMore, ExpandLess } from '@mui/icons-material';
+import { useIsMobile } from '@/hooks/useIsMobile';
 
 export interface SummaryItem {
   label: string;
@@ -38,7 +38,7 @@ export default function CollapsibleSummary({
   primaryColor = 'primary',
 }: CollapsibleSummaryProps) {
   const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+  const isMobile = useIsMobile();
   const [expanded, setExpanded] = useState(defaultExpanded);
 
   // Load saved state from localStorage

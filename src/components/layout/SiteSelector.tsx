@@ -8,16 +8,14 @@ import {
   Typography,
   Chip,
   SelectChangeEvent,
-  useMediaQuery,
-  useTheme,
 } from '@mui/material'
 import { LocationOn } from '@mui/icons-material'
 import { useSite } from '@/contexts/SiteContext'
+import { useIsMobile } from '@/hooks/useIsMobile'
 
 export default function SiteSelector() {
   const { sites, selectedSite, setSelectedSite, loading } = useSite()
-  const theme = useTheme()
-  const isMobile = useMediaQuery(theme.breakpoints.down('sm'))
+  const isMobile = useIsMobile()
 
   const handleChange = (event: SelectChangeEvent) => {
     const site = sites.find((s) => s.id === event.target.value)

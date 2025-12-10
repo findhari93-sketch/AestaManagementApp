@@ -1,7 +1,5 @@
 "use client";
 
-export const dynamic = "force-dynamic";
-
 import { useMemo, useState, useEffect, useCallback } from "react";
 import {
   Box,
@@ -20,10 +18,9 @@ import {
   Select,
   Grid,
   Alert,
-  useMediaQuery,
-  useTheme,
   Fab,
 } from "@mui/material";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import {
   Add as AddIcon,
   Edit as EditIcon,
@@ -65,8 +62,7 @@ export default function LaborersPage() {
 
   const { userProfile } = useAuth();
   const supabase = useMemo(() => createClient(), []);
-  const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
+  const isMobile = useIsMobile();
 
   const [formData, setFormData] = useState({
     name: "",

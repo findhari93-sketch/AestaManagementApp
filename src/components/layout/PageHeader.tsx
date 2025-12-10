@@ -1,8 +1,9 @@
 'use client'
 
-import { Box, Typography, IconButton, Tooltip, useMediaQuery, useTheme } from '@mui/material'
+import { Box, Typography, IconButton, Tooltip } from '@mui/material'
 import { ArrowBack, Refresh } from '@mui/icons-material'
 import { useRouter } from 'next/navigation'
+import { useIsMobile } from '@/hooks/useIsMobile'
 
 interface PageHeaderProps {
   title: string
@@ -22,8 +23,7 @@ export default function PageHeader({
   actions,
 }: PageHeaderProps) {
   const router = useRouter()
-  const theme = useTheme()
-  const isMobile = useMediaQuery(theme.breakpoints.down('sm'))
+  const isMobile = useIsMobile()
 
   const handleBack = () => {
     router.back()

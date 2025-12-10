@@ -1,7 +1,5 @@
 "use client";
 
-export const dynamic = "force-dynamic";
-
 import React, { useState, useEffect, useMemo } from "react";
 import {
   Box,
@@ -29,10 +27,9 @@ import {
   ToggleButtonGroup,
   ToggleButton,
   Paper,
-  useTheme,
-  useMediaQuery,
   Fab,
 } from "@mui/material";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import {
   Add,
   Delete,
@@ -73,8 +70,7 @@ export default function SiteSubcontractsPage() {
   const { userProfile } = useAuth();
   const { selectedSite } = useSite();
   const supabase = createClient();
-  const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
+  const isMobile = useIsMobile();
 
   const [subcontracts, setSubcontracts] = useState<SubcontractWithDetails[]>(
     []
