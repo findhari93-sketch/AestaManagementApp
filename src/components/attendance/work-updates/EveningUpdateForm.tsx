@@ -5,11 +5,11 @@ import {
   Box,
   TextField,
   Typography,
-  Slider,
   Divider,
   Paper,
   Chip,
-  LinearProgress,
+  ToggleButton,
+  ToggleButtonGroup,
 } from "@mui/material";
 import {
   WbSunny as MorningIcon,
@@ -21,6 +21,7 @@ import PhotoFullscreenDialog from "./PhotoFullscreenDialog";
 import {
   MorningUpdate,
   EveningUpdate,
+  TaskProgress,
   PhotoSlotState,
   createPhotoSlots,
   photoSlotsToPhotos,
@@ -39,13 +40,36 @@ interface EveningUpdateFormProps {
   disabled?: boolean;
 }
 
-const progressMarks = [
+// Progress options for per-task completion
+const PROGRESS_OPTIONS = [
   { value: 0, label: "0%" },
   { value: 25, label: "25%" },
   { value: 50, label: "50%" },
   { value: 75, label: "75%" },
   { value: 100, label: "100%" },
 ];
+
+// Initialize task progress from initial data or create new
+const initializeTaskProgress = (
+  initialData: EveningUpdate | null | undefined,
+  photoCount: number
+): TaskProgress[] => {
+  if (initialData?.taskProgress && initialData.taskProgress.length > 0) {
+    return initialData.taskProgress;
+  }
+  // Create default task progress for each photo slot
+  return Array.from({ length: photoCount }, (_, i) => ({
+    taskId: String(i + 1),
+    completionPercent: 0,
+  }));
+};
+
+// Calculate average completion from task progress
+const calculateAverageCompletion = (taskProgress: TaskProgress[]): number => {
+  if (taskProgress.length === 0) return 0;
+  const total = taskProgress.reduce((sum, task) => sum + task.completionPercent, 0);
+  return Math.round(total / taskProgress.length);
+};
 
 export default function EveningUpdateForm({
   supabase,
@@ -57,8 +81,8 @@ export default function EveningUpdateForm({
   onChange,
   disabled = false,
 }: EveningUpdateFormProps) {
-  const [completionPercent, setCompletionPercent] = useState(
-    initialData?.completionPercent || 0
+  const [taskProgress, setTaskProgress] = useState<TaskProgress[]>(
+    initializeTaskProgress(initialData, photoCount)
   );
   const [summary, setSummary] = useState(initialData?.summary || "");
   const [photoSlots, setPhotoSlots] = useState<PhotoSlotState[]>(
@@ -69,11 +93,14 @@ export default function EveningUpdateForm({
   const [fullscreenOpen, setFullscreenOpen] = useState(false);
   const [fullscreenIndex, setFullscreenIndex] = useState(0);
 
+  // Calculate average completion from task progress
+  const completionPercent = calculateAverageCompletion(taskProgress);
+
   // Use ref to avoid onChange in useEffect dependencies
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
 
-  // Update slots when photo count changes
+  // Update slots and task progress when photo count changes
   useEffect(() => {
     setPhotoSlots((prev) => {
       const newSlots = createPhotoSlots(photoCount);
@@ -84,22 +111,41 @@ export default function EveningUpdateForm({
       });
       return newSlots;
     });
+    // Also update task progress to match photo count
+    setTaskProgress((prev) => {
+      const newProgress: TaskProgress[] = Array.from({ length: photoCount }, (_, i) => {
+        const existing = prev.find((p) => p.taskId === String(i + 1));
+        return existing || { taskId: String(i + 1), completionPercent: 0 };
+      });
+      return newProgress;
+    });
   }, [photoCount]);
 
   // Emit changes to parent
   useEffect(() => {
     const photos = photoSlotsToPhotos(photoSlots);
-    if (completionPercent === 0 && !summary.trim() && photos.length === 0) {
+    const hasProgress = taskProgress.some((t) => t.completionPercent > 0);
+    if (!hasProgress && !summary.trim() && photos.length === 0) {
       onChangeRef.current(null);
     } else {
       onChangeRef.current({
-        completionPercent,
+        completionPercent, // Average for backward compatibility
+        taskProgress, // Per-task progress
         summary: summary.trim(),
         photos,
         timestamp: new Date().toISOString(),
       });
     }
-  }, [completionPercent, summary, photoSlots]);
+  }, [taskProgress, summary, photoSlots, completionPercent]);
+
+  // Handle task progress change
+  const handleTaskProgressChange = (taskId: string, value: number) => {
+    setTaskProgress((prev) =>
+      prev.map((task) =>
+        task.taskId === taskId ? { ...task, completionPercent: value } : task
+      )
+    );
+  };
 
   const handlePhotoCapture = (slotIndex: number, url: string) => {
     setPhotoSlots((prev) =>
@@ -177,35 +223,22 @@ export default function EveningUpdateForm({
         />
       </Divider>
 
-      {/* Completion Percentage Slider */}
-      <Box>
-        <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
+      {/* Overall Progress Summary (calculated from task progress) */}
+      {morningData?.photos && morningData.photos.length > 0 && (
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
           <Typography variant="body2" fontWeight={500}>
-            Work Completed Today
+            Overall Progress:
           </Typography>
           <Chip
             label={`${completionPercent}%`}
             size="small"
             color={getProgressColor(completionPercent)}
           />
+          <Typography variant="caption" color="text.secondary">
+            (avg of {morningData.photos.length} tasks)
+          </Typography>
         </Box>
-        <Slider
-          value={completionPercent}
-          onChange={(_, value) => setCompletionPercent(value as number)}
-          min={0}
-          max={100}
-          step={5}
-          marks={progressMarks}
-          valueLabelDisplay="auto"
-          disabled={disabled}
-          sx={{
-            color: `${getProgressColor(completionPercent)}.main`,
-            "& .MuiSlider-markLabel": {
-              fontSize: "0.7rem",
-            },
-          }}
-        />
-      </Box>
+      )}
 
       {/* Evening Summary */}
       <TextField
@@ -242,125 +275,165 @@ export default function EveningUpdateForm({
           >
             {photoSlots.slice(0, morningData.photos.length).map((slot, index) => {
               const morningPhoto = morningData.photos[index];
+              const taskId = String(index + 1);
+              const taskProgressValue = taskProgress.find((t) => t.taskId === taskId)?.completionPercent || 0;
               return (
                 <Paper
                   key={slot.id}
                   variant="outlined"
                   sx={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 1.5,
-                    p: 1,
+                    p: 1.5,
                     bgcolor: "grey.50",
                   }}
                 >
-                  {/* Morning Photo (Reference) */}
-                  <Box
-                    sx={{
-                      display: "flex",
-                      flexDirection: "column",
-                      alignItems: "center",
-                      gap: 0.5,
-                    }}
-                  >
-                    <Typography variant="caption" color="warning.dark" fontWeight={500}>
-                      Morning
+                  {/* Task Header */}
+                  <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 1 }}>
+                    <Typography variant="subtitle2" fontWeight={500}>
+                      Task {index + 1}: {morningPhoto?.description || "Work Area"}
                     </Typography>
-                    {morningPhoto ? (
-                      <Box
-                        component="img"
-                        src={morningPhoto.url}
-                        alt={`Morning ${index + 1}`}
-                        onClick={() => handleMorningPhotoClick(index)}
-                        sx={{
-                          width: 60,
-                          height: 60,
-                          borderRadius: 1,
-                          objectFit: "cover",
-                          border: "2px solid",
-                          borderColor: "warning.main",
-                          cursor: "pointer",
-                          "&:hover": {
-                            opacity: 0.8,
-                          },
-                        }}
-                      />
-                    ) : (
-                      <Box
-                        sx={{
-                          width: 60,
-                          height: 60,
-                          borderRadius: 1,
-                          bgcolor: "grey.200",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                        }}
-                      >
-                        <Typography variant="caption" color="text.disabled">
-                          -
-                        </Typography>
-                      </Box>
-                    )}
-                    {morningPhoto?.description && (
-                      <Typography
-                        variant="caption"
-                        color="text.secondary"
-                        sx={{
-                          maxWidth: 70,
-                          textAlign: "center",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {morningPhoto.description}
-                      </Typography>
-                    )}
-                  </Box>
-
-                  {/* Arrow indicator */}
-                  <Typography color="text.disabled" sx={{ fontSize: 20 }}>
-                    →
-                  </Typography>
-
-                  {/* Evening Photo (Capture) */}
-                  <Box
-                    sx={{
-                      display: "flex",
-                      flexDirection: "column",
-                      alignItems: "center",
-                      gap: 0.5,
-                    }}
-                  >
-                    <Typography variant="caption" color="info.dark" fontWeight={500}>
-                      Evening
-                    </Typography>
-                    <PhotoSlot
-                      supabase={supabase}
-                      siteId={siteId}
-                      date={date}
-                      period="evening"
-                      slotIndex={index + 1}
-                      photoUrl={slot.photo?.url || null}
-                      description=""
-                      onPhotoCapture={(url) => handlePhotoCapture(index, url)}
-                      onPhotoRemove={() => handlePhotoRemove(index)}
-                      onDescriptionChange={() => {}}
-                      showDescription={false}
-                      disabled={disabled}
-                      compact
+                    <Chip
+                      label={`${taskProgressValue}%`}
+                      size="small"
+                      color={getProgressColor(taskProgressValue)}
+                      sx={{ minWidth: 50 }}
                     />
                   </Box>
 
-                  {/* Task label */}
-                  <Typography
-                    variant="caption"
-                    color="text.secondary"
-                    sx={{ ml: "auto", pr: 1 }}
+                  {/* Photo Comparison Row */}
+                  <Box
+                    sx={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 1.5,
+                      mb: 1.5,
+                    }}
                   >
-                    Task {index + 1}
-                  </Typography>
+                    {/* Morning Photo (Reference) */}
+                    <Box
+                      sx={{
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "center",
+                        gap: 0.5,
+                      }}
+                    >
+                      <Typography variant="caption" color="warning.dark" fontWeight={500}>
+                        Morning
+                      </Typography>
+                      {morningPhoto ? (
+                        <Box
+                          component="img"
+                          src={morningPhoto.url}
+                          alt={`Morning ${index + 1}`}
+                          onClick={() => handleMorningPhotoClick(index)}
+                          sx={{
+                            width: 60,
+                            height: 60,
+                            borderRadius: 1,
+                            objectFit: "cover",
+                            border: "2px solid",
+                            borderColor: "warning.main",
+                            cursor: "pointer",
+                            "&:hover": {
+                              opacity: 0.8,
+                            },
+                          }}
+                        />
+                      ) : (
+                        <Box
+                          sx={{
+                            width: 60,
+                            height: 60,
+                            borderRadius: 1,
+                            bgcolor: "grey.200",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                          }}
+                        >
+                          <Typography variant="caption" color="text.disabled">
+                            -
+                          </Typography>
+                        </Box>
+                      )}
+                    </Box>
+
+                    {/* Arrow indicator */}
+                    <Typography color="text.disabled" sx={{ fontSize: 20 }}>
+                      →
+                    </Typography>
+
+                    {/* Evening Photo (Capture) */}
+                    <Box
+                      sx={{
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "center",
+                        gap: 0.5,
+                      }}
+                    >
+                      <Typography variant="caption" color="info.dark" fontWeight={500}>
+                        Evening
+                      </Typography>
+                      <PhotoSlot
+                        supabase={supabase}
+                        siteId={siteId}
+                        date={date}
+                        period="evening"
+                        slotIndex={index + 1}
+                        photoUrl={slot.photo?.url || null}
+                        description=""
+                        onPhotoCapture={(url) => handlePhotoCapture(index, url)}
+                        onPhotoRemove={() => handlePhotoRemove(index)}
+                        onDescriptionChange={() => {}}
+                        showDescription={false}
+                        disabled={disabled}
+                        compact
+                      />
+                    </Box>
+
+                    {/* Spacer */}
+                    <Box sx={{ flex: 1 }} />
+                  </Box>
+
+                  {/* Per-Task Progress Selector */}
+                  <Box>
+                    <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: "block" }}>
+                      Task Progress:
+                    </Typography>
+                    <ToggleButtonGroup
+                      value={taskProgressValue}
+                      exclusive
+                      onChange={(_, value) => value !== null && handleTaskProgressChange(taskId, value)}
+                      size="small"
+                      disabled={disabled}
+                      sx={{
+                        "& .MuiToggleButton-root": {
+                          px: 1.5,
+                          py: 0.5,
+                          fontSize: "0.75rem",
+                        },
+                      }}
+                    >
+                      {PROGRESS_OPTIONS.map((opt) => (
+                        <ToggleButton
+                          key={opt.value}
+                          value={opt.value}
+                          sx={{
+                            "&.Mui-selected": {
+                              bgcolor: `${getProgressColor(opt.value)}.main`,
+                              color: "white",
+                              "&:hover": {
+                                bgcolor: `${getProgressColor(opt.value)}.dark`,
+                              },
+                            },
+                          }}
+                        >
+                          {opt.label}
+                        </ToggleButton>
+                      ))}
+                    </ToggleButtonGroup>
+                  </Box>
                 </Paper>
               );
             })}

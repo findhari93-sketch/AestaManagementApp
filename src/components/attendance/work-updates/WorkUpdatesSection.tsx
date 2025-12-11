@@ -188,10 +188,16 @@ export default function WorkUpdatesSection({
             />
           )}
 
-          {/* Full Mode - Both forms */}
+          {/* Full Mode - Side by side on laptop, stacked on mobile */}
           {mode === "full" && (
-            <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
-              <Box>
+            <Box
+              sx={{
+                display: "flex",
+                flexDirection: { xs: "column", md: "row" },
+                gap: 3,
+              }}
+            >
+              <Box sx={{ flex: 1 }}>
                 <Typography
                   variant="subtitle2"
                   color="warning.dark"
@@ -210,7 +216,7 @@ export default function WorkUpdatesSection({
                   disabled={disabled}
                 />
               </Box>
-              <Box>
+              <Box sx={{ flex: 1 }}>
                 <Typography
                   variant="subtitle2"
                   color="info.dark"

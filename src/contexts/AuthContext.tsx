@@ -22,8 +22,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [supabase] = useState(() => createClient());
 
-  const fetchUserProfile = async (userId: string) => {
+  const fetchUserProfile = async (userId: string, retryCount = 0) => {
+    const maxRetries = 3;
     try {
+      console.log("[AuthContext] Fetching user profile...", { userId, retryCount });
       const { data, error } = await supabase
         .from("users")
         .select("*")
@@ -31,9 +33,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .single();
 
       if (error) throw error;
+      console.log("[AuthContext] User profile fetched successfully");
       setUserProfile(data);
     } catch (error) {
-      console.error("Error fetching user profile:", error);
+      console.error("[AuthContext] Error fetching user profile:", error);
+
+      // Retry with exponential backoff
+      if (retryCount < maxRetries) {
+        const delay = Math.pow(2, retryCount) * 1000;
+        console.log(`[AuthContext] Retrying in ${delay}ms... (${retryCount + 1}/${maxRetries})`);
+        setTimeout(() => fetchUserProfile(userId, retryCount + 1), delay);
+        return;
+      }
+
       setUserProfile(null);
     }
   };
@@ -47,16 +59,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const initializeAuth = async () => {
       try {
+        console.log("[AuthContext] Initializing auth...");
         const {
           data: { session },
+          error: sessionError,
         } = await supabase.auth.getSession();
+
+        if (sessionError) {
+          console.error("[AuthContext] Session error:", sessionError);
+        }
+
+        console.log("[AuthContext] Session:", session ? "exists" : "null");
         setUser(session?.user ?? null);
 
         if (session?.user) {
           await fetchUserProfile(session.user.id);
         }
       } catch (error) {
-        console.error("Error initializing auth:", error);
+        console.error("[AuthContext] Error initializing auth:", error);
       } finally {
         setLoading(false);
       }

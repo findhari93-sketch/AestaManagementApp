@@ -180,7 +180,7 @@ export default function MarketLaborerDialog({
           pb: 1,
         }}
       >
-        <Typography variant="h6" fontWeight={600}>
+        <Typography variant="h6" component="span" fontWeight={600}>
           Add Market Laborers
         </Typography>
         <IconButton size="small" onClick={onClose}>

@@ -16,6 +16,7 @@ interface SiteContextType {
   loading: boolean;
   refreshSites: () => Promise<void>;
   isInitialized: boolean;
+  error: string | null;
 }
 
 const SiteContext = createContext<SiteContextType | undefined>(undefined);
@@ -70,11 +71,14 @@ export function SiteProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [isInitialized, setIsInitialized] = useState(false);
   const [isHydrated, setIsHydrated] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const { userProfile } = useAuth();
   const [supabase] = useState(() => createClient());
 
   // Use ref to track if we're currently fetching (prevents race conditions)
   const isFetchingRef = useRef(false);
+  const retryCountRef = useRef(0);
+  const maxRetries = 3;
 
   // Wrapper to set site and persist to localStorage
   const setSelectedSite = useCallback((site: Site | null) => {
@@ -82,7 +86,7 @@ export function SiteProvider({ children }: { children: React.ReactNode }) {
     storeSiteId(site?.id || null);
   }, []);
 
-  const fetchSites = useCallback(async () => {
+  const fetchSites = useCallback(async (isRetry = false) => {
     // Prevent concurrent fetches (race condition fix)
     if (isFetchingRef.current) {
       return;
@@ -90,8 +94,18 @@ export function SiteProvider({ children }: { children: React.ReactNode }) {
 
     isFetchingRef.current = true;
     setLoading(true);
+    if (!isRetry) {
+      setError(null);
+      retryCountRef.current = 0;
+    }
 
     try {
+      console.log("[SiteContext] Fetching sites...", {
+        userRole: userProfile?.role,
+        assignedSites: userProfile?.assigned_sites,
+        retryCount: retryCountRef.current
+      });
+
       let query = supabase.from("sites").select("*").order("name");
 
       // Filter by assigned sites if user is not admin
@@ -99,12 +113,19 @@ export function SiteProvider({ children }: { children: React.ReactNode }) {
         query = query.in("id", userProfile.assigned_sites);
       }
 
-      const { data, error } = await query;
+      const { data, error: queryError } = await query;
 
-      if (error) throw error;
+      if (queryError) {
+        console.error("[SiteContext] Query error:", queryError);
+        throw queryError;
+      }
 
       const sitesData: Site[] = data || [];
+      console.log("[SiteContext] Sites fetched:", sitesData.length);
+
       setSites(sitesData);
+      setError(null);
+      retryCountRef.current = 0;
 
       // Cache sites for next load (instant restoration)
       storeSites(sitesData);
@@ -136,8 +157,23 @@ export function SiteProvider({ children }: { children: React.ReactNode }) {
         storeSiteId(firstSite.id);
         return firstSite;
       });
-    } catch (error) {
-      console.error("Error fetching sites:", error);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Failed to fetch sites";
+      console.error("[SiteContext] Error fetching sites:", errorMessage);
+
+      // Retry logic for network errors
+      if (retryCountRef.current < maxRetries) {
+        retryCountRef.current++;
+        console.log(`[SiteContext] Retrying... (${retryCountRef.current}/${maxRetries})`);
+        isFetchingRef.current = false;
+
+        // Exponential backoff: 1s, 2s, 4s
+        const delay = Math.pow(2, retryCountRef.current - 1) * 1000;
+        setTimeout(() => fetchSites(true), delay);
+        return;
+      }
+
+      setError(errorMessage);
     } finally {
       setLoading(false);
       setIsInitialized(true);
@@ -193,6 +229,7 @@ export function SiteProvider({ children }: { children: React.ReactNode }) {
     loading,
     refreshSites,
     isInitialized,
+    error,
   };
 
   return <SiteContext.Provider value={value}>{children}</SiteContext.Provider>;

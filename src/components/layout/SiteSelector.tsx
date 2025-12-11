@@ -8,12 +8,14 @@ import {
   Typography,
   Chip,
   SelectChangeEvent,
+  IconButton,
+  Tooltip,
 } from '@mui/material'
-import { LocationOn } from '@mui/icons-material'
+import { LocationOn, Refresh } from '@mui/icons-material'
 import { useSite } from '@/contexts/SiteContext'
 
 export default function SiteSelector() {
-  const { sites, selectedSite, setSelectedSite, loading } = useSite()
+  const { sites, selectedSite, setSelectedSite, loading, error, refreshSites } = useSite()
 
   const handleChange = (event: SelectChangeEvent) => {
     const site = sites.find((s) => s.id === event.target.value)
@@ -33,6 +35,22 @@ export default function SiteSelector() {
     )
   }
 
+  if (error) {
+    return (
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+        <LocationOn sx={{ color: 'error.main' }} />
+        <Typography variant="body2" color="error">
+          Failed to load sites
+        </Typography>
+        <Tooltip title="Retry">
+          <IconButton size="small" onClick={() => refreshSites()} color="primary">
+            <Refresh fontSize="small" />
+          </IconButton>
+        </Tooltip>
+      </Box>
+    )
+  }
+
   if (sites.length === 0) {
     return (
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -40,6 +58,11 @@ export default function SiteSelector() {
         <Typography variant="body2" color="text.secondary">
           No sites available
         </Typography>
+        <Tooltip title="Refresh">
+          <IconButton size="small" onClick={() => refreshSites()} color="primary">
+            <Refresh fontSize="small" />
+          </IconButton>
+        </Tooltip>
       </Box>
     )
   }

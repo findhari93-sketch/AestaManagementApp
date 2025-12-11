@@ -16,8 +16,15 @@ export interface MorningUpdate {
   timestamp: string;
 }
 
-export interface EveningUpdate {
+// Per-task progress tracking
+export interface TaskProgress {
+  taskId: string; // "1", "2", etc. (matches photo id)
   completionPercent: number; // 0-100
+}
+
+export interface EveningUpdate {
+  completionPercent: number; // 0-100 (average of task progress for backward compatibility)
+  taskProgress?: TaskProgress[]; // Per-task progress (optional for backward compatibility)
   summary: string; // What happened today
   photos: WorkPhoto[]; // 0-5 photos (ideally matching morning count)
   timestamp: string;
