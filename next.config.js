@@ -106,15 +106,27 @@ const withPWA = require('next-pwa')({
         },
       },
     },
+    // Navigation requests (HTML pages) - always fetch from network
+    // This prevents stale page caching issues with auth/data
     {
-      urlPattern: ({ url }) => {
+      urlPattern: ({ request, url }) => {
         const isSameOrigin = self.origin === url.origin;
-        return isSameOrigin && !url.pathname.startsWith('/api/');
+        return isSameOrigin && request.mode === 'navigate';
       },
-      handler: 'NetworkFirst',
+      handler: 'NetworkOnly',
+      options: {
+        cacheName: 'pages',
+      },
+    },
+    // Other same-origin requests (non-navigation, non-API)
+    {
+      urlPattern: ({ request, url }) => {
+        const isSameOrigin = self.origin === url.origin;
+        return isSameOrigin && request.mode !== 'navigate' && !url.pathname.startsWith('/api/');
+      },
+      handler: 'StaleWhileRevalidate',
       options: {
         cacheName: 'others',
-        networkTimeoutSeconds: 10,
         expiration: {
           maxEntries: 32,
           maxAgeSeconds: 24 * 60 * 60, // 1 day
