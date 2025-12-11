@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation'
 interface PageHeaderProps {
   title: string
   subtitle?: string
+  titleChip?: React.ReactNode  // Chip/badge displayed next to the title
   onRefresh?: () => void
   isLoading?: boolean
   showBack?: boolean
@@ -16,6 +17,7 @@ interface PageHeaderProps {
 export default function PageHeader({
   title,
   subtitle,
+  titleChip,
   onRefresh,
   isLoading = false,
   showBack = true,
@@ -31,11 +33,12 @@ export default function PageHeader({
     <Box
       sx={{
         display: 'flex',
-        flexDirection: { xs: 'column', sm: 'row' },
+        flexDirection: 'row',
         justifyContent: 'space-between',
-        alignItems: { xs: 'stretch', sm: 'flex-start' },
-        gap: { xs: 1.5, sm: 0 },
-        mb: { xs: 2, sm: 3 },
+        alignItems: 'center',
+        gap: { xs: 0.5, sm: 1 },
+        mb: { xs: 1, sm: 2 },
+        flexWrap: 'nowrap',
       }}
     >
       <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 0.5, sm: 1 } }}>
@@ -56,13 +59,16 @@ export default function PageHeader({
           </Tooltip>
         )}
         <Box>
-          <Typography
-            variant="h6"
-            fontWeight={600}
-            sx={{ fontSize: { xs: '1rem', sm: '1.25rem', md: '1.5rem' } }}
-          >
-            {title}
-          </Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Typography
+              variant="h6"
+              fontWeight={600}
+              sx={{ fontSize: { xs: '1rem', sm: '1.25rem', md: '1.5rem' } }}
+            >
+              {title}
+            </Typography>
+            {titleChip}
+          </Box>
           {subtitle && (
             <Typography
               variant="body2"

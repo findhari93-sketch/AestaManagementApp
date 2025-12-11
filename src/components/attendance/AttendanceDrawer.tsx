@@ -1454,6 +1454,10 @@ export default function AttendanceDrawer({
       disableScrollLock={false}
       hideBackdrop={false}
       ModalProps={{ keepMounted: false }}
+      sx={{
+        // Ensure drawer appears above fullscreen mode
+        zIndex: (theme) => theme.zIndex.modal + 100,
+      }}
       PaperProps={{
         sx: {
           width: { xs: "100%", sm: 700, md: 900 },
