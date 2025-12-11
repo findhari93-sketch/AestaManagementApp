@@ -355,17 +355,22 @@ export default function AttendanceDrawer({
     }
   }, [initialDate]);
 
-  // Fetch data on open
+  // Fetch data on open and load existing attendance if date provided
   useEffect(() => {
     if (open && siteId) {
-      fetchData();
-    }
-  }, [open, siteId]);
-
-  // Load existing attendance when drawer opens with a specific date
-  useEffect(() => {
-    if (open && siteId && initialDate) {
-      loadExistingAttendanceForDate(initialDate);
+      const loadAll = async () => {
+        setLoading(true);
+        try {
+          await fetchData();
+          // Only load existing attendance after fetchData completes (needs teaShops)
+          if (initialDate) {
+            await loadExistingAttendanceForDate(initialDate);
+          }
+        } finally {
+          setLoading(false);
+        }
+      };
+      loadAll();
     }
   }, [open, siteId, initialDate]);
 
@@ -408,7 +413,6 @@ export default function AttendanceDrawer({
   };
 
   const fetchData = async () => {
-    setLoading(true);
     try {
       // Fetch laborers with category info
       const { data: laborersData, error: laborersError } = await supabase
@@ -496,14 +500,12 @@ export default function AttendanceDrawer({
     } catch (err: any) {
       console.error("Error fetching data:", err);
       setError("Failed to load data: " + err.message);
-    } finally {
-      setLoading(false);
+      throw err; // Re-throw so the wrapper knows about the error
     }
   };
 
   const loadExistingAttendanceForDate = async (dateToLoad: string) => {
     try {
-      setLoading(true);
 
       // Load existing daily attendance for this date (including audit fields and two-phase status)
       const { data: attendanceData, error: attendanceError } = await supabase
@@ -647,8 +649,7 @@ export default function AttendanceDrawer({
     } catch (err: any) {
       console.error("Error loading existing attendance:", err);
       setError("Failed to load existing attendance");
-    } finally {
-      setLoading(false);
+      throw err; // Re-throw so the wrapper knows about the error
     }
   };
 
