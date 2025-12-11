@@ -6,12 +6,18 @@ import {
   CircularProgress,
   Typography,
   IconButton,
+  Menu,
+  MenuItem,
+  ListItemIcon,
+  ListItemText,
 } from "@mui/material";
 import {
   PhotoCamera as PhotoCameraIcon,
   Close as CloseIcon,
   Replay as RetakeIcon,
   Error as ErrorIcon,
+  Collections as GalleryIcon,
+  CameraAlt as CameraIcon,
 } from "@mui/icons-material";
 import { compressImage, getWorkUpdatePhotoPath, isMobileCameraPhoto } from "./imageUtils";
 import { SupabaseClient } from "@supabase/supabase-js";
@@ -51,10 +57,32 @@ export default function PhotoCaptureButton({
   compact = false,
   label,
 }: PhotoCaptureButtonProps) {
-  const inputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const galleryInputRef = useRef<HTMLInputElement>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [menuAnchor, setMenuAnchor] = useState<null | HTMLElement>(null);
+
+  const handleMenuOpen = (event: React.MouseEvent<HTMLElement>) => {
+    if (!disabled && !isUploading) {
+      setMenuAnchor(event.currentTarget);
+    }
+  };
+
+  const handleMenuClose = () => {
+    setMenuAnchor(null);
+  };
+
+  const handleCameraClick = () => {
+    handleMenuClose();
+    cameraInputRef.current?.click();
+  };
+
+  const handleGalleryClick = () => {
+    handleMenuClose();
+    galleryInputRef.current?.click();
+  };
 
   // Upload with retry logic
   const uploadWithRetry = async (
@@ -102,9 +130,12 @@ export default function PhotoCaptureButton({
     const isMobile = isMobileCameraPhoto(file);
     console.log(`[PhotoCapture] Starting upload for file: ${file.name}, size: ${(file.size / 1024 / 1024).toFixed(2)}MB, mobile: ${isMobile}`);
 
-    // Reset input so same file can be selected again
-    if (inputRef.current) {
-      inputRef.current.value = "";
+    // Reset inputs so same file can be selected again
+    if (cameraInputRef.current) {
+      cameraInputRef.current.value = "";
+    }
+    if (galleryInputRef.current) {
+      galleryInputRef.current.value = "";
     }
 
     setIsUploading(true);
@@ -181,16 +212,51 @@ export default function PhotoCaptureButton({
     onPhotoRemove();
   };
 
-  // Hidden file input for camera capture
-  const fileInput = (
-    <input
-      ref={inputRef}
-      type="file"
-      accept="image/*"
-      capture="environment"
-      onChange={handleCapture}
-      style={{ display: "none" }}
-    />
+  // Hidden file inputs - one for camera, one for gallery
+  const fileInputs = (
+    <>
+      {/* Camera input - forces camera on mobile */}
+      <input
+        ref={cameraInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        onChange={handleCapture}
+        style={{ display: "none" }}
+      />
+      {/* Gallery input - opens file picker/gallery */}
+      <input
+        ref={galleryInputRef}
+        type="file"
+        accept="image/*"
+        onChange={handleCapture}
+        style={{ display: "none" }}
+      />
+    </>
+  );
+
+  // Menu for camera/gallery selection
+  const sourceMenu = (
+    <Menu
+      anchorEl={menuAnchor}
+      open={Boolean(menuAnchor)}
+      onClose={handleMenuClose}
+      anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+      transformOrigin={{ vertical: "top", horizontal: "center" }}
+    >
+      <MenuItem onClick={handleCameraClick}>
+        <ListItemIcon>
+          <CameraIcon fontSize="small" />
+        </ListItemIcon>
+        <ListItemText>Take Photo</ListItemText>
+      </MenuItem>
+      <MenuItem onClick={handleGalleryClick}>
+        <ListItemIcon>
+          <GalleryIcon fontSize="small" />
+        </ListItemIcon>
+        <ListItemText>Choose from Gallery</ListItemText>
+      </MenuItem>
+    </Menu>
   );
 
   // Photo captured - show thumbnail with remove/retake
@@ -207,7 +273,8 @@ export default function PhotoCaptureButton({
           borderColor: "success.main",
         }}
       >
-        {fileInput}
+        {fileInputs}
+        {sourceMenu}
         <Box
           component="img"
           src={photoUrl}
@@ -236,10 +303,10 @@ export default function PhotoCaptureButton({
         >
           <CloseIcon sx={{ fontSize: 14 }} />
         </IconButton>
-        {/* Retake button */}
+        {/* Retake button - opens menu */}
         <IconButton
           size="small"
-          onClick={() => inputRef.current?.click()}
+          onClick={handleMenuOpen}
           disabled={disabled || isUploading}
           sx={{
             position: "absolute",
@@ -279,9 +346,10 @@ export default function PhotoCaptureButton({
             bgcolor: disabled ? "grey.50" : "primary.50",
           },
         }}
-        onClick={() => !disabled && !isUploading && inputRef.current?.click()}
+        onClick={handleMenuOpen}
       >
-        {fileInput}
+        {fileInputs}
+        {sourceMenu}
         {isUploading ? (
           <CircularProgress size={20} />
         ) : error ? (
@@ -324,9 +392,10 @@ export default function PhotoCaptureButton({
           bgcolor: disabled ? "grey.50" : "primary.50",
         },
       }}
-      onClick={() => !disabled && !isUploading && inputRef.current?.click()}
+      onClick={handleMenuOpen}
     >
-      {fileInput}
+      {fileInputs}
+      {sourceMenu}
       {isUploading ? (
         <Box sx={{ textAlign: "center" }}>
           <CircularProgress size={24} />
@@ -343,7 +412,7 @@ export default function PhotoCaptureButton({
             display="block"
             sx={{ fontSize: 9, lineHeight: 1.1 }}
           >
-            Failed
+            {error.length > 20 ? "Failed" : error}
           </Typography>
         </Box>
       ) : (

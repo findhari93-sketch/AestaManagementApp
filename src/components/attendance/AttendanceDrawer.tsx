@@ -51,6 +51,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import dayjs from "dayjs";
 import LaborerSelectionDialog from "./LaborerSelectionDialog";
+import MarketLaborerDialog from "./MarketLaborerDialog";
 import TeaShopEntryDialog from "../tea-shop/TeaShopEntryDialog";
 import AttendanceSaveConfirmDialog from "./AttendanceSaveConfirmDialog";
 import { WorkUpdatesSection } from "./work-updates";
@@ -298,6 +299,8 @@ export default function AttendanceDrawer({
   const [sections, setSections] = useState<{ id: string; name: string }[]>([]);
   const [laborRoles, setLaborRoles] = useState<LaborRole[]>([]);
   const [laborerDialogOpen, setLaborerDialogOpen] = useState(false);
+  const [marketLaborerDialogOpen, setMarketLaborerDialogOpen] = useState(false);
+  const [showMarketPrompt, setShowMarketPrompt] = useState(false);
 
   // UI state
   const [loading, setLoading] = useState(false);
@@ -305,7 +308,7 @@ export default function AttendanceDrawer({
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [expandedSection, setExpandedSection] = useState<string | false>(
-    "laborers"
+    "work"
   );
 
   // New Phase 2 state: Per-laborer expanded time fields
@@ -384,6 +387,7 @@ export default function AttendanceDrawer({
     setWorkDescription("");
     setWorkStatus("");
     setComments("");
+    setWorkUpdates(null); // Reset work updates to prevent data persistence
     setError(null);
     setSuccess(null);
     // Reset tea shop state
@@ -1455,8 +1459,7 @@ export default function AttendanceDrawer({
       hideBackdrop={false}
       ModalProps={{ keepMounted: false }}
       sx={{
-        // Ensure drawer appears above fullscreen mode
-        zIndex: (theme) => theme.zIndex.modal + 100,
+        // Use default z-index to allow dialogs to appear on top
       }}
       PaperProps={{
         sx: {
@@ -1901,59 +1904,79 @@ export default function AttendanceDrawer({
                   </Box>
                 )}
 
-                {/* Action Buttons Row */}
-                <Box
-                  sx={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 1,
-                    mb: 2,
-                    flexWrap: "wrap",
-                  }}
-                >
-                  {/* Custom times checkbox - Hidden in morning mode */}
-                  {mode !== "morning" && (
-                    <FormControlLabel
-                      control={
-                        <Checkbox
-                          checked={showGlobalCustomTimes}
-                          onChange={(e) =>
-                            setShowGlobalCustomTimes(e.target.checked)
-                          }
-                          size="small"
-                        />
-                      }
-                      label={
-                        <Typography variant="body2">Custom times</Typography>
-                      }
-                    />
-                  )}
-                  <Box sx={{ flex: 1 }} />
-                  {/* Tea Button - Hidden in morning mode */}
-                  {mode !== "morning" && teaShops.length > 0 && (
+                {/* Initial State - Show full-width buttons when no laborers */}
+                {selectedLaborers.size === 0 && marketLaborers.length === 0 ? (
+                  <Box sx={{ display: "flex", flexDirection: "column", gap: 2, mb: 2 }}>
                     <Button
-                      variant={existingTeaEntry ? "contained" : "outlined"}
-                      size="small"
-                      color="warning"
-                      startIcon={<TeaIcon />}
-                      onClick={() => setTeaShopDialogOpen(true)}
-                      disabled={!selectedTeaShop}
+                      variant="contained"
+                      fullWidth
+                      size="large"
+                      startIcon={<PeopleIcon />}
+                      onClick={() => setLaborerDialogOpen(true)}
+                      disabled={mode === "evening"}
+                      sx={{ py: 1.5 }}
                     >
-                      {existingTeaEntry
-                        ? `Tea ₹${teaShopTotal.toLocaleString()}`
-                        : "Tea"}
+                      Add Laborers
                     </Button>
-                  )}
-                  <Button
-                    variant="outlined"
-                    size="small"
-                    startIcon={<AddIcon />}
-                    onClick={() => setLaborerDialogOpen(true)}
-                    disabled={mode === "evening"}
+                    <Button
+                      variant="outlined"
+                      fullWidth
+                      size="large"
+                      startIcon={<StoreIcon />}
+                      onClick={() => setMarketLaborerDialogOpen(true)}
+                      disabled={mode === "evening"}
+                      color="warning"
+                      sx={{ py: 1.5 }}
+                    >
+                      Add Market Laborers
+                    </Button>
+                  </Box>
+                ) : (
+                  /* Action Buttons Row - Show when laborers exist */
+                  <Box
+                    sx={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 1,
+                      mb: 2,
+                      flexWrap: "wrap",
+                    }}
                   >
-                    {mode === "morning" ? "Select Laborers" : "Select"}
-                  </Button>
-                </Box>
+                    {/* Custom times checkbox - Hidden in morning mode */}
+                    {mode !== "morning" && (
+                      <FormControlLabel
+                        control={
+                          <Checkbox
+                            checked={showGlobalCustomTimes}
+                            onChange={(e) =>
+                              setShowGlobalCustomTimes(e.target.checked)
+                            }
+                            size="small"
+                          />
+                        }
+                        label={
+                          <Typography variant="body2">Custom times</Typography>
+                        }
+                      />
+                    )}
+                    <Box sx={{ flex: 1 }} />
+                    {/* Tea Button - Hidden in morning mode */}
+                    {mode !== "morning" && teaShops.length > 0 && (
+                      <Button
+                        variant={existingTeaEntry ? "contained" : "outlined"}
+                        size="small"
+                        color="warning"
+                        startIcon={<TeaIcon />}
+                        onClick={() => setTeaShopDialogOpen(true)}
+                        disabled={!selectedTeaShop}
+                      >
+                        {existingTeaEntry
+                          ? `Tea ₹${teaShopTotal.toLocaleString()}`
+                          : "Tea"}
+                      </Button>
+                    )}
+                  </Box>
+                )}
 
                 {/* Custom Times - Collapsible - Hidden in morning mode */}
                 <Collapse in={showGlobalCustomTimes && mode !== "morning"}>
@@ -2023,20 +2046,32 @@ export default function AttendanceDrawer({
                   </Box>
                 </Collapse>
 
-                <Divider sx={{ mb: 2 }} />
+                {/* Only show sections when laborers exist */}
+                {(selectedLaborers.size > 0 || marketLaborers.length > 0) && (
+                  <Divider sx={{ mb: 2 }} />
+                )}
 
-                {/* Named Laborers Subsection */}
-                <Box sx={{ mb: 2 }}>
-                  <Typography
-                    variant="body2"
-                    color="text.secondary"
-                    fontWeight={600}
-                    sx={{ mb: 1 }}
-                  >
-                    Named Laborers ({selectedLaborers.size})
-                  </Typography>
+                {/* Named Laborers Subsection - Only show when laborers selected */}
+                {selectedLaborers.size > 0 && (
+                  <Box sx={{ mb: 2 }}>
+                    <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 1 }}>
+                      <Typography
+                        variant="body2"
+                        color="text.secondary"
+                        fontWeight={600}
+                      >
+                        Named Laborers ({selectedLaborers.size})
+                      </Typography>
+                      <Button
+                        size="small"
+                        startIcon={<AddIcon />}
+                        onClick={() => setLaborerDialogOpen(true)}
+                        disabled={mode === "evening"}
+                      >
+                        Add More
+                      </Button>
+                    </Box>
 
-                  {selectedLaborers.size > 0 ? (
                     <Box
                       sx={{ display: "flex", flexDirection: "column", gap: 2 }}
                     >
@@ -2395,13 +2430,8 @@ export default function AttendanceDrawer({
                         }
                       )}
                     </Box>
-                  ) : (
-                    <Alert severity="info">
-                      Click &quot;Select Laborers&quot; to add workers for this
-                      day
-                    </Alert>
-                  )}
-                </Box>
+                  </Box>
+                )}
 
                 {/* Laborer Selection Dialog */}
                 <LaborerSelectionDialog
@@ -2437,38 +2467,83 @@ export default function AttendanceDrawer({
                     });
                     setSelectedLaborers(merged);
                     setLaborerDialogOpen(false);
+                    // Show market laborer prompt if laborers were selected and no market laborers yet
+                    if (selected.size > 0 && marketLaborers.length === 0) {
+                      setShowMarketPrompt(true);
+                    }
                   }}
                 />
 
-                <Divider sx={{ my: 2 }} />
-
-                {/* Market Laborers Subsection */}
-                <Box
-                  sx={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    mb: 1,
-                  }}
-                >
-                  <Typography
-                    variant="body2"
-                    color="text.secondary"
-                    fontWeight={600}
+                {/* Market Laborers Prompt - Show after company laborers selected */}
+                {showMarketPrompt && (
+                  <Box
+                    sx={{
+                      bgcolor: "info.50",
+                      border: "1px solid",
+                      borderColor: "info.200",
+                      borderRadius: 1,
+                      p: 2,
+                      mb: 2,
+                      textAlign: "center",
+                    }}
                   >
-                    Market Laborers (
-                    {marketLaborers.reduce((acc, m) => acc + m.count, 0)})
-                  </Typography>
-                  <Button
-                    size="small"
-                    startIcon={<AddIcon />}
-                    onClick={handleAddMarketLaborer}
-                  >
-                    Add Group
-                  </Button>
-                </Box>
+                    <Typography variant="body2" fontWeight={500} sx={{ mb: 1.5 }}>
+                      Did market laborers work today?
+                    </Typography>
+                    <Box sx={{ display: "flex", gap: 2, justifyContent: "center" }}>
+                      <Button
+                        variant="contained"
+                        size="small"
+                        color="primary"
+                        onClick={() => {
+                          setMarketLaborerDialogOpen(true);
+                          setShowMarketPrompt(false);
+                        }}
+                      >
+                        Yes, Add Market Laborers
+                      </Button>
+                      <Button
+                        variant="outlined"
+                        size="small"
+                        onClick={() => setShowMarketPrompt(false)}
+                      >
+                        No
+                      </Button>
+                    </Box>
+                  </Box>
+                )}
 
-                {marketLaborers.map((entry) => {
+                {/* Market Laborers Subsection - Only show when market laborers exist */}
+                {marketLaborers.length > 0 && (
+                  <>
+                    <Divider sx={{ my: 2 }} />
+                    <Box
+                      sx={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        mb: 1,
+                      }}
+                    >
+                      <Typography
+                        variant="body2"
+                        color="text.secondary"
+                        fontWeight={600}
+                      >
+                        Market Laborers (
+                        {marketLaborers.reduce((acc, m) => acc + m.count, 0)})
+                      </Typography>
+                      <Button
+                        size="small"
+                        startIcon={<AddIcon />}
+                        onClick={() => setMarketLaborerDialogOpen(true)}
+                        disabled={mode === "evening"}
+                      >
+                        Add More
+                      </Button>
+                    </Box>
+
+                    {marketLaborers.map((entry) => {
                   const isHalfDay = entry.dayUnits === 0.5;
                   const preset = getPresetByValue(entry.dayUnits);
                   const alignmentStatus = getAlignmentStatus(
@@ -2788,28 +2863,19 @@ export default function AttendanceDrawer({
                   );
                 })}
 
-                {/* Bottom Add Group button - shows when at least 1 market laborer exists */}
-                {marketLaborers.length > 0 && (
-                  <Button
-                    size="small"
-                    startIcon={<AddIcon />}
-                    onClick={handleAddMarketLaborer}
-                    sx={{ mt: 1 }}
-                    fullWidth
-                    variant="outlined"
-                  >
-                    Add Another Group
-                  </Button>
-                )}
-
-                {marketLaborers.length === 0 && (
-                  <Typography
-                    variant="body2"
-                    color="text.secondary"
-                    sx={{ textAlign: "center", py: 2 }}
-                  >
-                    No market laborers added
-                  </Typography>
+                    {/* Bottom Add Group button */}
+                    <Button
+                      size="small"
+                      startIcon={<AddIcon />}
+                      onClick={() => setMarketLaborerDialogOpen(true)}
+                      sx={{ mt: 1 }}
+                      fullWidth
+                      variant="outlined"
+                      disabled={mode === "evening"}
+                    >
+                      Add Another Group
+                    </Button>
+                  </>
                 )}
               </Box>
               {/* End Laborers Section wrapper */}
@@ -2925,6 +2991,45 @@ export default function AttendanceDrawer({
           )}
         />
       )}
+
+      {/* Market Laborer Dialog */}
+      <MarketLaborerDialog
+        open={marketLaborerDialogOpen}
+        onClose={() => setMarketLaborerDialogOpen(false)}
+        laborRoles={laborRoles}
+        onConfirm={(groups) => {
+          const timeCalc = calculateTimeHours(
+            defaultInTime,
+            defaultOutTime,
+            defaultLunchOut,
+            defaultLunchIn
+          );
+
+          // Add groups as market laborers
+          const newMarketLaborers: MarketLaborerEntry[] = groups.map((group) => ({
+            id: `new-${Date.now()}-${group.id}`,
+            roleId: group.roleId,
+            roleName: group.roleName,
+            count: group.count,
+            workDays: group.dayUnits, // Use dayUnits as workDays
+            ratePerPerson: group.rate,
+            inTime: defaultInTime,
+            lunchOut: defaultLunchOut,
+            lunchIn: defaultLunchIn,
+            outTime: defaultOutTime,
+            ...timeCalc,
+            dayUnits: group.dayUnits,
+          }));
+
+          setMarketLaborers((prev) => [...prev, ...newMarketLaborers]);
+        }}
+        defaultTimes={{
+          inTime: defaultInTime,
+          outTime: defaultOutTime,
+          lunchOut: defaultLunchOut,
+          lunchIn: defaultLunchIn,
+        }}
+      />
 
     </Drawer>
 

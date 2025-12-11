@@ -4,6 +4,7 @@ import React, { useState, useRef, useEffect } from "react";
 import {
   Box,
   Button,
+  Chip,
   IconButton,
   Popover,
   Typography,
@@ -18,6 +19,7 @@ import {
   ChevronRight as ChevronRightIcon,
   KeyboardArrowDown as ArrowDownIcon,
 } from "@mui/icons-material";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import { DateRange, Range, RangeKeyDict } from "react-date-range";
 import {
   startOfDay,
@@ -181,6 +183,7 @@ export default function DateRangePicker({
   minDate,
   maxDate = new Date(),
 }: DateRangePickerProps) {
+  const isMobile = useIsMobile();
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
   const [tempRange, setTempRange] = useState<Range[]>([
     {
@@ -239,6 +242,12 @@ export default function DateRangePicker({
       },
     ]);
     setSelectedPreset(preset.key);
+
+    // Auto-apply on mobile for quick preset selection
+    if (isMobile) {
+      onChange(range.start, range.end);
+      handleClose();
+    }
   };
 
   const handleRangeChange = (ranges: RangeKeyDict) => {
@@ -360,9 +369,9 @@ export default function DateRangePicker({
         PaperProps={{
           sx: {
             mt: 1,
-            maxWidth: { xs: "95vw", sm: "auto" },
-            maxHeight: { xs: "80vh", sm: "auto" },
-            overflow: "auto",
+            maxWidth: { xs: "100vw", sm: "auto" },
+            maxHeight: { xs: "85vh", sm: "auto" },
+            overflow: "hidden",
           },
         }}
       >
@@ -370,17 +379,50 @@ export default function DateRangePicker({
           sx={{
             display: "flex",
             flexDirection: { xs: "column", sm: "row" },
-            minWidth: { xs: 300, sm: 600 },
+            minWidth: { xs: "auto", sm: 600 },
+            width: { xs: "100vw", sm: "auto" },
           }}
         >
-          {/* Presets list */}
+          {/* Mobile: Horizontal scrollable preset chips */}
           <Box
             sx={{
-              width: { xs: "100%", sm: 180 },
-              borderRight: { xs: 0, sm: 1 },
-              borderBottom: { xs: 1, sm: 0 },
+              display: { xs: "flex", sm: "none" },
+              overflowX: "auto",
+              gap: 0.5,
+              p: 1,
+              pb: 0.5,
+              borderBottom: 1,
               borderColor: "divider",
-              maxHeight: { xs: 200, sm: 400 },
+              WebkitOverflowScrolling: "touch",
+              "&::-webkit-scrollbar": { display: "none" },
+              scrollbarWidth: "none",
+            }}
+          >
+            {presets.slice(0, 8).map((preset) => (
+              <Chip
+                key={preset.key}
+                label={preset.label.replace(" (Sun - Today)", "").replace(" (Sun - Sat)", "")}
+                size="small"
+                variant={selectedPreset === preset.key ? "filled" : "outlined"}
+                color={selectedPreset === preset.key ? "primary" : "default"}
+                onClick={() => handlePresetClick(preset)}
+                sx={{
+                  flexShrink: 0,
+                  fontSize: "0.7rem",
+                  height: 26,
+                }}
+              />
+            ))}
+          </Box>
+
+          {/* Desktop: Vertical presets list */}
+          <Box
+            sx={{
+              display: { xs: "none", sm: "block" },
+              width: 180,
+              borderRight: 1,
+              borderColor: "divider",
+              maxHeight: 400,
               overflow: "auto",
             }}
           >
@@ -414,7 +456,7 @@ export default function DateRangePicker({
           </Box>
 
           {/* Calendar */}
-          <Box sx={{ p: 1 }}>
+          <Box sx={{ p: { xs: 0.5, sm: 1 }, overflow: "auto" }}>
             <DateRange
               ranges={tempRange}
               onChange={handleRangeChange}
@@ -423,28 +465,56 @@ export default function DateRangePicker({
               maxDate={maxDate}
               minDate={minDate}
               rangeColors={["#1976d2"]}
-              showDateDisplay={true}
-              editableDateInputs={true}
+              showDateDisplay={!isMobile}
+              editableDateInputs={!isMobile}
             />
           </Box>
         </Box>
 
-        {/* Actions */}
-        <Divider />
+        {/* Actions - Hidden on mobile since presets auto-apply */}
+        <Box sx={{ display: { xs: "none", sm: "block" } }}>
+          <Divider />
+          <Box
+            sx={{
+              display: "flex",
+              justifyContent: "flex-end",
+              gap: 1,
+              p: 1.5,
+            }}
+          >
+            <Button size="small" onClick={handleClose}>
+              Cancel
+            </Button>
+            <Button size="small" variant="contained" onClick={handleApply}>
+              Apply
+            </Button>
+          </Box>
+        </Box>
+
+        {/* Mobile: Compact actions for custom calendar selection */}
         <Box
           sx={{
-            display: "flex",
-            justifyContent: "flex-end",
+            display: { xs: "flex", sm: "none" },
+            justifyContent: "space-between",
+            alignItems: "center",
             gap: 1,
-            p: 1.5,
+            p: 1,
+            pt: 0,
+            borderTop: 1,
+            borderColor: "divider",
           }}
         >
-          <Button size="small" onClick={handleClose}>
-            Cancel
-          </Button>
-          <Button size="small" variant="contained" onClick={handleApply}>
-            Apply
-          </Button>
+          <Typography variant="caption" color="text.secondary">
+            Tap preset to quick-apply
+          </Typography>
+          <Box sx={{ display: "flex", gap: 0.5 }}>
+            <Button size="small" onClick={handleClose} sx={{ minWidth: 60, py: 0.25 }}>
+              Close
+            </Button>
+            <Button size="small" variant="contained" onClick={handleApply} sx={{ minWidth: 60, py: 0.25 }}>
+              Apply
+            </Button>
+          </Box>
         </Box>
       </Popover>
     </Box>

@@ -353,7 +353,7 @@ export default function MainLayout({
         sx={{
           width: { md: `calc(100% - ${currentDrawerWidth}px)` },
           ml: { md: `${currentDrawerWidth}px` },
-          bgcolor: "white",
+          bgcolor: "background.paper",
           color: "text.primary",
           transition: theme.transitions.create(["width", "margin"], {
             easing: theme.transitions.easing.sharp,

@@ -13,10 +13,11 @@ export default function QueryProvider({
       new QueryClient({
         defaultOptions: {
           queries: {
-            staleTime: 5 * 60 * 1000, // 5 minutes - data considered fresh
+            staleTime: 1 * 60 * 1000, // 1 minute - data considered fresh (reduced for better sync)
             gcTime: 30 * 60 * 1000, // 30 minutes - cache garbage collection
-            retry: 2, // Retry failed requests twice
-            refetchOnWindowFocus: false, // Don't refetch when tab regains focus
+            retry: 3, // Retry failed requests 3 times for better reliability
+            retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000), // Exponential backoff
+            refetchOnWindowFocus: true, // Refetch when tab regains focus (fixes stale data)
             refetchOnReconnect: true, // Refetch when network reconnects
           },
           mutations: {

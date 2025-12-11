@@ -1350,250 +1350,109 @@ export default function AttendancePage() {
           </Box>
           {/* Expanded Content */}
           <Collapse in={summaryExpanded}>
-            <Box
-              sx={{
-                display: "grid",
-                gridTemplateColumns: "repeat(3, 1fr)",
-                gap: 0.75,
-                pt: 1,
-                borderTop: "1px solid",
-                borderColor: "divider",
-              }}
-            >
-              <Box>
-                <Typography
-                  variant="caption"
-                  color="text.secondary"
-                  sx={{ fontSize: "0.6rem" }}
-                >
-                  Salary
-                </Typography>
-                <Typography
-                  sx={{
-                    fontSize: "0.8rem",
-                    fontWeight: 600,
-                    color: "success.main",
-                  }}
-                >
-                  ₹{periodTotals.totalSalary.toLocaleString()}
-                </Typography>
+            <Box sx={{ pt: 1, borderTop: "1px solid", borderColor: "divider" }}>
+              {/* Row 1: Salary, Tea Shop */}
+              <Box sx={{ display: "flex", alignItems: "stretch", mb: 1 }}>
+                <Box sx={{ flex: 1, textAlign: "center" }}>
+                  <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.6rem" }}>
+                    Salary
+                  </Typography>
+                  <Typography sx={{ fontSize: "0.8rem", fontWeight: 600, color: "success.main" }}>
+                    ₹{periodTotals.totalSalary.toLocaleString()}
+                  </Typography>
+                </Box>
+                <Divider orientation="vertical" flexItem sx={{ mx: 1 }} />
+                <Box sx={{ flex: 1, textAlign: "center" }}>
+                  <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.6rem" }}>
+                    Tea Shop
+                  </Typography>
+                  <Typography sx={{ fontSize: "0.8rem", fontWeight: 600, color: "secondary.main" }}>
+                    ₹{periodTotals.totalTeaShop.toLocaleString()}
+                  </Typography>
+                </Box>
               </Box>
-              <Box>
-                <Typography
-                  variant="caption"
-                  color="text.secondary"
-                  sx={{ fontSize: "0.6rem" }}
-                >
-                  Tea Shop
-                </Typography>
-                <Typography
-                  sx={{
-                    fontSize: "0.8rem",
-                    fontWeight: 600,
-                    color: "secondary.main",
-                  }}
-                >
-                  ₹{periodTotals.totalTeaShop.toLocaleString()}
-                </Typography>
+              <Divider sx={{ my: 0.5 }} />
+              {/* Row 2: Daily, Contract, Market */}
+              <Box sx={{ display: "flex", alignItems: "stretch", mb: 1 }}>
+                <Box sx={{ flex: 1, textAlign: "center" }}>
+                  <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.6rem" }}>
+                    Daily
+                  </Typography>
+                  <Typography sx={{ fontSize: "0.8rem", fontWeight: 600, color: "warning.main" }}>
+                    ₹{periodTotals.totalDailyAmount.toLocaleString()}
+                  </Typography>
+                </Box>
+                <Divider orientation="vertical" flexItem sx={{ mx: 1 }} />
+                <Box sx={{ flex: 1, textAlign: "center" }}>
+                  <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.6rem" }}>
+                    Contract
+                  </Typography>
+                  <Typography sx={{ fontSize: "0.8rem", fontWeight: 600, color: "info.main" }}>
+                    ₹{periodTotals.totalContractAmount.toLocaleString()}
+                  </Typography>
+                </Box>
+                <Divider orientation="vertical" flexItem sx={{ mx: 1 }} />
+                <Box sx={{ flex: 1, textAlign: "center" }}>
+                  <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.6rem" }}>
+                    Market
+                  </Typography>
+                  <Typography sx={{ fontSize: "0.8rem", fontWeight: 600, color: "secondary.main" }}>
+                    ₹{periodTotals.totalMarketAmount.toLocaleString()}
+                  </Typography>
+                </Box>
               </Box>
-              <Box>
-                <Typography
-                  variant="caption"
-                  color="text.secondary"
-                  sx={{ fontSize: "0.6rem" }}
-                >
-                  Daily
-                </Typography>
-                <Typography
-                  sx={{
-                    fontSize: "0.8rem",
-                    fontWeight: 600,
-                    color: "warning.main",
-                  }}
-                >
-                  ₹{periodTotals.totalDailyAmount.toLocaleString()}
-                </Typography>
-              </Box>
-              <Box>
-                <Typography
-                  variant="caption"
-                  color="text.secondary"
-                  sx={{ fontSize: "0.6rem" }}
-                >
-                  Contract
-                </Typography>
-                <Typography
-                  sx={{
-                    fontSize: "0.8rem",
-                    fontWeight: 600,
-                    color: "info.main",
-                  }}
-                >
-                  ₹{periodTotals.totalContractAmount.toLocaleString()}
-                </Typography>
-              </Box>
-              <Box>
-                <Typography
-                  variant="caption"
-                  color="text.secondary"
-                  sx={{ fontSize: "0.6rem" }}
-                >
-                  Market
-                </Typography>
-                <Typography
-                  sx={{
-                    fontSize: "0.8rem",
-                    fontWeight: 600,
-                    color: "secondary.main",
-                  }}
-                >
-                  ₹{periodTotals.totalMarketAmount.toLocaleString()}
-                </Typography>
-              </Box>
-              <Box>
-                <Typography
-                  variant="caption"
-                  color="text.secondary"
-                  sx={{ fontSize: "0.6rem" }}
-                >
-                  Avg/Day
-                </Typography>
-                <Typography sx={{ fontSize: "0.8rem", fontWeight: 600 }}>
-                  ₹
-                  {periodTotals.avgPerDay.toLocaleString(undefined, {
-                    maximumFractionDigits: 0,
-                  })}
-                </Typography>
+              <Divider sx={{ my: 0.5 }} />
+              {/* Row 3: Avg/Day */}
+              <Box sx={{ display: "flex", alignItems: "stretch" }}>
+                <Box sx={{ flex: 1, textAlign: "center" }}>
+                  <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.6rem" }}>
+                    Avg/Day
+                  </Typography>
+                  <Typography sx={{ fontSize: "0.8rem", fontWeight: 600 }}>
+                    ₹{periodTotals.avgPerDay.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                  </Typography>
+                </Box>
               </Box>
             </Box>
           </Collapse>
         </Box>
 
-        {/* Desktop: Always expanded */}
+        {/* Desktop: Always expanded with vertical separators */}
         <Box
           sx={{
-            display: { xs: "none", sm: "grid" },
-            gridTemplateColumns: {
-              sm: "repeat(5, 1fr)",
-              md: "repeat(5, 1fr)",
-              lg: "repeat(9, 1fr)",
-            },
+            display: { xs: "none", sm: "flex" },
+            alignItems: "stretch",
             gap: 2,
           }}
         >
-          <Box>
-            <Typography
-              variant="caption"
-              color="text.secondary"
-              sx={{ fontSize: "0.75rem" }}
-            >
-              Period Total
-            </Typography>
-            <Typography
-              sx={{
-                fontSize: "1.25rem",
-                fontWeight: 700,
-                color: "primary.main",
-              }}
-            >
-              ₹{periodTotals.totalExpense.toLocaleString()}
-            </Typography>
-          </Box>
-          <Box>
-            <Typography
-              variant="caption"
-              color="text.secondary"
-              sx={{ fontSize: "0.75rem" }}
-            >
-              Salary
-            </Typography>
-            <Typography
-              sx={{
-                fontSize: "1.125rem",
-                fontWeight: 600,
-                color: "success.main",
-              }}
-            >
-              ₹{periodTotals.totalSalary.toLocaleString()}
-            </Typography>
-          </Box>
-          <Box>
-            <Typography
-              variant="caption"
-              color="text.secondary"
-              sx={{ fontSize: "0.75rem" }}
-            >
-              Tea Shop
-            </Typography>
-            <Typography
-              sx={{
-                fontSize: "1.125rem",
-                fontWeight: 600,
-                color: "secondary.main",
-              }}
-            >
-              ₹{periodTotals.totalTeaShop.toLocaleString()}
-            </Typography>
-          </Box>
-          <Box>
-            <Typography
-              variant="caption"
-              color="text.secondary"
-              sx={{ fontSize: "0.75rem" }}
-            >
-              Daily
-            </Typography>
-            <Typography
-              sx={{
-                fontSize: "1.125rem",
-                fontWeight: 600,
-                color: "warning.main",
-              }}
-            >
-              ₹{periodTotals.totalDailyAmount.toLocaleString()}
-            </Typography>
-          </Box>
-          <Box>
-            <Typography
-              variant="caption"
-              color="text.secondary"
-              sx={{ fontSize: "0.75rem" }}
-            >
-              Contract
-            </Typography>
-            <Typography
-              sx={{ fontSize: "1.125rem", fontWeight: 600, color: "info.main" }}
-            >
-              ₹{periodTotals.totalContractAmount.toLocaleString()}
-            </Typography>
-          </Box>
-          <Box>
-            <Typography
-              variant="caption"
-              color="text.secondary"
-              sx={{ fontSize: "0.75rem" }}
-            >
-              Market
-            </Typography>
-            <Typography
-              sx={{
-                fontSize: "1.125rem",
-                fontWeight: 600,
-                color: "secondary.main",
-              }}
-            >
-              ₹{periodTotals.totalMarketAmount.toLocaleString()}
-            </Typography>
-          </Box>
-          <Box>
-            <Typography
-              variant="caption"
-              color="text.secondary"
-              sx={{ fontSize: "0.75rem" }}
-            >
-              Paid
-            </Typography>
-            <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+          {/* Group 1: Period Total, Salary, Tea Shop */}
+          <Box sx={{ display: "flex", flex: 1, gap: 2 }}>
+            <Box sx={{ flex: 1, textAlign: "center" }}>
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{ fontSize: "0.75rem" }}
+              >
+                Period Total
+              </Typography>
+              <Typography
+                sx={{
+                  fontSize: "1.25rem",
+                  fontWeight: 700,
+                  color: "primary.main",
+                }}
+              >
+                ₹{periodTotals.totalExpense.toLocaleString()}
+              </Typography>
+            </Box>
+            <Box sx={{ flex: 1, textAlign: "center" }}>
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{ fontSize: "0.75rem" }}
+              >
+                Salary
+              </Typography>
               <Typography
                 sx={{
                   fontSize: "1.125rem",
@@ -1601,29 +1460,41 @@ export default function AttendancePage() {
                   color: "success.main",
                 }}
               >
-                ₹{periodTotals.totalPaidAmount.toLocaleString()}
+                ₹{periodTotals.totalSalary.toLocaleString()}
               </Typography>
-              <Chip
-                label={periodTotals.totalPaidCount}
-                size="small"
-                color="success"
-                variant="outlined"
+            </Box>
+            <Box sx={{ flex: 1, textAlign: "center" }}>
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{ fontSize: "0.75rem" }}
+              >
+                Tea Shop
+              </Typography>
+              <Typography
                 sx={{
-                  height: 24,
-                  "& .MuiChip-label": { px: 0.5, fontSize: "0.75rem" },
+                  fontSize: "1.125rem",
+                  fontWeight: 600,
+                  color: "secondary.main",
                 }}
-              />
+              >
+                ₹{periodTotals.totalTeaShop.toLocaleString()}
+              </Typography>
             </Box>
           </Box>
-          <Box>
-            <Typography
-              variant="caption"
-              color="text.secondary"
-              sx={{ fontSize: "0.75rem" }}
-            >
-              Pending
-            </Typography>
-            <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+
+          <Divider orientation="vertical" flexItem />
+
+          {/* Group 2: Daily, Contract, Market */}
+          <Box sx={{ display: "flex", flex: 1, gap: 2 }}>
+            <Box sx={{ flex: 1, textAlign: "center" }}>
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{ fontSize: "0.75rem" }}
+              >
+                Daily
+              </Typography>
               <Typography
                 sx={{
                   fontSize: "1.125rem",
@@ -1631,34 +1502,122 @@ export default function AttendancePage() {
                   color: "warning.main",
                 }}
               >
-                ₹{periodTotals.totalPendingAmount.toLocaleString()}
+                ₹{periodTotals.totalDailyAmount.toLocaleString()}
               </Typography>
-              <Chip
-                label={periodTotals.totalPendingCount}
-                size="small"
-                color="warning"
-                variant="outlined"
+            </Box>
+            <Box sx={{ flex: 1, textAlign: "center" }}>
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{ fontSize: "0.75rem" }}
+              >
+                Contract
+              </Typography>
+              <Typography
+                sx={{ fontSize: "1.125rem", fontWeight: 600, color: "info.main" }}
+              >
+                ₹{periodTotals.totalContractAmount.toLocaleString()}
+              </Typography>
+            </Box>
+            <Box sx={{ flex: 1, textAlign: "center" }}>
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{ fontSize: "0.75rem" }}
+              >
+                Market
+              </Typography>
+              <Typography
                 sx={{
-                  height: 24,
-                  "& .MuiChip-label": { px: 0.5, fontSize: "0.75rem" },
+                  fontSize: "1.125rem",
+                  fontWeight: 600,
+                  color: "secondary.main",
                 }}
-              />
+              >
+                ₹{periodTotals.totalMarketAmount.toLocaleString()}
+              </Typography>
             </Box>
           </Box>
-          <Box>
-            <Typography
-              variant="caption"
-              color="text.secondary"
-              sx={{ fontSize: "0.75rem" }}
-            >
-              Avg/Day
-            </Typography>
-            <Typography sx={{ fontSize: "1.125rem", fontWeight: 600 }}>
-              ₹
-              {periodTotals.avgPerDay.toLocaleString(undefined, {
-                maximumFractionDigits: 0,
-              })}
-            </Typography>
+
+          <Divider orientation="vertical" flexItem />
+
+          {/* Group 3: Paid, Pending, Avg/Day */}
+          <Box sx={{ display: "flex", flex: 1, gap: 2 }}>
+            <Box sx={{ flex: 1, textAlign: "center" }}>
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{ fontSize: "0.75rem" }}
+              >
+                Paid
+              </Typography>
+              <Box sx={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 0.5 }}>
+                <Typography
+                  sx={{
+                    fontSize: "1.125rem",
+                    fontWeight: 600,
+                    color: "success.main",
+                  }}
+                >
+                  ₹{periodTotals.totalPaidAmount.toLocaleString()}
+                </Typography>
+                <Chip
+                  label={periodTotals.totalPaidCount}
+                  size="small"
+                  color="success"
+                  variant="outlined"
+                  sx={{
+                    height: 24,
+                    "& .MuiChip-label": { px: 0.5, fontSize: "0.75rem" },
+                  }}
+                />
+              </Box>
+            </Box>
+            <Box sx={{ flex: 1, textAlign: "center" }}>
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{ fontSize: "0.75rem" }}
+              >
+                Pending
+              </Typography>
+              <Box sx={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 0.5 }}>
+                <Typography
+                  sx={{
+                    fontSize: "1.125rem",
+                    fontWeight: 600,
+                    color: "warning.main",
+                  }}
+                >
+                  ₹{periodTotals.totalPendingAmount.toLocaleString()}
+                </Typography>
+                <Chip
+                  label={periodTotals.totalPendingCount}
+                  size="small"
+                  color="warning"
+                  variant="outlined"
+                  sx={{
+                    height: 24,
+                    "& .MuiChip-label": { px: 0.5, fontSize: "0.75rem" },
+                  }}
+                />
+              </Box>
+            </Box>
+            <Box sx={{ flex: 1, textAlign: "center" }}>
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{ fontSize: "0.75rem" }}
+              >
+                Avg/Day
+              </Typography>
+              <Typography sx={{ fontSize: "1.125rem", fontWeight: 600 }}>
+                ₹
+                {periodTotals.avgPerDay.toLocaleString(undefined, {
+                  maximumFractionDigits: 0,
+                })}
+              </Typography>
+            </Box>
           </Box>
         </Box>
       </Paper>
@@ -1757,10 +1716,9 @@ export default function AttendancePage() {
           <TableContainer
             sx={{
               flex: 1,
-              maxHeight: {
-                xs: "calc(100vh - 320px)",
-                sm: "calc(100vh - 300px)",
-              },
+              maxHeight: isFullscreen
+                ? "calc(100vh - 56px)"
+                : { xs: "calc(100vh - 320px)", sm: "calc(100vh - 300px)" },
               overflowX: "auto",
               overflowY: "auto",
               WebkitOverflowScrolling: "touch",
