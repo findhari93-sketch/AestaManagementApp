@@ -267,38 +267,53 @@ export default function PhotoCaptureButton({
           position: "relative",
           width: compact ? 60 : 80,
           height: compact ? 60 : 80,
-          borderRadius: 1,
-          overflow: "hidden",
-          border: "2px solid",
-          borderColor: "success.main",
+          // Add padding to prevent close button from being cut off
+          pt: 1,
+          pr: 1,
         }}
       >
         {fileInputs}
         {sourceMenu}
+        {/* Image container with overflow hidden for rounded corners */}
         <Box
-          component="img"
-          src={photoUrl}
-          alt={`Photo ${photoIndex}`}
           sx={{
-            width: "100%",
-            height: "100%",
-            objectFit: "cover",
+            position: "absolute",
+            top: 8,
+            right: 8,
+            bottom: 0,
+            left: 0,
+            borderRadius: 1,
+            overflow: "hidden",
+            border: "2px solid",
+            borderColor: "success.main",
           }}
-        />
-        {/* Remove button */}
+        >
+          <Box
+            component="img"
+            src={photoUrl}
+            alt={`Photo ${photoIndex}`}
+            sx={{
+              width: "100%",
+              height: "100%",
+              objectFit: "cover",
+            }}
+          />
+        </Box>
+        {/* Remove button - now outside the overflow:hidden container */}
         <IconButton
           size="small"
           onClick={handleRemove}
           disabled={disabled}
           sx={{
             position: "absolute",
-            top: -6,
-            right: -6,
+            top: 0,
+            right: 0,
             bgcolor: "error.main",
             color: "white",
             width: 20,
             height: 20,
             "&:hover": { bgcolor: "error.dark" },
+            zIndex: 1,
           }}
         >
           <CloseIcon sx={{ fontSize: 14 }} />
@@ -311,7 +326,7 @@ export default function PhotoCaptureButton({
           sx={{
             position: "absolute",
             bottom: 2,
-            right: 2,
+            left: 2,
             bgcolor: "rgba(0,0,0,0.6)",
             color: "white",
             width: 24,

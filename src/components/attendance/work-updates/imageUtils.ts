@@ -25,24 +25,31 @@ export const isMobileCameraPhoto = (file: File): boolean => {
 
 // Get optimal compression settings based on file size
 export const getCompressionSettings = (file: File) => {
+  const sizeMB = file.size / (1024 * 1024);
+  const isVeryLarge = sizeMB > 5; // > 5MB needs aggressive compression
   const isMobile = isMobileCameraPhoto(file);
+
   return {
-    maxSizeKB: isMobile ? 300 : 500,      // Smaller target for mobile
-    maxWidth: isMobile ? 1200 : 1920,     // Lower resolution for mobile
-    maxHeight: isMobile ? 1200 : 1920,
-    quality: isMobile ? 0.7 : 0.8,        // Lower quality for mobile
-    timeout: isMobile ? 20000 : 10000,    // Longer timeout for large files
+    maxSizeKB: isVeryLarge ? 200 : (isMobile ? 300 : 500),
+    maxWidth: isVeryLarge ? 800 : (isMobile ? 1200 : 1920),
+    maxHeight: isVeryLarge ? 800 : (isMobile ? 1200 : 1920),
+    quality: isVeryLarge ? 0.5 : (isMobile ? 0.6 : 0.8),
+    timeout: isVeryLarge ? 30000 : (isMobile ? 20000 : 10000),
   };
 };
 
 // Compress image using Canvas API - optimized for mobile
+// Added recursionDepth to prevent infinite loops
 export const compressImage = (
   file: File,
   maxSizeKB?: number,
   maxWidth?: number,
   maxHeight?: number,
-  quality?: number
+  quality?: number,
+  recursionDepth: number = 0
 ): Promise<File> => {
+  const MAX_RECURSION = 3; // Limit recursive compression attempts
+
   return new Promise((resolve) => {
     // Skip compression for non-image files
     if (!file.type.startsWith("image/")) {
@@ -135,13 +142,17 @@ export const compressImage = (
 
               console.log(`[ImageUtils] Compressed to ${(compressedFile.size / 1024).toFixed(0)}KB (quality: ${targetQuality})`);
 
-              // If still too large, try lower quality (recursive)
-              if (compressedFile.size > targetMaxSizeKB * 1024 && targetQuality > 0.3) {
-                console.log(`[ImageUtils] Still too large, reducing quality to ${targetQuality - 0.1}`);
-                compressImage(file, targetMaxSizeKB, targetMaxWidth, targetMaxHeight, targetQuality - 0.1)
+              // If still too large, try lower quality (recursive) with depth limit
+              if (compressedFile.size > targetMaxSizeKB * 1024 && targetQuality > 0.3 && recursionDepth < MAX_RECURSION) {
+                console.log(`[ImageUtils] Still too large (${(compressedFile.size / 1024).toFixed(0)}KB), reducing quality to ${(targetQuality - 0.15).toFixed(2)} (attempt ${recursionDepth + 1}/${MAX_RECURSION})`);
+                compressImage(file, targetMaxSizeKB, targetMaxWidth, targetMaxHeight, targetQuality - 0.15, recursionDepth + 1)
                   .then(resolve)
-                  .catch(() => resolve(file));
+                  .catch(() => resolve(compressedFile)); // Use compressed file on error
               } else {
+                // Accept the file even if slightly over target - better than hanging
+                if (compressedFile.size > targetMaxSizeKB * 1024) {
+                  console.log(`[ImageUtils] Accepting ${(compressedFile.size / 1024).toFixed(0)}KB file (target was ${targetMaxSizeKB}KB) after ${recursionDepth} compression attempts`);
+                }
                 resolve(compressedFile);
               }
             },
