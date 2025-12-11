@@ -72,7 +72,7 @@ export function SiteProvider({ children }: { children: React.ReactNode }) {
   const [isInitialized, setIsInitialized] = useState(false);
   const [isHydrated, setIsHydrated] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const { userProfile } = useAuth();
+  const { userProfile, loading: authLoading } = useAuth();
   const [supabase] = useState(() => createClient());
 
   // Use ref to track if we're currently fetching (prevents race conditions)
@@ -206,17 +206,20 @@ export function SiteProvider({ children }: { children: React.ReactNode }) {
     // Only fetch after hydration is complete
     if (!isHydrated) return;
 
+    // Wait for auth to finish loading before making decisions
+    if (authLoading) return;
+
     if (userProfile) {
       fetchSites();
     } else {
-      // Reset state when user logs out
+      // Only reset state when user is actually logged out (auth finished loading with no user)
+      // Don't clear localStorage to preserve site selection for next login
       setSites([]);
       setSelectedSiteState(null);
-      storeSiteId(null);
       setLoading(false);
       setIsInitialized(true);
     }
-  }, [userProfile, fetchSites, isHydrated]);
+  }, [userProfile, fetchSites, isHydrated, authLoading]);
 
   const refreshSites = useCallback(async () => {
     await fetchSites();

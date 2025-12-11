@@ -66,7 +66,7 @@ interface ProjectCosts {
 
 export default function SiteDashboardPage() {
   const { selectedSite } = useSite();
-  const { userProfile } = useAuth();
+  const { userProfile, loading: authLoading } = useAuth();
   const router = useRouter();
   const queryClient = useQueryClient();
   const supabase = createClient();
@@ -213,7 +213,7 @@ export default function SiteDashboardPage() {
       <Box>
         <PageHeader
           title="Site Dashboard"
-          subtitle={`Welcome back, ${userProfile?.name}`}
+          subtitle={authLoading ? "Loading..." : `Welcome back, ${userProfile?.name || "User"}`}
           showBack={false}
         />
         <Paper sx={{ p: 4, textAlign: "center", borderRadius: 3 }}>
@@ -229,7 +229,7 @@ export default function SiteDashboardPage() {
     <Box>
       <PageHeader
         title="Site Dashboard"
-        subtitle={`${selectedSite.name} • Welcome back, ${userProfile?.name}`}
+        subtitle={`${selectedSite.name} • Welcome back, ${userProfile?.name || "User"}`}
         onRefresh={handleRefresh}
         isLoading={loading}
         showBack={false}
