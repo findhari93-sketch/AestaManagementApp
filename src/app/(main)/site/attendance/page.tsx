@@ -2175,200 +2175,98 @@ export default function AttendancePage() {
                           unmountOnExit
                         >
                           <Box sx={{ p: 2, bgcolor: "grey.50" }}>
-                            {/* Laborer Type Breakdown - compact on mobile */}
-                            <Box
-                              sx={{
-                                display: "flex",
-                                gap: { xs: 0.5, sm: 1 },
-                                mb: { xs: 1, sm: 2 },
-                                flexWrap: "wrap",
-                              }}
-                            >
-                              {summary.dailyLaborerCount > 0 && (
-                                <Chip
-                                  label={
-                                    <Box
-                                      sx={{
-                                        display: "flex",
-                                        alignItems: "center",
-                                        gap: 0.5,
-                                      }}
-                                    >
-                                      <Box
-                                        component="span"
-                                        sx={{
-                                          display: { xs: "none", sm: "inline" },
-                                        }}
-                                      >
-                                        Daily:
-                                      </Box>
-                                      <Box
-                                        component="span"
-                                        sx={{
-                                          display: { xs: "inline", sm: "none" },
-                                        }}
-                                      >
-                                        D:
-                                      </Box>
-                                      ₹
-                                      {summary.dailyLaborerAmount.toLocaleString()}
-                                      <Box
-                                        component="span"
-                                        sx={{ opacity: 0.8 }}
-                                      >
-                                        ({summary.dailyLaborerCount})
-                                      </Box>
-                                    </Box>
-                                  }
-                                  size="small"
-                                  color="warning"
-                                  variant="filled"
-                                  sx={{
-                                    height: { xs: 22, sm: 24 },
-                                    "& .MuiChip-label": {
-                                      px: { xs: 0.75, sm: 1 },
-                                      fontSize: {
-                                        xs: "0.65rem",
-                                        sm: "0.75rem",
-                                      },
-                                    },
-                                  }}
-                                />
-                              )}
-                              {summary.contractLaborerCount > 0 && (
-                                <Chip
-                                  label={
-                                    <Box
-                                      sx={{
-                                        display: "flex",
-                                        alignItems: "center",
-                                        gap: 0.5,
-                                      }}
-                                    >
-                                      <Box
-                                        component="span"
-                                        sx={{
-                                          display: { xs: "none", sm: "inline" },
-                                        }}
-                                      >
-                                        Contract:
-                                      </Box>
-                                      <Box
-                                        component="span"
-                                        sx={{
-                                          display: { xs: "inline", sm: "none" },
-                                        }}
-                                      >
-                                        C:
-                                      </Box>
-                                      ₹
-                                      {summary.contractLaborerAmount.toLocaleString()}
-                                      <Box
-                                        component="span"
-                                        sx={{ opacity: 0.8 }}
-                                      >
-                                        ({summary.contractLaborerCount})
-                                      </Box>
-                                    </Box>
-                                  }
-                                  size="small"
-                                  color="info"
-                                  variant="filled"
-                                  sx={{
-                                    height: { xs: 22, sm: 24 },
-                                    "& .MuiChip-label": {
-                                      px: { xs: 0.75, sm: 1 },
-                                      fontSize: {
-                                        xs: "0.65rem",
-                                        sm: "0.75rem",
-                                      },
-                                    },
-                                  }}
-                                />
-                              )}
-                              {summary.marketLaborerCount > 0 && (
-                                <Chip
-                                  label={
-                                    <Box
-                                      sx={{
-                                        display: "flex",
-                                        alignItems: "center",
-                                        gap: 0.5,
-                                      }}
-                                    >
-                                      <Box
-                                        component="span"
-                                        sx={{
-                                          display: { xs: "none", sm: "inline" },
-                                        }}
-                                      >
-                                        Market:
-                                      </Box>
-                                      <Box
-                                        component="span"
-                                        sx={{
-                                          display: { xs: "inline", sm: "none" },
-                                        }}
-                                      >
-                                        M:
-                                      </Box>
-                                      ₹
-                                      {summary.marketLaborerAmount.toLocaleString()}
-                                      <Box
-                                        component="span"
-                                        sx={{ opacity: 0.8 }}
-                                      >
-                                        ({summary.marketLaborerCount})
-                                      </Box>
-                                    </Box>
-                                  }
-                                  size="small"
-                                  color="secondary"
-                                  variant="filled"
-                                  sx={{
-                                    height: { xs: 22, sm: 24 },
-                                    "& .MuiChip-label": {
-                                      px: { xs: 0.75, sm: 1 },
-                                      fontSize: {
-                                        xs: "0.65rem",
-                                        sm: "0.75rem",
-                                      },
-                                    },
-                                  }}
-                                />
-                              )}
-                            </Box>
-
-                            {/* Header with Manage Button */}
+                            {/* Header with Manage Button and Laborer Type Chips */}
                             <Box
                               sx={{
                                 display: "flex",
                                 justifyContent: "space-between",
                                 alignItems: "center",
                                 mb: 2,
+                                flexWrap: "wrap",
+                                gap: 1,
                               }}
                             >
+                              {/* Left side: Contract/Market chips */}
                               <Box
                                 sx={{
                                   display: "flex",
-                                  gap: 1,
+                                  gap: { xs: 0.5, sm: 1 },
                                   flexWrap: "wrap",
+                                  alignItems: "center",
                                 }}
                               >
-                                {Object.entries(summary.categoryBreakdown).map(
-                                  ([cat, data]) => (
-                                    <Chip
-                                      key={cat}
-                                      label={`${cat}: ${
-                                        data.count
-                                      } (₹${data.amount.toLocaleString()})`}
-                                      size="small"
-                                      variant="outlined"
-                                      color="primary"
-                                    />
-                                  )
+                                {summary.contractLaborerCount > 0 && (
+                                  <Chip
+                                    label={
+                                      <Box
+                                        sx={{
+                                          display: "flex",
+                                          alignItems: "center",
+                                          gap: 0.5,
+                                        }}
+                                      >
+                                        Contract: ₹
+                                        {summary.contractLaborerAmount.toLocaleString()}
+                                        <Box
+                                          component="span"
+                                          sx={{ opacity: 0.8 }}
+                                        >
+                                          ({summary.contractLaborerCount})
+                                        </Box>
+                                      </Box>
+                                    }
+                                    size="small"
+                                    color="info"
+                                    variant="filled"
+                                    sx={{
+                                      height: { xs: 22, sm: 24 },
+                                      "& .MuiChip-label": {
+                                        px: { xs: 0.75, sm: 1 },
+                                        fontSize: {
+                                          xs: "0.65rem",
+                                          sm: "0.75rem",
+                                        },
+                                      },
+                                    }}
+                                  />
+                                )}
+                                {summary.marketLaborerCount > 0 && (
+                                  <Chip
+                                    label={
+                                      <Box
+                                        sx={{
+                                          display: "flex",
+                                          alignItems: "center",
+                                          gap: 0.5,
+                                        }}
+                                      >
+                                        Market: ₹
+                                        {summary.marketLaborerAmount.toLocaleString()}
+                                        <Box
+                                          component="span"
+                                          sx={{ opacity: 0.8 }}
+                                        >
+                                          ({summary.marketLaborerCount})
+                                        </Box>
+                                      </Box>
+                                    }
+                                    size="small"
+                                    color="secondary"
+                                    variant="filled"
+                                    sx={{
+                                      height: { xs: 22, sm: 24 },
+                                      "& .MuiChip-label": {
+                                        px: { xs: 0.75, sm: 1 },
+                                        fontSize: {
+                                          xs: "0.65rem",
+                                          sm: "0.75rem",
+                                        },
+                                      },
+                                    }}
+                                  />
                                 )}
                               </Box>
+                              {/* Right side: Audit Avatar and Edit Button */}
                               <Box
                                 sx={{
                                   display: "flex",
@@ -2498,9 +2396,6 @@ export default function AttendancePage() {
                                       Type
                                     </TableCell>
                                     <TableCell sx={{ fontWeight: 700 }}>
-                                      Category
-                                    </TableCell>
-                                    <TableCell sx={{ fontWeight: 700 }}>
                                       Team
                                     </TableCell>
                                     <TableCell
@@ -2574,9 +2469,6 @@ export default function AttendancePage() {
                                           }
                                           variant="outlined"
                                         />
-                                      </TableCell>
-                                      <TableCell>
-                                        {record.category_name}
                                       </TableCell>
                                       <TableCell>
                                         {record.team_name || "-"}
@@ -2819,10 +2711,9 @@ export default function AttendancePage() {
                                       {summary.marketLaborers.map((ml) => (
                                         <TableRow
                                           key={ml.id}
-                                          hover
                                           sx={{
                                             "&:hover": {
-                                              bgcolor: "secondary.100",
+                                              bgcolor: "secondary.100 !important",
                                             },
                                           }}
                                         >

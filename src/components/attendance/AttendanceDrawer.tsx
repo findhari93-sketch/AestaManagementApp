@@ -1943,6 +1943,27 @@ export default function AttendanceDrawer({
                       flexWrap: "wrap",
                     }}
                   >
+                    {/* Add More Laborers button */}
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      startIcon={<PeopleIcon />}
+                      onClick={() => setLaborerDialogOpen(true)}
+                      disabled={mode === "evening"}
+                    >
+                      Add More
+                    </Button>
+                    {/* Add Market Laborers button */}
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      color="warning"
+                      startIcon={<StoreIcon />}
+                      onClick={() => setMarketLaborerDialogOpen(true)}
+                      disabled={mode === "evening"}
+                    >
+                      Market
+                    </Button>
                     {/* Custom times checkbox - Hidden in morning mode */}
                     {mode !== "morning" && (
                       <FormControlLabel

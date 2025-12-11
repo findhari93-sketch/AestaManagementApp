@@ -35,7 +35,12 @@
       "Bash(cat:*)",
       "Bash(node check-db.mjs:*)",
       "Bash(node check-db.js:*)",
-      "Bash(npx eslint:*)"
+      "Bash(npx eslint:*)",
+      "Bash(wc:*)",
+      "Bash(node scripts/setup-storage-bucket.mjs:*)",
+      "Bash(where:*)",
+      "Bash(vercel:*)",
+      "Bash(timeout /t 60 /nobreak)"
     ],
     "deny": [],
     "ask": []

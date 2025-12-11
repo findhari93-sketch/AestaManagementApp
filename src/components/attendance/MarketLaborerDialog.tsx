@@ -143,6 +143,14 @@ export default function MarketLaborerDialog({
 
   const getTotalCount = () => groups.reduce((acc, g) => acc + g.count, 0);
 
+  // Calculate total cost for a group
+  const getGroupTotal = (group: MarketLaborerGroup) =>
+    group.rate * group.count * group.dayUnits;
+
+  // Calculate grand total for all groups
+  const getGrandTotal = () =>
+    groups.reduce((acc, g) => acc + getGroupTotal(g), 0);
+
   const handleConfirm = () => {
     // Filter out groups with 0 count
     const validGroups = groups.filter((g) => g.count > 0);
@@ -276,11 +284,11 @@ export default function MarketLaborerDialog({
                 }}
               />
 
-              {/* Rate */}
+              {/* Rate per day */}
               <TextField
                 sx={{ flex: 1 }}
                 size="small"
-                label="Rate ₹"
+                label="Rate/Day"
                 type="number"
                 value={group.rate}
                 onChange={(e) =>
@@ -292,8 +300,29 @@ export default function MarketLaborerDialog({
                 }
                 slotProps={{
                   htmlInput: { min: 0 },
+                  input: { startAdornment: <Typography variant="caption" sx={{ mr: 0.5 }}>₹</Typography> },
                 }}
               />
+            </Box>
+
+            {/* Total cost display for this group */}
+            <Box
+              sx={{
+                display: "flex",
+                justifyContent: "flex-end",
+                alignItems: "center",
+                mt: 1.5,
+                pt: 1,
+                borderTop: "1px dashed",
+                borderColor: "warning.300",
+              }}
+            >
+              <Typography variant="caption" color="text.secondary" sx={{ mr: 1 }}>
+                {group.count} × ₹{group.rate.toLocaleString()} × {group.dayUnits} day{group.dayUnits !== 1 ? "s" : ""} =
+              </Typography>
+              <Typography variant="subtitle2" color="warning.dark" fontWeight={600}>
+                ₹{getGroupTotal(group).toLocaleString()}
+              </Typography>
             </Box>
           </Box>
         ))}
@@ -310,17 +339,27 @@ export default function MarketLaborerDialog({
         </Button>
       </DialogContent>
 
-      <DialogActions sx={{ px: 3, py: 2 }}>
-        <Button onClick={onClose} color="inherit">
-          Cancel
-        </Button>
-        <Button
-          variant="contained"
-          onClick={handleConfirm}
-          disabled={totalCount === 0}
-        >
-          Add {totalCount} Laborer{totalCount !== 1 ? "s" : ""}
-        </Button>
+      <DialogActions sx={{ px: 3, py: 2, justifyContent: "space-between" }}>
+        <Box>
+          {totalCount > 0 && (
+            <Typography variant="subtitle1" fontWeight={600} color="warning.dark">
+              Total: ₹{getGrandTotal().toLocaleString()}
+            </Typography>
+          )}
+        </Box>
+        <Box sx={{ display: "flex", gap: 1 }}>
+          <Button onClick={onClose} color="inherit">
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            color="warning"
+            onClick={handleConfirm}
+            disabled={totalCount === 0}
+          >
+            Add {totalCount} Laborer{totalCount !== 1 ? "s" : ""}
+          </Button>
+        </Box>
       </DialogActions>
     </Dialog>
   );
