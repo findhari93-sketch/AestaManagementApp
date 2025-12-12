@@ -145,7 +145,7 @@ export default function WorkUpdatesSection({
       sx={{
         mb: 2,
         p: 2,
-        bgcolor: "grey.50",
+        bgcolor: "action.hover",
         borderRadius: 2,
         border: "1px solid",
         borderColor: "grey.200",

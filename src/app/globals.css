@@ -53,6 +53,63 @@ body {
   border: 1px solid #e0e0e0 !important;
 }
 
+/* Dark mode support for react-date-range */
+[data-mui-color-scheme="dark"] .rdrCalendarWrapper,
+[data-mui-color-scheme="dark"] .rdrDateRangePickerWrapper {
+  background-color: #1e1e1e;
+  color: rgba(255, 255, 255, 0.87);
+}
+
+[data-mui-color-scheme="dark"] .rdrDateDisplayItem {
+  border-color: rgba(255, 255, 255, 0.23) !important;
+  background-color: #2d2d2d !important;
+}
+
+[data-mui-color-scheme="dark"] .rdrDateDisplayItem input {
+  color: rgba(255, 255, 255, 0.87) !important;
+}
+
+[data-mui-color-scheme="dark"] .rdrMonthAndYearPickers select {
+  color: rgba(255, 255, 255, 0.87) !important;
+  background-color: #2d2d2d !important;
+}
+
+[data-mui-color-scheme="dark"] .rdrDayNumber span {
+  color: rgba(255, 255, 255, 0.87) !important;
+}
+
+[data-mui-color-scheme="dark"] .rdrDayPassive .rdrDayNumber span {
+  color: rgba(255, 255, 255, 0.38) !important;
+}
+
+[data-mui-color-scheme="dark"] .rdrDayToday .rdrDayNumber span:after {
+  background: #90caf9 !important;
+}
+
+[data-mui-color-scheme="dark"] .rdrWeekDay {
+  color: rgba(255, 255, 255, 0.6) !important;
+}
+
+[data-mui-color-scheme="dark"] .rdrMonthName {
+  color: rgba(255, 255, 255, 0.87) !important;
+}
+
+[data-mui-color-scheme="dark"] .rdrNextPrevButton {
+  background-color: #2d2d2d !important;
+}
+
+[data-mui-color-scheme="dark"] .rdrNextPrevButton:hover {
+  background-color: #3d3d3d !important;
+}
+
+[data-mui-color-scheme="dark"] .rdrNextPrevButton i {
+  border-color: transparent rgba(255, 255, 255, 0.6) transparent transparent !important;
+}
+
+[data-mui-color-scheme="dark"] .rdrPprevButton i {
+  border-color: transparent transparent transparent rgba(255, 255, 255, 0.6) !important;
+}
+
 .rdrDateDisplayItem input {
   height: 2em !important;
   font-size: 13px !important;

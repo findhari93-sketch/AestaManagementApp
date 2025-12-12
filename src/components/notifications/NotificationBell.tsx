@@ -139,7 +139,7 @@ export default function NotificationBell() {
             justifyContent: "space-between",
             borderBottom: 1,
             borderColor: "divider",
-            bgcolor: "grey.50",
+            bgcolor: "action.hover",
           }}
         >
           <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>

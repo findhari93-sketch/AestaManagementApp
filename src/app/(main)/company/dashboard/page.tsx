@@ -208,9 +208,9 @@ export default function CompanyDashboardPage() {
             <Button
               variant="contained"
               sx={{
-                bgcolor: "white",
+                bgcolor: "background.paper",
                 color: "primary.main",
-                "&:hover": { bgcolor: "grey.100" },
+                "&:hover": { bgcolor: "action.selected" },
               }}
               endIcon={<ArrowForward />}
               onClick={() => router.push("/company/reports")}

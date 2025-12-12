@@ -9,7 +9,6 @@ import {
   Button,
   Box,
   Typography,
-  Divider,
   Alert,
   Chip,
   CircularProgress,
@@ -18,10 +17,7 @@ import {
   CalendarToday as CalendarIcon,
   LocationOn as LocationIcon,
   Category as SectionIcon,
-  Person as PersonIcon,
   Groups as GroupsIcon,
-  Store as StoreIcon,
-  LocalCafe as TeaIcon,
   Warning as WarningIcon,
   CheckCircle as CheckIcon,
 } from "@mui/icons-material";
@@ -66,8 +62,6 @@ export default function AttendanceSaveConfirmDialog({
   hasExistingAttendance,
   saving,
 }: AttendanceSaveConfirmDialogProps) {
-  const grandTotal = summary.totalExpense + teaShopTotal;
-
   return (
     <Dialog
       open={open}
@@ -96,7 +90,7 @@ export default function AttendanceSaveConfirmDialog({
         {/* Site/Date/Section Info Card */}
         <Box
           sx={{
-            bgcolor: "grey.50",
+            bgcolor: "action.hover",
             borderRadius: 2,
             p: 2,
             mb: 2,
@@ -138,7 +132,7 @@ export default function AttendanceSaveConfirmDialog({
           </Alert>
         )}
 
-        {/* Laborers Summary Card */}
+        {/* Salary Summary Card */}
         <Box
           sx={{
             border: 1,
@@ -150,7 +144,7 @@ export default function AttendanceSaveConfirmDialog({
         >
           <Box
             sx={{
-              bgcolor: "primary.50",
+              bgcolor: "success.50",
               px: 2,
               py: 1.5,
               borderBottom: 1,
@@ -158,131 +152,35 @@ export default function AttendanceSaveConfirmDialog({
             }}
           >
             <Typography variant="subtitle2" fontWeight={600}>
-              Laborers Summary
+              Attendance Summary
             </Typography>
           </Box>
 
-          {/* Daily Laborers */}
-          {summary.dailyCount > 0 && (
-            <Box
-              sx={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                px: 2,
-                py: 1.5,
-                borderBottom: 1,
-                borderColor: "divider",
-              }}
-            >
-              <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                <PersonIcon fontSize="small" color="warning" />
-                <Typography variant="body2">Daily Laborers</Typography>
-                <Chip
-                  label={summary.dailyCount}
-                  size="small"
-                  color="warning"
-                  sx={{ height: 20, fontSize: "0.7rem" }}
-                />
-              </Box>
-              <Typography variant="body2" fontWeight={600}>
-                ₹
-                {(
-                  summary.namedSalary -
-                  (summary.namedSalary / summary.namedCount) *
-                    summary.contractCount || 0
-                ).toLocaleString()}
-              </Typography>
+          {/* Workers Count */}
+          <Box
+            sx={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              px: 2,
+              py: 1.5,
+              borderBottom: 1,
+              borderColor: "divider",
+            }}
+          >
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+              <GroupsIcon fontSize="small" color="primary" />
+              <Typography variant="body2">Total Workers</Typography>
             </Box>
-          )}
+            <Chip
+              label={summary.totalCount}
+              size="small"
+              color="primary"
+              sx={{ fontWeight: 600 }}
+            />
+          </Box>
 
-          {/* Contract Laborers */}
-          {summary.contractCount > 0 && (
-            <Box
-              sx={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                px: 2,
-                py: 1.5,
-                borderBottom: 1,
-                borderColor: "divider",
-              }}
-            >
-              <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                <PersonIcon fontSize="small" color="info" />
-                <Typography variant="body2">Contract Laborers</Typography>
-                <Chip
-                  label={summary.contractCount}
-                  size="small"
-                  color="info"
-                  sx={{ height: 20, fontSize: "0.7rem" }}
-                />
-              </Box>
-              <Typography variant="body2" fontWeight={600}>
-                ₹
-                {(
-                  (summary.namedSalary / summary.namedCount) *
-                    summary.contractCount || 0
-                ).toLocaleString()}
-              </Typography>
-            </Box>
-          )}
-
-          {/* Market Laborers */}
-          {summary.marketCount > 0 && (
-            <Box
-              sx={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                px: 2,
-                py: 1.5,
-                borderBottom: 1,
-                borderColor: "divider",
-              }}
-            >
-              <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                <StoreIcon fontSize="small" color="secondary" />
-                <Typography variant="body2">Market Laborers</Typography>
-                <Chip
-                  label={summary.marketCount}
-                  size="small"
-                  color="secondary"
-                  sx={{ height: 20, fontSize: "0.7rem" }}
-                />
-              </Box>
-              <Typography variant="body2" fontWeight={600}>
-                ₹{summary.marketSalary.toLocaleString()}
-              </Typography>
-            </Box>
-          )}
-
-          {/* Tea Shop */}
-          {teaShopTotal > 0 && (
-            <Box
-              sx={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                px: 2,
-                py: 1.5,
-                borderBottom: 1,
-                borderColor: "divider",
-                bgcolor: "warning.50",
-              }}
-            >
-              <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                <TeaIcon fontSize="small" sx={{ color: "warning.main" }} />
-                <Typography variant="body2">Tea Shop</Typography>
-              </Box>
-              <Typography variant="body2" fontWeight={600} color="warning.main">
-                ₹{teaShopTotal.toLocaleString()}
-              </Typography>
-            </Box>
-          )}
-
-          {/* Total */}
+          {/* Total Salary */}
           <Box
             sx={{
               display: "flex",
@@ -290,42 +188,15 @@ export default function AttendanceSaveConfirmDialog({
               alignItems: "center",
               px: 2,
               py: 2,
-              bgcolor: "primary.main",
+              bgcolor: "success.main",
               color: "white",
             }}
           >
             <Typography variant="subtitle2" fontWeight={600}>
-              TOTAL EXPENSE
+              TOTAL SALARY
             </Typography>
             <Typography variant="h6" fontWeight={700}>
-              ₹{grandTotal.toLocaleString()}
-            </Typography>
-          </Box>
-        </Box>
-
-        {/* Quick Stats */}
-        <Box
-          sx={{
-            display: "flex",
-            gap: 2,
-            justifyContent: "center",
-          }}
-        >
-          <Box sx={{ textAlign: "center" }}>
-            <Typography variant="h5" fontWeight={700} color="primary.main">
-              {summary.totalCount}
-            </Typography>
-            <Typography variant="caption" color="text.secondary">
-              Total Workers
-            </Typography>
-          </Box>
-          <Divider orientation="vertical" flexItem />
-          <Box sx={{ textAlign: "center" }}>
-            <Typography variant="h5" fontWeight={700} color="success.main">
               ₹{summary.totalSalary.toLocaleString()}
-            </Typography>
-            <Typography variant="caption" color="text.secondary">
-              Labor Cost
             </Typography>
           </Box>
         </Box>

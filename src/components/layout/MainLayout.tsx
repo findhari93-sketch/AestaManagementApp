@@ -44,9 +44,12 @@ import {
   PaymentOutlined as PaymentIcon,
   LocalCafe as LocalCafeIcon,
   Payments as PaymentsIcon,
+  LightMode as LightModeIcon,
+  DarkMode as DarkModeIcon,
 } from "@mui/icons-material";
 import { useRouter, usePathname } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
+import { useThemeMode } from "@/contexts/ThemeContext";
 import SiteSelector from "@/components/layout/SiteSelector";
 import NotificationBell from "@/components/notifications/NotificationBell";
 import ActiveSectionChip from "@/components/layout/ActiveSectionChip";
@@ -153,6 +156,7 @@ export default function MainLayout({
   const pathname = usePathname();
   const theme = useTheme();
   const isMobile = useIsMobile("md");
+  const { mode, toggleTheme } = useThemeMode();
 
   // Determine active tab based on current path
   useEffect(() => {
@@ -470,6 +474,18 @@ export default function MainLayout({
                 <SettingsIcon fontSize="small" />
               </ListItemIcon>
               <ListItemText>Settings</ListItemText>
+            </MenuItem>
+            <MenuItem onClick={toggleTheme}>
+              <ListItemIcon>
+                {mode === "dark" ? (
+                  <LightModeIcon fontSize="small" />
+                ) : (
+                  <DarkModeIcon fontSize="small" />
+                )}
+              </ListItemIcon>
+              <ListItemText>
+                {mode === "dark" ? "Light Mode" : "Dark Mode"}
+              </ListItemText>
             </MenuItem>
             <Divider />
             <MenuItem onClick={handleSignOut}>

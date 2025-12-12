@@ -558,7 +558,7 @@ export default function DateGroupRow({
                 justifyContent: "center",
                 alignItems: "center",
                 minHeight: 300,
-                bgcolor: "grey.100",
+                bgcolor: "action.selected",
                 borderRadius: 2,
                 overflow: "hidden",
               }}

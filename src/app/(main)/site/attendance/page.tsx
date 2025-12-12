@@ -133,6 +133,8 @@ interface TeaShopData {
 // Expanded market laborer record (individual rows like "Mason 1", "Mason 2")
 interface MarketLaborerRecord {
   id: string;
+  originalDbId: string; // The actual DB record ID from market_laborer_attendance
+  roleId: string; // The role_id from the DB
   date: string;
   tempName: string; // e.g., "Mason 1", "Mason 2"
   categoryName: string;
@@ -148,6 +150,7 @@ interface MarketLaborerRecord {
   isPaid: boolean;
   paidAmount: number;
   pendingAmount: number;
+  groupCount: number; // Total count in this group (for edit reference)
 }
 
 interface DateSummary {
@@ -319,6 +322,15 @@ export default function AttendancePage() {
   // Restoration message state
   const [restorationMessage, setRestorationMessage] = useState<string | null>(null);
 
+  // Market laborer edit dialog state
+  const [marketLaborerEditOpen, setMarketLaborerEditOpen] = useState(false);
+  const [editingMarketLaborer, setEditingMarketLaborer] = useState<MarketLaborerRecord | null>(null);
+  const [marketLaborerEditForm, setMarketLaborerEditForm] = useState({
+    count: 1,
+    day_units: 1,
+    rate_per_person: 0,
+  });
+
   const canEdit = hasEditPermission(userProfile?.role);
 
   // Check for persisted drawer state on mount and restore if found
@@ -465,7 +477,7 @@ export default function AttendancePage() {
         supabase.from("market_laborer_attendance") as any
       )
         .select(
-          "date, count, work_days, rate_per_person, total_cost, day_units, snacks_per_person, total_snacks, in_time, out_time, labor_roles(name)"
+          "id, role_id, date, count, work_days, rate_per_person, total_cost, day_units, snacks_per_person, total_snacks, in_time, out_time, is_paid, labor_roles(name)"
         )
         .eq("site_id", selectedSite.id)
         .gte("date", dateFrom)
@@ -562,6 +574,8 @@ export default function AttendancePage() {
         for (let i = 0; i < m.count; i++) {
           existing.expandedRecords.push({
             id: `${m.id || m.date}-${roleName}-${i}`,
+            originalDbId: m.id,
+            roleId: m.role_id,
             date: m.date,
             tempName: `${roleName} ${
               existing.expandedRecords.filter((r) => r.roleName === roleName)
@@ -577,9 +591,10 @@ export default function AttendancePage() {
             snacksAmount: perPersonSnacks,
             inTime: m.in_time || null,
             outTime: m.out_time || null,
-            isPaid: false, // Market laborers are pending by default
-            paidAmount: 0,
-            pendingAmount: perPersonEarnings,
+            isPaid: m.is_paid || false,
+            paidAmount: m.is_paid ? perPersonEarnings : 0,
+            pendingAmount: m.is_paid ? 0 : perPersonEarnings,
+            groupCount: m.count,
           });
         }
 
@@ -1054,6 +1069,70 @@ export default function AttendancePage() {
         .from("daily_attendance")
         .delete()
         .eq("id", id);
+      if (error) throw error;
+      fetchAttendanceHistory();
+    } catch (error: any) {
+      alert("Failed to delete: " + error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Market laborer edit handlers
+  const handleOpenMarketLaborerEdit = (record: MarketLaborerRecord) => {
+    setEditingMarketLaborer(record);
+    setMarketLaborerEditForm({
+      count: record.groupCount,
+      day_units: record.dayUnits,
+      rate_per_person: record.ratePerPerson,
+    });
+    setMarketLaborerEditOpen(true);
+  };
+
+  const handleSaveMarketLaborerEdit = async () => {
+    if (!editingMarketLaborer || !selectedSite) return;
+
+    setLoading(true);
+    try {
+      const totalCost = marketLaborerEditForm.count * marketLaborerEditForm.rate_per_person * marketLaborerEditForm.day_units;
+
+      const { error } = await (supabase.from("market_laborer_attendance") as any)
+        .update({
+          count: marketLaborerEditForm.count,
+          day_units: marketLaborerEditForm.day_units,
+          rate_per_person: marketLaborerEditForm.rate_per_person,
+          total_cost: totalCost,
+          updated_at: new Date().toISOString(),
+          updated_by: userProfile?.name || "Unknown",
+          updated_by_user_id: userProfile?.id,
+        })
+        .eq("id", editingMarketLaborer.originalDbId);
+
+      if (error) throw error;
+
+      setMarketLaborerEditOpen(false);
+      setEditingMarketLaborer(null);
+      fetchAttendanceHistory();
+    } catch (error: any) {
+      alert("Failed to update: " + error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteMarketLaborer = async (record: MarketLaborerRecord) => {
+    const confirmMsg = record.groupCount > 1
+      ? `This will delete all ${record.groupCount} ${record.roleName}(s) for this date. Continue?`
+      : `Are you sure you want to delete this ${record.roleName}?`;
+
+    if (!confirm(confirmMsg)) return;
+
+    setLoading(true);
+    try {
+      const { error } = await (supabase.from("market_laborer_attendance") as any)
+        .delete()
+        .eq("id", record.originalDbId);
+
       if (error) throw error;
       fetchAttendanceHistory();
     } catch (error: any) {
@@ -1866,7 +1945,7 @@ export default function AttendancePage() {
                     zIndex: 10,
                     bgcolor: "rgba(255,255,255,0.95)",
                     boxShadow: 2,
-                    "&:hover": { bgcolor: "white" },
+                    "&:hover": { bgcolor: "background.paper" },
                   }}
                 >
                   <Fullscreen fontSize="small" />
@@ -1890,7 +1969,7 @@ export default function AttendancePage() {
                 display: "block",
               },
               "&::-webkit-scrollbar-track": {
-                bgcolor: "grey.100",
+                bgcolor: "action.selected",
               },
               "&::-webkit-scrollbar-thumb": {
                 bgcolor: "grey.400",
@@ -1904,14 +1983,14 @@ export default function AttendancePage() {
               sx={{ minWidth: { xs: 600, sm: 800 } }}
             >
               <TableHead>
-                <TableRow sx={{ bgcolor: "#1565c0" }}>
+                <TableRow sx={{ bgcolor: "primary.dark" }}>
                   {/* Sticky expand column */}
                   <TableCell
                     sx={{
                       width: 40,
                       minWidth: 40,
-                      bgcolor: "#1565c0",
-                      color: "#fff",
+                      bgcolor: "primary.dark",
+                      color: "primary.contrastText",
                       fontWeight: 700,
                       position: "sticky",
                       left: 0,
@@ -1921,8 +2000,8 @@ export default function AttendancePage() {
                   {/* Sticky date column */}
                   <TableCell
                     sx={{
-                      bgcolor: "#1565c0",
-                      color: "#fff",
+                      bgcolor: "primary.dark",
+                      color: "primary.contrastText",
                       fontWeight: 700,
                       position: "sticky",
                       left: 40,
@@ -1944,8 +2023,8 @@ export default function AttendancePage() {
                   </TableCell>
                   <TableCell
                     sx={{
-                      bgcolor: "#1565c0",
-                      color: "#fff",
+                      bgcolor: "primary.dark",
+                      color: "primary.contrastText",
                       fontWeight: 700,
                       minWidth: { xs: 30, sm: 50 },
                       px: { xs: 0.5, sm: 1 },
@@ -1959,8 +2038,8 @@ export default function AttendancePage() {
                   </TableCell>
                   <TableCell
                     sx={{
-                      bgcolor: "#1565c0",
-                      color: "#fff",
+                      bgcolor: "primary.dark",
+                      color: "primary.contrastText",
                       fontWeight: 700,
                       minWidth: { xs: 30, sm: 55 },
                       px: { xs: 0.5, sm: 1 },
@@ -1974,8 +2053,8 @@ export default function AttendancePage() {
                   </TableCell>
                   <TableCell
                     sx={{
-                      bgcolor: "#1565c0",
-                      color: "#fff",
+                      bgcolor: "primary.dark",
+                      color: "primary.contrastText",
                       fontWeight: 700,
                       minWidth: { xs: 30, sm: 50 },
                       px: { xs: 0.5, sm: 1 },
@@ -1989,8 +2068,8 @@ export default function AttendancePage() {
                   </TableCell>
                   <TableCell
                     sx={{
-                      bgcolor: "#1565c0",
-                      color: "#fff",
+                      bgcolor: "primary.dark",
+                      color: "primary.contrastText",
                       fontWeight: 700,
                       minWidth: { xs: 30, sm: 45 },
                       px: { xs: 0.5, sm: 1 },
@@ -2004,8 +2083,8 @@ export default function AttendancePage() {
                   </TableCell>
                   <TableCell
                     sx={{
-                      bgcolor: "#1565c0",
-                      color: "#fff",
+                      bgcolor: "primary.dark",
+                      color: "primary.contrastText",
                       fontWeight: 700,
                       minWidth: 45,
                       display: { xs: "none", md: "table-cell" },
@@ -2016,8 +2095,8 @@ export default function AttendancePage() {
                   </TableCell>
                   <TableCell
                     sx={{
-                      bgcolor: "#1565c0",
-                      color: "#fff",
+                      bgcolor: "primary.dark",
+                      color: "primary.contrastText",
                       fontWeight: 700,
                       minWidth: 45,
                       display: { xs: "none", md: "table-cell" },
@@ -2028,8 +2107,8 @@ export default function AttendancePage() {
                   </TableCell>
                   <TableCell
                     sx={{
-                      bgcolor: "#1565c0",
-                      color: "#fff",
+                      bgcolor: "primary.dark",
+                      color: "primary.contrastText",
                       fontWeight: 700,
                       minWidth: { xs: 55, sm: 70 },
                       px: { xs: 0.5, sm: 1 },
@@ -2045,8 +2124,8 @@ export default function AttendancePage() {
                   </TableCell>
                   <TableCell
                     sx={{
-                      bgcolor: "#1565c0",
-                      color: "#fff",
+                      bgcolor: "primary.dark",
+                      color: "primary.contrastText",
                       fontWeight: 700,
                       minWidth: 80,
                       display: { xs: "none", sm: "table-cell" },
@@ -2057,8 +2136,8 @@ export default function AttendancePage() {
                   </TableCell>
                   <TableCell
                     sx={{
-                      bgcolor: "#1565c0",
-                      color: "#fff",
+                      bgcolor: "primary.dark",
+                      color: "primary.contrastText",
                       fontWeight: 700,
                       minWidth: { xs: 55, sm: 70 },
                       px: { xs: 0.5, sm: 1 },
@@ -2074,8 +2153,8 @@ export default function AttendancePage() {
                   </TableCell>
                   <TableCell
                     sx={{
-                      bgcolor: "#1565c0",
-                      color: "#fff",
+                      bgcolor: "primary.dark",
+                      color: "primary.contrastText",
                       fontWeight: 700,
                       minWidth: 120,
                       display: { xs: "none", md: "table-cell" },
@@ -2085,8 +2164,8 @@ export default function AttendancePage() {
                   </TableCell>
                   <TableCell
                     sx={{
-                      bgcolor: "#1565c0",
-                      color: "#fff",
+                      bgcolor: "primary.dark",
+                      color: "primary.contrastText",
                       fontWeight: 700,
                       minWidth: { xs: 50, sm: 90 },
                       px: { xs: 0.5, sm: 1 },
@@ -2385,23 +2464,60 @@ export default function AttendancePage() {
                       </TableCell>
                       <TableCell>
                         {entry.summary.attendanceStatus === "morning_entry" ? (
-                          <Chip
-                            label="🌅 Morning Only"
-                            size="small"
-                            color="warning"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleOpenDrawerForDate(entry.summary.date, "evening");
-                            }}
-                            sx={{ cursor: "pointer" }}
-                          />
+                          <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                            <Chip
+                              label="🌅 Morning"
+                              size="small"
+                              color="warning"
+                              variant="outlined"
+                            />
+                            <Tooltip title="Edit morning entry">
+                              <IconButton
+                                size="small"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleOpenDrawerForDate(entry.summary.date, "morning");
+                                }}
+                                disabled={!canEdit}
+                              >
+                                <Edit sx={{ fontSize: 16 }} />
+                              </IconButton>
+                            </Tooltip>
+                            <Tooltip title="Confirm attendance">
+                              <Chip
+                                label="Confirm"
+                                size="small"
+                                color="info"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleOpenDrawerForDate(entry.summary.date, "evening");
+                                }}
+                                sx={{ cursor: canEdit ? "pointer" : "default" }}
+                                disabled={!canEdit}
+                              />
+                            </Tooltip>
+                          </Box>
                         ) : (
-                          <Chip
-                            label="✓ Confirmed"
-                            size="small"
-                            color="success"
-                            variant="outlined"
-                          />
+                          <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                            <Chip
+                              label="✓ Confirmed"
+                              size="small"
+                              color="success"
+                              variant="outlined"
+                            />
+                            <Tooltip title="Edit attendance">
+                              <IconButton
+                                size="small"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleOpenDrawerForDate(entry.summary.date, "full");
+                                }}
+                                disabled={!canEdit}
+                              >
+                                <Edit sx={{ fontSize: 16 }} />
+                              </IconButton>
+                            </Tooltip>
+                          </Box>
                         )}
                       </TableCell>
                     </TableRow>
@@ -2412,7 +2528,7 @@ export default function AttendancePage() {
                           timeout="auto"
                           unmountOnExit
                         >
-                          <Box sx={{ p: 2, bgcolor: "grey.50" }}>
+                          <Box sx={{ p: 2, bgcolor: "action.hover" }}>
                             {/* Header with Manage Button and Laborer Type Chips */}
                             <Box
                               sx={{
@@ -2605,7 +2721,7 @@ export default function AttendancePage() {
                                 sx={{
                                   mb: 2,
                                   p: 1.5,
-                                  bgcolor: "white",
+                                  bgcolor: "background.paper",
                                   borderRadius: 1,
                                   border: "1px solid",
                                   borderColor: "divider",
@@ -2639,7 +2755,7 @@ export default function AttendancePage() {
                             {entry.summary.records.length > 0 && (
                               <Table size="small">
                                 <TableHead>
-                                  <TableRow sx={{ bgcolor: "#e3f2fd" }}>
+                                  <TableRow sx={{ bgcolor: "primary.light" }}>
                                     <TableCell sx={{ fontWeight: 700 }}>
                                       Name
                                     </TableCell>
@@ -2885,7 +3001,7 @@ export default function AttendancePage() {
                                     sx={{ bgcolor: "secondary.50" }}
                                   >
                                     <TableHead>
-                                      <TableRow sx={{ bgcolor: "#ab47bc" }}>
+                                      <TableRow sx={{ bgcolor: "secondary.main" }}>
                                         <TableCell
                                           sx={{
                                             fontWeight: 700,
@@ -2955,6 +3071,15 @@ export default function AttendancePage() {
                                           align="center"
                                         >
                                           Payment
+                                        </TableCell>
+                                        <TableCell
+                                          sx={{
+                                            fontWeight: 700,
+                                            color: "white",
+                                          }}
+                                          align="center"
+                                        >
+                                          Actions
                                         </TableCell>
                                       </TableRow>
                                     </TableHead>
@@ -3026,6 +3151,39 @@ export default function AttendancePage() {
                                               sx={{ fontSize: "0.65rem" }}
                                             />
                                           </TableCell>
+                                          <TableCell align="center">
+                                            <Box sx={{ display: "flex", gap: 0.5, justifyContent: "center" }}>
+                                              <Tooltip title={ml.groupCount > 1 ? `Edit all ${ml.groupCount} ${ml.roleName}(s)` : "Edit"}>
+                                                <span>
+                                                  <IconButton
+                                                    size="small"
+                                                    onClick={(e) => {
+                                                      e.stopPropagation();
+                                                      handleOpenMarketLaborerEdit(ml);
+                                                    }}
+                                                    disabled={!canEdit}
+                                                  >
+                                                    <Edit fontSize="small" />
+                                                  </IconButton>
+                                                </span>
+                                              </Tooltip>
+                                              <Tooltip title={ml.groupCount > 1 ? `Delete all ${ml.groupCount} ${ml.roleName}(s)` : "Delete"}>
+                                                <span>
+                                                  <IconButton
+                                                    size="small"
+                                                    color="error"
+                                                    onClick={(e) => {
+                                                      e.stopPropagation();
+                                                      handleDeleteMarketLaborer(ml);
+                                                    }}
+                                                    disabled={!canEdit}
+                                                  >
+                                                    <Delete fontSize="small" />
+                                                  </IconButton>
+                                                </span>
+                                              </Tooltip>
+                                            </Box>
+                                          </TableCell>
                                         </TableRow>
                                       ))}
                                       {/* Market Laborers Total Row */}
@@ -3059,6 +3217,7 @@ export default function AttendancePage() {
                                             sx={{ fontSize: "0.65rem" }}
                                           />
                                         </TableCell>
+                                        <TableCell />
                                       </TableRow>
                                     </TableBody>
                                   </Table>
@@ -3205,7 +3364,7 @@ export default function AttendancePage() {
               <Box
                 sx={{
                   p: 2,
-                  bgcolor: "grey.100",
+                  bgcolor: "action.selected",
                   borderRadius: 1,
                   display: "flex",
                   justifyContent: "space-between",
@@ -3240,6 +3399,139 @@ export default function AttendancePage() {
           <Button onClick={() => setEditDialogOpen(false)}>Cancel</Button>
           <Button
             onClick={handleEditSubmit}
+            variant="contained"
+            disabled={loading}
+          >
+            Update
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Market Laborer Edit Dialog */}
+      <Dialog
+        open={marketLaborerEditOpen}
+        onClose={() => {
+          setMarketLaborerEditOpen(false);
+          setEditingMarketLaborer(null);
+        }}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>
+          Edit Market Laborer
+          {editingMarketLaborer && editingMarketLaborer.groupCount > 1 && (
+            <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>
+              (All {editingMarketLaborer.groupCount} {editingMarketLaborer.roleName}s)
+            </Typography>
+          )}
+        </DialogTitle>
+        <DialogContent>
+          {editingMarketLaborer && (
+            <Box sx={{ display: "flex", flexDirection: "column", gap: 2, mt: 2 }}>
+              <Alert severity="info">
+                Editing <strong>{editingMarketLaborer.roleName}</strong> on{" "}
+                {dayjs(editingMarketLaborer.date).format("DD MMM YYYY")}
+                {editingMarketLaborer.groupCount > 1 && (
+                  <Typography variant="body2" sx={{ mt: 0.5 }}>
+                    This will update all {editingMarketLaborer.groupCount} workers in this group.
+                  </Typography>
+                )}
+              </Alert>
+
+              <TextField
+                fullWidth
+                label="Number of Workers"
+                type="number"
+                size="small"
+                value={marketLaborerEditForm.count}
+                onChange={(e) =>
+                  setMarketLaborerEditForm({
+                    ...marketLaborerEditForm,
+                    count: Math.max(1, Number(e.target.value)),
+                  })
+                }
+                slotProps={{
+                  input: { inputProps: { min: 1 } },
+                }}
+              />
+
+              <FormControl fullWidth size="small">
+                <InputLabel>W/D Units</InputLabel>
+                <Select
+                  value={marketLaborerEditForm.day_units}
+                  onChange={(e) =>
+                    setMarketLaborerEditForm({
+                      ...marketLaborerEditForm,
+                      day_units: e.target.value as number,
+                    })
+                  }
+                  label="W/D Units"
+                >
+                  <MenuItem value={0.5}>0.5 (Half Day)</MenuItem>
+                  <MenuItem value={1}>1 (Full Day)</MenuItem>
+                  <MenuItem value={1.5}>1.5</MenuItem>
+                  <MenuItem value={2}>2</MenuItem>
+                </Select>
+              </FormControl>
+
+              <TextField
+                fullWidth
+                label="Rate per Person"
+                type="number"
+                size="small"
+                value={marketLaborerEditForm.rate_per_person}
+                onChange={(e) =>
+                  setMarketLaborerEditForm({
+                    ...marketLaborerEditForm,
+                    rate_per_person: Number(e.target.value),
+                  })
+                }
+                slotProps={{
+                  input: {
+                    startAdornment: <Typography sx={{ mr: 0.5 }}>₹</Typography>,
+                  },
+                }}
+              />
+
+              <Box
+                sx={{
+                  p: 2,
+                  bgcolor: "action.selected",
+                  borderRadius: 1,
+                }}
+              >
+                <Box sx={{ display: "flex", justifyContent: "space-between", mb: 1 }}>
+                  <Typography variant="body2" color="text.secondary">
+                    Per Person:
+                  </Typography>
+                  <Typography variant="body2" fontWeight={500}>
+                    ₹{(marketLaborerEditForm.rate_per_person * marketLaborerEditForm.day_units).toLocaleString()}
+                  </Typography>
+                </Box>
+                <Divider sx={{ my: 1 }} />
+                <Box sx={{ display: "flex", justifyContent: "space-between" }}>
+                  <Typography variant="body1" fontWeight={600}>
+                    Total ({marketLaborerEditForm.count} workers):
+                  </Typography>
+                  <Typography variant="body1" fontWeight={700} color="success.main">
+                    ₹{(marketLaborerEditForm.count * marketLaborerEditForm.rate_per_person * marketLaborerEditForm.day_units).toLocaleString()}
+                  </Typography>
+                </Box>
+              </Box>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => {
+              setMarketLaborerEditOpen(false);
+              setEditingMarketLaborer(null);
+            }}
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={handleSaveMarketLaborerEdit}
             variant="contained"
             disabled={loading}
           >
@@ -3418,7 +3710,7 @@ export default function AttendancePage() {
                 for this date. This action cannot be undone.
               </Alert>
 
-              <Box sx={{ bgcolor: "grey.50", p: 2, borderRadius: 1, mb: 2 }}>
+              <Box sx={{ bgcolor: "action.hover", p: 2, borderRadius: 1, mb: 2 }}>
                 <Box
                   sx={{
                     display: "flex",
@@ -3608,7 +3900,7 @@ export default function AttendancePage() {
                 {(summary.workDescription || summary.comments) && (
                   <Box sx={{ mb: 3 }}>
                     <Typography variant="subtitle2" sx={{ mb: 1 }}>Work Description</Typography>
-                    <Paper sx={{ p: 2, bgcolor: "grey.50" }}>
+                    <Paper sx={{ p: 2, bgcolor: "action.hover" }}>
                       {summary.workDescription && (
                         <Typography variant="body2" sx={{ mb: 0.5 }}>
                           {summary.workDescription}
@@ -3632,7 +3924,7 @@ export default function AttendancePage() {
                     <TableContainer component={Paper} variant="outlined">
                       <Table size="small">
                         <TableHead>
-                          <TableRow sx={{ bgcolor: "grey.100" }}>
+                          <TableRow sx={{ bgcolor: "action.selected" }}>
                             <TableCell sx={{ fontWeight: 700 }}>Name</TableCell>
                             <TableCell sx={{ fontWeight: 700 }}>Type</TableCell>
                             <TableCell sx={{ fontWeight: 700 }}>Team</TableCell>
@@ -3722,7 +4014,7 @@ export default function AttendancePage() {
                 {summary.teaShop && (
                   <Box>
                     <Typography variant="subtitle2" sx={{ mb: 1 }}>Tea Shop</Typography>
-                    <Paper sx={{ p: 2, bgcolor: "grey.50" }}>
+                    <Paper sx={{ p: 2, bgcolor: "action.hover" }}>
                       <Box sx={{ display: "flex", gap: 3 }}>
                         <Typography variant="body2">
                           <strong>Tea:</strong> ₹{summary.teaShop.teaTotal.toLocaleString()}

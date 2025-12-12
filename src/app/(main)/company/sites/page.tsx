@@ -1419,7 +1419,7 @@ export default function CompanySitesPage() {
             p: 2,
             borderBottom: 1,
             borderColor: "divider",
-            bgcolor: "grey.50",
+            bgcolor: "action.hover",
           }}
         >
           <Typography variant="h6" fontWeight={600}>
@@ -1439,7 +1439,7 @@ export default function CompanySitesPage() {
           }}
         >
           <Box sx={{ display: "flex", flexDirection: "column", gap: 2.5 }}>
-            <Paper elevation={0} sx={{ p: 2, bgcolor: "grey.50" }}>
+            <Paper elevation={0} sx={{ p: 2, bgcolor: "action.hover" }}>
               <Typography variant="subtitle2" fontWeight={600} gutterBottom>
                 Basic Information
               </Typography>
@@ -2235,7 +2235,7 @@ export default function CompanySitesPage() {
             p: 2,
             borderTop: 1,
             borderColor: "divider",
-            bgcolor: "grey.50",
+            bgcolor: "action.hover",
           }}
         >
           <Button

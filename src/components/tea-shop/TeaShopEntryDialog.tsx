@@ -1330,7 +1330,7 @@ export default function TeaShopEntryDialog({
                         </Button>
                       </Box>
                       {/* Distribution Controls */}
-                      <Box sx={{ display: "flex", gap: 1, p: 1.5, bgcolor: "grey.50", borderRadius: 1, mb: 2 }}>
+                      <Box sx={{ display: "flex", gap: 1, p: 1.5, bgcolor: "action.hover", borderRadius: 1, mb: 2 }}>
                         <Box sx={{ flex: 1, textAlign: "center" }}>
                           <Typography variant="caption" color="text.secondary" display="block">
                             Tea: ₹{teaTotal} → {teaRecipientCount} people

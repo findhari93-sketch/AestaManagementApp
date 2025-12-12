@@ -220,7 +220,7 @@ export default function SecurityTab({ onSuccess, onError }: SecurityTabProps) {
             <Grid size={{ xs: 12 }}>
               <Paper
                 variant="outlined"
-                sx={{ p: 2, bgcolor: "grey.50", borderRadius: 2 }}
+                sx={{ p: 2, bgcolor: "action.hover", borderRadius: 2 }}
               >
                 <Typography variant="subtitle2" gutterBottom>
                   Password Requirements

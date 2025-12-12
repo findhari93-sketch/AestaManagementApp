@@ -229,7 +229,7 @@ export default function SubcontractPaymentBreakdown({
   const progressPercent = totalValue > 0 ? (totalPaid / totalValue) * 100 : 0;
 
   return (
-    <Box sx={{ p: 2, bgcolor: "grey.50" }}>
+    <Box sx={{ p: 2, bgcolor: "action.hover" }}>
       {/* Summary Header */}
       <Paper sx={{ p: 2, mb: 2 }}>
         <Typography variant="subtitle2" color="text.secondary" gutterBottom>

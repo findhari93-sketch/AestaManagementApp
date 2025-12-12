@@ -76,7 +76,7 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
                 sx={{
                   p: 2,
                   mb: 3,
-                  bgcolor: "grey.50",
+                  bgcolor: "action.hover",
                   textAlign: "left",
                   overflow: "auto",
                   maxHeight: 150,

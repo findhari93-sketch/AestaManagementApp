@@ -149,7 +149,7 @@ export default function WorkUpdateViewer({
                 sx={{
                   p: 1.5,
                   mb: 2,
-                  bgcolor: "grey.50",
+                  bgcolor: "action.hover",
                 }}
               >
                 <Box sx={{ display: "flex", alignItems: "center", gap: 2, mb: 1 }}>

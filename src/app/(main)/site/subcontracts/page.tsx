@@ -1512,7 +1512,7 @@ export default function SiteSubcontractsPage() {
 
               {/* Balance after payment preview */}
               {paymentForm.amount > 0 && (
-                <Paper elevation={0} sx={{ p: 2, bgcolor: "grey.100", borderRadius: 2 }}>
+                <Paper elevation={0} sx={{ p: 2, bgcolor: "action.selected", borderRadius: 2 }}>
                   <Grid container spacing={2}>
                     <Grid size={{ xs: 6 }}>
                       <Typography variant="caption" color="text.secondary">

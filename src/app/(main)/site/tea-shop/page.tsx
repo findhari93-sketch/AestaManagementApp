@@ -466,7 +466,7 @@ export default function TeaShopPage() {
               <TableContainer sx={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
                 <Table size="small" sx={{ minWidth: 600 }}>
                   <TableHead>
-                    <TableRow sx={{ bgcolor: "grey.100" }}>
+                    <TableRow sx={{ bgcolor: "action.selected" }}>
                       <TableCell sx={{
                         fontWeight: 700,
                         position: 'sticky',
@@ -631,7 +631,7 @@ export default function TeaShopPage() {
             <TableContainer sx={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
               <Table size="small" sx={{ minWidth: 800 }}>
                 <TableHead>
-                  <TableRow sx={{ bgcolor: "grey.100" }}>
+                  <TableRow sx={{ bgcolor: "action.selected" }}>
                     <TableCell sx={{ fontWeight: 700, fontSize: { xs: '0.7rem', sm: '0.875rem' } }}>Payment Date</TableCell>
                     <TableCell sx={{ fontWeight: 700, fontSize: { xs: '0.7rem', sm: '0.875rem' } }}>Period</TableCell>
                     <TableCell sx={{ fontWeight: 700, fontSize: { xs: '0.7rem', sm: '0.875rem' } }} align="right">Total Due</TableCell>

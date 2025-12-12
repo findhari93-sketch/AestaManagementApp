@@ -46,7 +46,8 @@
       "Bash(curl:*)",
       "Bash(cmd /c copy:*)",
       "Bash(if exist .next rmdir /s /q .next)",
-      "Bash(tr:*)"
+      "Bash(tr:*)",
+      "Bash(npm ls:*)"
     ],
     "deny": [],
     "ask": []

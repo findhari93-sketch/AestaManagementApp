@@ -2102,7 +2102,7 @@ export default function AttendanceDrawer({
                 {/* Custom Times - Collapsible - Hidden in morning mode */}
                 <Collapse in={showGlobalCustomTimes && mode !== "morning"}>
                   <Box
-                    sx={{ bgcolor: "grey.50", p: 1.5, borderRadius: 1, mb: 2 }}
+                    sx={{ bgcolor: "action.hover", p: 1.5, borderRadius: 1, mb: 2 }}
                   >
                     <Grid container spacing={1.5} alignItems="center">
                       <Grid size={2.5}>
@@ -2287,6 +2287,21 @@ export default function AttendanceDrawer({
                                         ml: 0.5,
                                       }}
                                     />
+                                    {/* Salary Badge - Always visible */}
+                                    <Typography
+                                      variant="caption"
+                                      fontWeight={600}
+                                      color="success.main"
+                                      sx={{
+                                        bgcolor: "success.50",
+                                        px: 1,
+                                        py: 0.25,
+                                        borderRadius: 1,
+                                        ml: 0.5,
+                                      }}
+                                    >
+                                      ₹{selection.dailyRate.toLocaleString()}/day
+                                    </Typography>
                                   </Box>
                                 </Box>
                                 <IconButton
@@ -2366,7 +2381,7 @@ export default function AttendanceDrawer({
                                     alignItems: "center",
                                     py: 1,
                                     px: 1.5,
-                                    bgcolor: "grey.50",
+                                    bgcolor: "action.hover",
                                     borderRadius: 1,
                                   }}
                                 >
@@ -2450,7 +2465,7 @@ export default function AttendanceDrawer({
                                   sx={{
                                     mt: 1.5,
                                     p: 1.5,
-                                    bgcolor: "grey.50",
+                                    bgcolor: "action.hover",
                                     borderRadius: 1,
                                   }}
                                 >
@@ -2726,6 +2741,26 @@ export default function AttendanceDrawer({
                             slotProps={{ htmlInput: { min: 1 } }}
                           />
                         </Grid>
+                        {/* Salary Badge - Morning mode only */}
+                        {mode === "morning" && (
+                          <Grid size={5}>
+                            <Box sx={{ display: "flex", alignItems: "center", height: "100%", pt: 0.5 }}>
+                              <Typography
+                                variant="caption"
+                                fontWeight={600}
+                                color="success.main"
+                                sx={{
+                                  bgcolor: "success.50",
+                                  px: 1,
+                                  py: 0.5,
+                                  borderRadius: 1,
+                                }}
+                              >
+                                ₹{entry.ratePerPerson.toLocaleString()}/person
+                              </Typography>
+                            </Box>
+                          </Grid>
+                        )}
                         {/* Rate/Person - Hidden in morning mode */}
                         {mode !== "morning" && (
                           <Grid size={3}>
@@ -3025,7 +3060,7 @@ export default function AttendanceDrawer({
             borderColor: "divider",
             px: 2,
             py: 1.5,
-            bgcolor: "grey.50",
+            bgcolor: "action.hover",
           }}
         >
           {/* Line 1: Laborers count with breakdown */}

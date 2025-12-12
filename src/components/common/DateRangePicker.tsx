@@ -324,12 +324,12 @@ export default function DateRangePicker({
             justifyContent: "space-between",
             px: { xs: 1, sm: 1.5 },
             py: 0.5,
-            bgcolor: "white",
+            bgcolor: "background.paper",
             borderColor: "divider",
             color: "text.primary",
             fontSize: { xs: "0.75rem", sm: "0.875rem" },
             "&:hover": {
-              bgcolor: "grey.50",
+              bgcolor: "action.hover",
               borderColor: "divider",
             },
           }}

@@ -160,7 +160,7 @@ function PhaseNode({
           {/* SubPhases Section */}
           <Box
             sx={{
-              bgcolor: "white",
+              bgcolor: "background.paper",
               borderRadius: 2,
               p: 1.5,
               mt: 1,
@@ -526,7 +526,7 @@ function PhaseListCard({
                     gap: 1,
                     py: 1,
                     px: 2,
-                    bgcolor: "white",
+                    bgcolor: "background.paper",
                     borderRadius: 2,
                     border: `1px solid ${alpha(theme.palette.info.main, 0.3)}`,
                     boxShadow: `0 1px 3px ${alpha(
@@ -926,7 +926,7 @@ export default function ConstructionPhasesPage() {
               color: theme.palette.text.secondary,
               transition: "all 0.2s ease",
               "&.Mui-selected": {
-                bgcolor: "white",
+                bgcolor: "background.paper",
                 color: theme.palette.primary.main,
                 boxShadow: `0 1px 3px ${alpha(
                   theme.palette.common.black,
@@ -1004,7 +1004,7 @@ export default function ConstructionPhasesPage() {
               p: 4,
               borderRadius: 3,
               border: `1px solid ${alpha(theme.palette.divider, 0.5)}`,
-              bgcolor: "white",
+              bgcolor: "background.paper",
               overflowX: "auto",
               cursor: isPanning ? "grabbing" : "grab",
               userSelect: "none",

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useEffect } from "react";
 import { ThemeProvider as MuiThemeProvider } from "@mui/material/styles";
 import CssBaseline from "@mui/material/CssBaseline";
 import { ThemeContextProvider, useThemeMode } from "@/contexts/ThemeContext";
@@ -10,6 +10,11 @@ function ThemeProviderInner({ children }: { children: React.ReactNode }) {
   const { mode } = useThemeMode();
 
   const theme = useMemo(() => createAppTheme(mode), [mode]);
+
+  // Set data attribute for CSS selectors to target dark mode
+  useEffect(() => {
+    document.documentElement.setAttribute("data-mui-color-scheme", mode);
+  }, [mode]);
 
   return (
     <MuiThemeProvider theme={theme}>

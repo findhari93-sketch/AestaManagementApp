@@ -360,7 +360,7 @@ export default function HolidayConfirmDialog({
           {/* Site Info */}
           <Box
             sx={{
-              bgcolor: "grey.50",
+              bgcolor: "action.hover",
               borderRadius: 2,
               p: 2,
               mb: 2,
@@ -438,7 +438,7 @@ export default function HolidayConfirmDialog({
                   <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>
                     Recent Past
                   </Typography>
-                  <List dense sx={{ bgcolor: "grey.100", borderRadius: 2 }}>
+                  <List dense sx={{ bgcolor: "action.selected", borderRadius: 2 }}>
                     {pastHolidays.slice(0, 5).map((holiday, index) => (
                       <React.Fragment key={holiday.id}>
                         {index > 0 && <Divider />}

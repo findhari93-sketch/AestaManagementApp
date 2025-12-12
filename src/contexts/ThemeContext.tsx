@@ -31,7 +31,7 @@ export function ThemeContextProvider({
   const [mode, setMode] = useState<ThemePreference>(initialMode || "light");
   const [isSystemPreference, setIsSystemPreference] = useState(false);
 
-  // Initialize theme from localStorage or system preference
+  // Initialize theme from localStorage - default to light mode
   useEffect(() => {
     // Check localStorage first
     const stored = localStorage.getItem(STORAGE_KEY) as ThemePreference | null;
@@ -40,10 +40,9 @@ export function ThemeContextProvider({
       setMode(stored);
       setIsSystemPreference(false);
     } else {
-      // Fall back to system preference
-      const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-      setMode(prefersDark ? "dark" : "light");
-      setIsSystemPreference(true);
+      // Default to light mode (not system preference)
+      setMode("light");
+      setIsSystemPreference(false);
     }
   }, []);
 

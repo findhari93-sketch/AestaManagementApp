@@ -346,7 +346,7 @@ export default function LaborerSelectionDialog({
         />
       </DialogContent>
 
-      <DialogActions sx={{ px: 3, py: 2, bgcolor: "grey.50" }}>
+      <DialogActions sx={{ px: 3, py: 2, bgcolor: "action.hover" }}>
         <Box sx={{ flex: 1, display: "flex", alignItems: "center", gap: 2 }}>
           <Typography variant="body2" fontWeight={600}>
             {summary.count} laborer{summary.count !== 1 ? "s" : ""} selected

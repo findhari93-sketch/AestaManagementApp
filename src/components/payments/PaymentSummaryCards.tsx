@@ -242,7 +242,7 @@ export default function PaymentSummaryCards({
 
       {/* Unlinked (Site Expenses) */}
       {data.unlinkedTotal > 0 && (
-        <Card sx={{ mt: 2, bgcolor: "grey.50" }}>
+        <Card sx={{ mt: 2, bgcolor: "action.hover" }}>
           <CardContent sx={{ py: 1.5, "&:last-child": { pb: 1.5 } }}>
             <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
               <ExpenseIcon fontSize="small" color="action" />

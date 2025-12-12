@@ -25,6 +25,90 @@ import imageCompression from "browser-image-compression";
 import { getWorkUpdatePhotoPath } from "./imageUtils";
 import { SupabaseClient } from "@supabase/supabase-js";
 
+// Helper to detect if running on mobile
+const isMobileDevice = () => {
+  if (typeof window === "undefined") return false;
+  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+    navigator.userAgent
+  );
+};
+
+// Helper to detect HEIC/HEIF format
+const isHeicFile = (file: File): boolean => {
+  const fileName = file.name.toLowerCase();
+  const fileType = file.type.toLowerCase();
+  return (
+    fileName.endsWith(".heic") ||
+    fileName.endsWith(".heif") ||
+    fileType === "image/heic" ||
+    fileType === "image/heif"
+  );
+};
+
+// Timeout wrapper for async operations
+const withTimeout = <T,>(promise: Promise<T>, timeoutMs: number, errorMsg: string): Promise<T> => {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(errorMsg)), timeoutMs)
+    ),
+  ]);
+};
+
+// Canvas-based fallback compression for when library fails
+const canvasCompress = async (file: File, maxSize: number = 1200): Promise<File> => {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const reader = new FileReader();
+
+    reader.onload = (e) => {
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        let { width, height } = img;
+
+        // Scale down if needed
+        if (width > maxSize || height > maxSize) {
+          const ratio = Math.min(maxSize / width, maxSize / height);
+          width = Math.round(width * ratio);
+          height = Math.round(height * ratio);
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          reject(new Error("Canvas context not available"));
+          return;
+        }
+
+        ctx.drawImage(img, 0, 0, width, height);
+
+        canvas.toBlob(
+          (blob) => {
+            if (!blob) {
+              reject(new Error("Canvas compression failed"));
+              return;
+            }
+            const compressedFile = new File([blob], file.name.replace(/\.[^.]+$/, ".jpg"), {
+              type: "image/jpeg",
+            });
+            resolve(compressedFile);
+          },
+          "image/jpeg",
+          0.7
+        );
+      };
+
+      img.onerror = () => reject(new Error("Failed to load image"));
+      img.src = e.target?.result as string;
+    };
+
+    reader.onerror = () => reject(new Error("Failed to read file"));
+    reader.readAsDataURL(file);
+  });
+};
+
 // Size variants for different contexts
 type PhotoSize = "small" | "medium" | "large" | "xlarge";
 
@@ -155,8 +239,10 @@ export default function PhotoCaptureButton({
     const file = e.target.files?.[0];
     if (!file) return;
 
+    const isMobile = isMobileDevice();
+    let workingFile = file;
     const fileSizeMB = file.size / (1024 * 1024);
-    console.log(`[PhotoCapture] Starting upload for file: ${file.name}, size: ${fileSizeMB.toFixed(2)}MB`);
+    console.log(`[PhotoCapture] Starting upload for file: ${file.name}, size: ${fileSizeMB.toFixed(2)}MB, mobile: ${isMobile}`);
 
     // Reset inputs so same file can be selected again
     if (cameraInputRef.current) {
@@ -170,22 +256,48 @@ export default function PhotoCaptureButton({
     abortControllerRef.current = new AbortController();
 
     setIsUploading(true);
-    setUploadProgress(10);
+    setUploadProgress(5);
     setUploadStatus("compressing");
     setError(null);
 
     try {
-      // Compress using browser-image-compression (uses Web Workers - won't block UI)
-      console.log("[PhotoCapture] Compressing image with browser-image-compression...");
+      // Step 1: Convert HEIC/HEIF to JPEG if needed (common on iOS)
+      if (isHeicFile(file)) {
+        console.log("[PhotoCapture] HEIC file detected, converting to JPEG...");
+        setUploadProgress(10);
+        try {
+          // Dynamic import to avoid SSR issues
+          const heic2any = (await import("heic2any")).default;
+          const convertedBlob = await withTimeout(
+            heic2any({ blob: file, toType: "image/jpeg", quality: 0.8 }) as Promise<Blob>,
+            30000,
+            "HEIC conversion timed out. Please try again."
+          );
+          // heic2any can return Blob or Blob[]
+          const blob = Array.isArray(convertedBlob) ? convertedBlob[0] : convertedBlob;
+          workingFile = new File([blob], file.name.replace(/\.heic$/i, ".jpg").replace(/\.heif$/i, ".jpg"), {
+            type: "image/jpeg",
+          });
+          console.log(`[PhotoCapture] HEIC converted to JPEG: ${(workingFile.size / 1024 / 1024).toFixed(2)}MB`);
+        } catch (heicErr) {
+          console.warn("[PhotoCapture] HEIC conversion failed:", heicErr);
+          // Continue with original file - it might still work
+        }
+      }
+
+      const workingFileSizeMB = workingFile.size / (1024 * 1024);
       setUploadProgress(20);
 
+      // Step 2: Compress the image
+      console.log("[PhotoCapture] Compressing image...");
+
+      // Use more aggressive settings for mobile
       const compressionOptions = {
-        maxSizeMB: fileSizeMB > 5 ? 0.3 : 0.5, // More aggressive for very large files
-        maxWidthOrHeight: fileSizeMB > 5 ? 1200 : 1920,
-        useWebWorker: true, // Critical: prevents UI blocking
+        maxSizeMB: isMobile ? 0.3 : (workingFileSizeMB > 5 ? 0.3 : 0.5),
+        maxWidthOrHeight: isMobile ? 1200 : (workingFileSizeMB > 5 ? 1200 : 1920),
+        useWebWorker: !isMobile, // Disable web workers on mobile (more stable)
         fileType: "image/jpeg" as const,
-        initialQuality: fileSizeMB > 5 ? 0.6 : 0.8,
-        signal: abortControllerRef.current.signal, // Allow cancellation
+        initialQuality: isMobile ? 0.6 : (workingFileSizeMB > 5 ? 0.6 : 0.8),
         onProgress: (progress: number) => {
           // Progress from 20 to 50 during compression
           setUploadProgress(20 + Math.round(progress * 30));
@@ -193,16 +305,36 @@ export default function PhotoCaptureButton({
       };
 
       let compressedFile: File;
+
+      // Try library compression with timeout
+      const compressionTimeout = isMobile ? 30000 : 20000;
       try {
-        compressedFile = await imageCompression(file, compressionOptions);
-        console.log(`[PhotoCapture] Compressed to ${(compressedFile.size / 1024).toFixed(0)}KB`);
+        compressedFile = await withTimeout(
+          imageCompression(workingFile, compressionOptions),
+          compressionTimeout,
+          "Compression timed out"
+        );
+        console.log(`[PhotoCapture] Library compressed to ${(compressedFile.size / 1024).toFixed(0)}KB`);
       } catch (compressionErr) {
-        // If compression fails/times out, try uploading original if it's small enough
-        if (fileSizeMB <= 5) {
-          console.warn("[PhotoCapture] Compression failed, using original file");
-          compressedFile = file;
-        } else {
-          throw new Error("Image too large. Please try a smaller photo.");
+        console.warn("[PhotoCapture] Library compression failed, trying canvas fallback:", compressionErr);
+
+        // Try canvas-based fallback compression
+        try {
+          compressedFile = await withTimeout(
+            canvasCompress(workingFile, isMobile ? 1200 : 1920),
+            15000,
+            "Canvas compression timed out"
+          );
+          console.log(`[PhotoCapture] Canvas compressed to ${(compressedFile.size / 1024).toFixed(0)}KB`);
+        } catch (canvasErr) {
+          console.warn("[PhotoCapture] Canvas compression also failed:", canvasErr);
+          // Last resort: use working file if it's small enough
+          if (workingFileSizeMB <= 5) {
+            console.warn("[PhotoCapture] Using uncompressed file");
+            compressedFile = workingFile;
+          } else {
+            throw new Error("Could not compress image. Please try a smaller photo.");
+          }
         }
       }
 
