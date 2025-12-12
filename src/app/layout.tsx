@@ -3,6 +3,7 @@ import "./globals.css";
 import ThemeProvider from "@/components/providers/ThemeProvider";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { SiteProvider } from "@/contexts/SiteContext";
+import { NotificationProvider } from "@/contexts/NotificationContext";
 import QueryProvider from "@/providers/QueryProvider";
 
 export const metadata: Metadata = {
@@ -34,7 +35,9 @@ export default function RootLayout({
           <ThemeProvider>
             <AuthProvider>
               <SiteProvider>
-                {children}
+                <NotificationProvider>
+                  {children}
+                </NotificationProvider>
               </SiteProvider>
             </AuthProvider>
           </ThemeProvider>

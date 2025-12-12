@@ -50,8 +50,10 @@ import {
   Close as CloseIcon,
   WbSunny,
   EventNote,
+  EventBusy as HolidayIcon,
 } from "@mui/icons-material";
 import AttendanceDrawer from "@/components/attendance/AttendanceDrawer";
+import HolidayConfirmDialog from "@/components/attendance/HolidayConfirmDialog";
 import TeaShopEntryDialog from "@/components/tea-shop/TeaShopEntryDialog";
 import PaymentDialog from "@/components/payments/PaymentDialog";
 import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
@@ -281,6 +283,28 @@ export default function AttendancePage() {
     marketCount: number;
     totalAmount: number;
   } | null>(null);
+
+  // Holiday management state
+  const [holidayDialogOpen, setHolidayDialogOpen] = useState(false);
+  const [holidayDialogMode, setHolidayDialogMode] = useState<"mark" | "revoke" | "list">("mark");
+  const [todayHoliday, setTodayHoliday] = useState<{
+    id: string;
+    site_id: string;
+    date: string;
+    reason: string | null;
+    is_paid_holiday: boolean | null;
+    created_at: string;
+    created_by: string | null;
+  } | null>(null);
+  const [recentHolidays, setRecentHolidays] = useState<Array<{
+    id: string;
+    site_id: string;
+    date: string;
+    reason: string | null;
+    is_paid_holiday: boolean | null;
+    created_at: string;
+    created_by: string | null;
+  }>>([]);
 
   const canEdit = hasEditPermission(userProfile?.role);
 
@@ -735,6 +759,62 @@ export default function AttendancePage() {
   useEffect(() => {
     fetchAttendanceHistory();
   }, [selectedSite, dateFrom, dateTo]);
+
+  // Check if today is a holiday for the selected site
+  const checkTodayHoliday = useCallback(async () => {
+    if (!selectedSite?.id) {
+      setTodayHoliday(null);
+      setRecentHolidays([]);
+      return;
+    }
+
+    const today = dayjs().format("YYYY-MM-DD");
+    const thirtyDaysAgo = dayjs().subtract(30, "day").format("YYYY-MM-DD");
+    const thirtyDaysLater = dayjs().add(30, "day").format("YYYY-MM-DD");
+
+    try {
+      // Check today's holiday
+      const { data: todayData } = await supabase
+        .from("site_holidays")
+        .select("*")
+        .eq("site_id", selectedSite.id)
+        .eq("date", today)
+        .single();
+
+      setTodayHoliday(todayData || null);
+
+      // Fetch recent and upcoming holidays (last 30 days to next 30 days)
+      const { data: holidaysData } = await supabase
+        .from("site_holidays")
+        .select("*")
+        .eq("site_id", selectedSite.id)
+        .gte("date", thirtyDaysAgo)
+        .lte("date", thirtyDaysLater)
+        .order("date", { ascending: false });
+
+      setRecentHolidays(holidaysData || []);
+    } catch (err) {
+      console.error("Error checking holidays:", err);
+    }
+  }, [selectedSite?.id, supabase]);
+
+  useEffect(() => {
+    checkTodayHoliday();
+  }, [checkTodayHoliday]);
+
+  const handleHolidayClick = () => {
+    if (todayHoliday) {
+      setHolidayDialogMode("revoke");
+    } else {
+      setHolidayDialogMode("mark");
+    }
+    setHolidayDialogOpen(true);
+  };
+
+  const handleHolidaySuccess = () => {
+    checkTodayHoliday();
+    fetchAttendanceHistory();
+  };
 
   const toggleDateExpanded = (date: string) => {
     setDateSummaries((prev) =>
@@ -3321,7 +3401,33 @@ export default function AttendancePage() {
               },
             }}
           />
+          <SpeedDialAction
+            icon={<HolidayIcon />}
+            tooltipTitle={todayHoliday ? "Revoke Holiday" : "Mark as Holiday"}
+            tooltipOpen
+            onClick={handleHolidayClick}
+            sx={{
+              "& .MuiSpeedDialAction-staticTooltipLabel": {
+                whiteSpace: "nowrap",
+                bgcolor: todayHoliday ? "error.main" : "success.main",
+                color: todayHoliday ? "error.contrastText" : "success.contrastText",
+              },
+            }}
+          />
         </SpeedDial>
+      )}
+
+      {/* Holiday Confirm Dialog */}
+      {selectedSite && (
+        <HolidayConfirmDialog
+          open={holidayDialogOpen}
+          onClose={() => setHolidayDialogOpen(false)}
+          mode={holidayDialogMode}
+          site={{ id: selectedSite.id, name: selectedSite.name }}
+          existingHoliday={todayHoliday}
+          recentHolidays={recentHolidays}
+          onSuccess={handleHolidaySuccess}
+        />
       )}
     </Box>
   );

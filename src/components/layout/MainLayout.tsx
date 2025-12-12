@@ -48,6 +48,8 @@ import {
 import { useRouter, usePathname } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import SiteSelector from "@/components/layout/SiteSelector";
+import NotificationBell from "@/components/notifications/NotificationBell";
+import ActiveSectionChip from "@/components/layout/ActiveSectionChip";
 
 const drawerWidth = 260;
 const collapsedDrawerWidth = 0;
@@ -95,6 +97,7 @@ const siteNavItems: NavItem[] = [
     path: "/site/subcontracts",
   },
   { text: "Site Reports", icon: <AssessmentIcon />, path: "/site/reports" },
+  { text: "Site Settings", icon: <SettingsIcon />, path: "/site/settings" },
 ];
 
 // Company-wide menu items
@@ -373,8 +376,13 @@ export default function MainLayout({
           </IconButton>
 
           {/* Site Selector - Only visible on Site tab */}
-          <Box sx={{ flexGrow: 1 }}>
-            {activeTab === "site" && <SiteSelector />}
+          <Box sx={{ flexGrow: 1, display: "flex", alignItems: "center" }}>
+            {activeTab === "site" && (
+              <>
+                <SiteSelector />
+                <ActiveSectionChip />
+              </>
+            )}
             {activeTab === "company" && (
               <Typography variant="h6" fontWeight={500} color="text.secondary">
                 Company Management
@@ -382,9 +390,12 @@ export default function MainLayout({
             )}
           </Box>
 
+          {/* Notification Bell */}
+          <NotificationBell />
+
           {/* User Avatar & Menu */}
           <Tooltip title="Account settings">
-            <IconButton onClick={handleUserMenuOpen} sx={{ ml: { xs: 1, sm: 2 } }}>
+            <IconButton onClick={handleUserMenuOpen} sx={{ ml: { xs: 0.5, sm: 1 } }}>
               <Avatar
                 src={userProfile?.avatar_url || undefined}
                 sx={{
