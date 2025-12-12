@@ -40,7 +40,13 @@
       "Bash(node scripts/setup-storage-bucket.mjs:*)",
       "Bash(where:*)",
       "Bash(vercel:*)",
-      "Bash(timeout /t 60 /nobreak)"
+      "Bash(timeout /t 60 /nobreak)",
+      "Bash(xxd:*)",
+      "Bash(npm uninstall:*)",
+      "Bash(curl:*)",
+      "Bash(cmd /c copy:*)",
+      "Bash(if exist .next rmdir /s /q .next)",
+      "Bash(tr:*)"
     ],
     "deny": [],
     "ask": []

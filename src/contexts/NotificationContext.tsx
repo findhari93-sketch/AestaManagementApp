@@ -23,10 +23,16 @@ export interface Notification {
   is_read: boolean;
   read_at: string | null;
   action_url: string | null;
-  related_id: string | null; // site_id for attendance reminders
-  related_table: string | null; // "sites" for attendance reminders
+  related_id: string | null; // site_id for attendance reminders, transaction_id for settlements
+  related_table: string | null; // "sites" for attendance reminders, "site_engineer_transactions" for settlements
   expires_at: string | null;
   created_at: string;
+}
+
+// Settlement dialog state
+export interface SettlementDialogState {
+  type: "form" | "details" | null;
+  transactionId: string | null;
 }
 
 interface NotificationContextType {
@@ -37,6 +43,11 @@ interface NotificationContextType {
   markAllAsRead: () => Promise<void>;
   handleNotificationClick: (notification: Notification) => void;
   refreshNotifications: () => Promise<void>;
+  // Settlement dialog management
+  settlementDialog: SettlementDialogState;
+  openSettlementForm: (transactionId: string) => void;
+  openSettlementDetails: (transactionId: string) => void;
+  closeSettlementDialog: () => void;
 }
 
 const NotificationContext = createContext<NotificationContextType | undefined>(
@@ -51,7 +62,26 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   const router = useRouter();
   const [supabase] = useState(() => createClient());
 
+  // Settlement dialog state
+  const [settlementDialog, setSettlementDialog] = useState<SettlementDialogState>({
+    type: null,
+    transactionId: null,
+  });
+
   const unreadCount = notifications.filter((n) => !n.is_read).length;
+
+  // Settlement dialog management
+  const openSettlementForm = useCallback((transactionId: string) => {
+    setSettlementDialog({ type: "form", transactionId });
+  }, []);
+
+  const openSettlementDetails = useCallback((transactionId: string) => {
+    setSettlementDialog({ type: "details", transactionId });
+  }, []);
+
+  const closeSettlementDialog = useCallback(() => {
+    setSettlementDialog({ type: null, transactionId: null });
+  }, []);
 
   // Fetch notifications
   const fetchNotifications = useCallback(async () => {
@@ -181,25 +211,42 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       // Mark as read
       markAsRead(notification.id);
 
-      // If it's an attendance reminder, navigate to attendance page
-      if (
-        notification.notification_type === "attendance_reminder" &&
-        notification.related_id &&
-        notification.related_table === "sites"
-      ) {
-        // Find the site and set it as selected
-        const site = sites.find((s) => s.id === notification.related_id);
-        if (site) {
-          setSelectedSite(site);
-        }
-        // Navigate to attendance page with autoOpen param
-        router.push(`/site/attendance?autoOpen=true`);
-      } else if (notification.action_url) {
-        // Use the action URL if provided
-        router.push(notification.action_url);
+      // Handle different notification types
+      switch (notification.notification_type) {
+        case "attendance_reminder":
+          // Attendance reminder - navigate to attendance page
+          if (notification.related_id && notification.related_table === "sites") {
+            const site = sites.find((s) => s.id === notification.related_id);
+            if (site) {
+              setSelectedSite(site);
+            }
+            router.push(`/site/attendance?autoOpen=true`);
+          }
+          break;
+
+        case "payment_settlement_pending":
+          // Engineer needs to settle payment - open settlement form
+          if (notification.related_id) {
+            openSettlementForm(notification.related_id);
+          }
+          break;
+
+        case "payment_settlement_completed":
+          // Admin/office needs to review settlement - open settlement details
+          if (notification.related_id) {
+            openSettlementDetails(notification.related_id);
+          }
+          break;
+
+        default:
+          // Use the action URL if provided
+          if (notification.action_url) {
+            router.push(notification.action_url);
+          }
+          break;
       }
     },
-    [markAsRead, sites, setSelectedSite, router]
+    [markAsRead, sites, setSelectedSite, router, openSettlementForm, openSettlementDetails]
   );
 
   const refreshNotifications = useCallback(async () => {
@@ -217,6 +264,10 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
         markAllAsRead,
         handleNotificationClick,
         refreshNotifications,
+        settlementDialog,
+        openSettlementForm,
+        openSettlementDetails,
+        closeSettlementDialog,
       }}
     >
       {children}

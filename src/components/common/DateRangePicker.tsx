@@ -259,21 +259,36 @@ export default function DateRangePicker({
     }
   };
 
-  // Navigate to previous/next range (based on current range duration)
+  // Check if it's a single date selection (not a range)
+  const isSingleDate = format(startDate, "yyyy-MM-dd") === format(endDate, "yyyy-MM-dd");
+
+  // Navigate dates based on selection type
   const handleNavigate = (direction: "prev" | "next") => {
-    const daysDiff = differenceInDays(endDate, startDate) + 1;
-    if (direction === "prev") {
-      onChange(subDays(startDate, daysDiff), subDays(endDate, daysDiff));
-    } else {
-      const newEnd = addDays(endDate, daysDiff);
-      // Don't go past today
-      if (newEnd <= new Date()) {
-        onChange(addDays(startDate, daysDiff), newEnd);
+    if (isSingleDate) {
+      // Single date: move by 1 day in either direction
+      if (direction === "prev") {
+        const newDate = subDays(startDate, 1);
+        onChange(newDate, newDate);
       } else {
-        onChange(addDays(startDate, daysDiff), new Date());
+        const newDate = addDays(startDate, 1);
+        // Don't go past today
+        if (newDate <= new Date()) {
+          onChange(newDate, newDate);
+        }
       }
+    } else {
+      // Date range: only allow going backwards, move by 1 day
+      if (direction === "prev") {
+        onChange(subDays(startDate, 1), subDays(endDate, 1));
+      }
+      // "next" does nothing for ranges (button is disabled)
     }
   };
+
+  // Disable next button: at today OR when it's a date range (not single date)
+  const isNextDisabled =
+    format(endDate, "yyyy-MM-dd") === format(new Date(), "yyyy-MM-dd") ||
+    !isSingleDate;
 
   // Quick access to last 7 days
   const handleShowLast7Days = () => {
@@ -328,11 +343,11 @@ export default function DateRangePicker({
           </Typography>
         </Button>
 
-        {/* Next arrow */}
+        {/* Next arrow - disabled for date ranges, only works for single date */}
         <IconButton
           size="small"
           onClick={() => handleNavigate("next")}
-          disabled={format(endDate, "yyyy-MM-dd") === format(new Date(), "yyyy-MM-dd")}
+          disabled={isNextDisabled}
           sx={{ p: { xs: 0.25, sm: 0.5 } }}
         >
           <ChevronRightIcon fontSize="small" />

@@ -33,6 +33,9 @@ import {
   Settings,
   Warning as WarningIcon,
   Group as GroupIcon,
+  Speed as SpeedIcon,
+  ListAlt as ListAltIcon,
+  CallSplit as SplitIcon,
 } from "@mui/icons-material";
 import { createClient } from "@/lib/supabase/client";
 import { useSite } from "@/contexts/SiteContext";
@@ -43,7 +46,7 @@ import TeaShopDrawer from "@/components/tea-shop/TeaShopDrawer";
 import TeaShopEntryDialog from "@/components/tea-shop/TeaShopEntryDialog";
 import AuditAvatarGroup from "@/components/common/AuditAvatarGroup";
 import TeaShopSettlementDialog from "@/components/tea-shop/TeaShopSettlementDialog";
-import type { TeaShopAccount, TeaShopEntry, TeaShopSettlement } from "@/types/database.types";
+import type { TeaShopAccount, TeaShopEntry, TeaShopSettlement, TeaShopEntryExtended } from "@/types/database.types";
 import dayjs from "dayjs";
 
 interface TabPanelProps {
@@ -477,6 +480,7 @@ export default function TeaShopPage() {
                       <TableCell sx={{ fontWeight: 700, fontSize: { xs: '0.7rem', sm: '0.875rem' } }} align="right">Tea</TableCell>
                       <TableCell sx={{ fontWeight: 700, fontSize: { xs: '0.7rem', sm: '0.875rem' } }} align="right">Snk</TableCell>
                       <TableCell sx={{ fontWeight: 700, fontSize: { xs: '0.7rem', sm: '0.875rem' } }} align="right">Total</TableCell>
+                      <TableCell sx={{ fontWeight: 700, display: { xs: 'none', sm: 'table-cell' }, fontSize: { xs: '0.7rem', sm: '0.875rem' } }} align="center">Mode</TableCell>
                       <TableCell sx={{ fontWeight: 700, display: { xs: 'none', md: 'table-cell' } }} align="center">By</TableCell>
                       <TableCell sx={{ fontWeight: 700, fontSize: { xs: '0.7rem', sm: '0.875rem' } }} align="center">Act</TableCell>
                     </TableRow>
@@ -538,6 +542,40 @@ export default function TeaShopPage() {
                             ₹{(entry.total_amount || 0).toLocaleString()}
                           </Typography>
                         </TableCell>
+                        {/* Mode Indicator */}
+                        <TableCell align="center" sx={{ display: { xs: 'none', sm: 'table-cell' } }}>
+                          {(() => {
+                            const extEntry = entry as TeaShopEntryExtended;
+                            const isSimple = extEntry.entry_mode === "simple";
+                            const isSplit = extEntry.is_split_entry;
+                            return (
+                              <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.25 }}>
+                                <Tooltip title={isSimple ? "Simple Entry (Total cost with % split)" : "Detailed Entry (Per-laborer tracking)"}>
+                                  <Chip
+                                    icon={isSimple ? <SpeedIcon fontSize="small" /> : <ListAltIcon fontSize="small" />}
+                                    label={isSimple ? "Simple" : "Detail"}
+                                    size="small"
+                                    color={isSimple ? "info" : "default"}
+                                    variant="outlined"
+                                    sx={{ height: 20, '& .MuiChip-label': { fontSize: '0.65rem', px: 0.5 } }}
+                                  />
+                                </Tooltip>
+                                {isSplit && (
+                                  <Tooltip title={`Split entry (${extEntry.split_percentage}% of total)`}>
+                                    <Chip
+                                      icon={<SplitIcon fontSize="small" />}
+                                      label={`${extEntry.split_percentage}%`}
+                                      size="small"
+                                      color="secondary"
+                                      variant="outlined"
+                                      sx={{ height: 18, '& .MuiChip-label': { fontSize: '0.6rem', px: 0.25 } }}
+                                    />
+                                  </Tooltip>
+                                )}
+                              </Box>
+                            );
+                          })()}
+                        </TableCell>
                         <TableCell align="center" sx={{ display: { xs: 'none', md: 'table-cell' } }}>
                           <AuditAvatarGroup
                             createdByName={entry.entered_by}
@@ -575,7 +613,7 @@ export default function TeaShopPage() {
                     ))}
                     {filteredEntries.length === 0 && (
                       <TableRow>
-                        <TableCell colSpan={8} align="center" sx={{ py: 4 }}>
+                        <TableCell colSpan={9} align="center" sx={{ py: 4 }}>
                           <Typography color="text.secondary">
                             No entries found for the selected date range
                           </Typography>

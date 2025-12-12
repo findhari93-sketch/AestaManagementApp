@@ -57,6 +57,7 @@ import type {
   RecipientType,
 } from "@/types/database.types";
 import dayjs from "dayjs";
+import { createPaymentSettlementNotification } from "@/lib/services/notificationService";
 
 interface User {
   id: string;
@@ -445,11 +446,40 @@ export default function EngineerWalletPage() {
         recorded_by: userProfile?.name || "Unknown",
         recorded_by_user_id: userProfile?.id,
         is_settled: false,
+        // Set settlement_status for received_from_company transactions
+        settlement_status:
+          transactionForm.transaction_type === "received_from_company"
+            ? "pending_settlement"
+            : null,
       };
 
-      const { error: insertError } = await (supabase.from("site_engineer_transactions") as any).insert(insertData);
+      const { data: insertedData, error: insertError } = await (
+        supabase.from("site_engineer_transactions") as any
+      )
+        .insert(insertData)
+        .select("id")
+        .single();
 
       if (insertError) throw insertError;
+
+      // Create notification for site engineer if this is a payment to them
+      if (
+        transactionForm.transaction_type === "received_from_company" &&
+        insertedData?.id
+      ) {
+        // Get site name for the notification message
+        const siteName = sites.find((s) => s.id === transactionForm.site_id)?.name;
+
+        // Create notification (fire and forget - don't block on error)
+        createPaymentSettlementNotification(
+          supabase,
+          insertedData.id,
+          transactionForm.user_id,
+          transactionForm.amount,
+          { dailyCount: 0, marketCount: 0, totalAmount: transactionForm.amount },
+          siteName
+        ).catch((err) => console.error("Failed to create notification:", err));
+      }
 
       setSuccess("Transaction recorded successfully");
       await fetchData();

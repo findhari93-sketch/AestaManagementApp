@@ -23,6 +23,8 @@ import {
   EventBusy as AttendanceIcon,
   CheckCircle as CheckIcon,
   Circle as UnreadIcon,
+  AccountBalanceWallet as PaymentIcon,
+  TaskAlt as SettlementCompletedIcon,
 } from "@mui/icons-material";
 import { useNotifications, Notification } from "@/contexts/NotificationContext";
 import dayjs from "dayjs";
@@ -59,6 +61,10 @@ export default function NotificationBell() {
     switch (type) {
       case "attendance_reminder":
         return <AttendanceIcon color="warning" />;
+      case "payment_settlement_pending":
+        return <PaymentIcon color="warning" />;
+      case "payment_settlement_completed":
+        return <SettlementCompletedIcon color="success" />;
       default:
         return <NotificationsIcon color="action" />;
     }

@@ -50,6 +50,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import SiteSelector from "@/components/layout/SiteSelector";
 import NotificationBell from "@/components/notifications/NotificationBell";
 import ActiveSectionChip from "@/components/layout/ActiveSectionChip";
+import SettlementDialogManager from "@/components/settlement/SettlementDialogManager";
 
 const drawerWidth = 260;
 const collapsedDrawerWidth = 0;
@@ -358,6 +359,7 @@ export default function MainLayout({
           ml: { md: `${currentDrawerWidth}px` },
           bgcolor: "background.paper",
           color: "text.primary",
+          borderRadius: 0,
           transition: theme.transitions.create(["width", "margin"], {
             easing: theme.transitions.easing.sharp,
             duration: theme.transitions.duration.leavingScreen,
@@ -550,6 +552,9 @@ export default function MainLayout({
         <Toolbar sx={{ minHeight: { xs: 56, sm: 64 } }} />
         {children}
       </Box>
+
+      {/* Settlement Dialogs (managed via NotificationContext) */}
+      <SettlementDialogManager />
     </Box>
   );
 }

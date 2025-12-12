@@ -12,6 +12,31 @@ export type Database = {
   __InternalSupabase: {
     PostgrestVersion: "13.0.5"
   }
+  graphql_public: {
+    Tables: {
+      [_ in never]: never
+    }
+    Views: {
+      [_ in never]: never
+    }
+    Functions: {
+      graphql: {
+        Args: {
+          extensions?: Json
+          operationName?: string
+          query?: string
+          variables?: Json
+        }
+        Returns: Json
+      }
+    }
+    Enums: {
+      [_ in never]: never
+    }
+    CompositeTypes: {
+      [_ in never]: never
+    }
+  }
   public: {
     Tables: {
       advances: {
@@ -215,7 +240,9 @@ export type Database = {
           actual_end_date: string | null
           actual_start_date: string | null
           area_sqft: number | null
+          construction_phase_id: string | null
           created_at: string
+          created_by: string | null
           description: string | null
           id: string
           name: string
@@ -226,12 +253,15 @@ export type Database = {
           site_id: string
           status: Database["public"]["Enums"]["section_status"]
           updated_at: string
+          updated_by: string | null
         }
         Insert: {
           actual_end_date?: string | null
           actual_start_date?: string | null
           area_sqft?: number | null
+          construction_phase_id?: string | null
           created_at?: string
+          created_by?: string | null
           description?: string | null
           id?: string
           name: string
@@ -242,12 +272,15 @@ export type Database = {
           site_id: string
           status?: Database["public"]["Enums"]["section_status"]
           updated_at?: string
+          updated_by?: string | null
         }
         Update: {
           actual_end_date?: string | null
           actual_start_date?: string | null
           area_sqft?: number | null
+          construction_phase_id?: string | null
           created_at?: string
+          created_by?: string | null
           description?: string | null
           id?: string
           name?: string
@@ -258,13 +291,35 @@ export type Database = {
           site_id?: string
           status?: Database["public"]["Enums"]["section_status"]
           updated_at?: string
+          updated_by?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "building_sections_construction_phase_id_fkey"
+            columns: ["construction_phase_id"]
+            isOneToOne: false
+            referencedRelation: "construction_phases"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "building_sections_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "building_sections_site_id_fkey"
             columns: ["site_id"]
             isOneToOne: false
             referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "building_sections_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "users"
             referencedColumns: ["id"]
           },
         ]
@@ -839,6 +894,7 @@ export type Database = {
           work_description: string | null
           work_progress_percent: number | null
           work_status: string | null
+          work_updates: Json | null
         }
         Insert: {
           comments?: string | null
@@ -864,6 +920,7 @@ export type Database = {
           work_description?: string | null
           work_progress_percent?: number | null
           work_status?: string | null
+          work_updates?: Json | null
         }
         Update: {
           comments?: string | null
@@ -889,6 +946,7 @@ export type Database = {
           work_description?: string | null
           work_progress_percent?: number | null
           work_status?: string | null
+          work_updates?: Json | null
         }
         Relationships: [
           {
@@ -1416,7 +1474,7 @@ export type Database = {
           display_order: number
           id: string
           is_active: boolean
-          is_market_role: boolean
+          is_market_role: boolean | null
           name: string
           updated_at: string
         }
@@ -1428,7 +1486,7 @@ export type Database = {
           display_order?: number
           id?: string
           is_active?: boolean
-          is_market_role?: boolean
+          is_market_role?: boolean | null
           name: string
           updated_at?: string
         }
@@ -1440,7 +1498,7 @@ export type Database = {
           display_order?: number
           id?: string
           is_active?: boolean
-          is_market_role?: boolean
+          is_market_role?: boolean | null
           name?: string
           updated_at?: string
         }
@@ -1946,37 +2004,37 @@ export type Database = {
       }
       push_subscriptions: {
         Row: {
-          id: string
-          user_id: string
-          endpoint: string
-          p256dh_key: string
           auth_key: string
-          user_agent: string | null
-          is_active: boolean
           created_at: string
+          endpoint: string
+          id: string
+          is_active: boolean
           last_used_at: string | null
+          p256dh_key: string
+          user_agent: string | null
+          user_id: string
         }
         Insert: {
-          id?: string
-          user_id: string
-          endpoint: string
-          p256dh_key: string
           auth_key: string
-          user_agent?: string | null
-          is_active?: boolean
           created_at?: string
+          endpoint: string
+          id?: string
+          is_active?: boolean
           last_used_at?: string | null
+          p256dh_key: string
+          user_agent?: string | null
+          user_id: string
         }
         Update: {
-          id?: string
-          user_id?: string
-          endpoint?: string
-          p256dh_key?: string
           auth_key?: string
-          user_agent?: string | null
-          is_active?: boolean
           created_at?: string
+          endpoint?: string
+          id?: string
+          is_active?: boolean
           last_used_at?: string | null
+          p256dh_key?: string
+          user_agent?: string | null
+          user_id?: string
         }
         Relationships: [
           {
@@ -2300,6 +2358,7 @@ export type Database = {
           settled_date: string | null
           settlement_mode: string | null
           settlement_proof_url: string | null
+          settlement_reason: string | null
           settlement_status: string | null
           site_id: string | null
           transaction_date: string
@@ -2330,6 +2389,7 @@ export type Database = {
           settled_date?: string | null
           settlement_mode?: string | null
           settlement_proof_url?: string | null
+          settlement_reason?: string | null
           settlement_status?: string | null
           site_id?: string | null
           transaction_date?: string
@@ -2360,6 +2420,7 @@ export type Database = {
           settled_date?: string | null
           settlement_mode?: string | null
           settlement_proof_url?: string | null
+          settlement_reason?: string | null
           settlement_status?: string | null
           site_id?: string | null
           transaction_date?: string
@@ -2368,6 +2429,13 @@ export type Database = {
           user_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "site_engineer_transactions_confirmed_by_user_id_fkey"
+            columns: ["confirmed_by_user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "site_engineer_transactions_recorded_by_user_id_fkey"
             columns: ["recorded_by_user_id"]
@@ -2533,6 +2601,7 @@ export type Database = {
           contract_document_url: string | null
           created_at: string
           created_by: string | null
+          default_section_id: string | null
           default_work_end: string | null
           default_work_start: string | null
           id: string
@@ -2567,6 +2636,7 @@ export type Database = {
           contract_document_url?: string | null
           created_at?: string
           created_by?: string | null
+          default_section_id?: string | null
           default_work_end?: string | null
           default_work_start?: string | null
           id?: string
@@ -2601,6 +2671,7 @@ export type Database = {
           contract_document_url?: string | null
           created_at?: string
           created_by?: string | null
+          default_section_id?: string | null
           default_work_end?: string | null
           default_work_start?: string | null
           id?: string
@@ -2637,6 +2708,20 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "users"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sites_default_section_id_fkey"
+            columns: ["default_section_id"]
+            isOneToOne: false
+            referencedRelation: "building_sections"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sites_default_section_id_fkey"
+            columns: ["default_section_id"]
+            isOneToOne: false
+            referencedRelation: "v_section_cost_summary"
+            referencedColumns: ["section_id"]
           },
         ]
       }
@@ -3179,7 +3264,9 @@ export type Database = {
           created_at: string
           date: string
           entered_by: string | null
+          entry_mode: string | null
           id: string
+          is_split_entry: boolean | null
           items_detail: string | null
           market_laborer_count: number | null
           market_laborer_snacks_amount: number | null
@@ -3190,9 +3277,14 @@ export type Database = {
           notes: string | null
           num_people: number | null
           num_rounds: number | null
+          percentage_split: Json | null
+          simple_total_cost: number | null
           site_id: string | null
           snacks_items: Json | null
           snacks_total: number | null
+          split_percentage: number | null
+          split_source_entry_id: string | null
+          split_target_site_id: string | null
           tea_people_count: number | null
           tea_rate_per_round: number | null
           tea_rounds: number | null
@@ -3211,7 +3303,9 @@ export type Database = {
           created_at?: string
           date: string
           entered_by?: string | null
+          entry_mode?: string | null
           id?: string
+          is_split_entry?: boolean | null
           items_detail?: string | null
           market_laborer_count?: number | null
           market_laborer_snacks_amount?: number | null
@@ -3222,9 +3316,14 @@ export type Database = {
           notes?: string | null
           num_people?: number | null
           num_rounds?: number | null
+          percentage_split?: Json | null
+          simple_total_cost?: number | null
           site_id?: string | null
           snacks_items?: Json | null
           snacks_total?: number | null
+          split_percentage?: number | null
+          split_source_entry_id?: string | null
+          split_target_site_id?: string | null
           tea_people_count?: number | null
           tea_rate_per_round?: number | null
           tea_rounds?: number | null
@@ -3243,7 +3342,9 @@ export type Database = {
           created_at?: string
           date?: string
           entered_by?: string | null
+          entry_mode?: string | null
           id?: string
+          is_split_entry?: boolean | null
           items_detail?: string | null
           market_laborer_count?: number | null
           market_laborer_snacks_amount?: number | null
@@ -3254,9 +3355,14 @@ export type Database = {
           notes?: string | null
           num_people?: number | null
           num_rounds?: number | null
+          percentage_split?: Json | null
+          simple_total_cost?: number | null
           site_id?: string | null
           snacks_items?: Json | null
           snacks_total?: number | null
+          split_percentage?: number | null
+          split_source_entry_id?: string | null
+          split_target_site_id?: string | null
           tea_people_count?: number | null
           tea_rate_per_round?: number | null
           tea_rounds?: number | null
@@ -3274,6 +3380,20 @@ export type Database = {
           {
             foreignKeyName: "tea_shop_entries_site_id_fkey"
             columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tea_shop_entries_split_source_entry_id_fkey"
+            columns: ["split_source_entry_id"]
+            isOneToOne: false
+            referencedRelation: "tea_shop_entries"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tea_shop_entries_split_target_site_id_fkey"
+            columns: ["split_target_site_id"]
             isOneToOne: false
             referencedRelation: "sites"
             referencedColumns: ["id"]
@@ -4237,47 +4357,10 @@ export type CompositeTypes<
     ? DefaultSchema["CompositeTypes"][PublicCompositeTypeNameOrOptions]
     : never
 
-// Type aliases for convenience
-export type Subcontract = Database["public"]["Tables"]["subcontracts"]["Row"];
-export type ContractType = Database["public"]["Enums"]["contract_type"];
-export type ContractStatus = Database["public"]["Enums"]["contract_status"];
-export type MeasurementUnit = Database["public"]["Enums"]["measurement_unit"];
-export type PaymentMode = Database["public"]["Enums"]["payment_mode"];
-export type PaymentType = Database["public"]["Enums"]["contract_payment_type"];
-export type SiteEngineerTransaction = Database["public"]["Tables"]["site_engineer_transactions"]["Row"];
-export type SiteEngineerSettlement = Database["public"]["Tables"]["site_engineer_settlements"]["Row"];
-export type SiteEngineerTransactionType = "received_from_company" | "spent_on_behalf" | "used_own_money" | "returned_to_company";
-export type RecipientType = "laborer" | "subcontract" | "team" | "other";
-export type SalaryPeriod = Database["public"]["Tables"]["salary_periods"]["Row"];
-export type ConstructionPhase = Database["public"]["Tables"]["construction_phases"]["Row"];
-export type ConstructionSubphase = Database["public"]["Tables"]["construction_subphases"]["Row"];
-export type Site = Database["public"]["Tables"]["sites"]["Row"];
-export type SitePaymentMilestone = Database["public"]["Tables"]["site_payment_milestones"]["Row"];
-export type Team = Database["public"]["Tables"]["teams"]["Row"];
-export type Laborer = Database["public"]["Tables"]["laborers"]["Row"];
-export type LaborerType = string;
-export type TeaShopAccount = Database["public"]["Tables"]["tea_shop_accounts"]["Row"];
-export type DailyWorkSummary = Database["public"]["Tables"]["daily_work_summary"]["Row"];
-export type ClientPaymentPlan = Database["public"]["Tables"]["client_payment_plans"]["Row"];
-export type PaymentPhase = Database["public"]["Tables"]["payment_phases"]["Row"];
-export type ClientPayment = Database["public"]["Tables"]["client_payments"]["Row"];
-export type Expense = Database["public"]["Tables"]["expenses"]["Row"];
-export type ExpenseModule = Database["public"]["Enums"]["expense_module"];
-export type SiteHoliday = Database["public"]["Tables"]["site_holidays"]["Row"];
-export type PaymentChannel = "via_site_engineer" | "mesthri_at_office" | "company_direct_online";
-export type TeaShopEntry = Database["public"]["Tables"]["tea_shop_entries"]["Row"];
-export type TeaShopSettlement = Database["public"]["Tables"]["tea_shop_settlements"]["Row"];
-export type ThemePreference = "light" | "dark" | "system";
-export type User = Database["public"]["Tables"]["users"]["Row"];
-export interface SnackItem {
-  name: string;
-  quantity: number;
-  rate: number;
-  total: number;
-}
-export type MarketLaborerAttendance = Database["public"]["Tables"]["market_laborer_attendance"]["Row"];
-
 export const Constants = {
+  graphql_public: {
+    Enums: {},
+  },
   public: {
     Enums: {
       audit_action: ["create", "update", "delete", "soft_delete", "restore"],
@@ -4310,3 +4393,88 @@ export const Constants = {
     },
   },
 } as const
+
+// Custom type exports for easier usage
+export type Advance = Database["public"]["Tables"]["advances"]["Row"];
+export type DailyAttendance = Database["public"]["Tables"]["daily_attendance"]["Row"];
+export type Expense = Database["public"]["Tables"]["expenses"]["Row"];
+export type ExpenseModule = Database["public"]["Enums"]["expense_module"];
+export type SiteHoliday = Database["public"]["Tables"]["site_holidays"]["Row"];
+export type PaymentChannel = "via_site_engineer" | "mesthri_at_office" | "company_direct_online";
+export type TeaShopEntry = Database["public"]["Tables"]["tea_shop_entries"]["Row"];
+export type TeaShopSettlement = Database["public"]["Tables"]["tea_shop_settlements"]["Row"];
+export type ThemePreference = "light" | "dark" | "system";
+export type User = Database["public"]["Tables"]["users"]["Row"];
+export type Laborer = Database["public"]["Tables"]["laborers"]["Row"];
+export type Site = Database["public"]["Tables"]["sites"]["Row"];
+export type Team = Database["public"]["Tables"]["teams"]["Row"];
+export type SalaryPeriod = Database["public"]["Tables"]["salary_periods"]["Row"];
+export type BuildingSection = Database["public"]["Tables"]["building_sections"]["Row"];
+export type DeletionRequest = Database["public"]["Tables"]["deletion_requests"]["Row"];
+export type Notification = Database["public"]["Tables"]["notifications"]["Row"];
+export type Subcontract = Database["public"]["Tables"]["subcontracts"]["Row"];
+export type ContractType = Database["public"]["Enums"]["contract_type"];
+export type ContractStatus = Database["public"]["Enums"]["contract_status"];
+export type MeasurementUnit = Database["public"]["Enums"]["measurement_unit"];
+export type LaborerStatus = Database["public"]["Enums"]["laborer_status"];
+export type EmploymentType = Database["public"]["Enums"]["employment_type"];
+export type SalaryStatus = Database["public"]["Enums"]["salary_status"];
+export type PaymentMode = Database["public"]["Enums"]["payment_mode"];
+export type UserRole = Database["public"]["Enums"]["user_role"];
+export type UserStatus = Database["public"]["Enums"]["user_status"];
+export type SiteStatus = Database["public"]["Enums"]["site_status"];
+export type TeamStatus = Database["public"]["Enums"]["team_status"];
+export type TransactionType = Database["public"]["Enums"]["transaction_type"];
+export type DeductionStatus = Database["public"]["Enums"]["deduction_status"];
+export type MilestoneStatus = Database["public"]["Enums"]["milestone_status"];
+export type SubcontractMilestone = Database["public"]["Tables"]["subcontract_milestones"]["Row"];
+export type TeaShopAccount = Database["public"]["Tables"]["tea_shop_accounts"]["Row"];
+export type LaborCategory = Database["public"]["Tables"]["labor_categories"]["Row"];
+export type MarketLaborerAttendance = Database["public"]["Tables"]["market_laborer_attendance"]["Row"];
+export type SitePaymentMilestone = Database["public"]["Tables"]["site_payment_milestones"]["Row"];
+export type ConstructionPhase = Database["public"]["Tables"]["construction_phases"]["Row"];
+export type PaymentType = Database["public"]["Enums"]["contract_payment_type"];
+export type ContractPaymentType = Database["public"]["Enums"]["contract_payment_type"];
+export type SiteEngineerTransaction = Database["public"]["Tables"]["site_engineer_transactions"]["Row"];
+export type SiteEngineerSettlement = Database["public"]["Tables"]["site_engineer_settlements"]["Row"];
+export type SiteEngineerTransactionType = "received_from_company" | "spent_on_behalf" | "used_own_money" | "returned_to_company";
+export type SiteEngineerSettlementDirection = "company_to_engineer" | "engineer_to_company";
+export type SubcontractPayment = Database["public"]["Tables"]["subcontract_payments"]["Row"];
+export type LaborPayment = Database["public"]["Tables"]["labor_payments"]["Row"];
+export type RecipientType = "laborer" | "mesthri" | "subcontractor" | "vendor" | "other";
+export type WorkDaysValue = Database["public"]["Enums"]["work_days_value"];
+export type SectionStatus = Database["public"]["Enums"]["section_status"];
+export type SiteType = Database["public"]["Enums"]["site_type"];
+export type AuditAction = Database["public"]["Enums"]["audit_action"];
+export type DeletionRequestStatus = Database["public"]["Enums"]["deletion_request_status"];
+export type WorkVariance = Database["public"]["Enums"]["work_variance"];
+export type ConstructionSubphase = Database["public"]["Tables"]["construction_subphases"]["Row"];
+export type LaborerType = Database["public"]["Enums"]["employment_type"];
+export type DailyWorkSummary = Database["public"]["Tables"]["daily_work_summary"]["Row"];
+export type ClientPaymentPlan = Database["public"]["Tables"]["client_payment_plans"]["Row"];
+export type ClientPayment = Database["public"]["Tables"]["client_payments"]["Row"];
+export type PaymentPhase = Database["public"]["Tables"]["payment_phases"]["Row"];
+
+// Tea shop related types
+export type TeaShopEntryMode = "simple" | "detailed";
+
+export interface SnackItem {
+  name: string;
+  quantity: number;
+  rate: number;
+  total: number;
+}
+
+export interface LaborGroupPercentageSplit {
+  daily: number;
+  contract: number;
+  market: number;
+}
+
+export interface TeaShopEntryExtended extends Omit<TeaShopEntry, 'entry_mode' | 'percentage_split'> {
+  entry_mode: TeaShopEntryMode | null;
+  simple_total_cost: number | null;
+  percentage_split: LaborGroupPercentageSplit | null;
+  is_split_entry: boolean | null;
+  split_percentage: number | null;
+}

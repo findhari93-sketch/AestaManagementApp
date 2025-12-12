@@ -112,35 +112,27 @@ const SectionAutocomplete = memo(function SectionAutocomplete({
     try {
       const supabase = createClient();
 
-      // Fetch sections with phase info
-      // Note: Using type assertion until migration is run and types regenerated
+      // Fetch sections
       const { data: sectionsData, error: sectionsError } = await supabase
         .from("building_sections")
-        .select(
-          `
-          id,
-          name,
-          status,
-          sequence_order,
-          construction_phase_id,
-          construction_phases(id, name)
-        `
-        )
+        .select("id, name, status, sequence_order")
         .eq("site_id", siteId)
-        .order("sequence_order") as { data: any[] | null; error: any };
+        .order("sequence_order");
 
       if (sectionsError) throw sectionsError;
 
-      // Fetch site's default section
-      // Note: Using type assertion until migration is run and types regenerated
-      const { data: siteData } = await supabase
-        .from("sites")
-        .select("default_section_id")
-        .eq("id", siteId)
-        .single() as { data: { default_section_id: string | null } | null };
+      // Fetch site's default section if not provided via prop
+      let activeSectionId = defaultSectionId || null;
+      if (!activeSectionId) {
+        const { data: siteData } = await supabase
+          .from("sites")
+          .select("default_section_id")
+          .eq("id", siteId)
+          .single();
 
-      const activeSectionId =
-        defaultSectionId || siteData?.default_section_id || null;
+        // Cast to handle new column not yet in generated types
+        activeSectionId = (siteData as { default_section_id?: string | null } | null)?.default_section_id || null;
+      }
 
       const mappedSections: SectionOption[] = (sectionsData || []).map(
         (section) => ({
@@ -148,10 +140,8 @@ const SectionAutocomplete = memo(function SectionAutocomplete({
           name: section.name,
           status: section.status as "not_started" | "in_progress" | "completed",
           isDefault: section.id === activeSectionId,
-          phaseName:
-            (section.construction_phases as { name: string } | null)?.name ||
-            null,
-          phaseId: section.construction_phase_id,
+          phaseName: null,
+          phaseId: null,
           sequenceOrder: section.sequence_order,
         })
       );
@@ -161,15 +151,8 @@ const SectionAutocomplete = memo(function SectionAutocomplete({
         ? mappedSections
         : mappedSections.filter((s) => s.status !== "completed");
 
-      // Sort: group by phase, then by sequence
+      // Sort by sequence order
       const sortedSections = [...filteredSections].sort((a, b) => {
-        // First by phase (null phases go last)
-        if (a.phaseName && !b.phaseName) return -1;
-        if (!a.phaseName && b.phaseName) return 1;
-        if (a.phaseName && b.phaseName && a.phaseName !== b.phaseName) {
-          return a.phaseName.localeCompare(b.phaseName);
-        }
-        // Then by sequence order
         return a.sequenceOrder - b.sequenceOrder;
       });
 
@@ -185,8 +168,8 @@ const SectionAutocomplete = memo(function SectionAutocomplete({
           onNameChange?.(defaultSection.name);
         }
       }
-    } catch (err) {
-      console.error("Error fetching sections:", err);
+    } catch (err: any) {
+      console.error("Error fetching sections:", err?.message || err?.code || JSON.stringify(err) || err);
       setSections([]);
     } finally {
       setLoading(false);
@@ -273,9 +256,7 @@ const SectionAutocomplete = memo(function SectionAutocomplete({
                 sx={{
                   textDecoration:
                     option.status === "completed" ? "line-through" : "none",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
+                  wordBreak: "break-word",
                 }}
               >
                 {option.name}
@@ -340,10 +321,29 @@ const SectionAutocomplete = memo(function SectionAutocomplete({
           }}
         />
       )}
+      slotProps={{
+        popper: {
+          sx: {
+            minWidth: 280,
+            maxWidth: "95vw",
+          },
+          placement: "bottom-start",
+        },
+        paper: {
+          sx: {
+            minWidth: 280,
+            maxWidth: { xs: "90vw", sm: 450 },
+          },
+        },
+      }}
       sx={{
         ...sx,
+        width: "100%",
         "& .MuiAutocomplete-listbox": {
           maxHeight: 300,
+        },
+        "& .MuiInputBase-root": {
+          width: "100%",
         },
       }}
       noOptionsText="No sections available"

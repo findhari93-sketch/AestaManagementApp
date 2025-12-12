@@ -55,6 +55,8 @@ import MarketLaborerDialog from "./MarketLaborerDialog";
 import TeaShopEntryDialog from "../tea-shop/TeaShopEntryDialog";
 import AttendanceSaveConfirmDialog from "./AttendanceSaveConfirmDialog";
 import { WorkUpdatesSection } from "./work-updates";
+import SectionAutocomplete from "../common/SectionAutocomplete";
+import { useDrawerPersistence } from "@/hooks/useDrawerPersistence";
 import type { WorkUpdates } from "@/types/work-updates.types";
 import type {
   TeaShopEntry,
@@ -270,6 +272,7 @@ export default function AttendanceDrawer({
     initialDate || dayjs().format("YYYY-MM-DD")
   );
   const [sectionId, setSectionId] = useState<string>("");
+  const [sectionName, setSectionName] = useState<string>("");
   const [selectedLaborers, setSelectedLaborers] = useState<
     Map<string, SelectedLaborer>
   >(new Map());
@@ -296,7 +299,6 @@ export default function AttendanceDrawer({
 
   // Data state
   const [laborers, setLaborers] = useState<LaborerWithCategory[]>([]);
-  const [sections, setSections] = useState<{ id: string; name: string }[]>([]);
   const [laborRoles, setLaborRoles] = useState<LaborRole[]>([]);
   const [laborerDialogOpen, setLaborerDialogOpen] = useState(false);
   const [marketLaborerDialogOpen, setMarketLaborerDialogOpen] = useState(false);
@@ -347,6 +349,28 @@ export default function AttendanceDrawer({
 
   // Calculate tea shop total from existing entry
   const teaShopTotal = existingTeaEntry?.total_amount || 0;
+
+  // Calculate if form has unsaved changes (for persistence warning)
+  const isDirty = useMemo((): boolean => {
+    // Check if there's any meaningful data entered
+    const hasLaborers = selectedLaborers.size > 0 || marketLaborers.length > 0;
+    const hasWorkUpdates = workUpdates !== null && Boolean(
+      (workUpdates.morning?.description || workUpdates.morning?.photos.length) ||
+      (workUpdates.evening?.summary || workUpdates.evening?.photos.length)
+    );
+    const hasDescription = workDescription.trim().length > 0;
+    return hasLaborers || hasWorkUpdates || hasDescription;
+  }, [selectedLaborers, marketLaborers, workUpdates, workDescription]);
+
+  // Persist drawer state for recovery after page refresh
+  const { clearState: clearPersistedState } = useDrawerPersistence(
+    open,
+    mode,
+    selectedDate,
+    siteId,
+    workUpdates,
+    isDirty
+  );
 
   // Sync selectedDate with initialDate when it changes
   useEffect(() => {
@@ -443,24 +467,8 @@ export default function AttendanceDrawer({
       );
       setLaborers(mappedLaborers);
 
-      // Fetch sections for the site
-      const { data: sectionsData, error: sectionsError } = await supabase
-        .from("building_sections")
-        .select("id, name")
-        .eq("site_id", siteId)
-        .order("name");
-
-      if (sectionsError) throw sectionsError;
-      const sectionsArray = (sectionsData || []) as {
-        id: string;
-        name: string;
-      }[];
-      setSections(sectionsArray);
-
-      // Auto-select first section only when adding new attendance
-      if (sectionsArray.length > 0 && !sectionId && !initialDate) {
-        setSectionId(sectionsArray[0].id);
-      }
+      // Note: Section selection is now handled by SectionAutocomplete component
+      // which auto-selects the site's default section
 
       // Fetch labor roles for market laborers (only roles marked as market roles)
       const { data: rolesData, error: rolesError } = await supabase
@@ -1383,6 +1391,8 @@ export default function AttendanceDrawer({
 
       console.log("[AttendanceDrawer] All saves completed successfully!");
       setSuccess("Attendance saved successfully!");
+      // Clear persisted state since save was successful
+      clearPersistedState();
       setTimeout(() => {
         onSuccess?.();
         handleClose();
@@ -1485,14 +1495,38 @@ export default function AttendanceDrawer({
             justifyContent: "space-between",
           }}
         >
+          {/* Shorter date format on mobile */}
           <Typography variant="subtitle1" fontWeight={600} sx={{ fontSize: { xs: '0.9rem', sm: '1rem' } }}>
-            {mode === "morning"
-              ? `🌅 Start Day - ${dayjs(selectedDate).format("DD MMM YYYY (ddd)")}`
-              : mode === "evening"
-                ? `🌆 Confirm - ${dayjs(selectedDate).format("DD MMM YYYY (ddd)")}`
-                : initialDate
-                  ? `Edit - ${dayjs(initialDate).format("DD MMM YYYY (ddd)")}`
-                  : "Add Attendance"}
+            {mode === "morning" ? (
+              <>
+                <Box component="span" sx={{ display: { xs: "none", sm: "inline" } }}>
+                  🌅 Start Day - {dayjs(selectedDate).format("DD MMM YYYY (ddd)")}
+                </Box>
+                <Box component="span" sx={{ display: { xs: "inline", sm: "none" } }}>
+                  🌅 Start - {dayjs(selectedDate).format("DD MMM (ddd)")}
+                </Box>
+              </>
+            ) : mode === "evening" ? (
+              <>
+                <Box component="span" sx={{ display: { xs: "none", sm: "inline" } }}>
+                  🌆 Confirm - {dayjs(selectedDate).format("DD MMM YYYY (ddd)")}
+                </Box>
+                <Box component="span" sx={{ display: { xs: "inline", sm: "none" } }}>
+                  🌆 Confirm - {dayjs(selectedDate).format("DD MMM (ddd)")}
+                </Box>
+              </>
+            ) : initialDate ? (
+              <>
+                <Box component="span" sx={{ display: { xs: "none", sm: "inline" } }}>
+                  Edit - {dayjs(initialDate).format("DD MMM YYYY (ddd)")}
+                </Box>
+                <Box component="span" sx={{ display: { xs: "inline", sm: "none" } }}>
+                  Edit - {dayjs(initialDate).format("DD MMM (ddd)")}
+                </Box>
+              </>
+            ) : (
+              "Add Attendance"
+            )}
           </Typography>
           <IconButton
             onClick={handleClose}
@@ -1526,8 +1560,15 @@ export default function AttendanceDrawer({
             </Box>
           ) : (
             <>
-              {/* Date and Section Row */}
-              <Box sx={{ display: "flex", gap: 2, mb: 2 }}>
+              {/* Date and Section Row - Stacked on mobile */}
+              <Box
+                sx={{
+                  display: "flex",
+                  flexDirection: { xs: "column", sm: "row" },
+                  gap: { xs: 1.5, sm: 2 },
+                  mb: 2,
+                }}
+              >
                 <TextField
                   label="Date"
                   type="date"
@@ -1536,22 +1577,18 @@ export default function AttendanceDrawer({
                   slotProps={{ inputLabel: { shrink: true } }}
                   size="small"
                   disabled={!!initialDate}
-                  sx={{ flex: 1 }}
+                  sx={{ flex: { xs: "none", sm: 1 }, minWidth: { sm: 140 } }}
                 />
-                <FormControl size="small" sx={{ flex: 1 }}>
-                  <InputLabel>Section</InputLabel>
-                  <Select
-                    value={sectionId}
-                    onChange={(e) => setSectionId(e.target.value)}
-                    label="Section"
-                  >
-                    {sections.map((s) => (
-                      <MenuItem key={s.id} value={s.id}>
-                        {s.name}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
+                <SectionAutocomplete
+                  siteId={siteId}
+                  value={sectionId || null}
+                  onChange={(id) => setSectionId(id || "")}
+                  onNameChange={(name) => setSectionName(name)}
+                  size="small"
+                  label="Section"
+                  autoSelectDefault={!initialDate}
+                  sx={{ flex: { xs: "none", sm: 2 }, width: "100%" }}
+                />
               </Box>
 
               {/* Unified Laborers Section */}
@@ -1571,7 +1608,7 @@ export default function AttendanceDrawer({
                 >
                   <PeopleIcon color="primary" />
                   <Typography variant="subtitle1" fontWeight={600}>
-                    Laborers
+                    Work Laborers
                   </Typography>
                   {(selectedLaborers.size > 0 || marketLaborers.length > 0) && (
                     <Chip
@@ -1587,22 +1624,44 @@ export default function AttendanceDrawer({
 
                 {/* Morning Mode: Start Time & Planned Work */}
                 {mode === "morning" && (
-                  <Box sx={{ mb: 2 }}>
+                  <Box
+                    sx={{
+                      mb: 2,
+                      display: "flex",
+                      flexDirection: { xs: "column", sm: "row" },
+                      gap: { xs: 1.5, sm: 3 },
+                      alignItems: { xs: "stretch", sm: "center" },
+                      flexWrap: "wrap",
+                    }}
+                  >
                     {/* Start Time Input */}
                     <Box
                       sx={{
                         display: "flex",
                         alignItems: "center",
                         gap: 1,
-                        mb: 2,
                       }}
                     >
+                      {/* Show shorter label on mobile */}
                       <Typography
                         variant="body2"
                         color="text.secondary"
-                        sx={{ minWidth: 100 }}
+                        sx={{
+                          minWidth: { xs: 70, sm: "auto" },
+                          display: { xs: "none", sm: "block" },
+                        }}
                       >
                         Work Start Time:
+                      </Typography>
+                      <Typography
+                        variant="body2"
+                        color="text.secondary"
+                        sx={{
+                          minWidth: 70,
+                          display: { xs: "block", sm: "none" },
+                        }}
+                      >
+                        Start Time:
                       </Typography>
                       <TextField
                         size="small"
@@ -1610,7 +1669,7 @@ export default function AttendanceDrawer({
                         value={defaultInTime}
                         onChange={(e) => setDefaultInTime(e.target.value)}
                         slotProps={{ inputLabel: { shrink: true } }}
-                        sx={{ width: 130 }}
+                        sx={{ width: 120 }}
                       />
                       <Button
                         size="small"
@@ -1631,8 +1690,9 @@ export default function AttendanceDrawer({
                         disabled={
                           selectedLaborers.size === 0 && marketLaborers.length === 0
                         }
+                        sx={{ minWidth: "auto", px: 1 }}
                       >
-                        Apply to All
+                        Apply All
                       </Button>
                     </Box>
                     {/* Planned Work Day Units */}
@@ -1641,15 +1701,14 @@ export default function AttendanceDrawer({
                         display: "flex",
                         alignItems: "center",
                         gap: 1,
-                        flexWrap: "wrap",
                       }}
                     >
                       <Typography
                         variant="body2"
                         color="text.secondary"
-                        sx={{ minWidth: 140 }}
+                        sx={{ minWidth: { xs: 70, sm: "auto" } }}
                       >
-                        Planned Work for Today:
+                        Planned Work:
                       </Typography>
                       <ToggleButtonGroup
                         value={defaultWorkUnit}
@@ -1905,31 +1964,49 @@ export default function AttendanceDrawer({
                   </Box>
                 )}
 
-                {/* Initial State - Show full-width buttons when no laborers */}
+                {/* Initial State - Show compact inline buttons when no laborers */}
                 {selectedLaborers.size === 0 && marketLaborers.length === 0 ? (
-                  <Box sx={{ display: "flex", flexDirection: "column", gap: 2, mb: 2 }}>
+                  <Box sx={{ display: "flex", flexDirection: "row", gap: 1, mb: 2 }}>
                     <Button
                       variant="contained"
-                      fullWidth
-                      size="large"
                       startIcon={<PeopleIcon />}
                       onClick={() => setLaborerDialogOpen(true)}
                       disabled={mode === "evening"}
-                      sx={{ py: 1.5 }}
+                      sx={{ flex: 1 }}
                     >
-                      Add Laborers
+                      <Box
+                        component="span"
+                        sx={{ display: { xs: "none", sm: "inline" } }}
+                      >
+                        Add Laborers
+                      </Box>
+                      <Box
+                        component="span"
+                        sx={{ display: { xs: "inline", sm: "none" } }}
+                      >
+                        Contract L.
+                      </Box>
                     </Button>
                     <Button
                       variant="outlined"
-                      fullWidth
-                      size="large"
                       startIcon={<StoreIcon />}
                       onClick={() => setMarketLaborerDialogOpen(true)}
                       disabled={mode === "evening"}
                       color="warning"
-                      sx={{ py: 1.5 }}
+                      sx={{ flex: 1 }}
                     >
-                      Add Market Laborers
+                      <Box
+                        component="span"
+                        sx={{ display: { xs: "none", sm: "inline" } }}
+                      >
+                        Add Market
+                      </Box>
+                      <Box
+                        component="span"
+                        sx={{ display: { xs: "inline", sm: "none" } }}
+                      >
+                        Market L.
+                      </Box>
                     </Button>
                   </Box>
                 ) : (
@@ -1951,7 +2028,18 @@ export default function AttendanceDrawer({
                       onClick={() => setLaborerDialogOpen(true)}
                       disabled={mode === "evening"}
                     >
-                      Add More
+                      <Box
+                        component="span"
+                        sx={{ display: { xs: "none", sm: "inline" } }}
+                      >
+                        Add More
+                      </Box>
+                      <Box
+                        component="span"
+                        sx={{ display: { xs: "inline", sm: "none" } }}
+                      >
+                        + Contract
+                      </Box>
                     </Button>
                     {/* Add Market Laborers button */}
                     <Button
@@ -1962,7 +2050,18 @@ export default function AttendanceDrawer({
                       onClick={() => setMarketLaborerDialogOpen(true)}
                       disabled={mode === "evening"}
                     >
-                      Market
+                      <Box
+                        component="span"
+                        sx={{ display: { xs: "none", sm: "inline" } }}
+                      >
+                        Market
+                      </Box>
+                      <Box
+                        component="span"
+                        sx={{ display: { xs: "inline", sm: "none" } }}
+                      >
+                        + Market
+                      </Box>
                     </Button>
                     {/* Custom times checkbox - Hidden in morning mode */}
                     {mode !== "morning" && (
@@ -2930,26 +3029,56 @@ export default function AttendanceDrawer({
           }}
         >
           {/* Line 1: Laborers count with breakdown */}
-          <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 0.5 }}>
-            <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+          <Box
+            sx={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              mb: 0.5,
+              flexWrap: "wrap",
+              gap: { xs: 0.5, sm: 1 },
+            }}
+          >
+            <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
               <Typography variant="body2" fontWeight={600}>
-                Laborers: {summary.totalCount}
+                {summary.totalCount} Workers
               </Typography>
-              <Typography variant="caption" color="text.secondary">
-                (D:{summary.dailyCount} | C:{summary.contractCount} | M:{summary.marketCount})
+              {/* Breakdown - clearer labels on mobile */}
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{ display: { xs: "none", sm: "inline" } }}
+              >
+                (Daily:{summary.dailyCount} | Contract:{summary.contractCount} | Market:{summary.marketCount})
               </Typography>
             </Box>
             <Typography variant="body2" fontWeight={700} color="primary.main">
-              Total: ₹{(summary.totalExpense + teaShopTotal).toLocaleString()}
+              ₹{(summary.totalExpense + teaShopTotal).toLocaleString()}
             </Typography>
           </Box>
           {/* Line 2: Salary and Tea Shop */}
-          <Box sx={{ display: "flex", alignItems: "center", gap: 2, mb: 1.5 }}>
+          <Box
+            sx={{
+              display: "flex",
+              alignItems: "center",
+              gap: { xs: 1.5, sm: 2 },
+              mb: 1.5,
+              flexWrap: "wrap",
+            }}
+          >
             <Typography variant="caption" color="success.main" fontWeight={600}>
               Salary: ₹{summary.totalSalary.toLocaleString()}
             </Typography>
             <Typography variant="caption" color="warning.main" fontWeight={600}>
               Tea: ₹{teaShopTotal.toLocaleString()}
+            </Typography>
+            {/* Show compact breakdown on mobile */}
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              sx={{ display: { xs: "inline", sm: "none" } }}
+            >
+              D:{summary.dailyCount} C:{summary.contractCount} M:{summary.marketCount}
             </Typography>
           </Box>
 
@@ -2976,7 +3105,7 @@ export default function AttendanceDrawer({
           <Typography
             variant="caption"
             color="text.secondary"
-            sx={{ display: "block", textAlign: "center", mt: 1 }}
+            sx={{ display: { xs: "none", sm: "block" }, textAlign: "center", mt: 1 }}
           >
             Auto-synced to Daily Expenses
           </Typography>
@@ -3065,7 +3194,7 @@ export default function AttendanceDrawer({
       }}
       onEdit={() => setConfirmDialogOpen(false)}
       siteName={siteName}
-      sectionName={sections.find((s) => s.id === sectionId)?.name || ""}
+      sectionName={sectionName}
       date={selectedDate}
       summary={summary}
       teaShopTotal={teaShopTotal}

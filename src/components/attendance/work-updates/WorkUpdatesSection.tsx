@@ -15,6 +15,7 @@ import {
 } from "@mui/icons-material";
 import MorningUpdateForm from "./MorningUpdateForm";
 import EveningUpdateForm from "./EveningUpdateForm";
+import FullDayUpdateForm from "./FullDayUpdateForm";
 import {
   WorkUpdates,
   MorningUpdate,
@@ -88,6 +89,21 @@ export default function WorkUpdatesSection({
       });
     },
     [onChange]
+  );
+
+  // Full day mode handler - simpler, just stores work updates directly
+  const handleFullDayChange = useCallback(
+    (data: WorkUpdates | null) => {
+      if (data) {
+        setWorkUpdates(data);
+        setTimeout(() => onChange(data), 0);
+      } else {
+        const empty = createEmptyWorkUpdates(workUpdates.photoCount);
+        setWorkUpdates(empty);
+        setTimeout(() => onChange(null), 0);
+      }
+    },
+    [onChange, workUpdates.photoCount]
   );
 
   // Determine status badge
@@ -188,54 +204,18 @@ export default function WorkUpdatesSection({
             />
           )}
 
-          {/* Full Mode - Side by side on laptop, stacked on mobile */}
+          {/* Full Mode - Simple photo gallery for historical data */}
           {mode === "full" && (
-            <Box
-              sx={{
-                display: "flex",
-                flexDirection: { xs: "column", md: "row" },
-                gap: 3,
-              }}
-            >
-              <Box sx={{ flex: 1 }}>
-                <Typography
-                  variant="subtitle2"
-                  color="warning.dark"
-                  sx={{ mb: 1 }}
-                >
-                  Morning Plan
-                </Typography>
-                <MorningUpdateForm
-                  supabase={supabase}
-                  siteId={siteId}
-                  date={date}
-                  initialData={workUpdates.morning}
-                  photoCount={workUpdates.photoCount}
-                  onPhotoCountChange={handlePhotoCountChange}
-                  onChange={handleMorningChange}
-                  disabled={disabled}
-                />
-              </Box>
-              <Box sx={{ flex: 1 }}>
-                <Typography
-                  variant="subtitle2"
-                  color="info.dark"
-                  sx={{ mb: 1 }}
-                >
-                  Evening Update
-                </Typography>
-                <EveningUpdateForm
-                  supabase={supabase}
-                  siteId={siteId}
-                  date={date}
-                  morningData={workUpdates.morning}
-                  initialData={workUpdates.evening}
-                  photoCount={workUpdates.photoCount}
-                  onChange={handleEveningChange}
-                  disabled={disabled}
-                />
-              </Box>
-            </Box>
+            <FullDayUpdateForm
+              supabase={supabase}
+              siteId={siteId}
+              date={date}
+              initialData={workUpdates}
+              photoCount={workUpdates.photoCount}
+              onPhotoCountChange={handlePhotoCountChange}
+              onChange={handleFullDayChange}
+              disabled={disabled}
+            />
           )}
         </Box>
       </Collapse>

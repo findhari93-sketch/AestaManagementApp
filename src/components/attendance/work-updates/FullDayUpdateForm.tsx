@@ -8,15 +8,11 @@ import {
   ToggleButton,
   ToggleButtonGroup,
   Paper,
-  IconButton,
 } from "@mui/material";
-import {
-  PhotoCamera as PhotoCameraIcon,
-  Close as CloseIcon,
-} from "@mui/icons-material";
+import { PhotoCamera as PhotoCameraIcon } from "@mui/icons-material";
 import PhotoCaptureButton from "./PhotoCaptureButton";
 import {
-  MorningUpdate,
+  WorkUpdates,
   PhotoSlotState,
   createPhotoSlots,
   photoSlotsToPhotos,
@@ -25,18 +21,18 @@ import {
 import { SupabaseClient } from "@supabase/supabase-js";
 import { useIsMobile } from "@/hooks/useIsMobile";
 
-interface MorningUpdateFormProps {
+interface FullDayUpdateFormProps {
   supabase: SupabaseClient;
   siteId: string;
   date: string;
-  initialData?: MorningUpdate | null;
+  initialData?: WorkUpdates | null;
   photoCount: number;
   onPhotoCountChange: (count: number) => void;
-  onChange: (data: MorningUpdate | null) => void;
+  onChange: (data: WorkUpdates | null) => void;
   disabled?: boolean;
 }
 
-export default function MorningUpdateForm({
+export default function FullDayUpdateForm({
   supabase,
   siteId,
   date,
@@ -45,14 +41,20 @@ export default function MorningUpdateForm({
   onPhotoCountChange,
   onChange,
   disabled = false,
-}: MorningUpdateFormProps) {
+}: FullDayUpdateFormProps) {
   const isMobile = useIsMobile();
-  const [description, setDescription] = useState(initialData?.description || "");
-  const [photoSlots, setPhotoSlots] = useState<PhotoSlotState[]>(
-    initialData?.photos
-      ? photosToPhotoSlots(initialData.photos, photoCount)
-      : createPhotoSlots(photoCount)
+  // Use morning description for the single description field
+  const [description, setDescription] = useState(
+    initialData?.morning?.description || ""
   );
+  // Combine morning and evening photos into a single gallery
+  const [photoSlots, setPhotoSlots] = useState<PhotoSlotState[]>(() => {
+    // Prefer morning photos, but fall back to evening photos if morning is empty
+    const photos = initialData?.morning?.photos || initialData?.evening?.photos || [];
+    return photos.length > 0
+      ? photosToPhotoSlots(photos, photoCount)
+      : createPhotoSlots(photoCount);
+  });
 
   // Use ref to avoid onChange in useEffect dependencies
   const onChangeRef = useRef(onChange);
@@ -78,13 +80,18 @@ export default function MorningUpdateForm({
     if (!description.trim() && photos.length === 0) {
       onChangeRef.current(null);
     } else {
+      // Store as morning data for consistency
       onChangeRef.current({
-        description: description.trim(),
-        photos,
-        timestamp: new Date().toISOString(),
+        photoCount,
+        morning: {
+          description: description.trim(),
+          photos,
+          timestamp: new Date().toISOString(),
+        },
+        evening: null,
       });
     }
-  }, [description, photoSlots]);
+  }, [description, photoSlots, photoCount]);
 
   const handlePhotoCapture = (slotIndex: number, url: string) => {
     setPhotoSlots((prev) =>
@@ -120,30 +127,35 @@ export default function MorningUpdateForm({
   };
 
   // Photo size based on screen size
-  const photoSize = isMobile ? "large" : "xlarge"; // 120px mobile, 160px desktop
+  const photoSize: "medium" | "large" = isMobile ? "medium" : "large"; // 80px mobile, 120px desktop
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2.5 }}>
+      {/* Header */}
+      <Typography variant="body2" color="text.secondary">
+        Add a summary and photos for this day&apos;s work.
+      </Typography>
+
       {/* Work Description */}
       <TextField
         fullWidth
         multiline
-        rows={2}
+        rows={3}
         size="small"
-        label="What work is planned for today?"
-        placeholder="e.g., Plastering 2nd floor, electrical wiring in ground floor..."
+        label="What work was done?"
+        placeholder="e.g., Completed plastering on 2nd floor, electrical wiring in ground floor..."
         value={description}
         onChange={(e) => setDescription(e.target.value)}
         disabled={disabled}
       />
 
-      {/* Task Photos Section - Always visible, optional */}
+      {/* Site Photos Section */}
       <Box>
         {/* Header with count selector */}
         <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1.5 }}>
           <PhotoCameraIcon sx={{ fontSize: 20, color: "action.active" }} />
           <Typography variant="body2" fontWeight={500}>
-            Task Photos
+            Site Photos
           </Typography>
           <Typography variant="caption" color="text.secondary">
             (optional)
@@ -157,7 +169,7 @@ export default function MorningUpdateForm({
             color="text.secondary"
             sx={{ mb: 0.5, display: "block" }}
           >
-            How many tasks to document?
+            How many photos?
           </Typography>
           <ToggleButtonGroup
             value={photoCount}
@@ -188,75 +200,72 @@ export default function MorningUpdateForm({
           </ToggleButtonGroup>
         </Box>
 
-        {/* Task Cards */}
-        <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+        {/* Photo Grid - Responsive Grid Layout */}
+        <Box
+          sx={{
+            display: "grid",
+            gridTemplateColumns: {
+              xs: "repeat(2, 1fr)",
+              sm: "repeat(3, 1fr)",
+              md: "repeat(5, 1fr)",
+            },
+            gap: 2,
+          }}
+        >
           {photoSlots.map((slot, index) => (
             <Paper
               key={slot.id}
               variant="outlined"
               sx={{
-                p: 2,
+                p: 1.5,
                 bgcolor: slot.photo ? "success.50" : "grey.50",
                 borderColor: slot.photo ? "success.200" : "grey.200",
                 transition: "all 0.2s ease",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: 1,
               }}
             >
-              {/* Task Header */}
+              {/* Photo Number */}
               <Typography
-                variant="subtitle2"
+                variant="caption"
                 fontWeight={600}
-                color={slot.photo ? "success.dark" : "text.primary"}
-                sx={{ mb: 1.5 }}
+                color={slot.photo ? "success.dark" : "text.secondary"}
               >
-                Task {index + 1}
+                Photo {index + 1}
               </Typography>
 
-              {/* Photo and Description Row */}
-              <Box
-                sx={{
-                  display: "flex",
-                  flexDirection: { xs: "column", sm: "row" },
-                  gap: 2,
-                  alignItems: { xs: "center", sm: "flex-start" },
-                }}
-              >
-                {/* Photo Capture Area */}
-                <Box sx={{ flexShrink: 0 }}>
-                  <PhotoCaptureButton
-                    supabase={supabase}
-                    siteId={siteId}
-                    date={date}
-                    period="morning"
-                    photoIndex={index + 1}
-                    photoUrl={slot.photo?.url || null}
-                    onPhotoCapture={(url) => handlePhotoCapture(index, url)}
-                    onPhotoRemove={() => handlePhotoRemove(index)}
-                    disabled={disabled}
-                    size={photoSize}
-                    label="Tap to capture"
-                  />
-                </Box>
+              {/* Photo Capture */}
+              <PhotoCaptureButton
+                supabase={supabase}
+                siteId={siteId}
+                date={date}
+                period="morning"
+                photoIndex={index + 1}
+                photoUrl={slot.photo?.url || null}
+                onPhotoCapture={(url) => handlePhotoCapture(index, url)}
+                onPhotoRemove={() => handlePhotoRemove(index)}
+                disabled={disabled}
+                size={photoSize}
+                label="Tap to add"
+              />
 
-                {/* Description Field */}
-                <Box sx={{ flex: 1, width: "100%" }}>
-                  <TextField
-                    fullWidth
-                    size="small"
-                    label={`Task ${index + 1} description`}
-                    placeholder="e.g., Ground floor plastering..."
-                    value={slot.description}
-                    onChange={(e) => handleDescriptionChange(index, e.target.value)}
-                    disabled={disabled}
-                    multiline
-                    rows={isMobile ? 2 : 3}
-                    sx={{
-                      "& .MuiInputBase-input": {
-                        fontSize: "0.875rem",
-                      },
-                    }}
-                  />
-                </Box>
-              </Box>
+              {/* Optional Description */}
+              <TextField
+                fullWidth
+                size="small"
+                placeholder="Description..."
+                value={slot.description}
+                onChange={(e) => handleDescriptionChange(index, e.target.value)}
+                disabled={disabled}
+                sx={{
+                  "& .MuiInputBase-input": {
+                    fontSize: "0.75rem",
+                    py: 0.75,
+                  },
+                }}
+              />
             </Paper>
           ))}
         </Box>
@@ -267,7 +276,7 @@ export default function MorningUpdateForm({
           color="text.secondary"
           sx={{ mt: 1.5, display: "block" }}
         >
-          Capture a photo of each work area and add a brief description for evening comparison.
+          Add photos to document the day&apos;s work progress.
         </Typography>
       </Box>
     </Box>

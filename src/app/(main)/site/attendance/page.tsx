@@ -33,9 +33,11 @@ import {
   SpeedDial,
   SpeedDialAction,
   SpeedDialIcon,
+  Snackbar,
 } from "@mui/material";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useFullscreen } from "@/hooks/useFullscreen";
+import { getPersistedDrawerState, clearPersistedDrawerState } from "@/hooks/useDrawerPersistence";
 import {
   ExpandMore,
   ExpandLess,
@@ -51,6 +53,8 @@ import {
   WbSunny,
   EventNote,
   EventBusy as HolidayIcon,
+  BeachAccess as BeachAccessIcon,
+  Visibility as VisibilityIcon,
 } from "@mui/icons-material";
 import AttendanceDrawer from "@/components/attendance/AttendanceDrawer";
 import HolidayConfirmDialog from "@/components/attendance/HolidayConfirmDialog";
@@ -306,7 +310,33 @@ export default function AttendancePage() {
     created_by: string | null;
   }>>([]);
 
+  // SpeedDial controlled state (click-only, not hover)
+  const [speedDialOpen, setSpeedDialOpen] = useState(false);
+
+  // View attendance summary state (eye icon)
+  const [viewSummaryDate, setViewSummaryDate] = useState<string | null>(null);
+
+  // Restoration message state
+  const [restorationMessage, setRestorationMessage] = useState<string | null>(null);
+
   const canEdit = hasEditPermission(userProfile?.role);
+
+  // Check for persisted drawer state on mount and restore if found
+  useEffect(() => {
+    const persistedState = getPersistedDrawerState();
+    if (persistedState && persistedState.dirty && selectedSite?.id === persistedState.siteId) {
+      // Restore the drawer state
+      setDrawerOpen(true);
+      setDrawerMode(persistedState.mode);
+      setSelectedDateForDrawer(persistedState.date);
+      setRestorationMessage("Restored your unsaved work");
+      // Clear message after 5 seconds
+      setTimeout(() => setRestorationMessage(null), 5000);
+    } else if (persistedState && persistedState.siteId !== selectedSite?.id) {
+      // Different site, clear the persisted state
+      clearPersistedDrawerState();
+    }
+  }, [selectedSite?.id]); // Only run when site changes
 
   // Calculate totals for the filtered period
   const periodTotals = useMemo(() => {
@@ -356,6 +386,48 @@ export default function AttendancePage() {
       totalMarketAmount,
     };
   }, [dateSummaries]);
+
+  // Combined view: dateSummaries + holiday-only dates (holidays without attendance)
+  // This creates a merged list sorted by date descending
+  const combinedDateEntries = useMemo(() => {
+    // Get set of dates that have attendance data
+    const attendanceDates = new Set(dateSummaries.map((s) => s.date));
+
+    // Filter holidays within selected date range that don't have attendance
+    const holidayOnlyEntries = recentHolidays
+      .filter((h) => {
+        const hDate = h.date;
+        return (
+          hDate >= dateFrom &&
+          hDate <= dateTo &&
+          !attendanceDates.has(hDate)
+        );
+      })
+      .map((h) => ({
+        type: "holiday" as const,
+        date: h.date,
+        holiday: h,
+      }));
+
+    // Map dateSummaries and check if each date is also a holiday
+    const attendanceEntries = dateSummaries.map((s) => {
+      const holiday = recentHolidays.find((h) => h.date === s.date);
+      return {
+        type: "attendance" as const,
+        date: s.date,
+        summary: s,
+        holiday: holiday || null,
+      };
+    });
+
+    // Combine and sort by date descending
+    const combined = [
+      ...attendanceEntries,
+      ...holidayOnlyEntries,
+    ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+    return combined;
+  }, [dateSummaries, recentHolidays, dateFrom, dateTo]);
 
   const fetchAttendanceHistory = async () => {
     if (!selectedSite) return;
@@ -533,7 +605,7 @@ export default function AttendancePage() {
           date: record.date,
           laborer_id: record.laborer_id,
           laborer_name: record.laborers.name,
-          laborer_type: record.laborers.laborer_type || "daily_market",
+          laborer_type: record.laborers.laborer_type || "daily_wage",
           category_name: record.laborers.labor_categories?.name || "Unknown",
           role_name: record.laborers.labor_roles?.name || "Unknown",
           team_name: record.laborers.team?.name || null,
@@ -654,7 +726,7 @@ export default function AttendancePage() {
             date: record.date,
             records: [record],
             marketLaborers: market?.expandedRecords || [],
-            dailyLaborerCount: record.laborer_type === "daily_market" ? 1 : 0,
+            dailyLaborerCount: record.laborer_type === "daily_wage" ? 1 : 0,
             contractLaborerCount: record.laborer_type === "contract" ? 1 : 0,
             marketLaborerCount: market?.count || 0,
             totalLaborerCount: 1 + (market?.count || 0),
@@ -669,7 +741,7 @@ export default function AttendancePage() {
               (market?.snacks || 0),
             // Amounts by laborer type
             dailyLaborerAmount:
-              record.laborer_type === "daily_market"
+              record.laborer_type === "daily_wage"
                 ? record.daily_earnings
                 : 0,
             contractLaborerAmount:
@@ -685,7 +757,7 @@ export default function AttendancePage() {
             comments: workSummary?.comments || null,
             workUpdates:
               ((workSummary as DailyWorkSummary & { work_updates?: unknown })
-                ?.work_updates as WorkUpdates) || null,
+                ?.work_updates as unknown as WorkUpdates) || null,
             categoryBreakdown,
             isExpanded: false,
             teaShop: teaShop || null,
@@ -727,7 +799,7 @@ export default function AttendancePage() {
             comments: workSummary?.comments || null,
             workUpdates:
               ((workSummary as DailyWorkSummary & { work_updates?: unknown })
-                ?.work_updates as WorkUpdates) || null,
+                ?.work_updates as unknown as WorkUpdates) || null,
             categoryBreakdown: {},
             isExpanded: false,
             teaShop: teaShop || null,
@@ -773,18 +845,21 @@ export default function AttendancePage() {
     const thirtyDaysLater = dayjs().add(30, "day").format("YYYY-MM-DD");
 
     try {
-      // Check today's holiday
-      const { data: todayData } = await supabase
+      // Check today's holiday (use maybeSingle to avoid error when no holiday exists)
+      const { data: todayData, error: todayError } = await supabase
         .from("site_holidays")
         .select("*")
         .eq("site_id", selectedSite.id)
         .eq("date", today)
-        .single();
+        .maybeSingle();
 
+      if (todayError) {
+        console.error("Error fetching today's holiday:", todayError);
+      }
       setTodayHoliday(todayData || null);
 
       // Fetch recent and upcoming holidays (last 30 days to next 30 days)
-      const { data: holidaysData } = await supabase
+      const { data: holidaysData, error: holidaysError } = await supabase
         .from("site_holidays")
         .select("*")
         .eq("site_id", selectedSite.id)
@@ -792,6 +867,9 @@ export default function AttendancePage() {
         .lte("date", thirtyDaysLater)
         .order("date", { ascending: false });
 
+      if (holidaysError) {
+        console.error("Error fetching holidays:", holidaysError);
+      }
       setRecentHolidays(holidaysData || []);
     } catch (err) {
       console.error("Error checking holidays:", err);
@@ -1343,7 +1421,8 @@ export default function AttendancePage() {
             size="small"
             variant="outlined"
             onClick={() => {
-              setDateFrom(dayjs().subtract(7, "day").format("YYYY-MM-DD"));
+              // Current week from Sunday to today
+              setDateFrom(dayjs().startOf("week").format("YYYY-MM-DD"));
               setDateTo(dayjs().format("YYYY-MM-DD"));
             }}
             sx={{
@@ -1359,7 +1438,8 @@ export default function AttendancePage() {
             size="small"
             variant="outlined"
             onClick={() => {
-              setDateFrom(dayjs().subtract(1, "month").format("YYYY-MM-DD"));
+              // Current month from 1st to today
+              setDateFrom(dayjs().startOf("month").format("YYYY-MM-DD"));
               setDateTo(dayjs().format("YYYY-MM-DD"));
             }}
             sx={{
@@ -2020,14 +2100,81 @@ export default function AttendancePage() {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {dateSummaries.map((summary) => (
-                  <React.Fragment key={summary.date}>
+                {combinedDateEntries.map((entry) => (
+                  <React.Fragment key={entry.date}>
+                    {/* Holiday-only row (no attendance data) */}
+                    {entry.type === "holiday" && (
+                      <TableRow
+                        sx={{
+                          bgcolor: "warning.50",
+                          "&:hover": { bgcolor: "warning.100" },
+                        }}
+                      >
+                        <TableCell
+                          colSpan={13}
+                          sx={{
+                            py: 1.5,
+                            borderLeft: 4,
+                            borderLeftColor: "warning.main",
+                          }}
+                        >
+                          <Box
+                            sx={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 1.5,
+                              flexWrap: "wrap",
+                            }}
+                          >
+                            <BeachAccessIcon
+                              sx={{ color: "warning.main", fontSize: 24 }}
+                            />
+                            <Typography
+                              variant="body2"
+                              fontWeight={600}
+                              sx={{ minWidth: 80 }}
+                            >
+                              {dayjs(entry.date).format("DD MMM")}
+                            </Typography>
+                            <Typography
+                              variant="caption"
+                              color="text.secondary"
+                            >
+                              {dayjs(entry.date).format("dddd")}
+                            </Typography>
+                            <Chip
+                              label="Holiday"
+                              size="small"
+                              color="warning"
+                              sx={{ fontWeight: 600 }}
+                            />
+                            <Typography
+                              variant="body2"
+                              color="text.secondary"
+                              sx={{ fontStyle: "italic" }}
+                            >
+                              {entry.holiday?.reason || "No reason specified"}
+                            </Typography>
+                          </Box>
+                        </TableCell>
+                      </TableRow>
+                    )}
+
+                    {/* Attendance row (with optional holiday indicator) */}
+                    {entry.type === "attendance" && (
+                      <>
                     <TableRow
                       hover
-                      onClick={() => toggleDateExpanded(summary.date)}
+                      onClick={() => toggleDateExpanded(entry.summary.date)}
                       sx={{
                         cursor: "pointer",
                         "&:hover": { bgcolor: "action.hover" },
+                        // Highlight if this date is also a holiday
+                        ...(entry.holiday && {
+                          bgcolor: "warning.50",
+                          borderLeft: 4,
+                          borderLeftColor: "warning.main",
+                        }),
                       }}
                     >
                       {/* Sticky expand cell */}
@@ -2035,12 +2182,12 @@ export default function AttendancePage() {
                         sx={{
                           position: "sticky",
                           left: 0,
-                          bgcolor: "background.paper",
+                          bgcolor: entry.holiday ? "warning.50" : "background.paper",
                           zIndex: 1,
                         }}
                       >
                         <IconButton size="small">
-                          {summary.isExpanded ? <ExpandLess /> : <ExpandMore />}
+                          {entry.summary.isExpanded ? <ExpandLess /> : <ExpandMore />}
                         </IconButton>
                       </TableCell>
                       {/* Sticky date cell */}
@@ -2048,7 +2195,7 @@ export default function AttendancePage() {
                         sx={{
                           position: "sticky",
                           left: 40,
-                          bgcolor: "background.paper",
+                          bgcolor: entry.holiday ? "warning.50" : "background.paper",
                           zIndex: 1,
                           "&::after": {
                             content: '""',
@@ -2062,24 +2209,35 @@ export default function AttendancePage() {
                           },
                         }}
                       >
-                        <Typography
-                          variant="body2"
-                          fontWeight={600}
-                          sx={{ fontSize: { xs: "0.75rem", sm: "0.875rem" } }}
-                        >
-                          {dayjs(summary.date).format("DD MMM")}
-                        </Typography>
-                        <Typography
-                          variant="caption"
-                          color="text.secondary"
-                          sx={{ fontSize: { xs: "0.65rem", sm: "0.75rem" } }}
-                        >
-                          {dayjs(summary.date).format("ddd")}
-                        </Typography>
+                        <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                          {entry.holiday && (
+                            <Tooltip title={`Holiday: ${entry.holiday.reason || "No reason"}`}>
+                              <BeachAccessIcon
+                                sx={{ color: "warning.main", fontSize: 16 }}
+                              />
+                            </Tooltip>
+                          )}
+                          <Box>
+                            <Typography
+                              variant="body2"
+                              fontWeight={600}
+                              sx={{ fontSize: { xs: "0.75rem", sm: "0.875rem" } }}
+                            >
+                              {dayjs(entry.summary.date).format("DD MMM")}
+                            </Typography>
+                            <Typography
+                              variant="caption"
+                              color="text.secondary"
+                              sx={{ fontSize: { xs: "0.65rem", sm: "0.75rem" } }}
+                            >
+                              {dayjs(entry.summary.date).format("ddd")}
+                            </Typography>
+                          </Box>
+                        </Box>
                       </TableCell>
                       <TableCell align="center">
                         <Chip
-                          label={summary.dailyLaborerCount}
+                          label={entry.summary.dailyLaborerCount}
                           size="small"
                           color="warning"
                           variant="outlined"
@@ -2087,7 +2245,7 @@ export default function AttendancePage() {
                       </TableCell>
                       <TableCell align="center">
                         <Chip
-                          label={summary.contractLaborerCount}
+                          label={entry.summary.contractLaborerCount}
                           size="small"
                           color="info"
                           variant="outlined"
@@ -2095,7 +2253,7 @@ export default function AttendancePage() {
                       </TableCell>
                       <TableCell align="center">
                         <Chip
-                          label={summary.marketLaborerCount}
+                          label={entry.summary.marketLaborerCount}
                           size="small"
                           color="secondary"
                           variant="outlined"
@@ -2103,7 +2261,7 @@ export default function AttendancePage() {
                       </TableCell>
                       <TableCell align="center">
                         <Typography variant="body2" fontWeight={700}>
-                          {summary.totalLaborerCount}
+                          {entry.summary.totalLaborerCount}
                         </Typography>
                       </TableCell>
                       <TableCell
@@ -2111,7 +2269,7 @@ export default function AttendancePage() {
                         sx={{ display: { xs: "none", md: "table-cell" } }}
                       >
                         <Typography variant="caption">
-                          {formatTime(summary.firstInTime)}
+                          {formatTime(entry.summary.firstInTime)}
                         </Typography>
                       </TableCell>
                       <TableCell
@@ -2119,9 +2277,9 @@ export default function AttendancePage() {
                         sx={{ display: { xs: "none", md: "table-cell" } }}
                       >
                         <Typography variant="caption">
-                          {summary.attendanceStatus === "morning_entry"
+                          {entry.summary.attendanceStatus === "morning_entry"
                             ? "-"
-                            : formatTime(summary.lastOutTime)}
+                            : formatTime(entry.summary.lastOutTime)}
                         </Typography>
                       </TableCell>
                       <TableCell align="right">
@@ -2130,17 +2288,17 @@ export default function AttendancePage() {
                           fontWeight={600}
                           color="success.main"
                         >
-                          ₹{summary.totalSalary.toLocaleString()}
+                          ₹{entry.summary.totalSalary.toLocaleString()}
                         </Typography>
                       </TableCell>
                       <TableCell
                         align="center"
                         sx={{ display: { xs: "none", sm: "table-cell" } }}
                       >
-                        {summary.teaShop ? (
+                        {entry.summary.teaShop ? (
                           <Chip
                             icon={<TeaIcon fontSize="small" />}
-                            label={`₹${summary.teaShop.total.toLocaleString()}`}
+                            label={`₹${entry.summary.teaShop.total.toLocaleString()}`}
                             size="small"
                             color="secondary"
                             variant="outlined"
@@ -2148,8 +2306,8 @@ export default function AttendancePage() {
                               e.stopPropagation();
                               setTeaShopPopoverAnchor(e.currentTarget);
                               setTeaShopPopoverData({
-                                date: summary.date,
-                                data: summary.teaShop!,
+                                date: entry.summary.date,
+                                data: entry.summary.teaShop!,
                               });
                             }}
                             sx={{ cursor: "pointer" }}
@@ -2162,7 +2320,7 @@ export default function AttendancePage() {
                             variant="outlined"
                             onClick={(e) => {
                               e.stopPropagation();
-                              handleOpenTeaShopDialog(summary.date);
+                              handleOpenTeaShopDialog(entry.summary.date);
                             }}
                             sx={{ cursor: "pointer", opacity: 0.6 }}
                           />
@@ -2176,7 +2334,7 @@ export default function AttendancePage() {
                         >
                           ₹
                           {(
-                            summary.totalExpense + (summary.teaShop?.total || 0)
+                            entry.summary.totalExpense + (entry.summary.teaShop?.total || 0)
                           ).toLocaleString()}
                         </Typography>
                       </TableCell>
@@ -2188,8 +2346,8 @@ export default function AttendancePage() {
                         >
                           <Tooltip
                             title={
-                              summary.workDescription ||
-                              summary.workUpdates?.morning?.description ||
+                              entry.summary.workDescription ||
+                              entry.summary.workUpdates?.morning?.description ||
                               "No description"
                             }
                           >
@@ -2198,26 +2356,26 @@ export default function AttendancePage() {
                               noWrap
                               sx={{ maxWidth: 100, display: "block" }}
                             >
-                              {summary.workDescription ||
-                                summary.workUpdates?.morning?.description ||
+                              {entry.summary.workDescription ||
+                                entry.summary.workUpdates?.morning?.description ||
                                 "-"}
                             </Typography>
                           </Tooltip>
-                          {summary.workUpdates && (
+                          {entry.summary.workUpdates && (
                             <PhotoBadge
                               photoCount={
-                                (summary.workUpdates.morning?.photos?.length ||
+                                (entry.summary.workUpdates.morning?.photos?.length ||
                                   0) +
-                                (summary.workUpdates.evening?.photos?.length ||
+                                (entry.summary.workUpdates.evening?.photos?.length ||
                                   0)
                               }
                               completionPercent={
-                                summary.workUpdates.evening?.completionPercent
+                                entry.summary.workUpdates.evening?.completionPercent
                               }
                               onClick={() => {
                                 setSelectedWorkUpdate({
-                                  workUpdates: summary.workUpdates,
-                                  date: summary.date,
+                                  workUpdates: entry.summary.workUpdates,
+                                  date: entry.summary.date,
                                 });
                                 setWorkUpdateViewerOpen(true);
                               }}
@@ -2226,14 +2384,14 @@ export default function AttendancePage() {
                         </Box>
                       </TableCell>
                       <TableCell>
-                        {summary.attendanceStatus === "morning_entry" ? (
+                        {entry.summary.attendanceStatus === "morning_entry" ? (
                           <Chip
                             label="🌅 Morning Only"
                             size="small"
                             color="warning"
                             onClick={(e) => {
                               e.stopPropagation();
-                              handleOpenDrawerForDate(summary.date, "evening");
+                              handleOpenDrawerForDate(entry.summary.date, "evening");
                             }}
                             sx={{ cursor: "pointer" }}
                           />
@@ -2250,7 +2408,7 @@ export default function AttendancePage() {
                     <TableRow>
                       <TableCell colSpan={13} sx={{ py: 0, border: 0 }}>
                         <Collapse
-                          in={summary.isExpanded}
+                          in={entry.summary.isExpanded}
                           timeout="auto"
                           unmountOnExit
                         >
@@ -2275,7 +2433,7 @@ export default function AttendancePage() {
                                   alignItems: "center",
                                 }}
                               >
-                                {summary.contractLaborerCount > 0 && (
+                                {entry.summary.contractLaborerCount > 0 && (
                                   <Chip
                                     label={
                                       <Box
@@ -2286,12 +2444,12 @@ export default function AttendancePage() {
                                         }}
                                       >
                                         Contract: ₹
-                                        {summary.contractLaborerAmount.toLocaleString()}
+                                        {entry.summary.contractLaborerAmount.toLocaleString()}
                                         <Box
                                           component="span"
                                           sx={{ opacity: 0.8 }}
                                         >
-                                          ({summary.contractLaborerCount})
+                                          ({entry.summary.contractLaborerCount})
                                         </Box>
                                       </Box>
                                     }
@@ -2310,7 +2468,7 @@ export default function AttendancePage() {
                                     }}
                                   />
                                 )}
-                                {summary.marketLaborerCount > 0 && (
+                                {entry.summary.marketLaborerCount > 0 && (
                                   <Chip
                                     label={
                                       <Box
@@ -2321,12 +2479,12 @@ export default function AttendancePage() {
                                         }}
                                       >
                                         Market: ₹
-                                        {summary.marketLaborerAmount.toLocaleString()}
+                                        {entry.summary.marketLaborerAmount.toLocaleString()}
                                         <Box
                                           component="span"
                                           sx={{ opacity: 0.8 }}
                                         >
-                                          ({summary.marketLaborerCount})
+                                          ({entry.summary.marketLaborerCount})
                                         </Box>
                                       </Box>
                                     }
@@ -2355,28 +2513,28 @@ export default function AttendancePage() {
                                 }}
                               >
                                 {/* Audit Avatar - show who created/edited this entry */}
-                                {summary.records.length > 0 && (
+                                {entry.summary.records.length > 0 && (
                                   <AuditAvatarGroup
                                     createdByName={
-                                      summary.records[0]?.entered_by
+                                      entry.summary.records[0]?.entered_by
                                     }
                                     createdByAvatar={
-                                      summary.records[0]?.entered_by_avatar
+                                      entry.summary.records[0]?.entered_by_avatar
                                     }
-                                    createdAt={summary.records[0]?.created_at}
+                                    createdAt={entry.summary.records[0]?.created_at}
                                     updatedByName={
-                                      summary.records[0]?.updated_by
+                                      entry.summary.records[0]?.updated_by
                                     }
                                     updatedByAvatar={
-                                      summary.records[0]?.updated_by_avatar
+                                      entry.summary.records[0]?.updated_by_avatar
                                     }
-                                    updatedAt={summary.records[0]?.updated_at}
+                                    updatedAt={entry.summary.records[0]?.updated_at}
                                     compact
                                     size="small"
                                   />
                                 )}
                                 {canEdit &&
-                                  summary.attendanceStatus ===
+                                  entry.summary.attendanceStatus ===
                                     "morning_entry" && (
                                     <Button
                                       variant="contained"
@@ -2384,7 +2542,7 @@ export default function AttendancePage() {
                                       size="small"
                                       onClick={() =>
                                         handleOpenDrawerForDate(
-                                          summary.date,
+                                          entry.summary.date,
                                           "evening"
                                         )
                                       }
@@ -2392,8 +2550,21 @@ export default function AttendancePage() {
                                       🌆 Confirm Attendance
                                     </Button>
                                   )}
+                                {/* View Summary Button */}
+                                <Tooltip title="View attendance summary">
+                                  <IconButton
+                                    size="small"
+                                    color="info"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setViewSummaryDate(entry.summary.date);
+                                    }}
+                                  >
+                                    <VisibilityIcon fontSize="small" />
+                                  </IconButton>
+                                </Tooltip>
                                 {canEdit &&
-                                  summary.attendanceStatus !==
+                                  entry.summary.attendanceStatus !==
                                     "morning_entry" && (
                                     <Button
                                       variant="contained"
@@ -2401,7 +2572,7 @@ export default function AttendancePage() {
                                       startIcon={<Edit />}
                                       onClick={() =>
                                         handleOpenDrawerForDate(
-                                          summary.date,
+                                          entry.summary.date,
                                           "full"
                                         )
                                       }
@@ -2417,7 +2588,7 @@ export default function AttendancePage() {
                                       onClick={(e) => {
                                         e.stopPropagation();
                                         handleDeleteDateAttendance(
-                                          summary.date
+                                          entry.summary.date
                                         );
                                       }}
                                     >
@@ -2429,7 +2600,7 @@ export default function AttendancePage() {
                             </Box>
 
                             {/* Work Description */}
-                            {(summary.workDescription || summary.comments) && (
+                            {(entry.summary.workDescription || entry.summary.comments) && (
                               <Box
                                 sx={{
                                   mb: 2,
@@ -2440,32 +2611,32 @@ export default function AttendancePage() {
                                   borderColor: "divider",
                                 }}
                               >
-                                {summary.workDescription && (
+                                {entry.summary.workDescription && (
                                   <Typography variant="body2" sx={{ mb: 0.5 }}>
                                     <strong>Work:</strong>{" "}
-                                    {summary.workDescription}
+                                    {entry.summary.workDescription}
                                   </Typography>
                                 )}
-                                {summary.workStatus && (
+                                {entry.summary.workStatus && (
                                   <Typography variant="body2" sx={{ mb: 0.5 }}>
                                     <strong>Status:</strong>{" "}
-                                    {summary.workStatus}
+                                    {entry.summary.workStatus}
                                   </Typography>
                                 )}
-                                {summary.comments && (
+                                {entry.summary.comments && (
                                   <Typography
                                     variant="body2"
                                     color="text.secondary"
                                   >
                                     <strong>Comments:</strong>{" "}
-                                    {summary.comments}
+                                    {entry.summary.comments}
                                   </Typography>
                                 )}
                               </Box>
                             )}
 
                             {/* Individual Records Table */}
-                            {summary.records.length > 0 && (
+                            {entry.summary.records.length > 0 && (
                               <Table size="small">
                                 <TableHead>
                                   <TableRow sx={{ bgcolor: "#e3f2fd" }}>
@@ -2529,7 +2700,7 @@ export default function AttendancePage() {
                                   </TableRow>
                                 </TableHead>
                                 <TableBody>
-                                  {summary.records.map((record) => (
+                                  {entry.summary.records.map((record) => (
                                     <TableRow key={record.id} hover>
                                       <TableCell>
                                         {record.laborer_name}
@@ -2681,11 +2852,11 @@ export default function AttendancePage() {
                             )}
 
                             {/* Market Laborers Section */}
-                            {summary.marketLaborers &&
-                              summary.marketLaborers.length > 0 && (
+                            {entry.summary.marketLaborers &&
+                              entry.summary.marketLaborers.length > 0 && (
                                 <Box
                                   sx={{
-                                    mt: summary.records.length > 0 ? 2 : 0,
+                                    mt: entry.summary.records.length > 0 ? 2 : 0,
                                   }}
                                 >
                                   <Typography
@@ -2706,7 +2877,7 @@ export default function AttendancePage() {
                                       variant="caption"
                                       color="text.secondary"
                                     >
-                                      ({summary.marketLaborers.length} workers)
+                                      ({entry.summary.marketLaborers.length} workers)
                                     </Typography>
                                   </Typography>
                                   <Table
@@ -2788,7 +2959,7 @@ export default function AttendancePage() {
                                       </TableRow>
                                     </TableHead>
                                     <TableBody>
-                                      {summary.marketLaborers.map((ml) => (
+                                      {entry.summary.marketLaborers.map((ml) => (
                                         <TableRow
                                           key={ml.id}
                                           sx={{
@@ -2867,7 +3038,7 @@ export default function AttendancePage() {
                                             fontWeight={700}
                                           >
                                             Market Labor Total (
-                                            {summary.marketLaborers.length}{" "}
+                                            {entry.summary.marketLaborers.length}{" "}
                                             workers)
                                           </Typography>
                                         </TableCell>
@@ -2877,12 +3048,12 @@ export default function AttendancePage() {
                                             color="secondary.main"
                                           >
                                             ₹
-                                            {summary.marketLaborerAmount.toLocaleString()}
+                                            {entry.summary.marketLaborerAmount.toLocaleString()}
                                           </Typography>
                                         </TableCell>
                                         <TableCell align="center">
                                           <Chip
-                                            label={`Pending: ₹${summary.marketLaborerAmount.toLocaleString()}`}
+                                            label={`Pending: ₹${entry.summary.marketLaborerAmount.toLocaleString()}`}
                                             size="small"
                                             color="warning"
                                             sx={{ fontSize: "0.65rem" }}
@@ -2897,9 +3068,11 @@ export default function AttendancePage() {
                         </Collapse>
                       </TableCell>
                     </TableRow>
+                      </>
+                    )}
                   </React.Fragment>
                 ))}
-                {dateSummaries.length === 0 && (
+                {combinedDateEntries.length === 0 && (
                   <TableRow>
                     <TableCell colSpan={13} align="center" sx={{ py: 4 }}>
                       <Typography color="text.secondary">
@@ -3352,10 +3525,242 @@ export default function AttendancePage() {
         </DialogActions>
       </Dialog>
 
-      {/* SpeedDial for Add Attendance - Two options: Start Day + Full Day */}
+      {/* View Attendance Summary Dialog */}
+      <Dialog
+        open={Boolean(viewSummaryDate)}
+        onClose={() => setViewSummaryDate(null)}
+        maxWidth="md"
+        fullWidth
+      >
+        {viewSummaryDate && (() => {
+          const summaryEntry = combinedDateEntries.find(
+            (e) => e.type === "attendance" && e.date === viewSummaryDate
+          );
+          const summary = summaryEntry?.type === "attendance" ? summaryEntry.summary : null;
+
+          if (!summary) return null;
+
+          return (
+            <>
+              <DialogTitle sx={{ bgcolor: "primary.main", color: "white" }}>
+                <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
+                  <VisibilityIcon />
+                  <Box>
+                    <Typography variant="h6">
+                      Attendance Summary
+                    </Typography>
+                    <Typography variant="body2" sx={{ opacity: 0.9 }}>
+                      {dayjs(viewSummaryDate).format("dddd, DD MMMM YYYY")}
+                    </Typography>
+                  </Box>
+                </Box>
+              </DialogTitle>
+              <DialogContent sx={{ p: 3 }}>
+                {/* Summary Stats */}
+                <Box sx={{ display: "flex", flexWrap: "wrap", gap: 2, mb: 3 }}>
+                  <Paper sx={{ p: 2, flex: "1 1 150px", textAlign: "center" }}>
+                    <Typography variant="caption" color="text.secondary">Total Laborers</Typography>
+                    <Typography variant="h4" fontWeight={700}>{summary.totalLaborerCount}</Typography>
+                  </Paper>
+                  <Paper sx={{ p: 2, flex: "1 1 150px", textAlign: "center" }}>
+                    <Typography variant="caption" color="text.secondary">Daily/Contract</Typography>
+                    <Typography variant="h4" fontWeight={700} color="info.main">
+                      {summary.dailyLaborerCount + summary.contractLaborerCount}
+                    </Typography>
+                  </Paper>
+                  <Paper sx={{ p: 2, flex: "1 1 150px", textAlign: "center" }}>
+                    <Typography variant="caption" color="text.secondary">Market</Typography>
+                    <Typography variant="h4" fontWeight={700} color="secondary.main">
+                      {summary.marketLaborerCount}
+                    </Typography>
+                  </Paper>
+                  <Paper sx={{ p: 2, flex: "1 1 150px", textAlign: "center" }}>
+                    <Typography variant="caption" color="text.secondary">Total Expense</Typography>
+                    <Typography variant="h4" fontWeight={700} color="success.main">
+                      ₹{(summary.totalExpense + (summary.teaShop?.total || 0)).toLocaleString()}
+                    </Typography>
+                  </Paper>
+                </Box>
+
+                {/* Status */}
+                <Box sx={{ mb: 3 }}>
+                  <Typography variant="subtitle2" sx={{ mb: 1 }}>Status</Typography>
+                  <Chip
+                    label={summary.attendanceStatus === "morning_entry" ? "🌅 Morning Only" : "✓ Confirmed"}
+                    color={summary.attendanceStatus === "morning_entry" ? "warning" : "success"}
+                  />
+                </Box>
+
+                {/* Timing */}
+                <Box sx={{ mb: 3 }}>
+                  <Typography variant="subtitle2" sx={{ mb: 1 }}>Work Timing</Typography>
+                  <Box sx={{ display: "flex", gap: 3 }}>
+                    <Typography variant="body2">
+                      <strong>First In:</strong> {formatTime(summary.firstInTime) || "N/A"}
+                    </Typography>
+                    <Typography variant="body2">
+                      <strong>Last Out:</strong> {summary.attendanceStatus === "morning_entry" ? "Pending" : formatTime(summary.lastOutTime) || "N/A"}
+                    </Typography>
+                  </Box>
+                </Box>
+
+                {/* Work Description */}
+                {(summary.workDescription || summary.comments) && (
+                  <Box sx={{ mb: 3 }}>
+                    <Typography variant="subtitle2" sx={{ mb: 1 }}>Work Description</Typography>
+                    <Paper sx={{ p: 2, bgcolor: "grey.50" }}>
+                      {summary.workDescription && (
+                        <Typography variant="body2" sx={{ mb: 0.5 }}>
+                          {summary.workDescription}
+                        </Typography>
+                      )}
+                      {summary.comments && (
+                        <Typography variant="body2" color="text.secondary">
+                          Comments: {summary.comments}
+                        </Typography>
+                      )}
+                    </Paper>
+                  </Box>
+                )}
+
+                {/* Laborers List */}
+                {summary.records.length > 0 && (
+                  <Box sx={{ mb: 3 }}>
+                    <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                      Laborers ({summary.records.length})
+                    </Typography>
+                    <TableContainer component={Paper} variant="outlined">
+                      <Table size="small">
+                        <TableHead>
+                          <TableRow sx={{ bgcolor: "grey.100" }}>
+                            <TableCell sx={{ fontWeight: 700 }}>Name</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Type</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Team</TableCell>
+                            <TableCell align="center" sx={{ fontWeight: 700 }}>In</TableCell>
+                            <TableCell align="center" sx={{ fontWeight: 700 }}>Out</TableCell>
+                            <TableCell align="center" sx={{ fontWeight: 700 }}>Days</TableCell>
+                            <TableCell align="right" sx={{ fontWeight: 700 }}>Earnings</TableCell>
+                            <TableCell align="center" sx={{ fontWeight: 700 }}>Payment</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {summary.records.map((record) => (
+                            <TableRow key={record.id}>
+                              <TableCell>{record.laborer_name}</TableCell>
+                              <TableCell>
+                                <Chip
+                                  label={record.laborer_type === "contract" ? "Contract" : "Daily"}
+                                  size="small"
+                                  color={record.laborer_type === "contract" ? "info" : "warning"}
+                                  variant="outlined"
+                                />
+                              </TableCell>
+                              <TableCell>{record.team_name || "-"}</TableCell>
+                              <TableCell align="center">{formatTime(record.in_time) || "-"}</TableCell>
+                              <TableCell align="center">{formatTime(record.out_time) || "-"}</TableCell>
+                              <TableCell align="center">{record.work_days}</TableCell>
+                              <TableCell align="right">₹{record.daily_earnings.toLocaleString()}</TableCell>
+                              <TableCell align="center">
+                                <Chip
+                                  label={record.is_paid ? "Paid" : "Pending"}
+                                  size="small"
+                                  color={record.is_paid ? "success" : "warning"}
+                                  variant={record.is_paid ? "filled" : "outlined"}
+                                />
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+                  </Box>
+                )}
+
+                {/* Market Laborers */}
+                {summary.marketLaborers && summary.marketLaborers.length > 0 && (
+                  <Box sx={{ mb: 3 }}>
+                    <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                      Market Laborers ({summary.marketLaborers.length})
+                    </Typography>
+                    <TableContainer component={Paper} variant="outlined">
+                      <Table size="small">
+                        <TableHead>
+                          <TableRow sx={{ bgcolor: "secondary.50" }}>
+                            <TableCell sx={{ fontWeight: 700 }}>Name</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Role</TableCell>
+                            <TableCell align="center" sx={{ fontWeight: 700 }}>In</TableCell>
+                            <TableCell align="center" sx={{ fontWeight: 700 }}>Out</TableCell>
+                            <TableCell align="center" sx={{ fontWeight: 700 }}>Days</TableCell>
+                            <TableCell align="right" sx={{ fontWeight: 700 }}>Earnings</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {summary.marketLaborers.map((ml) => (
+                            <TableRow key={ml.id}>
+                              <TableCell>{ml.tempName}</TableCell>
+                              <TableCell>
+                                <Chip
+                                  label={ml.roleName}
+                                  size="small"
+                                  color="secondary"
+                                  variant="outlined"
+                                />
+                              </TableCell>
+                              <TableCell align="center">{ml.inTime?.substring(0, 5) || "-"}</TableCell>
+                              <TableCell align="center">{ml.outTime?.substring(0, 5) || "-"}</TableCell>
+                              <TableCell align="center">{ml.dayUnits}</TableCell>
+                              <TableCell align="right">₹{ml.dailyEarnings.toLocaleString()}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+                  </Box>
+                )}
+
+                {/* Tea Shop */}
+                {summary.teaShop && (
+                  <Box>
+                    <Typography variant="subtitle2" sx={{ mb: 1 }}>Tea Shop</Typography>
+                    <Paper sx={{ p: 2, bgcolor: "grey.50" }}>
+                      <Box sx={{ display: "flex", gap: 3 }}>
+                        <Typography variant="body2">
+                          <strong>Tea:</strong> ₹{summary.teaShop.teaTotal.toLocaleString()}
+                        </Typography>
+                        <Typography variant="body2">
+                          <strong>Snacks:</strong> ₹{summary.teaShop.snacksTotal.toLocaleString()}
+                        </Typography>
+                        <Typography variant="body2" fontWeight={700}>
+                          <strong>Total:</strong> ₹{summary.teaShop.total.toLocaleString()}
+                        </Typography>
+                      </Box>
+                    </Paper>
+                  </Box>
+                )}
+              </DialogContent>
+              <DialogActions sx={{ px: 3, pb: 2 }}>
+                <Button
+                  onClick={() => setViewSummaryDate(null)}
+                  variant="contained"
+                >
+                  Close
+                </Button>
+              </DialogActions>
+            </>
+          );
+        })()}
+      </Dialog>
+
+      {/* SpeedDial for Add Attendance - Click-only (not hover) */}
       {canEdit && (
         <SpeedDial
           ariaLabel="Add Attendance"
+          open={speedDialOpen}
+          onOpen={() => {}} // Disable hover open
+          onClose={() => setSpeedDialOpen(false)}
+          FabProps={{
+            onClick: () => setSpeedDialOpen(!speedDialOpen),
+          }}
           sx={{
             position: "fixed",
             bottom: 24,
@@ -3372,6 +3777,7 @@ export default function AttendancePage() {
             tooltipTitle="Start Day Attendance"
             tooltipOpen
             onClick={() => {
+              setSpeedDialOpen(false);
               setSelectedDateForDrawer(undefined);
               setDrawerMode("morning");
               setDrawerOpen(true);
@@ -3389,6 +3795,7 @@ export default function AttendancePage() {
             tooltipTitle="Full Day Attendance"
             tooltipOpen
             onClick={() => {
+              setSpeedDialOpen(false);
               setSelectedDateForDrawer(undefined);
               setDrawerMode("full");
               setDrawerOpen(true);
@@ -3405,7 +3812,10 @@ export default function AttendancePage() {
             icon={<HolidayIcon />}
             tooltipTitle={todayHoliday ? "Revoke Holiday" : "Mark as Holiday"}
             tooltipOpen
-            onClick={handleHolidayClick}
+            onClick={() => {
+              setSpeedDialOpen(false);
+              handleHolidayClick();
+            }}
             sx={{
               "& .MuiSpeedDialAction-staticTooltipLabel": {
                 whiteSpace: "nowrap",
@@ -3429,6 +3839,15 @@ export default function AttendancePage() {
           onSuccess={handleHolidaySuccess}
         />
       )}
+
+      {/* Restoration message snackbar */}
+      <Snackbar
+        open={!!restorationMessage}
+        autoHideDuration={5000}
+        onClose={() => setRestorationMessage(null)}
+        message={restorationMessage}
+        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+      />
     </Box>
   );
 }
