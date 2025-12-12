@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState, useCallback, useRef } from "react";
+import { createContext, useContext, useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Site } from "@/types/database.types";
 import { useAuth } from "./AuthContext";
@@ -64,21 +64,13 @@ function storeSites(sites: Site[]): void {
 }
 
 export function SiteProvider({ children }: { children: React.ReactNode }) {
-  // Initialize with empty values to match server render (prevents hydration mismatch)
-  // localStorage restoration happens in useEffect after hydration
   const [sites, setSites] = useState<Site[]>([]);
   const [selectedSite, setSelectedSiteState] = useState<Site | null>(null);
   const [loading, setLoading] = useState(true);
   const [isInitialized, setIsInitialized] = useState(false);
-  const [isHydrated, setIsHydrated] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { userProfile, loading: authLoading } = useAuth();
   const [supabase] = useState(() => createClient());
-
-  // Use ref to track if we're currently fetching (prevents race conditions)
-  const isFetchingRef = useRef(false);
-  const retryCountRef = useRef(0);
-  const maxRetries = 3;
 
   // Wrapper to set site and persist to localStorage
   const setSelectedSite = useCallback((site: Site | null) => {
@@ -86,30 +78,26 @@ export function SiteProvider({ children }: { children: React.ReactNode }) {
     storeSiteId(site?.id || null);
   }, []);
 
-  const fetchSites = useCallback(async (isRetry = false) => {
-    // Prevent concurrent fetches (race condition fix)
-    if (isFetchingRef.current) {
+  // Fetch sites from database
+  const fetchSites = useCallback(async () => {
+    if (!userProfile) {
+      console.log("[SiteContext] No user profile, skipping fetch");
       return;
     }
 
-    isFetchingRef.current = true;
     setLoading(true);
-    if (!isRetry) {
-      setError(null);
-      retryCountRef.current = 0;
-    }
+    setError(null);
 
     try {
       console.log("[SiteContext] Fetching sites...", {
-        userRole: userProfile?.role,
-        assignedSites: userProfile?.assigned_sites,
-        retryCount: retryCountRef.current
+        userRole: userProfile.role,
+        assignedSites: userProfile.assigned_sites,
       });
 
       let query = supabase.from("sites").select("*").order("name");
 
       // Filter by assigned sites if user is not admin
-      if (userProfile?.role !== "admin" && userProfile?.assigned_sites) {
+      if (userProfile.role !== "admin" && userProfile.assigned_sites) {
         query = query.in("id", userProfile.assigned_sites);
       }
 
@@ -124,15 +112,11 @@ export function SiteProvider({ children }: { children: React.ReactNode }) {
       console.log("[SiteContext] Sites fetched:", sitesData.length);
 
       setSites(sitesData);
-      setError(null);
-      retryCountRef.current = 0;
-
-      // Cache sites for next load (instant restoration)
       storeSites(sitesData);
 
-      // Update selected site if needed using functional update
+      // Update selected site
       setSelectedSiteState((prevSelected) => {
-        // Keep existing selection if it's still valid
+        // Keep existing selection if valid
         if (prevSelected && sitesData.some((s) => s.id === prevSelected.id)) {
           return prevSelected;
         }
@@ -157,40 +141,25 @@ export function SiteProvider({ children }: { children: React.ReactNode }) {
         storeSiteId(firstSite.id);
         return firstSite;
       });
+
+      setError(null);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Failed to fetch sites";
       console.error("[SiteContext] Error fetching sites:", errorMessage);
-
-      // Retry logic for network errors
-      if (retryCountRef.current < maxRetries) {
-        retryCountRef.current++;
-        console.log(`[SiteContext] Retrying... (${retryCountRef.current}/${maxRetries})`);
-        isFetchingRef.current = false;
-
-        // Exponential backoff: 1s, 2s, 4s
-        const delay = Math.pow(2, retryCountRef.current - 1) * 1000;
-        setTimeout(() => fetchSites(true), delay);
-        return;
-      }
-
       setError(errorMessage);
     } finally {
       setLoading(false);
       setIsInitialized(true);
-      isFetchingRef.current = false;
     }
   }, [userProfile, supabase]);
 
-  // Restore from localStorage AFTER hydration (prevents hydration mismatch)
+  // Restore from localStorage on mount (client-side only)
   useEffect(() => {
-    // Mark as hydrated
-    setIsHydrated(true);
-
-    // Restore cached sites and selection from localStorage
     const cachedSites = getStoredSites();
     const savedSiteId = getStoredSiteId();
 
     if (cachedSites.length > 0) {
+      console.log("[SiteContext] Restoring from cache:", cachedSites.length, "sites");
       setSites(cachedSites);
 
       if (savedSiteId) {
@@ -200,26 +169,30 @@ export function SiteProvider({ children }: { children: React.ReactNode }) {
         setSelectedSiteState(cachedSites[0] || null);
       }
     }
-  }, []); // Run once after hydration
+  }, []);
 
+  // Fetch sites when auth is ready
   useEffect(() => {
-    // Only fetch after hydration is complete
-    if (!isHydrated) return;
+    console.log("[SiteContext] Effect triggered:", { authLoading, hasUserProfile: !!userProfile });
 
-    // Wait for auth to finish loading before making decisions
-    if (authLoading) return;
+    // Wait for auth to finish loading
+    if (authLoading) {
+      console.log("[SiteContext] Auth still loading, waiting...");
+      return;
+    }
 
     if (userProfile) {
+      console.log("[SiteContext] User profile available, fetching sites");
       fetchSites();
     } else {
-      // Only reset state when user is actually logged out (auth finished loading with no user)
-      // Don't clear localStorage to preserve site selection for next login
+      // User logged out
+      console.log("[SiteContext] No user profile, clearing state");
       setSites([]);
       setSelectedSiteState(null);
       setLoading(false);
       setIsInitialized(true);
     }
-  }, [userProfile, fetchSites, isHydrated, authLoading]);
+  }, [authLoading, userProfile, fetchSites]);
 
   const refreshSites = useCallback(async () => {
     await fetchSites();

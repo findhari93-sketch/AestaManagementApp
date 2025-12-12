@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useState, useCallback } from "react";
 import { User as SupabaseUser } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
 import { User } from "@/types/database.types";
@@ -22,41 +22,38 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [supabase] = useState(() => createClient());
 
-  const fetchUserProfile = async (userId: string, retryCount = 0) => {
-    const maxRetries = 3;
+  const fetchUserProfile = useCallback(async (userId: string) => {
     try {
-      console.log("[AuthContext] Fetching user profile...", { userId, retryCount });
+      console.log("[AuthContext] Fetching user profile...", { userId });
       const { data, error } = await supabase
         .from("users")
         .select("*")
         .eq("auth_id", userId)
         .single();
 
-      if (error) throw error;
-      console.log("[AuthContext] User profile fetched successfully");
-      setUserProfile(data);
-    } catch (error) {
-      console.error("[AuthContext] Error fetching user profile:", error);
-
-      // Retry with exponential backoff
-      if (retryCount < maxRetries) {
-        const delay = Math.pow(2, retryCount) * 1000;
-        console.log(`[AuthContext] Retrying in ${delay}ms... (${retryCount + 1}/${maxRetries})`);
-        setTimeout(() => fetchUserProfile(userId, retryCount + 1), delay);
+      if (error) {
+        console.error("[AuthContext] Error fetching user profile:", error);
+        setUserProfile(null);
         return;
       }
 
+      console.log("[AuthContext] User profile fetched successfully:", data?.name);
+      setUserProfile(data);
+    } catch (error) {
+      console.error("[AuthContext] Error fetching user profile:", error);
       setUserProfile(null);
     }
-  };
+  }, [supabase]);
 
-  const refreshUserProfile = async () => {
+  const refreshUserProfile = useCallback(async () => {
     if (user) {
       await fetchUserProfile(user.id);
     }
-  };
+  }, [user, fetchUserProfile]);
 
   useEffect(() => {
+    let mounted = true;
+
     const initializeAuth = async () => {
       try {
         console.log("[AuthContext] Initializing auth...");
@@ -69,6 +66,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           console.error("[AuthContext] Session error:", sessionError);
         }
 
+        if (!mounted) return;
+
         console.log("[AuthContext] Session:", session ? "exists" : "null");
         setUser(session?.user ?? null);
 
@@ -78,7 +77,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } catch (error) {
         console.error("[AuthContext] Error initializing auth:", error);
       } finally {
-        setLoading(false);
+        if (mounted) {
+          console.log("[AuthContext] Auth loading complete");
+          setLoading(false);
+        }
       }
     };
 
@@ -87,6 +89,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (!mounted) return;
+
+      console.log("[AuthContext] Auth state changed:", _event);
       setUser(session?.user ?? null);
 
       if (session?.user) {
@@ -99,9 +104,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
 
     return () => {
+      mounted = false;
       subscription.unsubscribe();
     };
-  }, [supabase]);
+  }, [supabase, fetchUserProfile]);
 
   const signIn = async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({
