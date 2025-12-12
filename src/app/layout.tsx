@@ -8,19 +8,9 @@ import QueryProvider from "@/providers/QueryProvider";
 export const metadata: Metadata = {
   title: "Aesta Construction Manager",
   description: "Construction Labor Management System",
-  manifest: "/manifest.json",
   icons: {
     icon: "/favicon.png",
     shortcut: "/favicon.png",
-    apple: "/icons/icon-192x192.png",
-  },
-  appleWebApp: {
-    capable: true,
-    statusBarStyle: "default",
-    title: "Aesta",
-  },
-  formatDetection: {
-    telephone: false,
   },
 };
 
@@ -39,9 +29,6 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <head>
-        <link rel="apple-touch-icon" href="/icons/icon-192x192.png" />
-      </head>
       <body suppressHydrationWarning>
         <QueryProvider>
           <ThemeProvider>
