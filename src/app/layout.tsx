@@ -3,8 +3,11 @@ import "./globals.css";
 import ThemeProvider from "@/components/providers/ThemeProvider";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { SiteProvider } from "@/contexts/SiteContext";
+import { DateRangeProvider } from "@/contexts/DateRangeContext";
 import { NotificationProvider } from "@/contexts/NotificationContext";
 import QueryProvider from "@/providers/QueryProvider";
+
+export const dynamic = 'force-dynamic';
 
 export const metadata: Metadata = {
   title: "Aesta Construction Manager",
@@ -31,17 +34,19 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body suppressHydrationWarning>
-        <QueryProvider>
-          <ThemeProvider>
-            <AuthProvider>
-              <SiteProvider>
-                <NotificationProvider>
-                  {children}
-                </NotificationProvider>
-              </SiteProvider>
-            </AuthProvider>
-          </ThemeProvider>
-        </QueryProvider>
+        <ThemeProvider>
+          <AuthProvider>
+            <SiteProvider>
+              <DateRangeProvider>
+                <QueryProvider>
+                  <NotificationProvider>
+                    {children}
+                  </NotificationProvider>
+                </QueryProvider>
+              </DateRangeProvider>
+            </SiteProvider>
+          </AuthProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

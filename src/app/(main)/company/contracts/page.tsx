@@ -614,8 +614,6 @@ export default function CompanyContractsPage() {
       <PageHeader
         title="All Subcontracts Overview"
         subtitle="View all subcontracts across all sites (manage from Site > Subcontracts)"
-        onRefresh={fetchSubcontracts}
-        isLoading={loading}
         actions={
           <Button
             variant="contained"

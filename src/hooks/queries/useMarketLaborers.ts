@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase/client";
+import { queryKeys } from "@/lib/cache/keys";
 import type { MarketLaborerAttendance } from "@/types/database.types";
 
 interface MarketLaborerWithCategory extends MarketLaborerAttendance {
@@ -31,12 +32,17 @@ export function useMarketLaborerAttendance(
   const supabase = createClient();
 
   return useQuery({
-    queryKey: ["marketLaborers", siteId, date],
+    queryKey:
+      siteId && date
+        ? queryKeys.marketAttendance.byDate(siteId, date)
+        : ["market-attendance", "unknown"],
     queryFn: async () => {
       if (!siteId || !date) return [];
 
       // Cast to any because table may not exist yet
-      const { data, error } = await (supabase.from("market_laborer_attendance") as any)
+      const { data, error } = await (
+        supabase.from("market_laborer_attendance") as any
+      )
         .select(
           `
           *,
@@ -71,12 +77,16 @@ export function useMarketLaborerSummary(
   const supabase = createClient();
 
   return useQuery({
-    queryKey: ["marketLaborerSummary", siteId, dateFrom, dateTo],
+    queryKey: siteId
+      ? queryKeys.marketAttendance.dateRange(siteId, dateFrom, dateTo)
+      : ["market-attendance", "summary"],
     queryFn: async () => {
       if (!siteId) return { totalCount: 0, totalCost: 0, byCategory: {} };
 
       // Cast to any because table may not exist yet
-      const { data, error } = await (supabase.from("market_laborer_attendance") as any)
+      const { data, error } = await (
+        supabase.from("market_laborer_attendance") as any
+      )
         .select(
           `
           category_id,
@@ -136,7 +146,9 @@ export function useSaveMarketLaborers() {
 
       // Use upsert to handle both insert and update
       // Cast to any because table may not exist yet
-      const { data, error } = await (supabase.from("market_laborer_attendance") as any)
+      const { data, error } = await (
+        supabase.from("market_laborer_attendance") as any
+      )
         .upsert(
           records.map((r) => ({
             site_id: r.site_id,
@@ -170,11 +182,11 @@ export function useSaveMarketLaborers() {
       siteIds.forEach((siteId) => {
         dates.forEach((date) => {
           queryClient.invalidateQueries({
-            queryKey: ["marketLaborers", siteId, date],
+            queryKey: queryKeys.marketAttendance.byDate(siteId, date),
           });
         });
         queryClient.invalidateQueries({
-          queryKey: ["marketLaborerSummary", siteId],
+          queryKey: queryKeys.marketAttendance.all,
         });
       });
     },
@@ -197,7 +209,9 @@ export function useDeleteMarketLaborer() {
       date: string;
     }) => {
       // Cast to any because table may not exist yet
-      const { error } = await (supabase.from("market_laborer_attendance") as any)
+      const { error } = await (
+        supabase.from("market_laborer_attendance") as any
+      )
         .delete()
         .eq("id", id);
 
@@ -206,10 +220,10 @@ export function useDeleteMarketLaborer() {
     },
     onSuccess: (result) => {
       queryClient.invalidateQueries({
-        queryKey: ["marketLaborers", result.siteId, result.date],
+        queryKey: queryKeys.marketAttendance.byDate(result.siteId, result.date),
       });
       queryClient.invalidateQueries({
-        queryKey: ["marketLaborerSummary", result.siteId],
+        queryKey: queryKeys.marketAttendance.all,
       });
     },
   });

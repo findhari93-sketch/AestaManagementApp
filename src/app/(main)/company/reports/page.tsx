@@ -296,8 +296,6 @@ export default function CompanyReportsPage() {
       <PageHeader
         title="Company Reports"
         subtitle="Analytics and reports across all sites"
-        onRefresh={fetchReportData}
-        isLoading={loading}
       />
 
       {error && (

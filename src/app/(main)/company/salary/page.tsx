@@ -457,8 +457,6 @@ export default function CompanySalaryPage() {
       <PageHeader
         title="Salary Management"
         subtitle="Manage salary calculations and payments across all sites"
-        onRefresh={fetchSalaryPeriods}
-        isLoading={loading}
         actions={
           canEdit && (
             <Button

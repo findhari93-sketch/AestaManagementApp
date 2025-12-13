@@ -15,6 +15,8 @@ import {
   Divider,
   Alert,
   Skeleton,
+  Fab,
+  Tooltip,
 } from "@mui/material";
 import {
   People,
@@ -26,6 +28,7 @@ import {
   LocalCafe as TeaIcon,
   Receipt as ExpenseIcon,
   Warning as WarningIcon,
+  EventNote as AttendanceIcon,
 } from "@mui/icons-material";
 import {
   LineChart,
@@ -36,7 +39,7 @@ import {
   XAxis,
   YAxis,
   CartesianGrid,
-  Tooltip,
+  Tooltip as RechartsTooltip,
   Legend,
   ResponsiveContainer,
 } from "recharts";
@@ -230,8 +233,6 @@ export default function SiteDashboardPage() {
       <PageHeader
         title="Site Dashboard"
         subtitle={`${selectedSite.name} • Welcome back, ${userProfile?.name || "User"}`}
-        onRefresh={handleRefresh}
-        isLoading={loading}
         showBack={false}
       />
 
@@ -463,7 +464,7 @@ export default function SiteDashboardPage() {
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="date" />
                   <YAxis />
-                  <Tooltip
+                  <RechartsTooltip
                     formatter={(value: number) => `₹${value.toLocaleString()}`}
                   />
                   <Legend />
@@ -531,7 +532,7 @@ export default function SiteDashboardPage() {
                       );
                     })}
                   </Pie>
-                  <Tooltip
+                  <RechartsTooltip
                     formatter={(value: number) => `₹${value.toLocaleString()}`}
                   />
                 </PieChart>
@@ -663,6 +664,22 @@ export default function SiteDashboardPage() {
           </Paper>
         </Grid>
       </Grid>
+
+      {/* Floating Action Button for Quick Attendance */}
+      <Tooltip title="Record Attendance" placement="left">
+        <Fab
+          color="primary"
+          onClick={() => router.push("/site/attendance")}
+          sx={{
+            position: "fixed",
+            bottom: { xs: 24, sm: 32 },
+            right: { xs: 24, sm: 32 },
+            zIndex: 1000,
+          }}
+        >
+          <AttendanceIcon />
+        </Fab>
+      </Tooltip>
     </Box>
   );
 }

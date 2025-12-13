@@ -1,0 +1,399 @@
+/**
+ * Background Sync Orchestrator
+ *
+ * Manages periodic data refreshes without blocking UI.
+ * Coordinates background sync for different data tiers.
+ */
+
+import { QueryClient } from "@tanstack/react-query";
+import { queryKeys, cacheTTL } from "./keys";
+import { cleanupPersistedCache } from "./persistor";
+
+type SyncConfig = {
+  enabled: boolean;
+  intervals: {
+    reference: number; // Reference data sync interval
+    transactional: number; // Transactional data sync interval
+    dashboard: number; // Dashboard data sync interval
+    cleanup: number; // Cache cleanup interval
+  };
+};
+
+const DEFAULT_CONFIG: SyncConfig = {
+  enabled: true,
+  intervals: {
+    reference: 5 * 60 * 1000, // 5 minutes
+    transactional: 30 * 1000, // 30 seconds for active page data
+    dashboard: 2 * 60 * 1000, // 2 minutes
+    cleanup: 15 * 60 * 1000, // 15 minutes
+  },
+};
+
+export class BackgroundSyncOrchestrator {
+  private queryClient: QueryClient;
+  private config: SyncConfig;
+  private intervals: Map<string, NodeJS.Timeout> = new Map();
+  private lastSyncTimes: Map<string, number> = new Map();
+  private currentSiteId: string | null = null;
+  private isActive: boolean = false;
+
+  constructor(queryClient: QueryClient, config: Partial<SyncConfig> = {}) {
+    this.queryClient = queryClient;
+    this.config = { ...DEFAULT_CONFIG, ...config };
+  }
+
+  /**
+   * Start background sync
+   */
+  start(siteId?: string): void {
+    if (this.isActive) {
+      console.log("Background sync already active");
+      return;
+    }
+
+    this.isActive = true;
+    this.currentSiteId = siteId || null;
+
+    console.log("Starting background sync orchestrator...");
+
+    // Sync reference data periodically
+    this.scheduleReferenceSync();
+
+    // Sync transactional data more frequently
+    this.scheduleTransactionalSync();
+
+    // Sync dashboard data
+    this.scheduleDashboardSync();
+
+    // Schedule cache cleanup
+    this.scheduleCleanup();
+
+    // Initial sync after a short delay
+    setTimeout(() => {
+      this.syncReferenceData();
+    }, 2000);
+  }
+
+  /**
+   * Stop all background sync
+   */
+  stop(): void {
+    console.log("Stopping background sync orchestrator...");
+
+    this.intervals.forEach((interval) => {
+      clearInterval(interval);
+    });
+
+    this.intervals.clear();
+    this.isActive = false;
+  }
+
+  /**
+   * Update current site context
+   */
+  setSiteContext(siteId: string): void {
+    if (this.currentSiteId === siteId) {
+      return;
+    }
+
+    console.log(`Updating sync context to site: ${siteId}`);
+    this.currentSiteId = siteId;
+
+    // Trigger immediate sync for new site context
+    this.syncSiteContextData(siteId);
+  }
+
+  /**
+   * Manual refresh all data
+   */
+  async refreshAll(): Promise<void> {
+    console.log("Manual refresh triggered");
+
+    await Promise.allSettled([
+      this.syncReferenceData(),
+      this.currentSiteId
+        ? this.syncSiteContextData(this.currentSiteId)
+        : Promise.resolve(),
+      this.syncDashboardData(),
+    ]);
+
+    this.updateLastSyncTime("manual");
+  }
+
+  /**
+   * Get last sync time for a specific category
+   */
+  getLastSyncTime(category: string): number | null {
+    return this.lastSyncTimes.get(category) || null;
+  }
+
+  /**
+   * Get overall last sync time
+   */
+  getLastSyncTimeOverall(): number | null {
+    const times = Array.from(this.lastSyncTimes.values());
+    return times.length > 0 ? Math.max(...times) : null;
+  }
+
+  // ==================== PRIVATE METHODS ====================
+
+  private scheduleReferenceSync(): void {
+    const interval = setInterval(() => {
+      this.syncReferenceData();
+    }, this.config.intervals.reference);
+
+    this.intervals.set("reference", interval);
+  }
+
+  private scheduleTransactionalSync(): void {
+    const interval = setInterval(() => {
+      if (this.currentSiteId) {
+        this.syncTransactionalData(this.currentSiteId);
+      }
+    }, this.config.intervals.transactional);
+
+    this.intervals.set("transactional", interval);
+  }
+
+  private scheduleDashboardSync(): void {
+    const interval = setInterval(() => {
+      this.syncDashboardData();
+    }, this.config.intervals.dashboard);
+
+    this.intervals.set("dashboard", interval);
+  }
+
+  private scheduleCleanup(): void {
+    const interval = setInterval(() => {
+      this.performCleanup();
+    }, this.config.intervals.cleanup);
+
+    this.intervals.set("cleanup", interval);
+  }
+
+  /**
+   * Sync reference data in background
+   */
+  private async syncReferenceData(): Promise<void> {
+    if (!this.config.enabled) return;
+
+    try {
+      const queriesToSync = [
+        queryKeys.sites.list(),
+        queryKeys.laborCategories.list(),
+        queryKeys.laborRoles.list(),
+        queryKeys.materials.list(),
+        queryKeys.vendors.list(),
+      ];
+
+      // Invalidate queries to trigger background refetch
+      await Promise.allSettled(
+        queriesToSync.map((queryKey) =>
+          this.queryClient.invalidateQueries({
+            queryKey,
+            refetchType: "none", // Don't refetch if not being observed
+          })
+        )
+      );
+
+      this.updateLastSyncTime("reference");
+    } catch (error) {
+      console.error("Reference data sync error:", error);
+    }
+  }
+
+  /**
+   * Sync site-specific context data
+   */
+  private async syncSiteContextData(siteId: string): Promise<void> {
+    if (!this.config.enabled) return;
+
+    try {
+      const queriesToSync = [
+        queryKeys.teams.bySite(siteId),
+        queryKeys.laborers.bySite(siteId),
+        queryKeys.subcontracts.active(siteId),
+      ];
+
+      await Promise.allSettled(
+        queriesToSync.map((queryKey) =>
+          this.queryClient.invalidateQueries({
+            queryKey,
+            refetchType: "active", // Refetch if currently being observed
+          })
+        )
+      );
+
+      this.updateLastSyncTime("context");
+    } catch (error) {
+      console.error("Site context sync error:", error);
+    }
+  }
+
+  /**
+   * Sync transactional data for current context
+   */
+  private async syncTransactionalData(siteId: string): Promise<void> {
+    if (!this.config.enabled || !siteId) return;
+
+    try {
+      const today = new Date().toISOString().split("T")[0];
+
+      const queriesToSync = [
+        queryKeys.attendance.today(siteId),
+        queryKeys.attendance.active(siteId),
+        queryKeys.expenses.byDate(siteId, today),
+        queryKeys.salaryPeriods.pending(siteId),
+        queryKeys.clientPayments.pending(siteId),
+        queryKeys.materialStock.lowStock(siteId),
+      ];
+
+      await Promise.allSettled(
+        queriesToSync.map((queryKey) =>
+          this.queryClient.invalidateQueries({
+            queryKey,
+            refetchType: "active",
+          })
+        )
+      );
+
+      this.updateLastSyncTime("transactional");
+    } catch (error) {
+      console.error("Transactional data sync error:", error);
+    }
+  }
+
+  /**
+   * Sync dashboard/aggregated data
+   */
+  private async syncDashboardData(): Promise<void> {
+    if (!this.config.enabled) return;
+
+    try {
+      const queriesToSync: (readonly unknown[])[] = [
+        queryKeys.dashboard.company(),
+        queryKeys.stats.company(),
+      ];
+
+      if (this.currentSiteId) {
+        queriesToSync.push(
+          queryKeys.dashboard.site(this.currentSiteId),
+          queryKeys.stats.site(this.currentSiteId)
+        );
+      }
+
+      await Promise.allSettled(
+        queriesToSync.map((queryKey) =>
+          this.queryClient.invalidateQueries({
+            queryKey,
+            refetchType: "active",
+          })
+        )
+      );
+
+      this.updateLastSyncTime("dashboard");
+    } catch (error) {
+      console.error("Dashboard data sync error:", error);
+    }
+  }
+
+  /**
+   * Perform cache cleanup
+   */
+  private async performCleanup(): Promise<void> {
+    try {
+      // Clean up React Query cache (garbage collection)
+      this.queryClient.getQueryCache().clear();
+
+      // Clean up persisted cache
+      await cleanupPersistedCache();
+
+      console.log("Cache cleanup completed");
+    } catch (error) {
+      console.error("Cache cleanup error:", error);
+    }
+  }
+
+  private updateLastSyncTime(category: string): void {
+    const now = Date.now();
+    this.lastSyncTimes.set(category, now);
+
+    // Store in localStorage for persistence across sessions
+    try {
+      localStorage.setItem(`sync_${category}`, now.toString());
+      localStorage.setItem("sync_last", now.toString());
+    } catch (error) {
+      console.error("Failed to store sync time:", error);
+    }
+  }
+}
+
+// Singleton instance
+let syncOrchestratorInstance: BackgroundSyncOrchestrator | null = null;
+
+/**
+ * Get or create sync orchestrator instance
+ */
+export function getSyncOrchestrator(
+  queryClient?: QueryClient
+): BackgroundSyncOrchestrator | null {
+  if (!queryClient && !syncOrchestratorInstance) {
+    console.warn("Cannot create sync orchestrator without QueryClient");
+    return null;
+  }
+
+  if (!syncOrchestratorInstance && queryClient) {
+    syncOrchestratorInstance = new BackgroundSyncOrchestrator(queryClient);
+  }
+
+  return syncOrchestratorInstance;
+}
+
+/**
+ * Initialize background sync
+ */
+export function initBackgroundSync(
+  queryClient: QueryClient,
+  siteId?: string
+): void {
+  const orchestrator = getSyncOrchestrator(queryClient);
+  orchestrator?.start(siteId);
+}
+
+/**
+ * Stop background sync
+ */
+export function stopBackgroundSync(): void {
+  syncOrchestratorInstance?.stop();
+}
+
+/**
+ * Update site context for sync
+ */
+export function updateSyncContext(siteId: string): void {
+  syncOrchestratorInstance?.setSiteContext(siteId);
+}
+
+/**
+ * Trigger manual refresh
+ */
+export async function manualRefresh(): Promise<void> {
+  await syncOrchestratorInstance?.refreshAll();
+}
+
+/**
+ * Get last overall sync time
+ */
+export function getLastSyncTime(): number | null {
+  // Try to get from localStorage first
+  try {
+    const stored = localStorage.getItem("sync_last");
+    if (stored) {
+      return parseInt(stored, 10);
+    }
+  } catch (error) {
+    console.error("Failed to get sync time from storage:", error);
+  }
+
+  return syncOrchestratorInstance?.getLastSyncTimeOverall() || null;
+}

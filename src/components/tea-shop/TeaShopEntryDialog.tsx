@@ -375,7 +375,7 @@ export default function TeaShopEntryDialog({
         const extEntry = entry as TeaShopEntryExtended;
 
         // Determine entry mode from existing entry
-        const mode = extEntry.entry_mode || "detailed";
+        const mode = (extEntry.entry_mode || "detailed") as TeaShopEntryMode;
         setEntryMode(mode);
 
         setDate(entry.date);
@@ -391,7 +391,7 @@ export default function TeaShopEntryDialog({
         if (mode === "simple") {
           setSimpleTotalCost(extEntry.simple_total_cost || entry.total_amount || 0);
           if (extEntry.percentage_split) {
-            setPercentageSplit(extEntry.percentage_split);
+            setPercentageSplit(extEntry.percentage_split as unknown as LaborGroupPercentageSplit);
           }
           if (extEntry.is_split_entry && extEntry.split_percentage) {
             setEnableMultiSite(true);

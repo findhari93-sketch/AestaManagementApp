@@ -12,7 +12,6 @@ import {
   ListItemButton,
   ListItemText,
   Divider,
-  Link,
 } from "@mui/material";
 import {
   ChevronLeft as ChevronLeftIcon,
@@ -290,13 +289,6 @@ export default function DateRangePicker({
     format(endDate, "yyyy-MM-dd") === format(new Date(), "yyyy-MM-dd") ||
     !isSingleDate;
 
-  // Quick access to last 7 days
-  const handleShowLast7Days = () => {
-    const preset = presets.find((p) => p.key === "last7days")!;
-    const range = preset.getRange();
-    onChange(range.start, range.end);
-  };
-
   const currentLabel = getSelectionLabel(startDate, endDate);
 
   return (
@@ -353,20 +345,6 @@ export default function DateRangePicker({
           <ChevronRightIcon fontSize="small" />
         </IconButton>
       </Box>
-
-      {/* Quick access link */}
-      <Link
-        component="button"
-        variant="body2"
-        onClick={handleShowLast7Days}
-        sx={{
-          fontSize: { xs: "0.7rem", sm: "0.8rem" },
-          whiteSpace: "nowrap",
-          display: { xs: "none", sm: "inline" },
-        }}
-      >
-        Show last 7 days
-      </Link>
 
       {/* Popover with presets and calendar */}
       <Popover

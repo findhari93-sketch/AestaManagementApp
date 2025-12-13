@@ -6,7 +6,6 @@ import {
   Typography,
   Tab,
   Tabs,
-  TextField,
   Paper,
   CircularProgress,
 } from "@mui/material";
@@ -14,17 +13,17 @@ import {
   Payments as PaymentsIcon,
   Person as PersonIcon,
   Groups as GroupsIcon,
-  CalendarMonth as CalendarIcon,
 } from "@mui/icons-material";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSite } from "@/contexts/SiteContext";
+import { useDateRange } from "@/contexts/DateRangeContext";
 import PageHeader from "@/components/layout/PageHeader";
 import PaymentSummaryCards from "@/components/payments/PaymentSummaryCards";
 import DailyMarketPaymentsTab from "@/components/payments/DailyMarketPaymentsTab";
 import ContractWeeklyPaymentsTab from "@/components/payments/ContractWeeklyPaymentsTab";
 import dayjs from "dayjs";
-import type { PaymentSummaryData, PaymentFilterState } from "@/types/payment.types";
+import type { PaymentSummaryData } from "@/types/payment.types";
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -51,16 +50,13 @@ function TabPanel(props: TabPanelProps) {
 export default function PaymentsPage() {
   const { userProfile } = useAuth();
   const { selectedSite } = useSite();
+  const { formatForApi, isAllTime } = useDateRange();
   const supabase = createClient();
+
+  const { dateFrom, dateTo } = formatForApi();
 
   // Tab state
   const [activeTab, setActiveTab] = useState(0);
-
-  // Date filter state
-  const [dateFrom, setDateFrom] = useState(
-    dayjs().subtract(7, "day").format("YYYY-MM-DD")
-  );
-  const [dateTo, setDateTo] = useState(dayjs().format("YYYY-MM-DD"));
 
   // Summary data state
   const [summaryData, setSummaryData] = useState<PaymentSummaryData>({
@@ -86,8 +82,8 @@ export default function PaymentsPage() {
     setSummaryLoading(true);
 
     try {
-      // Fetch daily attendance summary (non-contract)
-      const { data: dailyData } = await supabase
+      // Build daily attendance query (non-contract)
+      let dailyQuery = supabase
         .from("daily_attendance")
         .select(
           `
@@ -100,17 +96,27 @@ export default function PaymentsPage() {
         `
         )
         .eq("site_id", selectedSite.id)
-        .neq("laborers.laborer_type", "contract")
-        .gte("date", dateFrom)
-        .lte("date", dateTo);
+        .neq("laborers.laborer_type", "contract");
 
-      // Fetch market attendance summary
-      const { data: marketData } = await supabase
+      // Only apply date filters if not "All Time"
+      if (!isAllTime && dateFrom && dateTo) {
+        dailyQuery = dailyQuery.gte("date", dateFrom).lte("date", dateTo);
+      }
+
+      const { data: dailyData } = await dailyQuery;
+
+      // Build market attendance query
+      let marketQuery = supabase
         .from("market_laborer_attendance")
         .select("id, total_cost, is_paid, paid_via")
-        .eq("site_id", selectedSite.id)
-        .gte("date", dateFrom)
-        .lte("date", dateTo);
+        .eq("site_id", selectedSite.id);
+
+      // Only apply date filters if not "All Time"
+      if (!isAllTime && dateFrom && dateTo) {
+        marketQuery = marketQuery.gte("date", dateFrom).lte("date", dateTo);
+      }
+
+      const { data: marketData } = await marketQuery;
 
       // Fetch contract laborers attendance for weekly due
       const weeksBack = 4;
@@ -118,6 +124,7 @@ export default function PaymentsPage() {
         .subtract(weeksBack, "week")
         .day(0)
         .format("YYYY-MM-DD");
+      const contractToDate = dateTo || dayjs().format("YYYY-MM-DD");
 
       const { data: contractAttendance } = await supabase
         .from("daily_attendance")
@@ -134,7 +141,7 @@ export default function PaymentsPage() {
         .eq("site_id", selectedSite.id)
         .eq("laborers.laborer_type", "contract")
         .gte("date", contractFromDate)
-        .lte("date", dateTo);
+        .lte("date", contractToDate);
 
       const { data: contractPayments } = await supabase
         .from("labor_payments")
@@ -142,7 +149,7 @@ export default function PaymentsPage() {
         .eq("site_id", selectedSite.id)
         .eq("is_under_contract", true)
         .gte("payment_for_date", contractFromDate)
-        .lte("payment_for_date", dateTo);
+        .lte("payment_for_date", contractToDate);
 
       // Calculate daily/market summary
       const dailyRecords = dailyData || [];
@@ -299,16 +306,11 @@ export default function PaymentsPage() {
     } finally {
       setSummaryLoading(false);
     }
-  }, [selectedSite?.id, dateFrom, dateTo, supabase]);
+  }, [selectedSite?.id, dateFrom, dateTo, isAllTime, supabase]);
 
   useEffect(() => {
     fetchSummaryData();
   }, [fetchSummaryData]);
-
-  const handleFilterChange = (filters: Partial<PaymentFilterState>) => {
-    if (filters.dateFrom) setDateFrom(filters.dateFrom);
-    if (filters.dateTo) setDateTo(filters.dateTo);
-  };
 
   const handleDataChange = () => {
     fetchSummaryData();
@@ -320,31 +322,6 @@ export default function PaymentsPage() {
         title="Salary Settlements"
         subtitle="Manage daily, market, and contract laborer salary settlements"
       />
-
-      {/* Date Range Filters */}
-      <Paper sx={{ p: 2, mb: 3 }}>
-        <Box sx={{ display: "flex", gap: 2, alignItems: "center" }}>
-          <CalendarIcon color="action" />
-          <Typography variant="subtitle2">Date Range:</Typography>
-          <TextField
-            type="date"
-            size="small"
-            value={dateFrom}
-            onChange={(e) => setDateFrom(e.target.value)}
-            InputLabelProps={{ shrink: true }}
-            sx={{ width: 160 }}
-          />
-          <Typography variant="body2">to</Typography>
-          <TextField
-            type="date"
-            size="small"
-            value={dateTo}
-            onChange={(e) => setDateTo(e.target.value)}
-            InputLabelProps={{ shrink: true }}
-            sx={{ width: 160 }}
-          />
-        </Box>
-      </Paper>
 
       {/* Summary Cards */}
       <PaymentSummaryCards data={summaryData} loading={summaryLoading} />
@@ -375,9 +352,9 @@ export default function PaymentsPage() {
         <Box sx={{ p: 2 }}>
           <TabPanel value={activeTab} index={0}>
             <DailyMarketPaymentsTab
-              dateFrom={dateFrom}
-              dateTo={dateTo}
-              onFilterChange={handleFilterChange}
+              dateFrom={dateFrom || dayjs().format("YYYY-MM-DD")}
+              dateTo={dateTo || dayjs().format("YYYY-MM-DD")}
+              onFilterChange={() => {}} // No-op since dates are managed globally
               onDataChange={handleDataChange}
             />
           </TabPanel>

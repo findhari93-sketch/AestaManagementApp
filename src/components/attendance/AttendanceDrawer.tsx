@@ -28,6 +28,9 @@ import {
   Checkbox,
   FormControlLabel,
   Slider,
+  Popover,
+  Radio,
+  RadioGroup,
 } from "@mui/material";
 import {
   Close as CloseIcon,
@@ -170,13 +173,13 @@ const WORK_UNIT_PRESETS: WorkUnitPreset[] = [
     value: 1.5,
     label: "Extended",
     shortLabel: "1.5",
-    inTime: "06:00",
-    outTime: "18:00",
+    inTime: "09:00",
+    outTime: "19:00",
     lunchOut: "13:00",
     lunchIn: "14:00",
-    minHours: 10,
-    maxHours: 12,
-    description: "Early start or late finish",
+    minHours: 9,
+    maxHours: 11,
+    description: "9 AM - 7 PM with lunch",
   },
   {
     value: 2,
@@ -189,6 +192,38 @@ const WORK_UNIT_PRESETS: WorkUnitPreset[] = [
     minHours: 12,
     maxHours: 16,
     description: "Full day + overtime",
+  },
+];
+
+// 1.5 Day Time Variants - user can choose between different time schedules
+interface TimeVariant {
+  id: string;
+  label: string;
+  shortLabel: string;
+  inTime: string;
+  outTime: string;
+  lunchOut: string;
+  lunchIn: string;
+}
+
+const EXTENDED_TIME_VARIANTS: TimeVariant[] = [
+  {
+    id: "9to7",
+    label: "9 AM - 7 PM",
+    shortLabel: "9-7",
+    inTime: "09:00",
+    outTime: "19:00",
+    lunchOut: "13:00",
+    lunchIn: "14:00",
+  },
+  {
+    id: "6to6",
+    label: "6 AM - 6 PM",
+    shortLabel: "6-6",
+    inTime: "06:00",
+    outTime: "18:00",
+    lunchOut: "13:00",
+    lunchIn: "14:00",
   },
 ];
 
@@ -318,6 +353,11 @@ export default function AttendanceDrawer({
     new Set()
   );
   const [showGlobalCustomTimes, setShowGlobalCustomTimes] = useState(false);
+
+  // 1.5 day time variant selection state
+  const [extendedTimeAnchorEl, setExtendedTimeAnchorEl] = useState<HTMLElement | null>(null);
+  const [selectedExtendedVariant, setSelectedExtendedVariant] = useState<string>("9to7");
+  const [pendingLaborerId, setPendingLaborerId] = useState<string | null>(null);
 
   // Tea Shop state - dialog-based approach
   const [teaShops, setTeaShops] = useState<TeaShopAccountType[]>([]);
@@ -962,6 +1002,59 @@ export default function AttendanceDrawer({
       newMap.set(laborerId, updated);
       return newMap;
     });
+  };
+
+  // Handler to show time variant popover for 1.5 day
+  const handleExtendedTimeClick = (
+    event: React.MouseEvent<HTMLElement>,
+    laborerId: string
+  ) => {
+    setExtendedTimeAnchorEl(event.currentTarget);
+    setPendingLaborerId(laborerId);
+  };
+
+  // Handler to apply selected time variant for 1.5 day
+  const handleExtendedVariantSelect = (variantId: string) => {
+    if (!pendingLaborerId) return;
+
+    const variant = EXTENDED_TIME_VARIANTS.find((v) => v.id === variantId);
+    if (!variant) return;
+
+    setSelectedLaborers((prev) => {
+      const newMap = new Map(prev);
+      const laborer = newMap.get(pendingLaborerId);
+      if (!laborer) return prev;
+
+      const timeCalc = calculateTimeHours(
+        variant.inTime,
+        variant.outTime,
+        variant.lunchOut,
+        variant.lunchIn
+      );
+
+      const updated = {
+        ...laborer,
+        dayUnits: 1.5,
+        inTime: variant.inTime,
+        outTime: variant.outTime,
+        lunchOut: variant.lunchOut,
+        lunchIn: variant.lunchIn,
+        ...timeCalc,
+      };
+
+      newMap.set(pendingLaborerId, updated);
+      return newMap;
+    });
+
+    setSelectedExtendedVariant(variantId);
+    setExtendedTimeAnchorEl(null);
+    setPendingLaborerId(null);
+  };
+
+  // Close the extended time popover
+  const handleExtendedTimeClose = () => {
+    setExtendedTimeAnchorEl(null);
+    setPendingLaborerId(null);
   };
 
   // Tea Shop dialog handler
@@ -2312,63 +2405,102 @@ export default function AttendanceDrawer({
                                 </IconButton>
                               </Box>
 
-                              {/* Work Unit Selection - PRIMARY - Hidden in morning mode */}
-                              {mode !== "morning" && (
-                                <Box sx={{ mb: 1.5 }}>
-                                  <Typography
-                                    variant="caption"
-                                    color="text.secondary"
-                                    sx={{ mb: 0.5, display: "block" }}
-                                  >
-                                    WORK DAY UNIT
-                                  </Typography>
-                                  <ToggleButtonGroup
-                                    value={selection.dayUnits}
-                                    exclusive
-                                    onChange={(_, value) => {
-                                      if (value !== null) {
+                              {/* Work Unit Selection - PRIMARY - Now visible in all modes */}
+                              <Box sx={{ mb: 1.5 }}>
+                                <Typography
+                                  variant="caption"
+                                  color="text.secondary"
+                                  sx={{ mb: 0.5, display: "block" }}
+                                >
+                                  WORK DAY UNIT
+                                </Typography>
+                                <ToggleButtonGroup
+                                  value={selection.dayUnits}
+                                  exclusive
+                                  onChange={(event, value) => {
+                                    if (value !== null) {
+                                      if (value === 1.5) {
+                                        // Show popover for 1.5 day time variant selection
+                                        handleExtendedTimeClick(
+                                          event as React.MouseEvent<HTMLElement>,
+                                          selection.laborerId
+                                        );
+                                      } else {
                                         handleLaborerFieldChange(
                                           selection.laborerId,
                                           "dayUnits",
                                           value
                                         );
                                       }
-                                    }}
-                                    size="small"
-                                    fullWidth
-                                    sx={{
-                                      "& .MuiToggleButton-root": {
-                                        flex: 1,
-                                        py: 0.75,
-                                        flexDirection: "column",
-                                        "&.Mui-selected": {
-                                          bgcolor: "primary.main",
-                                          color: "white",
-                                          "&:hover": { bgcolor: "primary.dark" },
-                                        },
+                                    }
+                                  }}
+                                  size="small"
+                                  fullWidth
+                                  sx={{
+                                    "& .MuiToggleButton-root": {
+                                      flex: 1,
+                                      py: 0.75,
+                                      flexDirection: "column",
+                                      "&.Mui-selected": {
+                                        bgcolor: "primary.main",
+                                        color: "white",
+                                        "&:hover": { bgcolor: "primary.dark" },
                                       },
+                                    },
+                                  }}
+                                >
+                                  {WORK_UNIT_PRESETS.map((p) => (
+                                    <ToggleButton key={p.value} value={p.value}>
+                                      <Typography
+                                        variant="body2"
+                                        fontWeight={700}
+                                      >
+                                        {p.shortLabel}
+                                      </Typography>
+                                      <Typography
+                                        variant="caption"
+                                        sx={{
+                                          fontSize: "0.6rem",
+                                          lineHeight: 1,
+                                        }}
+                                      >
+                                        {p.label}
+                                      </Typography>
+                                    </ToggleButton>
+                                  ))}
+                                </ToggleButtonGroup>
+                              </Box>
+
+                              {/* Enable Custom Time button - Morning mode only */}
+                              {mode === "morning" && (
+                                <Box sx={{ mt: 1, display: "flex", justifyContent: "flex-end" }}>
+                                  <Button
+                                    size="small"
+                                    variant="text"
+                                    startIcon={
+                                      expandedLaborerTimes.has(selection.laborerId) ? (
+                                        <CollapseIcon />
+                                      ) : (
+                                        <TimeIcon />
+                                      )
+                                    }
+                                    onClick={() => {
+                                      setExpandedLaborerTimes((prev) => {
+                                        const newSet = new Set(prev);
+                                        if (newSet.has(selection.laborerId)) {
+                                          newSet.delete(selection.laborerId);
+                                        } else {
+                                          newSet.add(selection.laborerId);
+                                        }
+                                        return newSet;
+                                      });
                                     }}
+                                    sx={{ color: "text.secondary" }}
                                   >
-                                    {WORK_UNIT_PRESETS.map((p) => (
-                                      <ToggleButton key={p.value} value={p.value}>
-                                        <Typography
-                                          variant="body2"
-                                          fontWeight={700}
-                                        >
-                                          {p.shortLabel}
-                                        </Typography>
-                                        <Typography
-                                          variant="caption"
-                                          sx={{
-                                            fontSize: "0.6rem",
-                                            lineHeight: 1,
-                                          }}
-                                        >
-                                          {p.label}
-                                        </Typography>
-                                      </ToggleButton>
-                                    ))}
-                                  </ToggleButtonGroup>
+                                    {expandedLaborerTimes.has(selection.laborerId)
+                                      ? "Hide custom time"
+                                      : "Enable custom time"}
+                                  </Button>
                                 </Box>
                               )}
 
@@ -2455,11 +2587,9 @@ export default function AttendanceDrawer({
                                 </Box>
                               )}
 
-                              {/* Collapsible Time Fields - Hidden in morning mode */}
+                              {/* Collapsible Time Fields - Now visible in all modes */}
                               <Collapse
-                                in={mode !== "morning" && expandedLaborerTimes.has(
-                                  selection.laborerId
-                                )}
+                                in={expandedLaborerTimes.has(selection.laborerId)}
                               >
                                 <Box
                                   sx={{
@@ -2474,10 +2604,12 @@ export default function AttendanceDrawer({
                                     color="text.secondary"
                                     sx={{ mb: 1, display: "block" }}
                                   >
-                                    Custom Time (this laborer only)
+                                    {mode === "morning"
+                                      ? "Custom In Time"
+                                      : "Custom Time (this laborer only)"}
                                   </Typography>
                                   <Grid container spacing={1}>
-                                    <Grid size={isHalfDay ? 6 : 3}>
+                                    <Grid size={mode === "morning" ? 12 : isHalfDay ? 6 : 3}>
                                       <TextField
                                         fullWidth
                                         size="small"
@@ -2496,8 +2628,8 @@ export default function AttendanceDrawer({
                                         }}
                                       />
                                     </Grid>
-                                    {/* Only show lunch fields for non-half-day */}
-                                    {!isHalfDay && (
+                                    {/* Only show lunch fields for non-half-day and not morning mode */}
+                                    {!isHalfDay && mode !== "morning" && (
                                       <>
                                         <Grid size={3}>
                                           <TextField
@@ -2539,6 +2671,8 @@ export default function AttendanceDrawer({
                                         </Grid>
                                       </>
                                     )}
+                                    {/* Out time - hidden in morning mode */}
+                                    {mode !== "morning" && (
                                     <Grid size={isHalfDay ? 6 : 3}>
                                       <TextField
                                         fullWidth
@@ -2558,6 +2692,7 @@ export default function AttendanceDrawer({
                                         }}
                                       />
                                     </Grid>
+                                    )}
                                   </Grid>
                                 </Box>
                               </Collapse>
@@ -2694,10 +2829,19 @@ export default function AttendanceDrawer({
                       sx={{
                         mb: 2,
                         p: 2,
-                        bgcolor: "warning.50",
+                        bgcolor: (theme) =>
+                          theme.palette.mode === "dark"
+                            ? "rgba(237, 108, 2, 0.08)"
+                            : "warning.50",
                         borderRadius: 2,
                         border: 1,
                         borderColor: "warning.200",
+                        "& .MuiTypography-root": {
+                          color: "text.primary",
+                        },
+                        "& .MuiInputLabel-root": {
+                          color: "text.secondary",
+                        },
                       }}
                     >
                       {/* Header Row with Role, Count, Rate */}
@@ -2828,9 +2972,8 @@ export default function AttendanceDrawer({
                         </Grid>
                       </Grid>
 
-                      {/* Work Unit Selection - Hidden in morning mode */}
-                      {mode !== "morning" && (
-                        <Box sx={{ mt: 2, mb: 1.5 }}>
+                      {/* Work Unit Selection - Now visible in all modes */}
+                      <Box sx={{ mt: 2, mb: 1.5 }}>
                           <Typography
                             variant="caption"
                             color="text.secondary"
@@ -2880,57 +3023,48 @@ export default function AttendanceDrawer({
                             ))}
                           </ToggleButtonGroup>
                         </Box>
-                      )}
 
-                      {/* Settings button for custom times - Hidden in morning mode */}
-                      {mode !== "morning" && (
-                        <Box
-                          sx={{
-                            mt: 1,
-                            display: "flex",
-                            justifyContent: "flex-end",
-                          }}
-                        >
-                          <Tooltip
-                            title={
-                              expandedLaborerTimes.has(entry.id)
-                                ? "Hide custom times"
-                                : "Set custom times"
-                            }
-                          >
-                            <Button
-                              size="small"
-                              variant="text"
-                              startIcon={
-                                expandedLaborerTimes.has(entry.id) ? (
-                                  <CollapseIcon />
-                                ) : (
-                                  <SettingsIcon />
-                                )
+                      {/* Settings button for custom times - Now visible in all modes */}
+                      <Box
+                        sx={{
+                          mt: 1,
+                          display: "flex",
+                          justifyContent: "flex-end",
+                        }}
+                      >
+                        <Button
+                          size="small"
+                          variant="text"
+                          startIcon={
+                            expandedLaborerTimes.has(entry.id) ? (
+                              <CollapseIcon />
+                            ) : (
+                              <TimeIcon />
+                            )
+                          }
+                          onClick={() => {
+                            setExpandedLaborerTimes((prev) => {
+                              const newSet = new Set(prev);
+                              if (newSet.has(entry.id)) {
+                                newSet.delete(entry.id);
+                              } else {
+                                newSet.add(entry.id);
                               }
-                              onClick={() => {
-                                setExpandedLaborerTimes((prev) => {
-                                  const newSet = new Set(prev);
-                                  if (newSet.has(entry.id)) {
-                                    newSet.delete(entry.id);
-                                  } else {
-                                    newSet.add(entry.id);
-                                  }
-                                  return newSet;
-                                });
-                              }}
-                              sx={{ color: "text.secondary" }}
-                            >
-                              {expandedLaborerTimes.has(entry.id)
-                                ? "Hide"
-                                : "Custom Time"}
-                            </Button>
-                          </Tooltip>
-                        </Box>
-                      )}
+                              return newSet;
+                            });
+                          }}
+                          sx={{ color: "text.secondary" }}
+                        >
+                          {expandedLaborerTimes.has(entry.id)
+                            ? "Hide custom time"
+                            : mode === "morning"
+                            ? "Enable custom time"
+                            : "Custom Time"}
+                        </Button>
+                      </Box>
 
-                      {/* Collapsible Time row - Hidden in morning mode */}
-                      <Collapse in={mode !== "morning" && expandedLaborerTimes.has(entry.id)}>
+                      {/* Collapsible Time row - Now visible in all modes */}
+                      <Collapse in={expandedLaborerTimes.has(entry.id)}>
                         <Box
                           sx={{
                             mt: 1,
@@ -2939,8 +3073,17 @@ export default function AttendanceDrawer({
                             borderRadius: 1,
                           }}
                         >
+                          <Typography
+                            variant="caption"
+                            color="text.secondary"
+                            sx={{ mb: 1, display: "block" }}
+                          >
+                            {mode === "morning"
+                              ? "Custom In Time"
+                              : "Custom Time"}
+                          </Typography>
                           <Grid container spacing={1}>
-                            <Grid size={isHalfDay ? 6 : 3}>
+                            <Grid size={mode === "morning" ? 12 : isHalfDay ? 6 : 3}>
                               <TextField
                                 fullWidth
                                 size="small"
@@ -2957,7 +3100,8 @@ export default function AttendanceDrawer({
                                 slotProps={{ inputLabel: { shrink: true } }}
                               />
                             </Grid>
-                            {!isHalfDay && (
+                            {/* Lunch fields - hidden in morning mode */}
+                            {!isHalfDay && mode !== "morning" && (
                               <>
                                 <Grid size={3}>
                                   <TextField
@@ -2995,23 +3139,26 @@ export default function AttendanceDrawer({
                                 </Grid>
                               </>
                             )}
-                            <Grid size={isHalfDay ? 6 : 3}>
-                              <TextField
-                                fullWidth
-                                size="small"
-                                type="time"
-                                label="Out"
-                                value={entry.outTime}
-                                onChange={(e) =>
-                                  handleMarketLaborerChange(
-                                    entry.id,
-                                    "outTime",
-                                    e.target.value
-                                  )
-                                }
-                                slotProps={{ inputLabel: { shrink: true } }}
-                              />
-                            </Grid>
+                            {/* Out time - hidden in morning mode */}
+                            {mode !== "morning" && (
+                              <Grid size={isHalfDay ? 6 : 3}>
+                                <TextField
+                                  fullWidth
+                                  size="small"
+                                  type="time"
+                                  label="Out"
+                                  value={entry.outTime}
+                                  onChange={(e) =>
+                                    handleMarketLaborerChange(
+                                      entry.id,
+                                      "outTime",
+                                      e.target.value
+                                    )
+                                  }
+                                  slotProps={{ inputLabel: { shrink: true } }}
+                                />
+                              </Grid>
+                            )}
                           </Grid>
                         </Box>
                       </Collapse>
@@ -3130,9 +3277,9 @@ export default function AttendanceDrawer({
             {saving ? (
               <CircularProgress size={24} color="inherit" />
             ) : mode === "morning" ? (
-              "✓ Mark as Started"
+              "Save Morning Entry"
             ) : mode === "evening" ? (
-              "✓ Confirm Attendance"
+              "Evening Closing"
             ) : (
               "Save Attendance"
             )}
@@ -3216,6 +3363,50 @@ export default function AttendanceDrawer({
           lunchIn: defaultLunchIn,
         }}
       />
+
+      {/* Extended Time Variant Popover for 1.5 day */}
+      <Popover
+        open={Boolean(extendedTimeAnchorEl)}
+        anchorEl={extendedTimeAnchorEl}
+        onClose={handleExtendedTimeClose}
+        anchorOrigin={{
+          vertical: "bottom",
+          horizontal: "center",
+        }}
+        transformOrigin={{
+          vertical: "top",
+          horizontal: "center",
+        }}
+      >
+        <Box sx={{ p: 2, minWidth: 200 }}>
+          <Typography variant="subtitle2" fontWeight={600} sx={{ mb: 1.5 }}>
+            Select Time Schedule
+          </Typography>
+          <RadioGroup
+            value={selectedExtendedVariant}
+            onChange={(e) => handleExtendedVariantSelect(e.target.value)}
+          >
+            {EXTENDED_TIME_VARIANTS.map((variant) => (
+              <FormControlLabel
+                key={variant.id}
+                value={variant.id}
+                control={<Radio size="small" />}
+                label={
+                  <Box>
+                    <Typography variant="body2" fontWeight={500}>
+                      {variant.label}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {variant.shortLabel} (with lunch)
+                    </Typography>
+                  </Box>
+                }
+                sx={{ mb: 0.5 }}
+              />
+            ))}
+          </RadioGroup>
+        </Box>
+      </Popover>
 
     </Drawer>
 

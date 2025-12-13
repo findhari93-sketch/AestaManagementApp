@@ -12,31 +12,6 @@ export type Database = {
   __InternalSupabase: {
     PostgrestVersion: "13.0.5"
   }
-  graphql_public: {
-    Tables: {
-      [_ in never]: never
-    }
-    Views: {
-      [_ in never]: never
-    }
-    Functions: {
-      graphql: {
-        Args: {
-          extensions?: Json
-          operationName?: string
-          query?: string
-          variables?: Json
-        }
-        Returns: Json
-      }
-    }
-    Enums: {
-      [_ in never]: never
-    }
-    CompositeTypes: {
-      [_ in never]: never
-    }
-  }
   public: {
     Tables: {
       advances: {
@@ -869,6 +844,136 @@ export type Database = {
           },
         ]
       }
+      daily_material_usage: {
+        Row: {
+          brand_id: string | null
+          created_at: string | null
+          created_by: string | null
+          id: string
+          is_verified: boolean | null
+          material_id: string
+          notes: string | null
+          quantity: number
+          section_id: string | null
+          site_id: string
+          total_cost: number | null
+          unit_cost: number | null
+          updated_at: string | null
+          usage_date: string
+          used_by: string | null
+          verified_at: string | null
+          verified_by: string | null
+          work_area: string | null
+          work_description: string | null
+        }
+        Insert: {
+          brand_id?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          id?: string
+          is_verified?: boolean | null
+          material_id: string
+          notes?: string | null
+          quantity: number
+          section_id?: string | null
+          site_id: string
+          total_cost?: number | null
+          unit_cost?: number | null
+          updated_at?: string | null
+          usage_date?: string
+          used_by?: string | null
+          verified_at?: string | null
+          verified_by?: string | null
+          work_area?: string | null
+          work_description?: string | null
+        }
+        Update: {
+          brand_id?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          id?: string
+          is_verified?: boolean | null
+          material_id?: string
+          notes?: string | null
+          quantity?: number
+          section_id?: string | null
+          site_id?: string
+          total_cost?: number | null
+          unit_cost?: number | null
+          updated_at?: string | null
+          usage_date?: string
+          used_by?: string | null
+          verified_at?: string | null
+          verified_by?: string | null
+          work_area?: string | null
+          work_description?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "daily_material_usage_brand_id_fkey"
+            columns: ["brand_id"]
+            isOneToOne: false
+            referencedRelation: "material_brands"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "daily_material_usage_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "daily_material_usage_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "materials"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "daily_material_usage_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_low_stock_alerts"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "daily_material_usage_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_stock_summary"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "daily_material_usage_section_id_fkey"
+            columns: ["section_id"]
+            isOneToOne: false
+            referencedRelation: "building_sections"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "daily_material_usage_section_id_fkey"
+            columns: ["section_id"]
+            isOneToOne: false
+            referencedRelation: "v_section_cost_summary"
+            referencedColumns: ["section_id"]
+          },
+          {
+            foreignKeyName: "daily_material_usage_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "daily_material_usage_verified_by_fkey"
+            columns: ["verified_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       daily_work_summary: {
         Row: {
           comments: string | null
@@ -1052,6 +1157,254 @@ export type Database = {
           },
         ]
       }
+      deliveries: {
+        Row: {
+          challan_date: string | null
+          challan_number: string | null
+          challan_url: string | null
+          created_at: string | null
+          created_by: string | null
+          delivery_date: string
+          delivery_status: Database["public"]["Enums"]["delivery_status"] | null
+          driver_name: string | null
+          driver_phone: string | null
+          grn_number: string
+          id: string
+          inspection_notes: string | null
+          invoice_amount: number | null
+          invoice_date: string | null
+          invoice_number: string | null
+          invoice_url: string | null
+          location_id: string | null
+          notes: string | null
+          po_id: string | null
+          received_by: string | null
+          site_id: string
+          updated_at: string | null
+          vehicle_number: string | null
+          vendor_id: string
+          verified: boolean | null
+          verified_at: string | null
+          verified_by: string | null
+        }
+        Insert: {
+          challan_date?: string | null
+          challan_number?: string | null
+          challan_url?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          delivery_date?: string
+          delivery_status?:
+            | Database["public"]["Enums"]["delivery_status"]
+            | null
+          driver_name?: string | null
+          driver_phone?: string | null
+          grn_number: string
+          id?: string
+          inspection_notes?: string | null
+          invoice_amount?: number | null
+          invoice_date?: string | null
+          invoice_number?: string | null
+          invoice_url?: string | null
+          location_id?: string | null
+          notes?: string | null
+          po_id?: string | null
+          received_by?: string | null
+          site_id: string
+          updated_at?: string | null
+          vehicle_number?: string | null
+          vendor_id: string
+          verified?: boolean | null
+          verified_at?: string | null
+          verified_by?: string | null
+        }
+        Update: {
+          challan_date?: string | null
+          challan_number?: string | null
+          challan_url?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          delivery_date?: string
+          delivery_status?:
+            | Database["public"]["Enums"]["delivery_status"]
+            | null
+          driver_name?: string | null
+          driver_phone?: string | null
+          grn_number?: string
+          id?: string
+          inspection_notes?: string | null
+          invoice_amount?: number | null
+          invoice_date?: string | null
+          invoice_number?: string | null
+          invoice_url?: string | null
+          location_id?: string | null
+          notes?: string | null
+          po_id?: string | null
+          received_by?: string | null
+          site_id?: string
+          updated_at?: string | null
+          vehicle_number?: string | null
+          vendor_id?: string
+          verified?: boolean | null
+          verified_at?: string | null
+          verified_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "deliveries_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "deliveries_location_id_fkey"
+            columns: ["location_id"]
+            isOneToOne: false
+            referencedRelation: "stock_locations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "deliveries_po_id_fkey"
+            columns: ["po_id"]
+            isOneToOne: false
+            referencedRelation: "purchase_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "deliveries_po_id_fkey"
+            columns: ["po_id"]
+            isOneToOne: false
+            referencedRelation: "v_pending_purchase_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "deliveries_received_by_fkey"
+            columns: ["received_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "deliveries_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "deliveries_vendor_id_fkey"
+            columns: ["vendor_id"]
+            isOneToOne: false
+            referencedRelation: "vendors"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "deliveries_verified_by_fkey"
+            columns: ["verified_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      delivery_items: {
+        Row: {
+          accepted_qty: number | null
+          batch_number: string | null
+          brand_id: string | null
+          created_at: string | null
+          delivery_id: string
+          expiry_date: string | null
+          id: string
+          material_id: string
+          notes: string | null
+          ordered_qty: number | null
+          po_item_id: string | null
+          received_qty: number
+          rejected_qty: number | null
+          rejection_reason: string | null
+          unit_price: number | null
+        }
+        Insert: {
+          accepted_qty?: number | null
+          batch_number?: string | null
+          brand_id?: string | null
+          created_at?: string | null
+          delivery_id: string
+          expiry_date?: string | null
+          id?: string
+          material_id: string
+          notes?: string | null
+          ordered_qty?: number | null
+          po_item_id?: string | null
+          received_qty: number
+          rejected_qty?: number | null
+          rejection_reason?: string | null
+          unit_price?: number | null
+        }
+        Update: {
+          accepted_qty?: number | null
+          batch_number?: string | null
+          brand_id?: string | null
+          created_at?: string | null
+          delivery_id?: string
+          expiry_date?: string | null
+          id?: string
+          material_id?: string
+          notes?: string | null
+          ordered_qty?: number | null
+          po_item_id?: string | null
+          received_qty?: number
+          rejected_qty?: number | null
+          rejection_reason?: string | null
+          unit_price?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "delivery_items_brand_id_fkey"
+            columns: ["brand_id"]
+            isOneToOne: false
+            referencedRelation: "material_brands"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "delivery_items_delivery_id_fkey"
+            columns: ["delivery_id"]
+            isOneToOne: false
+            referencedRelation: "deliveries"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "delivery_items_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "materials"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "delivery_items_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_low_stock_alerts"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "delivery_items_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_stock_summary"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "delivery_items_po_item_id_fkey"
+            columns: ["po_item_id"]
+            isOneToOne: false
+            referencedRelation: "purchase_order_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       expense_categories: {
         Row: {
           created_at: string
@@ -1114,6 +1467,7 @@ export type Database = {
           reference_number: string | null
           section_id: string | null
           site_id: string | null
+          site_payer_id: string | null
           team_id: string | null
           updated_at: string
           vendor_contact: string | null
@@ -1145,6 +1499,7 @@ export type Database = {
           reference_number?: string | null
           section_id?: string | null
           site_id?: string | null
+          site_payer_id?: string | null
           team_id?: string | null
           updated_at?: string
           vendor_contact?: string | null
@@ -1176,6 +1531,7 @@ export type Database = {
           reference_number?: string | null
           section_id?: string | null
           site_id?: string | null
+          site_payer_id?: string | null
           team_id?: string | null
           updated_at?: string
           vendor_contact?: string | null
@@ -1244,6 +1600,20 @@ export type Database = {
             columns: ["site_id"]
             isOneToOne: false
             referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "expenses_site_payer_id_fkey"
+            columns: ["site_payer_id"]
+            isOneToOne: false
+            referencedRelation: "payer_expense_summary"
+            referencedColumns: ["payer_id"]
+          },
+          {
+            foreignKeyName: "expenses_site_payer_id_fkey"
+            columns: ["site_payer_id"]
+            isOneToOne: false
+            referencedRelation: "site_payers"
             referencedColumns: ["id"]
           },
           {
@@ -1586,6 +1956,7 @@ export type Database = {
           id_proof_type: string | null
           joining_date: string | null
           laborer_type: string | null
+          language: string | null
           name: string
           notes: string | null
           phone: string | null
@@ -1613,6 +1984,7 @@ export type Database = {
           id_proof_type?: string | null
           joining_date?: string | null
           laborer_type?: string | null
+          language?: string | null
           name: string
           notes?: string | null
           phone?: string | null
@@ -1640,6 +2012,7 @@ export type Database = {
           id_proof_type?: string | null
           joining_date?: string | null
           laborer_type?: string | null
+          language?: string | null
           name?: string
           notes?: string | null
           phone?: string | null
@@ -1893,6 +2266,455 @@ export type Database = {
           },
         ]
       }
+      material_brands: {
+        Row: {
+          brand_name: string
+          created_at: string | null
+          id: string
+          is_active: boolean | null
+          is_preferred: boolean | null
+          material_id: string
+          notes: string | null
+          quality_rating: number | null
+        }
+        Insert: {
+          brand_name: string
+          created_at?: string | null
+          id?: string
+          is_active?: boolean | null
+          is_preferred?: boolean | null
+          material_id: string
+          notes?: string | null
+          quality_rating?: number | null
+        }
+        Update: {
+          brand_name?: string
+          created_at?: string | null
+          id?: string
+          is_active?: boolean | null
+          is_preferred?: boolean | null
+          material_id?: string
+          notes?: string | null
+          quality_rating?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "material_brands_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "materials"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "material_brands_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_low_stock_alerts"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "material_brands_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_stock_summary"
+            referencedColumns: ["material_id"]
+          },
+        ]
+      }
+      material_categories: {
+        Row: {
+          code: string | null
+          created_at: string | null
+          description: string | null
+          display_order: number | null
+          icon: string | null
+          id: string
+          is_active: boolean | null
+          name: string
+          parent_id: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          code?: string | null
+          created_at?: string | null
+          description?: string | null
+          display_order?: number | null
+          icon?: string | null
+          id?: string
+          is_active?: boolean | null
+          name: string
+          parent_id?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          code?: string | null
+          created_at?: string | null
+          description?: string | null
+          display_order?: number | null
+          icon?: string | null
+          id?: string
+          is_active?: boolean | null
+          name?: string
+          parent_id?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "material_categories_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "material_categories"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      material_request_items: {
+        Row: {
+          approved_qty: number | null
+          brand_id: string | null
+          created_at: string | null
+          estimated_cost: number | null
+          fulfilled_qty: number | null
+          id: string
+          material_id: string
+          notes: string | null
+          request_id: string
+          requested_qty: number
+        }
+        Insert: {
+          approved_qty?: number | null
+          brand_id?: string | null
+          created_at?: string | null
+          estimated_cost?: number | null
+          fulfilled_qty?: number | null
+          id?: string
+          material_id: string
+          notes?: string | null
+          request_id: string
+          requested_qty: number
+        }
+        Update: {
+          approved_qty?: number | null
+          brand_id?: string | null
+          created_at?: string | null
+          estimated_cost?: number | null
+          fulfilled_qty?: number | null
+          id?: string
+          material_id?: string
+          notes?: string | null
+          request_id?: string
+          requested_qty?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "material_request_items_brand_id_fkey"
+            columns: ["brand_id"]
+            isOneToOne: false
+            referencedRelation: "material_brands"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "material_request_items_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "materials"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "material_request_items_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_low_stock_alerts"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "material_request_items_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_stock_summary"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "material_request_items_request_id_fkey"
+            columns: ["request_id"]
+            isOneToOne: false
+            referencedRelation: "material_requests"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      material_requests: {
+        Row: {
+          approved_at: string | null
+          approved_by: string | null
+          converted_to_po_id: string | null
+          created_at: string | null
+          id: string
+          notes: string | null
+          priority: string | null
+          rejection_reason: string | null
+          request_date: string
+          request_number: string
+          requested_by: string
+          required_by_date: string | null
+          section_id: string | null
+          site_id: string
+          status: Database["public"]["Enums"]["material_request_status"] | null
+          updated_at: string | null
+        }
+        Insert: {
+          approved_at?: string | null
+          approved_by?: string | null
+          converted_to_po_id?: string | null
+          created_at?: string | null
+          id?: string
+          notes?: string | null
+          priority?: string | null
+          rejection_reason?: string | null
+          request_date?: string
+          request_number: string
+          requested_by: string
+          required_by_date?: string | null
+          section_id?: string | null
+          site_id: string
+          status?: Database["public"]["Enums"]["material_request_status"] | null
+          updated_at?: string | null
+        }
+        Update: {
+          approved_at?: string | null
+          approved_by?: string | null
+          converted_to_po_id?: string | null
+          created_at?: string | null
+          id?: string
+          notes?: string | null
+          priority?: string | null
+          rejection_reason?: string | null
+          request_date?: string
+          request_number?: string
+          requested_by?: string
+          required_by_date?: string | null
+          section_id?: string | null
+          site_id?: string
+          status?: Database["public"]["Enums"]["material_request_status"] | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "material_requests_approved_by_fkey"
+            columns: ["approved_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "material_requests_converted_to_po_id_fkey"
+            columns: ["converted_to_po_id"]
+            isOneToOne: false
+            referencedRelation: "purchase_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "material_requests_converted_to_po_id_fkey"
+            columns: ["converted_to_po_id"]
+            isOneToOne: false
+            referencedRelation: "v_pending_purchase_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "material_requests_requested_by_fkey"
+            columns: ["requested_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "material_requests_section_id_fkey"
+            columns: ["section_id"]
+            isOneToOne: false
+            referencedRelation: "building_sections"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "material_requests_section_id_fkey"
+            columns: ["section_id"]
+            isOneToOne: false
+            referencedRelation: "v_section_cost_summary"
+            referencedColumns: ["section_id"]
+          },
+          {
+            foreignKeyName: "material_requests_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      material_vendors: {
+        Row: {
+          brand_id: string | null
+          created_at: string | null
+          id: string
+          is_active: boolean | null
+          is_preferred: boolean | null
+          last_price_update: string | null
+          lead_time_days: number | null
+          material_id: string
+          min_order_qty: number | null
+          notes: string | null
+          unit_price: number
+          updated_at: string | null
+          vendor_id: string
+        }
+        Insert: {
+          brand_id?: string | null
+          created_at?: string | null
+          id?: string
+          is_active?: boolean | null
+          is_preferred?: boolean | null
+          last_price_update?: string | null
+          lead_time_days?: number | null
+          material_id: string
+          min_order_qty?: number | null
+          notes?: string | null
+          unit_price: number
+          updated_at?: string | null
+          vendor_id: string
+        }
+        Update: {
+          brand_id?: string | null
+          created_at?: string | null
+          id?: string
+          is_active?: boolean | null
+          is_preferred?: boolean | null
+          last_price_update?: string | null
+          lead_time_days?: number | null
+          material_id?: string
+          min_order_qty?: number | null
+          notes?: string | null
+          unit_price?: number
+          updated_at?: string | null
+          vendor_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "material_vendors_brand_id_fkey"
+            columns: ["brand_id"]
+            isOneToOne: false
+            referencedRelation: "material_brands"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "material_vendors_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "materials"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "material_vendors_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_low_stock_alerts"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "material_vendors_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_stock_summary"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "material_vendors_vendor_id_fkey"
+            columns: ["vendor_id"]
+            isOneToOne: false
+            referencedRelation: "vendors"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      materials: {
+        Row: {
+          category_id: string | null
+          code: string | null
+          conversion_factor: number | null
+          created_at: string | null
+          created_by: string | null
+          description: string | null
+          gst_rate: number | null
+          hsn_code: string | null
+          id: string
+          image_url: string | null
+          is_active: boolean | null
+          local_name: string | null
+          min_order_qty: number | null
+          name: string
+          reorder_level: number | null
+          secondary_unit: Database["public"]["Enums"]["material_unit"] | null
+          specifications: Json | null
+          unit: Database["public"]["Enums"]["material_unit"]
+          updated_at: string | null
+        }
+        Insert: {
+          category_id?: string | null
+          code?: string | null
+          conversion_factor?: number | null
+          created_at?: string | null
+          created_by?: string | null
+          description?: string | null
+          gst_rate?: number | null
+          hsn_code?: string | null
+          id?: string
+          image_url?: string | null
+          is_active?: boolean | null
+          local_name?: string | null
+          min_order_qty?: number | null
+          name: string
+          reorder_level?: number | null
+          secondary_unit?: Database["public"]["Enums"]["material_unit"] | null
+          specifications?: Json | null
+          unit?: Database["public"]["Enums"]["material_unit"]
+          updated_at?: string | null
+        }
+        Update: {
+          category_id?: string | null
+          code?: string | null
+          conversion_factor?: number | null
+          created_at?: string | null
+          created_by?: string | null
+          description?: string | null
+          gst_rate?: number | null
+          hsn_code?: string | null
+          id?: string
+          image_url?: string | null
+          is_active?: boolean | null
+          local_name?: string | null
+          min_order_qty?: number | null
+          name?: string
+          reorder_level?: number | null
+          secondary_unit?: Database["public"]["Enums"]["material_unit"] | null
+          specifications?: Json | null
+          unit?: Database["public"]["Enums"]["material_unit"]
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "materials_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "material_categories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "materials_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       notifications: {
         Row: {
           action_url: string | null
@@ -1998,6 +2820,371 @@ export type Database = {
             columns: ["payment_plan_id"]
             isOneToOne: false
             referencedRelation: "client_payment_plans"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      purchase_order_items: {
+        Row: {
+          brand_id: string | null
+          created_at: string | null
+          description: string | null
+          discount_amount: number | null
+          discount_percent: number | null
+          id: string
+          material_id: string
+          notes: string | null
+          pending_qty: number | null
+          po_id: string
+          quantity: number
+          received_qty: number | null
+          tax_amount: number | null
+          tax_rate: number | null
+          total_amount: number
+          unit_price: number
+        }
+        Insert: {
+          brand_id?: string | null
+          created_at?: string | null
+          description?: string | null
+          discount_amount?: number | null
+          discount_percent?: number | null
+          id?: string
+          material_id: string
+          notes?: string | null
+          pending_qty?: number | null
+          po_id: string
+          quantity: number
+          received_qty?: number | null
+          tax_amount?: number | null
+          tax_rate?: number | null
+          total_amount: number
+          unit_price: number
+        }
+        Update: {
+          brand_id?: string | null
+          created_at?: string | null
+          description?: string | null
+          discount_amount?: number | null
+          discount_percent?: number | null
+          id?: string
+          material_id?: string
+          notes?: string | null
+          pending_qty?: number | null
+          po_id?: string
+          quantity?: number
+          received_qty?: number | null
+          tax_amount?: number | null
+          tax_rate?: number | null
+          total_amount?: number
+          unit_price?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "purchase_order_items_brand_id_fkey"
+            columns: ["brand_id"]
+            isOneToOne: false
+            referencedRelation: "material_brands"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchase_order_items_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "materials"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchase_order_items_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_low_stock_alerts"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "purchase_order_items_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_stock_summary"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "purchase_order_items_po_id_fkey"
+            columns: ["po_id"]
+            isOneToOne: false
+            referencedRelation: "purchase_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchase_order_items_po_id_fkey"
+            columns: ["po_id"]
+            isOneToOne: false
+            referencedRelation: "v_pending_purchase_orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      purchase_orders: {
+        Row: {
+          advance_paid: number | null
+          approved_at: string | null
+          approved_by: string | null
+          cancellation_reason: string | null
+          cancelled_at: string | null
+          cancelled_by: string | null
+          created_at: string | null
+          created_by: string | null
+          delivery_address: string | null
+          delivery_location_id: string | null
+          discount_amount: number | null
+          expected_delivery_date: string | null
+          id: string
+          internal_notes: string | null
+          notes: string | null
+          order_date: string
+          other_charges: number | null
+          payment_terms: string | null
+          po_document_url: string | null
+          po_number: string
+          quotation_url: string | null
+          site_id: string
+          status: Database["public"]["Enums"]["po_status"] | null
+          subtotal: number | null
+          tax_amount: number | null
+          total_amount: number | null
+          transport_cost: number | null
+          updated_at: string | null
+          vendor_id: string
+        }
+        Insert: {
+          advance_paid?: number | null
+          approved_at?: string | null
+          approved_by?: string | null
+          cancellation_reason?: string | null
+          cancelled_at?: string | null
+          cancelled_by?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          delivery_address?: string | null
+          delivery_location_id?: string | null
+          discount_amount?: number | null
+          expected_delivery_date?: string | null
+          id?: string
+          internal_notes?: string | null
+          notes?: string | null
+          order_date?: string
+          other_charges?: number | null
+          payment_terms?: string | null
+          po_document_url?: string | null
+          po_number: string
+          quotation_url?: string | null
+          site_id: string
+          status?: Database["public"]["Enums"]["po_status"] | null
+          subtotal?: number | null
+          tax_amount?: number | null
+          total_amount?: number | null
+          transport_cost?: number | null
+          updated_at?: string | null
+          vendor_id: string
+        }
+        Update: {
+          advance_paid?: number | null
+          approved_at?: string | null
+          approved_by?: string | null
+          cancellation_reason?: string | null
+          cancelled_at?: string | null
+          cancelled_by?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          delivery_address?: string | null
+          delivery_location_id?: string | null
+          discount_amount?: number | null
+          expected_delivery_date?: string | null
+          id?: string
+          internal_notes?: string | null
+          notes?: string | null
+          order_date?: string
+          other_charges?: number | null
+          payment_terms?: string | null
+          po_document_url?: string | null
+          po_number?: string
+          quotation_url?: string | null
+          site_id?: string
+          status?: Database["public"]["Enums"]["po_status"] | null
+          subtotal?: number | null
+          tax_amount?: number | null
+          total_amount?: number | null
+          transport_cost?: number | null
+          updated_at?: string | null
+          vendor_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "purchase_orders_approved_by_fkey"
+            columns: ["approved_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchase_orders_cancelled_by_fkey"
+            columns: ["cancelled_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchase_orders_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchase_orders_delivery_location_id_fkey"
+            columns: ["delivery_location_id"]
+            isOneToOne: false
+            referencedRelation: "stock_locations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchase_orders_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchase_orders_vendor_id_fkey"
+            columns: ["vendor_id"]
+            isOneToOne: false
+            referencedRelation: "vendors"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      purchase_payment_allocations: {
+        Row: {
+          amount: number
+          created_at: string | null
+          delivery_id: string | null
+          id: string
+          payment_id: string
+          po_id: string | null
+        }
+        Insert: {
+          amount: number
+          created_at?: string | null
+          delivery_id?: string | null
+          id?: string
+          payment_id: string
+          po_id?: string | null
+        }
+        Update: {
+          amount?: number
+          created_at?: string | null
+          delivery_id?: string | null
+          id?: string
+          payment_id?: string
+          po_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "purchase_payment_allocations_delivery_id_fkey"
+            columns: ["delivery_id"]
+            isOneToOne: false
+            referencedRelation: "deliveries"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchase_payment_allocations_payment_id_fkey"
+            columns: ["payment_id"]
+            isOneToOne: false
+            referencedRelation: "purchase_payments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchase_payment_allocations_po_id_fkey"
+            columns: ["po_id"]
+            isOneToOne: false
+            referencedRelation: "purchase_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchase_payment_allocations_po_id_fkey"
+            columns: ["po_id"]
+            isOneToOne: false
+            referencedRelation: "v_pending_purchase_orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      purchase_payments: {
+        Row: {
+          amount: number
+          bank_name: string | null
+          created_at: string | null
+          created_by: string | null
+          id: string
+          is_advance: boolean | null
+          notes: string | null
+          payment_date: string
+          payment_mode: string
+          receipt_url: string | null
+          reference_number: string | null
+          site_id: string | null
+          vendor_id: string
+        }
+        Insert: {
+          amount: number
+          bank_name?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          id?: string
+          is_advance?: boolean | null
+          notes?: string | null
+          payment_date?: string
+          payment_mode: string
+          receipt_url?: string | null
+          reference_number?: string | null
+          site_id?: string | null
+          vendor_id: string
+        }
+        Update: {
+          amount?: number
+          bank_name?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          id?: string
+          is_advance?: boolean | null
+          notes?: string | null
+          payment_date?: string
+          payment_mode?: string
+          receipt_url?: string | null
+          reference_number?: string | null
+          site_id?: string | null
+          vendor_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "purchase_payments_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchase_payments_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchase_payments_vendor_id_fkey"
+            columns: ["vendor_id"]
+            isOneToOne: false
+            referencedRelation: "vendors"
             referencedColumns: ["id"]
           },
         ]
@@ -2532,6 +3719,108 @@ export type Database = {
           },
         ]
       }
+      site_material_budgets: {
+        Row: {
+          budget_amount: number
+          category_id: string | null
+          created_at: string | null
+          created_by: string | null
+          id: string
+          notes: string | null
+          period_end: string
+          period_start: string
+          site_id: string
+          updated_at: string | null
+        }
+        Insert: {
+          budget_amount: number
+          category_id?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          id?: string
+          notes?: string | null
+          period_end: string
+          period_start: string
+          site_id: string
+          updated_at?: string | null
+        }
+        Update: {
+          budget_amount?: number
+          category_id?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          id?: string
+          notes?: string | null
+          period_end?: string
+          period_start?: string
+          site_id?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "site_material_budgets_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "material_categories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "site_material_budgets_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "site_material_budgets_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      site_payers: {
+        Row: {
+          created_at: string | null
+          id: string
+          is_active: boolean | null
+          name: string
+          notes: string | null
+          phone: string | null
+          site_id: string
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          is_active?: boolean | null
+          name: string
+          notes?: string | null
+          phone?: string | null
+          site_id: string
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          is_active?: boolean | null
+          name?: string
+          notes?: string | null
+          phone?: string | null
+          site_id?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "site_payers_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       site_payment_milestones: {
         Row: {
           actual_payment_date: string | null
@@ -2604,6 +3893,7 @@ export type Database = {
           default_section_id: string | null
           default_work_end: string | null
           default_work_start: string | null
+          has_multiple_payers: boolean | null
           id: string
           last_payment_amount: number | null
           last_payment_date: string | null
@@ -2639,6 +3929,7 @@ export type Database = {
           default_section_id?: string | null
           default_work_end?: string | null
           default_work_start?: string | null
+          has_multiple_payers?: boolean | null
           id?: string
           last_payment_amount?: number | null
           last_payment_date?: string | null
@@ -2674,6 +3965,7 @@ export type Database = {
           default_section_id?: string | null
           default_work_end?: string | null
           default_work_start?: string | null
+          has_multiple_payers?: boolean | null
           id?: string
           last_payment_amount?: number | null
           last_payment_date?: string | null
@@ -2722,6 +4014,426 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "v_section_cost_summary"
             referencedColumns: ["section_id"]
+          },
+        ]
+      }
+      stock_inventory: {
+        Row: {
+          available_qty: number | null
+          avg_unit_cost: number | null
+          brand_id: string | null
+          created_at: string | null
+          current_qty: number
+          id: string
+          last_issued_date: string | null
+          last_received_date: string | null
+          location_id: string | null
+          material_id: string
+          reorder_level: number | null
+          reorder_qty: number | null
+          reserved_qty: number
+          site_id: string
+          updated_at: string | null
+        }
+        Insert: {
+          available_qty?: number | null
+          avg_unit_cost?: number | null
+          brand_id?: string | null
+          created_at?: string | null
+          current_qty?: number
+          id?: string
+          last_issued_date?: string | null
+          last_received_date?: string | null
+          location_id?: string | null
+          material_id: string
+          reorder_level?: number | null
+          reorder_qty?: number | null
+          reserved_qty?: number
+          site_id: string
+          updated_at?: string | null
+        }
+        Update: {
+          available_qty?: number | null
+          avg_unit_cost?: number | null
+          brand_id?: string | null
+          created_at?: string | null
+          current_qty?: number
+          id?: string
+          last_issued_date?: string | null
+          last_received_date?: string | null
+          location_id?: string | null
+          material_id?: string
+          reorder_level?: number | null
+          reorder_qty?: number | null
+          reserved_qty?: number
+          site_id?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "stock_inventory_brand_id_fkey"
+            columns: ["brand_id"]
+            isOneToOne: false
+            referencedRelation: "material_brands"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_inventory_location_id_fkey"
+            columns: ["location_id"]
+            isOneToOne: false
+            referencedRelation: "stock_locations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_inventory_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "materials"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_inventory_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_low_stock_alerts"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "stock_inventory_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_stock_summary"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "stock_inventory_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      stock_locations: {
+        Row: {
+          code: string | null
+          created_at: string | null
+          description: string | null
+          id: string
+          is_active: boolean | null
+          is_default: boolean | null
+          location_type: string | null
+          name: string
+          site_id: string
+          updated_at: string | null
+        }
+        Insert: {
+          code?: string | null
+          created_at?: string | null
+          description?: string | null
+          id?: string
+          is_active?: boolean | null
+          is_default?: boolean | null
+          location_type?: string | null
+          name: string
+          site_id: string
+          updated_at?: string | null
+        }
+        Update: {
+          code?: string | null
+          created_at?: string | null
+          description?: string | null
+          id?: string
+          is_active?: boolean | null
+          is_default?: boolean | null
+          location_type?: string | null
+          name?: string
+          site_id?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "stock_locations_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      stock_transactions: {
+        Row: {
+          created_at: string | null
+          created_by: string | null
+          id: string
+          inventory_id: string
+          notes: string | null
+          quantity: number
+          reference_id: string | null
+          reference_type: string | null
+          section_id: string | null
+          site_id: string
+          total_cost: number | null
+          transaction_date: string
+          transaction_type: Database["public"]["Enums"]["stock_transaction_type"]
+          unit_cost: number | null
+        }
+        Insert: {
+          created_at?: string | null
+          created_by?: string | null
+          id?: string
+          inventory_id: string
+          notes?: string | null
+          quantity: number
+          reference_id?: string | null
+          reference_type?: string | null
+          section_id?: string | null
+          site_id: string
+          total_cost?: number | null
+          transaction_date?: string
+          transaction_type: Database["public"]["Enums"]["stock_transaction_type"]
+          unit_cost?: number | null
+        }
+        Update: {
+          created_at?: string | null
+          created_by?: string | null
+          id?: string
+          inventory_id?: string
+          notes?: string | null
+          quantity?: number
+          reference_id?: string | null
+          reference_type?: string | null
+          section_id?: string | null
+          site_id?: string
+          total_cost?: number | null
+          transaction_date?: string
+          transaction_type?: Database["public"]["Enums"]["stock_transaction_type"]
+          unit_cost?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "stock_transactions_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_transactions_inventory_id_fkey"
+            columns: ["inventory_id"]
+            isOneToOne: false
+            referencedRelation: "stock_inventory"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_transactions_inventory_id_fkey"
+            columns: ["inventory_id"]
+            isOneToOne: false
+            referencedRelation: "v_low_stock_alerts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_transactions_section_id_fkey"
+            columns: ["section_id"]
+            isOneToOne: false
+            referencedRelation: "building_sections"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_transactions_section_id_fkey"
+            columns: ["section_id"]
+            isOneToOne: false
+            referencedRelation: "v_section_cost_summary"
+            referencedColumns: ["section_id"]
+          },
+          {
+            foreignKeyName: "stock_transactions_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      stock_transfer_items: {
+        Row: {
+          brand_id: string | null
+          created_at: string | null
+          id: string
+          material_id: string
+          notes: string | null
+          quantity_received: number | null
+          quantity_sent: number
+          transfer_id: string
+          unit_cost: number | null
+        }
+        Insert: {
+          brand_id?: string | null
+          created_at?: string | null
+          id?: string
+          material_id: string
+          notes?: string | null
+          quantity_received?: number | null
+          quantity_sent: number
+          transfer_id: string
+          unit_cost?: number | null
+        }
+        Update: {
+          brand_id?: string | null
+          created_at?: string | null
+          id?: string
+          material_id?: string
+          notes?: string | null
+          quantity_received?: number | null
+          quantity_sent?: number
+          transfer_id?: string
+          unit_cost?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "stock_transfer_items_brand_id_fkey"
+            columns: ["brand_id"]
+            isOneToOne: false
+            referencedRelation: "material_brands"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_transfer_items_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "materials"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_transfer_items_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_low_stock_alerts"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "stock_transfer_items_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_stock_summary"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "stock_transfer_items_transfer_id_fkey"
+            columns: ["transfer_id"]
+            isOneToOne: false
+            referencedRelation: "stock_transfers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      stock_transfers: {
+        Row: {
+          approved_at: string | null
+          approved_by: string | null
+          created_at: string | null
+          from_location_id: string | null
+          from_site_id: string
+          id: string
+          initiated_at: string | null
+          initiated_by: string | null
+          notes: string | null
+          received_at: string | null
+          received_by: string | null
+          status: string | null
+          to_location_id: string | null
+          to_site_id: string
+          transfer_date: string
+          transfer_number: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          approved_at?: string | null
+          approved_by?: string | null
+          created_at?: string | null
+          from_location_id?: string | null
+          from_site_id: string
+          id?: string
+          initiated_at?: string | null
+          initiated_by?: string | null
+          notes?: string | null
+          received_at?: string | null
+          received_by?: string | null
+          status?: string | null
+          to_location_id?: string | null
+          to_site_id: string
+          transfer_date?: string
+          transfer_number?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          approved_at?: string | null
+          approved_by?: string | null
+          created_at?: string | null
+          from_location_id?: string | null
+          from_site_id?: string
+          id?: string
+          initiated_at?: string | null
+          initiated_by?: string | null
+          notes?: string | null
+          received_at?: string | null
+          received_by?: string | null
+          status?: string | null
+          to_location_id?: string | null
+          to_site_id?: string
+          transfer_date?: string
+          transfer_number?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "stock_transfers_approved_by_fkey"
+            columns: ["approved_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_transfers_from_location_id_fkey"
+            columns: ["from_location_id"]
+            isOneToOne: false
+            referencedRelation: "stock_locations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_transfers_from_site_id_fkey"
+            columns: ["from_site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_transfers_initiated_by_fkey"
+            columns: ["initiated_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_transfers_received_by_fkey"
+            columns: ["received_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_transfers_to_location_id_fkey"
+            columns: ["to_location_id"]
+            isOneToOne: false
+            referencedRelation: "stock_locations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_transfers_to_site_id_fkey"
+            columns: ["to_site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
           },
         ]
       }
@@ -3713,8 +5425,219 @@ export type Database = {
         }
         Relationships: []
       }
+      vendor_material_categories: {
+        Row: {
+          category_id: string
+          created_at: string | null
+          id: string
+          is_primary: boolean | null
+          vendor_id: string
+        }
+        Insert: {
+          category_id: string
+          created_at?: string | null
+          id?: string
+          is_primary?: boolean | null
+          vendor_id: string
+        }
+        Update: {
+          category_id?: string
+          created_at?: string | null
+          id?: string
+          is_primary?: boolean | null
+          vendor_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vendor_material_categories_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "material_categories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_material_categories_vendor_id_fkey"
+            columns: ["vendor_id"]
+            isOneToOne: false
+            referencedRelation: "vendors"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      vendor_price_history: {
+        Row: {
+          created_at: string | null
+          effective_date: string
+          id: string
+          material_vendor_id: string
+          new_price: number
+          old_price: number
+          reason: string | null
+          recorded_by: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          effective_date?: string
+          id?: string
+          material_vendor_id: string
+          new_price: number
+          old_price: number
+          reason?: string | null
+          recorded_by?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          effective_date?: string
+          id?: string
+          material_vendor_id?: string
+          new_price?: number
+          old_price?: number
+          reason?: string | null
+          recorded_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vendor_price_history_material_vendor_id_fkey"
+            columns: ["material_vendor_id"]
+            isOneToOne: false
+            referencedRelation: "material_vendors"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_price_history_recorded_by_fkey"
+            columns: ["recorded_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      vendors: {
+        Row: {
+          address: string | null
+          alternate_phone: string | null
+          bank_account_number: string | null
+          bank_ifsc: string | null
+          bank_name: string | null
+          city: string | null
+          code: string | null
+          contact_person: string | null
+          created_at: string | null
+          created_by: string | null
+          credit_limit: number | null
+          email: string | null
+          gst_number: string | null
+          id: string
+          is_active: boolean | null
+          name: string
+          notes: string | null
+          pan_number: string | null
+          payment_terms_days: number | null
+          phone: string | null
+          pincode: string | null
+          rating: number | null
+          state: string | null
+          updated_at: string | null
+          updated_by: string | null
+          whatsapp_number: string | null
+        }
+        Insert: {
+          address?: string | null
+          alternate_phone?: string | null
+          bank_account_number?: string | null
+          bank_ifsc?: string | null
+          bank_name?: string | null
+          city?: string | null
+          code?: string | null
+          contact_person?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          credit_limit?: number | null
+          email?: string | null
+          gst_number?: string | null
+          id?: string
+          is_active?: boolean | null
+          name: string
+          notes?: string | null
+          pan_number?: string | null
+          payment_terms_days?: number | null
+          phone?: string | null
+          pincode?: string | null
+          rating?: number | null
+          state?: string | null
+          updated_at?: string | null
+          updated_by?: string | null
+          whatsapp_number?: string | null
+        }
+        Update: {
+          address?: string | null
+          alternate_phone?: string | null
+          bank_account_number?: string | null
+          bank_ifsc?: string | null
+          bank_name?: string | null
+          city?: string | null
+          code?: string | null
+          contact_person?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          credit_limit?: number | null
+          email?: string | null
+          gst_number?: string | null
+          id?: string
+          is_active?: boolean | null
+          name?: string
+          notes?: string | null
+          pan_number?: string | null
+          payment_terms_days?: number | null
+          phone?: string | null
+          pincode?: string | null
+          rating?: number | null
+          state?: string | null
+          updated_at?: string | null
+          updated_by?: string | null
+          whatsapp_number?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vendors_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendors_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
+      payer_expense_summary: {
+        Row: {
+          expense_count: number | null
+          first_expense_date: string | null
+          is_active: boolean | null
+          last_expense_date: string | null
+          payer_id: string | null
+          payer_name: string | null
+          phone: string | null
+          site_id: string | null
+          total_amount: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "site_payers_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       v_active_attendance: {
         Row: {
           category_name: string | null
@@ -3831,6 +5754,89 @@ export type Database = {
           },
         ]
       }
+      v_low_stock_alerts: {
+        Row: {
+          avg_unit_cost: number | null
+          current_qty: number | null
+          id: string | null
+          material_code: string | null
+          material_id: string | null
+          material_name: string | null
+          reorder_level: number | null
+          shortage_qty: number | null
+          site_id: string | null
+          site_name: string | null
+          unit: Database["public"]["Enums"]["material_unit"] | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "stock_inventory_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      v_material_usage_by_section: {
+        Row: {
+          first_usage: string | null
+          last_usage: string | null
+          material_id: string | null
+          material_name: string | null
+          section_id: string | null
+          section_name: string | null
+          site_id: string | null
+          total_cost: number | null
+          total_quantity: number | null
+          unit: Database["public"]["Enums"]["material_unit"] | null
+          usage_count: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "daily_material_usage_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "materials"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "daily_material_usage_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_low_stock_alerts"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "daily_material_usage_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_stock_summary"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "daily_material_usage_section_id_fkey"
+            columns: ["section_id"]
+            isOneToOne: false
+            referencedRelation: "building_sections"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "daily_material_usage_section_id_fkey"
+            columns: ["section_id"]
+            isOneToOne: false
+            referencedRelation: "v_section_cost_summary"
+            referencedColumns: ["section_id"]
+          },
+          {
+            foreignKeyName: "daily_material_usage_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       v_pending_advances: {
         Row: {
           laborer_id: string | null
@@ -3878,6 +5884,45 @@ export type Database = {
             columns: ["reviewed_by"]
             isOneToOne: false
             referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      v_pending_purchase_orders: {
+        Row: {
+          created_by: string | null
+          created_by_name: string | null
+          expected_delivery_date: string | null
+          id: string | null
+          order_date: string | null
+          po_number: string | null
+          site_id: string | null
+          site_name: string | null
+          status: Database["public"]["Enums"]["po_status"] | null
+          total_amount: number | null
+          vendor_id: string | null
+          vendor_name: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "purchase_orders_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchase_orders_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchase_orders_vendor_id_fkey"
+            columns: ["vendor_id"]
+            isOneToOne: false
+            referencedRelation: "vendors"
             referencedColumns: ["id"]
           },
         ]
@@ -4030,6 +6075,31 @@ export type Database = {
           },
         ]
       }
+      v_site_stock_summary: {
+        Row: {
+          avg_cost: number | null
+          category_name: string | null
+          material_code: string | null
+          material_id: string | null
+          material_name: string | null
+          site_id: string | null
+          site_name: string | null
+          total_available: number | null
+          total_qty: number | null
+          total_reserved: number | null
+          total_value: number | null
+          unit: Database["public"]["Enums"]["material_unit"] | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "stock_inventory_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       v_tea_shop_weekly: {
         Row: {
           num_days: number | null
@@ -4143,6 +6213,10 @@ export type Database = {
         }
         Returns: string
       }
+      generate_grn_number: { Args: never; Returns: string }
+      generate_mr_number: { Args: never; Returns: string }
+      generate_po_number: { Args: never; Returns: string }
+      generate_transfer_number: { Args: never; Returns: string }
       generate_weekly_notifications: { Args: never; Returns: number }
       get_current_user_id: { Args: never; Returns: string }
       get_monthly_report: {
@@ -4200,6 +6274,8 @@ export type Database = {
         }
         Returns: string
       }
+      show_limit: { Args: never; Returns: number }
+      show_trgm: { Args: { "": string }; Returns: string[] }
     }
     Enums: {
       audit_action: "create" | "update" | "delete" | "soft_delete" | "restore"
@@ -4217,16 +6293,65 @@ export type Database = {
       contract_type: "mesthri" | "specialist"
       deduction_status: "pending" | "partial" | "deducted" | "written_off"
       deletion_request_status: "pending" | "approved" | "rejected"
+      delivery_status:
+        | "pending"
+        | "in_transit"
+        | "partial"
+        | "delivered"
+        | "rejected"
       employment_type: "daily_wage" | "contract" | "specialist"
       expense_module: "labor" | "material" | "machinery" | "general"
       laborer_status: "active" | "inactive"
+      material_request_status:
+        | "draft"
+        | "pending"
+        | "approved"
+        | "rejected"
+        | "ordered"
+        | "partial_fulfilled"
+        | "fulfilled"
+        | "cancelled"
+      material_unit:
+        | "kg"
+        | "g"
+        | "ton"
+        | "liter"
+        | "ml"
+        | "piece"
+        | "bag"
+        | "bundle"
+        | "sqft"
+        | "sqm"
+        | "cft"
+        | "cum"
+        | "nos"
+        | "rmt"
+        | "box"
+        | "set"
       measurement_unit: "sqft" | "rft" | "nos" | "lumpsum" | "per_point"
       milestone_status: "pending" | "in_progress" | "completed" | "paid"
       payment_mode: "cash" | "upi" | "bank_transfer" | "cheque" | "other"
+      po_status:
+        | "draft"
+        | "pending_approval"
+        | "approved"
+        | "ordered"
+        | "partial_delivered"
+        | "delivered"
+        | "cancelled"
       salary_status: "draft" | "calculated" | "partial" | "paid"
       section_status: "not_started" | "in_progress" | "completed"
       site_status: "planning" | "active" | "on_hold" | "completed"
       site_type: "single_client" | "multi_client"
+      stock_transaction_type:
+        | "purchase"
+        | "usage"
+        | "transfer_in"
+        | "transfer_out"
+        | "adjustment"
+        | "return"
+        | "wastage"
+        | "initial"
       team_status: "active" | "inactive" | "completed"
       transaction_type: "advance" | "extra"
       user_role: "admin" | "office" | "site_engineer"
@@ -4358,9 +6483,6 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
-  graphql_public: {
-    Enums: {},
-  },
   public: {
     Enums: {
       audit_action: ["create", "update", "delete", "soft_delete", "restore"],
@@ -4374,16 +6496,70 @@ export const Constants = {
       contract_type: ["mesthri", "specialist"],
       deduction_status: ["pending", "partial", "deducted", "written_off"],
       deletion_request_status: ["pending", "approved", "rejected"],
+      delivery_status: [
+        "pending",
+        "in_transit",
+        "partial",
+        "delivered",
+        "rejected",
+      ],
       employment_type: ["daily_wage", "contract", "specialist"],
       expense_module: ["labor", "material", "machinery", "general"],
       laborer_status: ["active", "inactive"],
+      material_request_status: [
+        "draft",
+        "pending",
+        "approved",
+        "rejected",
+        "ordered",
+        "partial_fulfilled",
+        "fulfilled",
+        "cancelled",
+      ],
+      material_unit: [
+        "kg",
+        "g",
+        "ton",
+        "liter",
+        "ml",
+        "piece",
+        "bag",
+        "bundle",
+        "sqft",
+        "sqm",
+        "cft",
+        "cum",
+        "nos",
+        "rmt",
+        "box",
+        "set",
+      ],
       measurement_unit: ["sqft", "rft", "nos", "lumpsum", "per_point"],
       milestone_status: ["pending", "in_progress", "completed", "paid"],
       payment_mode: ["cash", "upi", "bank_transfer", "cheque", "other"],
+      po_status: [
+        "draft",
+        "pending_approval",
+        "approved",
+        "ordered",
+        "partial_delivered",
+        "delivered",
+        "cancelled",
+      ],
       salary_status: ["draft", "calculated", "partial", "paid"],
       section_status: ["not_started", "in_progress", "completed"],
       site_status: ["planning", "active", "on_hold", "completed"],
       site_type: ["single_client", "multi_client"],
+      stock_transaction_type: [
+        "purchase",
+        "usage",
+        "transfer_in",
+        "transfer_out",
+        "adjustment",
+        "return",
+        "wastage",
+        "initial",
+      ],
       team_status: ["active", "inactive", "completed"],
       transaction_type: ["advance", "extra"],
       user_role: ["admin", "office", "site_engineer"],
@@ -4394,69 +6570,75 @@ export const Constants = {
   },
 } as const
 
-// Custom type exports for easier usage
-export type Advance = Database["public"]["Tables"]["advances"]["Row"];
-export type DailyAttendance = Database["public"]["Tables"]["daily_attendance"]["Row"];
-export type Expense = Database["public"]["Tables"]["expenses"]["Row"];
-export type ExpenseModule = Database["public"]["Enums"]["expense_module"];
-export type SiteHoliday = Database["public"]["Tables"]["site_holidays"]["Row"];
-export type PaymentChannel = "via_site_engineer" | "mesthri_at_office" | "company_direct_online";
-export type TeaShopEntry = Database["public"]["Tables"]["tea_shop_entries"]["Row"];
-export type TeaShopSettlement = Database["public"]["Tables"]["tea_shop_settlements"]["Row"];
-export type ThemePreference = "light" | "dark" | "system";
-export type User = Database["public"]["Tables"]["users"]["Row"];
-export type Laborer = Database["public"]["Tables"]["laborers"]["Row"];
-export type Site = Database["public"]["Tables"]["sites"]["Row"];
-export type Team = Database["public"]["Tables"]["teams"]["Row"];
-export type SalaryPeriod = Database["public"]["Tables"]["salary_periods"]["Row"];
-export type BuildingSection = Database["public"]["Tables"]["building_sections"]["Row"];
-export type DeletionRequest = Database["public"]["Tables"]["deletion_requests"]["Row"];
-export type Notification = Database["public"]["Tables"]["notifications"]["Row"];
-export type Subcontract = Database["public"]["Tables"]["subcontracts"]["Row"];
-export type ContractType = Database["public"]["Enums"]["contract_type"];
-export type ContractStatus = Database["public"]["Enums"]["contract_status"];
-export type MeasurementUnit = Database["public"]["Enums"]["measurement_unit"];
-export type LaborerStatus = Database["public"]["Enums"]["laborer_status"];
-export type EmploymentType = Database["public"]["Enums"]["employment_type"];
-export type SalaryStatus = Database["public"]["Enums"]["salary_status"];
-export type PaymentMode = Database["public"]["Enums"]["payment_mode"];
-export type UserRole = Database["public"]["Enums"]["user_role"];
-export type UserStatus = Database["public"]["Enums"]["user_status"];
-export type SiteStatus = Database["public"]["Enums"]["site_status"];
-export type TeamStatus = Database["public"]["Enums"]["team_status"];
-export type TransactionType = Database["public"]["Enums"]["transaction_type"];
-export type DeductionStatus = Database["public"]["Enums"]["deduction_status"];
-export type MilestoneStatus = Database["public"]["Enums"]["milestone_status"];
-export type SubcontractMilestone = Database["public"]["Tables"]["subcontract_milestones"]["Row"];
-export type TeaShopAccount = Database["public"]["Tables"]["tea_shop_accounts"]["Row"];
-export type LaborCategory = Database["public"]["Tables"]["labor_categories"]["Row"];
-export type MarketLaborerAttendance = Database["public"]["Tables"]["market_laborer_attendance"]["Row"];
-export type SitePaymentMilestone = Database["public"]["Tables"]["site_payment_milestones"]["Row"];
-export type ConstructionPhase = Database["public"]["Tables"]["construction_phases"]["Row"];
-export type PaymentType = Database["public"]["Enums"]["contract_payment_type"];
-export type ContractPaymentType = Database["public"]["Enums"]["contract_payment_type"];
-export type SiteEngineerTransaction = Database["public"]["Tables"]["site_engineer_transactions"]["Row"];
-export type SiteEngineerSettlement = Database["public"]["Tables"]["site_engineer_settlements"]["Row"];
-export type SiteEngineerTransactionType = "received_from_company" | "spent_on_behalf" | "used_own_money" | "returned_to_company";
-export type SiteEngineerSettlementDirection = "company_to_engineer" | "engineer_to_company";
-export type SubcontractPayment = Database["public"]["Tables"]["subcontract_payments"]["Row"];
-export type LaborPayment = Database["public"]["Tables"]["labor_payments"]["Row"];
-export type RecipientType = "laborer" | "mesthri" | "subcontractor" | "vendor" | "other";
-export type WorkDaysValue = Database["public"]["Enums"]["work_days_value"];
-export type SectionStatus = Database["public"]["Enums"]["section_status"];
-export type SiteType = Database["public"]["Enums"]["site_type"];
-export type AuditAction = Database["public"]["Enums"]["audit_action"];
-export type DeletionRequestStatus = Database["public"]["Enums"]["deletion_request_status"];
-export type WorkVariance = Database["public"]["Enums"]["work_variance"];
-export type ConstructionSubphase = Database["public"]["Tables"]["construction_subphases"]["Row"];
-export type LaborerType = Database["public"]["Enums"]["employment_type"];
-export type DailyWorkSummary = Database["public"]["Tables"]["daily_work_summary"]["Row"];
-export type ClientPaymentPlan = Database["public"]["Tables"]["client_payment_plans"]["Row"];
-export type ClientPayment = Database["public"]["Tables"]["client_payments"]["Row"];
-export type PaymentPhase = Database["public"]["Tables"]["payment_phases"]["Row"];
+// ============================================
+// Helper Type Exports for convenience
+// ============================================
 
-// Tea shop related types
-export type TeaShopEntryMode = "simple" | "detailed";
+// Table Row types
+export type Expense = Database["public"]["Tables"]["expenses"]["Row"]
+export type SitePayer = Database["public"]["Tables"]["site_payers"]["Row"]
+export type Site = Database["public"]["Tables"]["sites"]["Row"]
+export type User = Database["public"]["Tables"]["users"]["Row"]
+export type Laborer = Database["public"]["Tables"]["laborers"]["Row"]
+export type Team = Database["public"]["Tables"]["teams"]["Row"]
+export type DailyAttendance = Database["public"]["Tables"]["daily_attendance"]["Row"]
+export type ExpenseCategory = Database["public"]["Tables"]["expense_categories"]["Row"]
+export type BuildingSection = Database["public"]["Tables"]["building_sections"]["Row"]
+export type ConstructionPhase = Database["public"]["Tables"]["construction_phases"]["Row"]
+export type Subcontract = Database["public"]["Tables"]["subcontracts"]["Row"]
+export type LaborPayment = Database["public"]["Tables"]["labor_payments"]["Row"]
+export type Vendor = Database["public"]["Tables"]["vendors"]["Row"]
+export type Material = Database["public"]["Tables"]["materials"]["Row"]
+
+// Enum types
+export type ExpenseModule = Database["public"]["Enums"]["expense_module"]
+export type PaymentMode = Database["public"]["Enums"]["payment_mode"]
+export type SiteStatus = Database["public"]["Enums"]["site_status"]
+export type SiteType = Database["public"]["Enums"]["site_type"]
+export type UserRole = Database["public"]["Enums"]["user_role"]
+export type LaborerStatus = Database["public"]["Enums"]["laborer_status"]
+export type EmploymentType = Database["public"]["Enums"]["employment_type"]
+export type ContractStatus = Database["public"]["Enums"]["contract_status"]
+export type ContractType = Database["public"]["Enums"]["contract_type"]
+export type SectionStatus = Database["public"]["Enums"]["section_status"]
+export type MaterialUnit = Database["public"]["Enums"]["material_unit"]
+export type MeasurementUnit = Database["public"]["Enums"]["measurement_unit"]
+export type POStatus = Database["public"]["Enums"]["po_status"]
+export type MaterialRequestStatus = Database["public"]["Enums"]["material_request_status"]
+export type PaymentType = Database["public"]["Enums"]["contract_payment_type"]
+export type TransactionType = Database["public"]["Enums"]["transaction_type"]
+
+// Site engineer related types
+export type SiteEngineerTransaction = Database["public"]["Tables"]["site_engineer_transactions"]["Row"]
+export type SiteEngineerSettlement = Database["public"]["Tables"]["site_engineer_settlements"]["Row"]
+export type SiteEngineerTransactionType = "received_from_company" | "spent_on_behalf" | "used_own_money" | "returned_to_company"
+export type RecipientType = "laborer" | "mesthri" | "vendor" | "other"
+export type SalaryPeriod = Database["public"]["Tables"]["salary_periods"]["Row"]
+export type ConstructionSubphase = Database["public"]["Tables"]["construction_subphases"]["Row"]
+export type SitePaymentMilestone = Database["public"]["Tables"]["site_payment_milestones"]["Row"]
+export type LaborerType = string | null
+export type TeaShopAccount = Database["public"]["Tables"]["tea_shop_accounts"]["Row"]
+export type DailyWorkSummary = Database["public"]["Tables"]["daily_work_summary"]["Row"]
+export type ClientPaymentPlan = Database["public"]["Tables"]["client_payment_plans"]["Row"]
+export type PaymentPhase = Database["public"]["Tables"]["payment_phases"]["Row"]
+export type ClientPayment = Database["public"]["Tables"]["client_payments"]["Row"]
+export type SiteHoliday = Database["public"]["Tables"]["site_holidays"]["Row"]
+export type PaymentChannel = string | null
+export type TeaShopEntry = Database["public"]["Tables"]["tea_shop_entries"]["Row"]
+export type TeaShopSettlement = Database["public"]["Tables"]["tea_shop_settlements"]["Row"]
+export type TeaShopEntryExtended = TeaShopEntry & {
+  laborer_name?: string;
+  team_name?: string;
+  entry_mode?: string | null;
+}
+export type ThemePreference = "light" | "dark" | "system"
+
+// UI helper types
+export interface LaborGroupPercentageSplit {
+  daily: number;
+  contract: number;
+  market: number;
+}
 
 export interface SnackItem {
   name: string;
@@ -4465,16 +6647,5 @@ export interface SnackItem {
   total: number;
 }
 
-export interface LaborGroupPercentageSplit {
-  daily: number;
-  contract: number;
-  market: number;
-}
-
-export interface TeaShopEntryExtended extends Omit<TeaShopEntry, 'entry_mode' | 'percentage_split'> {
-  entry_mode: TeaShopEntryMode | null;
-  simple_total_cost: number | null;
-  percentage_split: LaborGroupPercentageSplit | null;
-  is_split_entry: boolean | null;
-  split_percentage: number | null;
-}
+export type TeaShopEntryMode = "simple" | "detailed"
+export type MarketLaborerAttendance = Database["public"]["Tables"]["market_laborer_attendance"]["Row"]

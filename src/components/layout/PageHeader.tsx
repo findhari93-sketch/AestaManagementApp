@@ -1,15 +1,13 @@
 'use client'
 
 import { Box, Typography, IconButton, Tooltip } from '@mui/material'
-import { ArrowBack, Refresh } from '@mui/icons-material'
+import { ArrowBack } from '@mui/icons-material'
 import { useRouter } from 'next/navigation'
 
 interface PageHeaderProps {
   title: string
   subtitle?: string
   titleChip?: React.ReactNode  // Chip/badge displayed next to the title
-  onRefresh?: () => void
-  isLoading?: boolean
   showBack?: boolean
   actions?: React.ReactNode
 }
@@ -18,8 +16,6 @@ export default function PageHeader({
   title,
   subtitle,
   titleChip,
-  onRefresh,
-  isLoading = false,
   showBack = true,
   actions,
 }: PageHeaderProps) {
@@ -80,30 +76,11 @@ export default function PageHeader({
           )}
         </Box>
       </Box>
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 0.5, sm: 1 }, flexWrap: 'wrap' }}>
-        {onRefresh && (
-          <Tooltip title="Refresh data">
-            <IconButton
-              onClick={onRefresh}
-              disabled={isLoading}
-              size="small"
-              sx={{
-                bgcolor: 'action.hover',
-                '&:hover': { bgcolor: 'action.selected' },
-                padding: { xs: 0.5, sm: 1 },
-                animation: isLoading ? 'spin 1s linear infinite' : 'none',
-                '@keyframes spin': {
-                  '0%': { transform: 'rotate(0deg)' },
-                  '100%': { transform: 'rotate(360deg)' },
-                },
-              }}
-            >
-              <Refresh sx={{ fontSize: { xs: 18, sm: 24 } }} />
-            </IconButton>
-          </Tooltip>
-        )}
-        {actions}
-      </Box>
+      {actions && (
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 0.5, sm: 1 }, flexWrap: 'wrap' }}>
+          {actions}
+        </Box>
+      )}
     </Box>
   )
 }

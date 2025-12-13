@@ -713,8 +713,6 @@ export default function EngineerWalletPage() {
       <PageHeader
         title="Site Engineer Wallet"
         subtitle="Track money flow between company and site engineers"
-        onRefresh={fetchData}
-        isLoading={loading}
         actions={
           canEdit && (
             <Box sx={{ display: "flex", gap: 1 }}>

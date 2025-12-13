@@ -1,0 +1,185 @@
+"use client";
+
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+  useCallback,
+} from "react";
+import dayjs from "dayjs";
+
+// Storage keys
+const DATE_FROM_KEY = "globalDateFrom";
+const DATE_TO_KEY = "globalDateTo";
+
+interface DateRangeContextType {
+  startDate: Date | null;
+  endDate: Date | null;
+  setDateRange: (start: Date | null, end: Date | null) => void;
+  setLastWeek: () => void;
+  setLastMonth: () => void;
+  setAllTime: () => void;
+  formatForApi: () => { dateFrom: string | null; dateTo: string | null };
+  isAllTime: boolean;
+  label: string;
+}
+
+const DateRangeContext = createContext<DateRangeContextType | undefined>(
+  undefined
+);
+
+// Helper functions to safely access localStorage
+function getStoredDateFrom(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return localStorage.getItem(DATE_FROM_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function getStoredDateTo(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return localStorage.getItem(DATE_TO_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function storeDateRange(
+  dateFrom: string | null,
+  dateTo: string | null
+): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (dateFrom) {
+      localStorage.setItem(DATE_FROM_KEY, dateFrom);
+    } else {
+      localStorage.removeItem(DATE_FROM_KEY);
+    }
+    if (dateTo) {
+      localStorage.setItem(DATE_TO_KEY, dateTo);
+    } else {
+      localStorage.removeItem(DATE_TO_KEY);
+    }
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+function getLabel(startDate: Date | null, endDate: Date | null): string {
+  if (!startDate || !endDate) {
+    return "All Time";
+  }
+
+  const start = dayjs(startDate);
+  const end = dayjs(endDate);
+  const today = dayjs();
+
+  // Check for "This Week" (Sunday to today)
+  if (
+    start.isSame(today.startOf("week"), "day") &&
+    end.isSame(today, "day")
+  ) {
+    return "This Week";
+  }
+
+  // Check for "This Month" (1st to today)
+  if (
+    start.isSame(today.startOf("month"), "day") &&
+    end.isSame(today, "day")
+  ) {
+    return "This Month";
+  }
+
+  // Custom range
+  const startStr = start.format("MMM D");
+  const endStr = end.format("MMM D");
+  if (start.year() !== end.year()) {
+    return `${start.format("MMM D, YYYY")} - ${end.format("MMM D, YYYY")}`;
+  }
+  return `${startStr} - ${endStr}`;
+}
+
+export function DateRangeProvider({ children }: { children: React.ReactNode }) {
+  const [startDate, setStartDate] = useState<Date | null>(null);
+  const [endDate, setEndDate] = useState<Date | null>(null);
+
+  // Restore from localStorage on mount
+  useEffect(() => {
+    const storedFrom = getStoredDateFrom();
+    const storedTo = getStoredDateTo();
+
+    if (storedFrom && storedTo) {
+      setStartDate(new Date(storedFrom));
+      setEndDate(new Date(storedTo));
+    }
+    // If no stored values, keep null (All Time)
+  }, []);
+
+  const setDateRange = useCallback(
+    (start: Date | null, end: Date | null) => {
+      setStartDate(start);
+      setEndDate(end);
+      storeDateRange(
+        start ? dayjs(start).format("YYYY-MM-DD") : null,
+        end ? dayjs(end).format("YYYY-MM-DD") : null
+      );
+    },
+    []
+  );
+
+  const setLastWeek = useCallback(() => {
+    const today = dayjs();
+    const weekStart = today.startOf("week"); // Sunday
+    setDateRange(weekStart.toDate(), today.toDate());
+  }, [setDateRange]);
+
+  const setLastMonth = useCallback(() => {
+    const today = dayjs();
+    const monthStart = today.startOf("month");
+    setDateRange(monthStart.toDate(), today.toDate());
+  }, [setDateRange]);
+
+  const setAllTime = useCallback(() => {
+    setDateRange(null, null);
+  }, [setDateRange]);
+
+  const formatForApi = useCallback(() => {
+    return {
+      dateFrom: startDate ? dayjs(startDate).format("YYYY-MM-DD") : null,
+      dateTo: endDate ? dayjs(endDate).format("YYYY-MM-DD") : null,
+    };
+  }, [startDate, endDate]);
+
+  const isAllTime = !startDate && !endDate;
+  const label = getLabel(startDate, endDate);
+
+  const value: DateRangeContextType = {
+    startDate,
+    endDate,
+    setDateRange,
+    setLastWeek,
+    setLastMonth,
+    setAllTime,
+    formatForApi,
+    isAllTime,
+    label,
+  };
+
+  return (
+    <DateRangeContext.Provider value={value}>
+      {children}
+    </DateRangeContext.Provider>
+  );
+}
+
+export function useDateRange() {
+  const context = useContext(DateRangeContext);
+  if (context === undefined) {
+    throw new Error("useDateRange must be used within a DateRangeProvider");
+  }
+  return context;
+}

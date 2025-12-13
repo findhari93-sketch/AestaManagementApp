@@ -868,8 +868,6 @@ export default function ConstructionPhasesPage() {
       <PageHeader
         title="Construction Phases"
         subtitle="Manage your project phases and subphases in a visual workflow"
-        onRefresh={fetchData}
-        isLoading={loading}
         actions={
           <Button
             variant="contained"

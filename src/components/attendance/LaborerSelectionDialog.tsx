@@ -36,6 +36,7 @@ interface LaborerData {
   team_name: string | null;
   daily_rate: number;
   laborer_type: string;
+  language: string;
 }
 
 interface LaborerSelectionDialogProps {
@@ -63,6 +64,7 @@ export default function LaborerSelectionDialog({
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [teamFilter, setTeamFilter] = useState<string>("all");
+  const [languageFilter, setLanguageFilter] = useState<string>("all");
 
   // Initialize local state with pre-selected laborers
   useEffect(() => {
@@ -85,6 +87,7 @@ export default function LaborerSelectionDialog({
           daily_rate,
           team_id,
           laborer_type,
+          language,
           labor_categories(name),
           team:teams!laborers_team_id_fkey(name)
         `
@@ -103,6 +106,7 @@ export default function LaborerSelectionDialog({
         team_name: l.team?.name || null,
         daily_rate: l.daily_rate,
         laborer_type: l.laborer_type || "daily_market",
+        language: l.language || "Tamil",
       }));
 
       setLaborers(mappedLaborers);
@@ -131,9 +135,12 @@ export default function LaborerSelectionDialog({
         (teamFilter === "no_team" && !laborer.team_id) ||
         laborer.team_id === teamFilter;
 
-      return matchesSearch && matchesCategory && matchesTeam;
+      const matchesLanguage =
+        languageFilter === "all" || laborer.language === languageFilter;
+
+      return matchesSearch && matchesCategory && matchesTeam && matchesLanguage;
     });
-  }, [laborers, searchQuery, categoryFilter, teamFilter]);
+  }, [laborers, searchQuery, categoryFilter, teamFilter, languageFilter]);
 
   // Get unique categories and teams for filters
   const categories = useMemo(() => {
@@ -188,6 +195,23 @@ export default function LaborerSelectionDialog({
   // Handle deselect all
   const handleDeselectAll = () => {
     setLocalSelected(new Map());
+  };
+
+  // Handle select all Hindi laborers
+  const handleSelectAllHindi = () => {
+    const newSelected = new Map(localSelected);
+    laborers
+      .filter((laborer) => laborer.language === "Hindi")
+      .forEach((laborer) => {
+        if (!newSelected.has(laborer.id)) {
+          newSelected.set(laborer.id, {
+            laborerId: laborer.id,
+            workDays: 1,
+            dailyRate: laborer.daily_rate,
+          });
+        }
+      });
+    setLocalSelected(newSelected);
   };
 
   // Calculate summary (daily rate total - work days applied in AttendanceDrawer)
@@ -328,6 +352,22 @@ export default function LaborerSelectionDialog({
             </Select>
           </FormControl>
 
+          <FormControl size="small" sx={{ minWidth: 120 }}>
+            <InputLabel>Language</InputLabel>
+            <Select
+              value={languageFilter}
+              onChange={(e) => setLanguageFilter(e.target.value)}
+              label="Language"
+            >
+              <MenuItem value="all">All</MenuItem>
+              <MenuItem value="Hindi">Hindi</MenuItem>
+              <MenuItem value="Tamil">Tamil</MenuItem>
+            </Select>
+          </FormControl>
+
+          <Button variant="contained" size="small" onClick={handleSelectAllHindi} color="info">
+            + All Hindi
+          </Button>
           <Button variant="outlined" size="small" onClick={handleSelectAll}>
             Select All
           </Button>

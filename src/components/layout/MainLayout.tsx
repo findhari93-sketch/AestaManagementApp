@@ -21,15 +21,20 @@ import {
   Tab,
   Tooltip,
   useTheme,
+  Switch,
+  Chip,
 } from "@mui/material";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import {
   Menu as MenuIcon,
   ChevronLeft as ChevronLeftIcon,
+  ChevronRight as ChevronRightIcon,
   Dashboard as DashboardIcon,
   Engineering,
   Logout,
   Settings as SettingsIcon,
+  ExpandMore as ExpandMoreIcon,
+  ExpandLess as ExpandLessIcon,
   People as PeopleIcon,
   Groups as GroupsIcon,
   AccessTime as AccessTimeIcon,
@@ -46,17 +51,36 @@ import {
   Payments as PaymentsIcon,
   LightMode as LightModeIcon,
   DarkMode as DarkModeIcon,
+  UploadFile as UploadFileIcon,
+  Inventory2 as InventoryIcon,
+  Construction as ConstructionIcon,
+  Store as StoreIcon,
+  Category as CategoryIcon,
+  ShoppingCart as ShoppingCartIcon,
+  Assignment as AssignmentIcon,
+  Refresh as RefreshIcon,
+  Sync as SyncIcon,
+  SyncDisabled as SyncDisabledIcon,
+  CheckCircle as CheckCircleIcon,
+  Error as ErrorIcon,
 } from "@mui/icons-material";
 import { useRouter, usePathname } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useThemeMode } from "@/contexts/ThemeContext";
+import { useSyncStatus } from "@/hooks/useSyncStatus";
 import SiteSelector from "@/components/layout/SiteSelector";
 import NotificationBell from "@/components/notifications/NotificationBell";
 import ActiveSectionChip from "@/components/layout/ActiveSectionChip";
 import SettlementDialogManager from "@/components/settlement/SettlementDialogManager";
+import ThemeToggle from "@/components/common/ThemeToggle";
+import DateRangePicker from "@/components/common/DateRangePicker";
+import { useDateRange } from "@/contexts/DateRangeContext";
 
 const drawerWidth = 260;
+const iconBarWidth = 64;
 const collapsedDrawerWidth = 0;
+
+type SidebarState = "open" | "iconBar" | "closed";
 
 interface NavItem {
   text: string;
@@ -65,77 +89,205 @@ interface NavItem {
   adminOnly?: boolean;
 }
 
-// Site-specific menu items
-const siteNavItems: NavItem[] = [
-  { text: "Dashboard", icon: <DashboardIcon />, path: "/site/dashboard" },
+interface NavCategory {
+  label: string;
+  emoji: string;
+  items: NavItem[];
+}
+
+// Dashboard items (not in categories)
+const siteDashboard: NavItem = {
+  text: "Dashboard",
+  icon: <DashboardIcon />,
+  path: "/site/dashboard",
+};
+
+const companyDashboard: NavItem = {
+  text: "Dashboard",
+  icon: <DashboardIcon />,
+  path: "/company/dashboard",
+};
+
+// Site-specific menu items organized by category
+const siteNavCategories: NavCategory[] = [
   {
-    text: "Attendance",
-    icon: <AccessTimeIcon />,
-    path: "/site/attendance",
+    label: "Workforce",
+    emoji: "👷",
+    items: [
+      {
+        text: "Attendance",
+        icon: <AccessTimeIcon />,
+        path: "/site/attendance",
+      },
+      {
+        text: "Salary Settlements",
+        icon: <PaymentsIcon />,
+        path: "/site/payments",
+      },
+      { text: "Holidays", icon: <EventBusyIcon />, path: "/site/holidays" },
+    ],
   },
   {
-    text: "Salary Settlements",
-    icon: <PaymentsIcon />,
-    path: "/site/payments",
+    label: "Expenses",
+    emoji: "💰",
+    items: [
+      {
+        text: "Daily Expenses",
+        icon: <AccountBalanceWalletIcon />,
+        path: "/site/expenses",
+      },
+      {
+        text: "Tea Shop",
+        icon: <LocalCafeIcon />,
+        path: "/site/tea-shop",
+      },
+      {
+        text: "Client Payments",
+        icon: <PaymentIcon />,
+        path: "/site/client-payments",
+      },
+    ],
   },
-  { text: "Holidays", icon: <EventBusyIcon />, path: "/site/holidays" },
   {
-    text: "Daily Expenses",
-    icon: <AccountBalanceWalletIcon />,
-    path: "/site/expenses",
+    label: "Site Operations",
+    emoji: "🏗️",
+    items: [
+      { text: "Daily Work Log", icon: <NotesIcon />, path: "/site/work-log" },
+      { text: "Site Reports", icon: <AssessmentIcon />, path: "/site/reports" },
+    ],
   },
   {
-    text: "Tea Shop",
-    icon: <LocalCafeIcon />,
-    path: "/site/tea-shop",
+    label: "Materials",
+    emoji: "📦",
+    items: [
+      {
+        text: "Stock Inventory",
+        icon: <InventoryIcon />,
+        path: "/site/stock",
+      },
+      {
+        text: "Material Usage",
+        icon: <ConstructionIcon />,
+        path: "/site/material-usage",
+      },
+      {
+        text: "Material Requests",
+        icon: <AssignmentIcon />,
+        path: "/site/material-requests",
+      },
+      {
+        text: "Purchase Orders",
+        icon: <ShoppingCartIcon />,
+        path: "/site/purchase-orders",
+      },
+    ],
   },
-  { text: "Daily Work Log", icon: <NotesIcon />, path: "/site/work-log" },
   {
-    text: "Client Payments",
-    icon: <PaymentIcon />,
-    path: "/site/client-payments",
+    label: "Contracts",
+    emoji: "🤝",
+    items: [
+      {
+        text: "Subcontracts",
+        icon: <DescriptionIcon />,
+        path: "/site/subcontracts",
+      },
+    ],
   },
   {
-    text: "Subcontracts",
-    icon: <DescriptionIcon />,
-    path: "/site/subcontracts",
+    label: "Settings",
+    emoji: "⚙️",
+    items: [
+      { text: "Site Settings", icon: <SettingsIcon />, path: "/site/settings" },
+    ],
   },
-  { text: "Site Reports", icon: <AssessmentIcon />, path: "/site/reports" },
-  { text: "Site Settings", icon: <SettingsIcon />, path: "/site/settings" },
 ];
 
-// Company-wide menu items
-const companyNavItems: NavItem[] = [
-  { text: "Dashboard", icon: <DashboardIcon />, path: "/company/dashboard" },
-  { text: "Laborers", icon: <PeopleIcon />, path: "/company/laborers" },
-  { text: "Teams", icon: <GroupsIcon />, path: "/company/teams" },
-  { text: "All Subcontracts", icon: <DescriptionIcon />, path: "/company/contracts" },
+// Company-wide menu items organized by category
+const companyNavCategories: NavCategory[] = [
   {
-    text: "Salary & Payments",
-    icon: <AccountBalanceWalletIcon />,
-    path: "/company/salary",
+    label: "Workforce",
+    emoji: "👷",
+    items: [
+      { text: "Laborers", icon: <PeopleIcon />, path: "/company/laborers" },
+      { text: "Teams", icon: <GroupsIcon />, path: "/company/teams" },
+    ],
   },
   {
-    text: "Engineer Wallet",
-    icon: <PaymentIcon />,
-    path: "/company/engineer-wallet",
+    label: "Contracts & Payments",
+    emoji: "🤝",
+    items: [
+      {
+        text: "All Subcontracts",
+        icon: <DescriptionIcon />,
+        path: "/company/contracts",
+      },
+      {
+        text: "Salary & Payments",
+        icon: <AccountBalanceWalletIcon />,
+        path: "/company/salary",
+      },
+      {
+        text: "Engineer Wallet",
+        icon: <PaymentIcon />,
+        path: "/company/engineer-wallet",
+      },
+    ],
   },
   {
-    text: "Sites",
-    icon: <DomainIcon />,
-    path: "/company/sites",
-    adminOnly: true,
+    label: "Materials & Vendors",
+    emoji: "🧱",
+    items: [
+      {
+        text: "Material Catalog",
+        icon: <CategoryIcon />,
+        path: "/company/materials",
+      },
+      {
+        text: "Vendors",
+        icon: <StoreIcon />,
+        path: "/company/vendors",
+      },
+    ],
   },
   {
-    text: "Construction Phases",
-    icon: <Engineering />, // construction-centric icon
-    path: "/company/construction-phases",
-    adminOnly: true,
+    label: "Project Setup",
+    emoji: "🏗️",
+    items: [
+      {
+        text: "Sites",
+        icon: <DomainIcon />,
+        path: "/company/sites",
+        adminOnly: true,
+      },
+      {
+        text: "Construction Phases",
+        icon: <Engineering />,
+        path: "/company/construction-phases",
+        adminOnly: true,
+      },
+    ],
   },
   {
-    text: "Company Reports",
-    icon: <AssessmentIcon />,
-    path: "/company/reports",
+    label: "Data Management",
+    emoji: "📤",
+    items: [
+      {
+        text: "Mass Upload",
+        icon: <UploadFileIcon />,
+        path: "/company/mass-upload",
+      },
+    ],
+  },
+  {
+    label: "Reports",
+    emoji: "📈",
+    items: [
+      {
+        text: "Company Reports",
+        icon: <AssessmentIcon />,
+        path: "/company/reports",
+      },
+    ],
   },
 ];
 
@@ -147,9 +299,12 @@ export default function MainLayout({
   children: React.ReactNode;
 }) {
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarState, setSidebarState] = useState<SidebarState>("open");
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const [activeTab, setActiveTab] = useState<ActiveTab>("site");
+  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(
+    new Set()
+  );
 
   const { userProfile, signOut } = useAuth();
   const router = useRouter();
@@ -157,6 +312,17 @@ export default function MainLayout({
   const theme = useTheme();
   const isMobile = useIsMobile("md");
   const { mode, toggleTheme } = useThemeMode();
+  const syncStatus = useSyncStatus();
+  const {
+    startDate,
+    endDate,
+    setDateRange,
+    setLastWeek,
+    setLastMonth,
+    setAllTime,
+    isAllTime,
+    label: dateRangeLabel,
+  } = useDateRange();
 
   // Determine active tab based on current path
   useEffect(() => {
@@ -171,9 +337,30 @@ export default function MainLayout({
     if (isMobile) {
       setMobileOpen(!mobileOpen);
     } else {
-      setSidebarCollapsed(!sidebarCollapsed);
+      // Cycle through: open -> iconBar -> closed -> open
+      setSidebarState((prev) => {
+        if (prev === "open") return "iconBar";
+        if (prev === "iconBar") return "closed";
+        return "open";
+      });
     }
   };
+
+  // Calculate current drawer width based on state
+  const getCurrentDrawerWidth = () => {
+    if (isMobile) return drawerWidth;
+    switch (sidebarState) {
+      case "open":
+        return drawerWidth;
+      case "iconBar":
+        return iconBarWidth;
+      case "closed":
+        return collapsedDrawerWidth;
+    }
+  };
+
+  const currentDrawerWidth = getCurrentDrawerWidth();
+  const isIconBarMode = sidebarState === "iconBar" && !isMobile;
 
   const handleUserMenuOpen = (event: React.MouseEvent<HTMLElement>) => {
     setAnchorEl(event.currentTarget);
@@ -212,16 +399,164 @@ export default function MainLayout({
     if (isMobile) setMobileOpen(false);
   };
 
-  const currentNavItems = activeTab === "site" ? siteNavItems : companyNavItems;
-  const filteredNavItems = currentNavItems.filter((item) => {
-    if (item.adminOnly && userProfile?.role !== "admin") {
-      return false;
-    }
-    return true;
-  });
+  const toggleCategory = (categoryLabel: string) => {
+    setExpandedCategories((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(categoryLabel)) {
+        newSet.delete(categoryLabel);
+      } else {
+        newSet.add(categoryLabel);
+      }
+      return newSet;
+    });
+  };
 
-  const currentDrawerWidth =
-    sidebarCollapsed && !isMobile ? collapsedDrawerWidth : drawerWidth;
+  const currentNavCategories =
+    activeTab === "site" ? siteNavCategories : companyNavCategories;
+
+  // Filter out categories based on permissions
+  const filteredNavCategories = currentNavCategories
+    .map((category) => ({
+      ...category,
+      items: category.items.filter((item) => {
+        if (item.adminOnly && userProfile?.role !== "admin") {
+          return false;
+        }
+        return true;
+      }),
+    }))
+    .filter((category) => category.items.length > 0); // Remove empty categories
+
+  // Icon Bar Drawer - Compact version showing only icons
+  const iconBarDrawer = (
+    <Box sx={{ height: "100%", display: "flex", flexDirection: "column" }}>
+      {/* Logo Icon Only */}
+      <Toolbar
+        sx={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          px: 1,
+          py: 2,
+          minHeight: 64,
+        }}
+      >
+        <Engineering sx={{ fontSize: 28, color: "primary.main" }} />
+      </Toolbar>
+
+      <Divider />
+
+      {/* Tab Icons */}
+      <Box sx={{ display: "flex", justifyContent: "center", py: 1 }}>
+        <Tooltip title={activeTab === "site" ? "Site" : "Company"} placement="right">
+          <IconButton
+            onClick={() => handleTabChange(null as unknown as React.SyntheticEvent, activeTab === "site" ? "company" : "site")}
+            sx={{ color: "primary.main" }}
+          >
+            {activeTab === "site" ? <DomainIcon /> : <BusinessIcon />}
+          </IconButton>
+        </Tooltip>
+      </Box>
+
+      <Divider />
+
+      {/* Navigation Icons */}
+      <List sx={{ px: 0.5, py: 1, flex: 1, overflowY: "auto" }}>
+        {/* Dashboard Icon */}
+        <ListItem disablePadding sx={{ mb: 1 }}>
+          <Tooltip title="Dashboard" placement="right">
+            <ListItemButton
+              onClick={() =>
+                handleNavigation(
+                  activeTab === "site"
+                    ? siteDashboard.path
+                    : companyDashboard.path
+                )
+              }
+              sx={{
+                borderRadius: 2,
+                py: 1,
+                justifyContent: "center",
+                bgcolor:
+                  (activeTab === "site" && pathname === siteDashboard.path) ||
+                  (activeTab === "company" && pathname === companyDashboard.path)
+                    ? "primary.main"
+                    : "transparent",
+                color:
+                  (activeTab === "site" && pathname === siteDashboard.path) ||
+                  (activeTab === "company" && pathname === companyDashboard.path)
+                    ? "white"
+                    : "text.primary",
+                "&:hover": {
+                  bgcolor:
+                    (activeTab === "site" && pathname === siteDashboard.path) ||
+                    (activeTab === "company" && pathname === companyDashboard.path)
+                      ? "primary.dark"
+                      : "action.hover",
+                },
+              }}
+            >
+              <DashboardIcon />
+            </ListItemButton>
+          </Tooltip>
+        </ListItem>
+
+        {/* Category Icons */}
+        {filteredNavCategories.map((category) => (
+          <Box key={category.label} sx={{ mb: 0.5 }}>
+            {category.items.map((item) => {
+              const isActive =
+                pathname === item.path ||
+                pathname.startsWith(`${item.path}/`);
+
+              return (
+                <ListItem key={item.text} disablePadding sx={{ mb: 0.5 }}>
+                  <Tooltip title={item.text} placement="right">
+                    <ListItemButton
+                      onClick={() => handleNavigation(item.path)}
+                      sx={{
+                        borderRadius: 2,
+                        py: 1,
+                        justifyContent: "center",
+                        bgcolor: isActive ? "primary.main" : "transparent",
+                        color: isActive ? "white" : "text.secondary",
+                        "&:hover": {
+                          bgcolor: isActive ? "primary.dark" : "action.hover",
+                        },
+                      }}
+                    >
+                      {item.icon}
+                    </ListItemButton>
+                  </Tooltip>
+                </ListItem>
+              );
+            })}
+          </Box>
+        ))}
+      </List>
+
+      {/* User Section - Icons Only */}
+      <Divider />
+      <Box sx={{ p: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 1 }}>
+        <NotificationBell />
+        <Tooltip title="Account settings" placement="right">
+          <IconButton onClick={handleUserMenuOpen} sx={{ p: 0.5 }}>
+            <Avatar
+              src={userProfile?.avatar_url || undefined}
+              sx={{
+                bgcolor: "primary.main",
+                width: 32,
+                height: 32,
+                fontSize: "0.8rem",
+              }}
+            >
+              {userProfile?.name?.charAt(0).toUpperCase() || "U"}
+            </Avatar>
+          </IconButton>
+        </Tooltip>
+      </Box>
+    </Box>
+  );
 
   const drawer = (
     <Box sx={{ height: "100%", display: "flex", flexDirection: "column" }}>
@@ -290,71 +625,234 @@ export default function MainLayout({
       <Divider />
 
       {/* Navigation Menu */}
-      <List sx={{ px: 1.5, py: 1, flexGrow: 1 }}>
-        {filteredNavItems.map((item) => {
-          const isActive =
-            pathname === item.path || pathname.startsWith(`${item.path}/`);
+      <List sx={{ px: 1.5, py: 1, flex: 1, overflowY: "auto" }}>
+        {/* Dashboard - Always visible, not in a category */}
+        <ListItem disablePadding sx={{ mb: 1.5 }}>
+          <ListItemButton
+            onClick={() =>
+              handleNavigation(
+                activeTab === "site"
+                  ? siteDashboard.path
+                  : companyDashboard.path
+              )
+            }
+            sx={{
+              borderRadius: 2,
+              py: 1.25,
+              bgcolor:
+                (activeTab === "site" && pathname === siteDashboard.path) ||
+                (activeTab === "company" && pathname === companyDashboard.path)
+                  ? "primary.main"
+                  : "transparent",
+              color:
+                (activeTab === "site" && pathname === siteDashboard.path) ||
+                (activeTab === "company" && pathname === companyDashboard.path)
+                  ? "white"
+                  : "text.primary",
+              "&:hover": {
+                bgcolor:
+                  (activeTab === "site" && pathname === siteDashboard.path) ||
+                  (activeTab === "company" &&
+                    pathname === companyDashboard.path)
+                    ? "primary.dark"
+                    : "action.hover",
+              },
+            }}
+          >
+            <ListItemIcon
+              sx={{
+                color:
+                  (activeTab === "site" && pathname === siteDashboard.path) ||
+                  (activeTab === "company" &&
+                    pathname === companyDashboard.path)
+                    ? "white"
+                    : "text.secondary",
+                minWidth: 40,
+              }}
+            >
+              <DashboardIcon />
+            </ListItemIcon>
+            <ListItemText
+              primary="Dashboard"
+              primaryTypographyProps={{
+                fontWeight:
+                  (activeTab === "site" && pathname === siteDashboard.path) ||
+                  (activeTab === "company" &&
+                    pathname === companyDashboard.path)
+                    ? 600
+                    : 500,
+                fontSize: "0.875rem",
+              }}
+            />
+          </ListItemButton>
+        </ListItem>
+
+        {/* Collapsible Categories */}
+        {filteredNavCategories.map((category, categoryIndex) => {
+          const isExpanded = expandedCategories.has(category.label);
 
           return (
-            <ListItem key={item.text} disablePadding sx={{ mb: 0.5 }}>
+            <Box
+              key={category.label}
+              sx={{
+                mb: categoryIndex < filteredNavCategories.length - 1 ? 1.5 : 0,
+              }}
+            >
+              {/* Category Header - Clickable */}
               <ListItemButton
-                onClick={() => handleNavigation(item.path)}
+                onClick={() => toggleCategory(category.label)}
                 sx={{
                   borderRadius: 2,
-                  py: 1,
-                  bgcolor: isActive ? "primary.main" : "transparent",
-                  color: isActive ? "white" : "text.primary",
+                  px: 1.5,
+                  py: 0.75,
+                  mb: 0.5,
                   "&:hover": {
-                    bgcolor: isActive ? "primary.dark" : "action.hover",
+                    bgcolor: "action.hover",
                   },
                 }}
               >
-                <ListItemIcon
+                <Box
                   sx={{
-                    color: isActive ? "white" : "text.secondary",
-                    minWidth: 40,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 0.75,
+                    flexGrow: 1,
                   }}
                 >
-                  {item.icon}
-                </ListItemIcon>
-                <ListItemText
-                  primary={item.text}
-                  primaryTypographyProps={{
-                    fontWeight: isActive ? 600 : 400,
-                    fontSize: "0.875rem",
-                  }}
-                />
+                  <span style={{ fontSize: "1rem" }}>{category.emoji}</span>
+                  <Typography
+                    variant="caption"
+                    sx={{
+                      fontWeight: 700,
+                      fontSize: "0.7rem",
+                      color: "text.secondary",
+                      textTransform: "uppercase",
+                      letterSpacing: 0.5,
+                    }}
+                  >
+                    {category.label}
+                  </Typography>
+                </Box>
+                {isExpanded ? (
+                  <ExpandLessIcon
+                    sx={{ fontSize: 18, color: "text.secondary" }}
+                  />
+                ) : (
+                  <ExpandMoreIcon
+                    sx={{ fontSize: 18, color: "text.secondary" }}
+                  />
+                )}
               </ListItemButton>
-            </ListItem>
+
+              {/* Category Items - Only shown when expanded */}
+              {isExpanded &&
+                category.items.map((item) => {
+                  const isActive =
+                    pathname === item.path ||
+                    pathname.startsWith(`${item.path}/`);
+
+                  return (
+                    <ListItem key={item.text} disablePadding sx={{ mb: 0.5 }}>
+                      <ListItemButton
+                        onClick={() => handleNavigation(item.path)}
+                        sx={{
+                          borderRadius: 2,
+                          py: 1,
+                          pl: 3.5,
+                          bgcolor: isActive ? "primary.main" : "transparent",
+                          color: isActive ? "white" : "text.primary",
+                          "&:hover": {
+                            bgcolor: isActive ? "primary.dark" : "action.hover",
+                          },
+                        }}
+                      >
+                        <ListItemIcon
+                          sx={{
+                            color: isActive ? "white" : "text.secondary",
+                            minWidth: 40,
+                          }}
+                        >
+                          {item.icon}
+                        </ListItemIcon>
+                        <ListItemText
+                          primary={item.text}
+                          primaryTypographyProps={{
+                            fontWeight: isActive ? 600 : 400,
+                            fontSize: "0.875rem",
+                          }}
+                        />
+                      </ListItemButton>
+                    </ListItem>
+                  );
+                })}
+            </Box>
           );
         })}
       </List>
 
-      {/* Collapse Button - Desktop only (use CSS display to avoid hydration mismatch) */}
-      <Box sx={{ display: { xs: 'none', md: 'block' } }}>
-        <Divider />
-        <Box sx={{ p: 1 }}>
-          <ListItemButton
-            onClick={() => setSidebarCollapsed(true)}
-            sx={{
-              borderRadius: 2,
-              justifyContent: "center",
-            }}
-          >
-            <ChevronLeftIcon />
-            <ListItemText
-              primary="Collapse"
-              primaryTypographyProps={{ fontSize: "0.875rem" }}
-              sx={{ ml: 1 }}
-            />
-          </ListItemButton>
+      {/* User Section - Fixed at bottom */}
+      <Divider />
+      <Box sx={{ p: 1.5 }}>
+        <Box
+          sx={{
+            display: "flex",
+            alignItems: "center",
+            gap: 1,
+          }}
+        >
+          <NotificationBell />
+          <Tooltip title="Account settings">
+            <IconButton
+              onClick={handleUserMenuOpen}
+              sx={{ p: 0.5 }}
+            >
+              <Avatar
+                src={userProfile?.avatar_url || undefined}
+                sx={{
+                  bgcolor: "primary.main",
+                  width: 36,
+                  height: 36,
+                  fontSize: "0.85rem",
+                }}
+              >
+                {userProfile?.name?.charAt(0).toUpperCase() || "U"}
+              </Avatar>
+            </IconButton>
+          </Tooltip>
+          <Box sx={{ flex: 1, minWidth: 0 }}>
+            <Typography
+              variant="body2"
+              fontWeight={500}
+              noWrap
+              sx={{ fontSize: "0.85rem" }}
+            >
+              {userProfile?.display_name || userProfile?.name || "User"}
+            </Typography>
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              noWrap
+              sx={{ fontSize: "0.7rem" }}
+            >
+              {userProfile?.role?.charAt(0).toUpperCase() +
+                (userProfile?.role?.slice(1) || "")}
+            </Typography>
+          </Box>
+          <ThemeToggle />
         </Box>
       </Box>
     </Box>
   );
 
   return (
-    <Box sx={{ display: "flex", width: '100%', maxWidth: '100vw', overflowX: 'hidden' }}>
+    <Box
+      sx={{
+        display: "flex",
+        width: "100%",
+        maxWidth: "100vw",
+        overflowX: "hidden",
+      }}
+    >
       {/* Top App Bar */}
       <AppBar
         position="fixed"
@@ -371,18 +869,21 @@ export default function MainLayout({
         }}
       >
         <Toolbar sx={{ px: { xs: 1, sm: 2 }, minHeight: { xs: 56, sm: 64 } }}>
-          {/* Menu Toggle */}
+          {/* Menu Toggle - Mobile only */}
           <IconButton
             color="inherit"
             edge="start"
             onClick={handleDrawerToggle}
-            sx={{ mr: { xs: 0.5, sm: 2 } }}
+            sx={{
+              mr: { xs: 0.5, sm: 2 },
+              display: { xs: "flex", md: "none" },
+            }}
           >
             <MenuIcon />
           </IconButton>
 
           {/* Site Selector - Only visible on Site tab */}
-          <Box sx={{ flexGrow: 1, display: "flex", alignItems: "center" }}>
+          <Box sx={{ display: "flex", alignItems: "center" }}>
             {activeTab === "site" && (
               <>
                 <SiteSelector />
@@ -390,30 +891,185 @@ export default function MainLayout({
               </>
             )}
             {activeTab === "company" && (
-              <Typography variant="h6" fontWeight={500} color="text.secondary">
-                Company Management
+              <Typography
+                variant="h6"
+                fontWeight={500}
+                color="text.secondary"
+                sx={{ display: { xs: "none", sm: "block" } }}
+              >
+                Company
               </Typography>
             )}
           </Box>
 
-          {/* Notification Bell */}
-          <NotificationBell />
+          {/* Spacer */}
+          <Box sx={{ flexGrow: 1 }} />
 
-          {/* User Avatar & Menu */}
-          <Tooltip title="Account settings">
-            <IconButton onClick={handleUserMenuOpen} sx={{ ml: { xs: 0.5, sm: 1 } }}>
-              <Avatar
-                src={userProfile?.avatar_url || undefined}
+          {/* Global Date Range Controls */}
+          <Box
+            sx={{
+              display: "flex",
+              alignItems: "center",
+              gap: { xs: 0.5, sm: 1 },
+              mr: { xs: 0.5, sm: 1 },
+            }}
+          >
+            {/* Date Range Picker or All Time display */}
+            {isAllTime ? (
+              <Chip
+                label="All Time"
+                size="small"
+                variant="outlined"
+                onClick={() => {
+                  // Open picker with default dates
+                  const today = new Date();
+                  const weekAgo = new Date();
+                  weekAgo.setDate(today.getDate() - 7);
+                  setDateRange(weekAgo, today);
+                }}
                 sx={{
-                  bgcolor: "primary.main",
-                  width: { xs: 32, sm: 38 },
-                  height: { xs: 32, sm: 38 },
-                  fontSize: { xs: "0.8rem", sm: "0.9rem" },
+                  cursor: "pointer",
+                  fontWeight: 600,
+                  minWidth: { xs: 70, sm: 100 },
+                }}
+              />
+            ) : (
+              <DateRangePicker
+                startDate={startDate!}
+                endDate={endDate!}
+                onChange={(start, end) => setDateRange(start, end)}
+              />
+            )}
+
+            {/* Quick Filter Chips */}
+            <Chip
+              label={isMobile ? "W" : "Week"}
+              size="small"
+              variant={dateRangeLabel === "This Week" ? "filled" : "outlined"}
+              color={dateRangeLabel === "This Week" ? "primary" : "default"}
+              onClick={setLastWeek}
+              sx={{
+                cursor: "pointer",
+                minWidth: { xs: 28, sm: 56 },
+                fontWeight: dateRangeLabel === "This Week" ? 600 : 400,
+              }}
+            />
+            <Chip
+              label={isMobile ? "M" : "Month"}
+              size="small"
+              variant={dateRangeLabel === "This Month" ? "filled" : "outlined"}
+              color={dateRangeLabel === "This Month" ? "primary" : "default"}
+              onClick={setLastMonth}
+              sx={{
+                cursor: "pointer",
+                minWidth: { xs: 28, sm: 64 },
+                fontWeight: dateRangeLabel === "This Month" ? 600 : 400,
+              }}
+            />
+            {!isAllTime && (
+              <Chip
+                label={isMobile ? "All" : "All Time"}
+                size="small"
+                variant="outlined"
+                onClick={setAllTime}
+                sx={{
+                  cursor: "pointer",
+                  minWidth: { xs: 32, sm: 72 },
+                  display: { xs: "none", sm: "flex" },
+                }}
+              />
+            )}
+          </Box>
+
+          {/* Sync Status Indicator */}
+          <Tooltip
+            title={
+              <Box>
+                <Typography variant="caption" fontWeight={600}>
+                  {syncStatus.status === "syncing" && "Syncing data..."}
+                  {syncStatus.status === "success" &&
+                    "Data synced successfully"}
+                  {syncStatus.status === "error" &&
+                    "Sync error - click to retry"}
+                  {syncStatus.status === "idle" && "Click to refresh data"}
+                </Typography>
+                {syncStatus.lastSyncTimeFormatted && (
+                  <Typography
+                    variant="caption"
+                    display="block"
+                    sx={{ mt: 0.5, opacity: 0.8 }}
+                  >
+                    Last updated: {syncStatus.lastSyncTimeFormatted}
+                  </Typography>
+                )}
+              </Box>
+            }
+          >
+            <Box
+              sx={{
+                display: "flex",
+                alignItems: "center",
+                gap: 0.5,
+                px: { xs: 0.5, sm: 1.5 },
+                py: 0.5,
+                borderRadius: 2,
+                bgcolor: "action.hover",
+                cursor: "pointer",
+                transition: "all 0.2s",
+                "&:hover": {
+                  bgcolor: "action.selected",
+                },
+              }}
+              onClick={() => !syncStatus.isRefreshing && syncStatus.refresh()}
+            >
+              <IconButton
+                size="small"
+                disabled={syncStatus.isRefreshing}
+                sx={{
+                  p: 0.5,
+                  color:
+                    syncStatus.status === "syncing"
+                      ? "primary.main"
+                      : syncStatus.status === "success"
+                      ? "success.main"
+                      : syncStatus.status === "error"
+                      ? "error.main"
+                      : "text.secondary",
+                  animation: syncStatus.isRefreshing
+                    ? "spin 1s linear infinite"
+                    : "none",
+                  "@keyframes spin": {
+                    "0%": { transform: "rotate(0deg)" },
+                    "100%": { transform: "rotate(360deg)" },
+                  },
                 }}
               >
-                {userProfile?.name?.charAt(0).toUpperCase() || "U"}
-              </Avatar>
-            </IconButton>
+                {syncStatus.status === "syncing" && (
+                  <SyncIcon fontSize="small" />
+                )}
+                {syncStatus.status === "success" && (
+                  <CheckCircleIcon fontSize="small" />
+                )}
+                {syncStatus.status === "error" && (
+                  <ErrorIcon fontSize="small" />
+                )}
+                {syncStatus.status === "idle" && (
+                  <RefreshIcon fontSize="small" />
+                )}
+              </IconButton>
+              {!isMobile && syncStatus.timeSinceLastSync && (
+                <Typography
+                  variant="caption"
+                  sx={{
+                    fontSize: "0.7rem",
+                    color: "text.secondary",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {syncStatus.timeSinceLastSync}
+                </Typography>
+              )}
+            </Box>
           </Tooltip>
 
           <Menu
@@ -426,7 +1082,15 @@ export default function MainLayout({
               sx: { minWidth: 220, mt: 1 },
             }}
           >
-            <Box sx={{ px: 2, py: 1.5, display: "flex", alignItems: "center", gap: 1.5 }}>
+            <Box
+              sx={{
+                px: 2,
+                py: 1.5,
+                display: "flex",
+                alignItems: "center",
+                gap: 1.5,
+              }}
+            >
               <Avatar
                 src={userProfile?.avatar_url || undefined}
                 sx={{
@@ -441,7 +1105,11 @@ export default function MainLayout({
                 <Typography variant="subtitle1" fontWeight={600}>
                   {userProfile?.display_name || userProfile?.name}
                 </Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ fontSize: "0.75rem" }}>
+                <Typography
+                  variant="body2"
+                  color="text.secondary"
+                  sx={{ fontSize: "0.75rem" }}
+                >
                   {userProfile?.email}
                 </Typography>
                 <Typography
@@ -486,6 +1154,15 @@ export default function MainLayout({
               <ListItemText>
                 {mode === "dark" ? "Light Mode" : "Dark Mode"}
               </ListItemText>
+              <Switch
+                edge="end"
+                checked={mode === "dark"}
+                size="small"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleTheme();
+                }}
+              />
             </MenuItem>
             <Divider />
             <MenuItem onClick={handleSignOut}>
@@ -508,8 +1185,47 @@ export default function MainLayout({
             easing: theme.transitions.easing.sharp,
             duration: theme.transitions.duration.leavingScreen,
           }),
+          position: "relative",
         }}
       >
+        {/* Toggle Button - Desktop only */}
+        {!isMobile && (
+          <IconButton
+            onClick={handleDrawerToggle}
+            size="small"
+            sx={{
+              display: { xs: "none", md: "flex" },
+              position: "fixed",
+              left: currentDrawerWidth - 12,
+              top: "50%",
+              transform: "translateY(-50%)",
+              zIndex: theme.zIndex.drawer + 2,
+              bgcolor: "background.paper",
+              color: "text.secondary",
+              width: 24,
+              height: 24,
+              borderRadius: "50%",
+              border: "1px solid",
+              borderColor: "divider",
+              boxShadow: 1,
+              transition: theme.transitions.create(["left", "background-color"], {
+                easing: theme.transitions.easing.sharp,
+                duration: theme.transitions.duration.leavingScreen,
+              }),
+              "&:hover": {
+                bgcolor: "action.hover",
+                boxShadow: 2,
+              },
+            }}
+          >
+            {sidebarState === "closed" ? (
+              <ChevronRightIcon sx={{ fontSize: 16 }} />
+            ) : (
+              <ChevronLeftIcon sx={{ fontSize: 16 }} />
+            )}
+          </IconButton>
+        )}
+
         {/* Mobile Drawer */}
         <Drawer
           variant="temporary"
@@ -544,7 +1260,7 @@ export default function MainLayout({
           }}
           open
         >
-          {!sidebarCollapsed && drawer}
+          {sidebarState !== "closed" && (isIconBarMode ? iconBarDrawer : drawer)}
         </Drawer>
       </Box>
 
@@ -554,11 +1270,11 @@ export default function MainLayout({
         sx={{
           flexGrow: 1,
           p: { xs: 1.5, sm: 2, md: 3 },
-          width: { xs: '100%', md: `calc(100% - ${currentDrawerWidth}px)` },
-          maxWidth: '100%',
+          width: { xs: "100%", md: `calc(100% - ${currentDrawerWidth}px)` },
+          maxWidth: "100%",
           minHeight: "100vh",
           bgcolor: "background.default",
-          overflowX: 'hidden',
+          overflowX: "hidden",
           transition: theme.transitions.create(["width", "margin"], {
             easing: theme.transitions.easing.sharp,
             duration: theme.transitions.duration.leavingScreen,

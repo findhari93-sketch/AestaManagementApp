@@ -338,8 +338,6 @@ export default function TeamsPage() {
       <PageHeader
         title="Teams / Mesthri Groups"
         subtitle="Manage Mesthri teams and their associated contract laborers"
-        onRefresh={fetchTeams}
-        isLoading={loading}
         actions={
           <Button
             variant="contained"

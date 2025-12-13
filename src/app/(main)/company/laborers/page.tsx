@@ -71,6 +71,7 @@ export default function LaborersPage() {
     role_id: "",
     employment_type: "daily_wage" as "daily_wage" | "contract" | "specialist",
     laborer_type: "daily_market" as LaborerType,
+    language: "Tamil" as "Hindi" | "Tamil",
     daily_rate: 0,
     team_id: "",
     associated_team_id: "",
@@ -131,6 +132,7 @@ export default function LaborersPage() {
         role_id: laborer.role_id,
         employment_type: laborer.employment_type,
         laborer_type: (laborer.laborer_type as LaborerType) || "daily_market",
+        language: (laborer.language as "Hindi" | "Tamil") || "Tamil",
         daily_rate: laborer.daily_rate,
         team_id: laborer.team_id || "",
         associated_team_id: laborer.associated_team_id || "",
@@ -146,6 +148,7 @@ export default function LaborersPage() {
         role_id: "",
         employment_type: "daily_wage",
         laborer_type: "daily_market",
+        language: "Tamil",
         daily_rate: 0,
         team_id: "",
         associated_team_id: "",
@@ -255,6 +258,22 @@ export default function LaborersPage() {
         },
       },
       {
+        accessorKey: "language",
+        header: isMobile ? "Lang" : "Language",
+        size: isMobile ? 45 : 90,
+        Cell: ({ cell }) => {
+          const lang = cell.getValue<string>() || "Tamil";
+          return (
+            <Chip
+              label={isMobile ? (lang === "Hindi" ? "H" : "T") : lang}
+              size="small"
+              color={lang === "Hindi" ? "info" : "success"}
+              variant="outlined"
+            />
+          );
+        },
+      },
+      {
         accessorKey: "employment_type",
         header: isMobile ? "Emp" : "Employment",
         size: isMobile ? 70 : 120,
@@ -344,8 +363,6 @@ export default function LaborersPage() {
       <PageHeader
         title="Laborers"
         subtitle="Manage all company laborers"
-        onRefresh={fetchLaborers}
-        isLoading={loading}
         actions={
           !isMobile && (
             <Button
@@ -408,7 +425,7 @@ export default function LaborersPage() {
                   required
                 />
               </Grid>
-              <Grid size={{ xs: 12, sm: 6 }}>
+              <Grid size={{ xs: 6, sm: 3 }}>
                 <TextField
                   fullWidth
                   label="Phone"
@@ -417,6 +434,24 @@ export default function LaborersPage() {
                     setFormData({ ...formData, phone: e.target.value })
                   }
                 />
+              </Grid>
+              <Grid size={{ xs: 6, sm: 3 }}>
+                <FormControl fullWidth>
+                  <InputLabel>Language</InputLabel>
+                  <Select
+                    value={formData.language}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        language: e.target.value as "Hindi" | "Tamil",
+                      })
+                    }
+                    label="Language"
+                  >
+                    <MenuItem value="Tamil">Tamil</MenuItem>
+                    <MenuItem value="Hindi">Hindi</MenuItem>
+                  </Select>
+                </FormControl>
               </Grid>
             </Grid>
             <Grid container spacing={2}>

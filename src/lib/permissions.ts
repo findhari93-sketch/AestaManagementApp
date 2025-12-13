@@ -40,3 +40,11 @@ export const canManageSites = (role: UserRole | string | undefined | null): bool
 export const canManageConstructionPhases = (role: UserRole | string | undefined | null): boolean => {
   return role === "admin";
 };
+
+/**
+ * Check if user can perform mass upload operations
+ * Only Admin and Office staff can bulk upload data
+ */
+export const canPerformMassUpload = (role: UserRole | string | undefined | null): boolean => {
+  return role === "admin" || role === "office";
+};

@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase/client";
+import { queryKeys } from "@/lib/cache/keys";
 import dayjs from "dayjs";
 
 interface CompanyStats {
@@ -29,35 +30,44 @@ async function fetchCompanyStats(): Promise<CompanyStats> {
   const monthStart = dayjs().startOf("month").format("YYYY-MM-DD");
 
   // Run all queries in parallel
-  const [sitesResult, laborersResult, teamsResult, pendingResult, monthlyResult] =
-    await Promise.all([
-      // Sites
-      supabase.from("sites").select("id, status"),
+  const [
+    sitesResult,
+    laborersResult,
+    teamsResult,
+    pendingResult,
+    monthlyResult,
+  ] = await Promise.all([
+    // Sites
+    supabase.from("sites").select("id, status"),
 
-      // Laborers
-      supabase.from("laborers").select("id, status"),
+    // Laborers
+    supabase.from("laborers").select("id, status"),
 
-      // Teams count
-      supabase.from("teams").select("id", { count: "exact", head: true }),
+    // Teams count
+    supabase.from("teams").select("id", { count: "exact", head: true }),
 
-      // Pending payments
-      supabase
-        .from("salary_periods")
-        .select("balance_due")
-        .in("status", ["calculated", "partial"]),
+    // Pending payments
+    supabase
+      .from("salary_periods")
+      .select("balance_due")
+      .in("status", ["calculated", "partial"]),
 
-      // Monthly expenses
-      supabase
-        .from("daily_attendance")
-        .select("daily_earnings")
-        .gte("date", monthStart)
-        .lte("date", today),
-    ]);
+    // Monthly expenses
+    supabase
+      .from("daily_attendance")
+      .select("daily_earnings")
+      .gte("date", monthStart)
+      .lte("date", today),
+  ]);
 
   const sites = sitesResult.data as { id: string; status: string }[] | null;
-  const laborers = laborersResult.data as { id: string; status: string }[] | null;
+  const laborers = laborersResult.data as
+    | { id: string; status: string }[]
+    | null;
   const pendingList = pendingResult.data as { balance_due: number }[] | null;
-  const monthlyExpList = monthlyResult.data as { daily_earnings: number }[] | null;
+  const monthlyExpList = monthlyResult.data as
+    | { daily_earnings: number }[]
+    | null;
 
   return {
     totalSites: sites?.length || 0,
@@ -87,7 +97,9 @@ async function fetchSiteSummaries(): Promise<SiteSummary[]> {
 
   if (sitesError) throw sitesError;
 
-  const typedSites = sites as { id: string; name: string; status: string }[] | null;
+  const typedSites = sites as
+    | { id: string; name: string; status: string }[]
+    | null;
   if (!typedSites || typedSites.length === 0) return [];
 
   const siteIds = typedSites.map((s) => s.id);
@@ -130,7 +142,8 @@ async function fetchSiteSummaries(): Promise<SiteSummary[]> {
   });
 
   weekData?.forEach((row) => {
-    weekBySite[row.site_id] = (weekBySite[row.site_id] || 0) + (row.daily_earnings || 0);
+    weekBySite[row.site_id] =
+      (weekBySite[row.site_id] || 0) + (row.daily_earnings || 0);
   });
 
   // Build summaries
@@ -147,14 +160,14 @@ async function fetchSiteSummaries(): Promise<SiteSummary[]> {
 // React Query hooks
 export function useCompanyStats() {
   return useQuery({
-    queryKey: ["companyStats"],
+    queryKey: queryKeys.stats.company(),
     queryFn: fetchCompanyStats,
   });
 }
 
 export function useSiteSummaries() {
   return useQuery({
-    queryKey: ["siteSummaries"],
+    queryKey: queryKeys.dashboard.company(),
     queryFn: fetchSiteSummaries,
   });
 }

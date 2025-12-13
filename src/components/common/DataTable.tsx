@@ -53,7 +53,7 @@ export const tableDefaults = {
     showColumnFilters: false,
     showGlobalFilter: true,
     pagination: {
-      pageSize: 20,
+      pageSize: 30,
       pageIndex: 0,
     },
     columnPinning: {
@@ -63,7 +63,7 @@ export const tableDefaults = {
 
   // Pagination options
   muiPaginationProps: {
-    rowsPerPageOptions: [10, 20, 50, 100],
+    rowsPerPageOptions: [10, 30, 50, 100],
     showFirstButton: true,
     showLastButton: true,
   },
@@ -195,7 +195,10 @@ export default function DataTable<TData extends MRT_RowData>({
     () => ({
       sx: {
         fontWeight: 700,
-        backgroundColor: theme.palette.background.default,
+        backgroundColor: theme.palette.mode === 'dark'
+          ? theme.palette.background.paper  // Use paper color for better contrast in dark mode
+          : theme.palette.background.default,
+        color: theme.palette.text.primary,
         fontSize: useCompact ? "0.65rem" : isTablet ? "0.75rem" : "0.8rem",
         py: useCompact ? 0.5 : isTablet ? 0.75 : 1,
         px: useCompact ? 0.75 : isTablet ? 1 : 1.5,
@@ -211,10 +214,13 @@ export default function DataTable<TData extends MRT_RowData>({
           overflow: 'hidden',
           textOverflow: 'ellipsis',
         },
+        '& .MuiSvgIcon-root': {
+          color: theme.palette.text.secondary, // Fix sort/filter icons in header
+        },
         ...((otherProps.muiTableHeadCellProps as any)?.sx || {}),
       },
     }),
-    [theme.palette.background.default, useCompact, isTablet, otherProps.muiTableHeadCellProps]
+    [theme.palette.mode, theme.palette.background.paper, theme.palette.background.default, theme.palette.text.primary, theme.palette.text.secondary, useCompact, isTablet, otherProps.muiTableHeadCellProps]
   );
 
   // Table body cell styles - ultra-compact on mobile
@@ -257,6 +263,10 @@ export default function DataTable<TData extends MRT_RowData>({
         },
         '& .MuiIconButton-root': {
           padding: useCompact ? 0.5 : 1,
+          color: theme.palette.text.primary, // Fix dark mode icon color
+        },
+        '& .MuiSvgIcon-root': {
+          color: theme.palette.text.primary, // Fix fullscreen and other icons
         },
         '& .MuiInputBase-root': {
           fontSize: useCompact ? '0.75rem' : '0.875rem',
@@ -265,7 +275,7 @@ export default function DataTable<TData extends MRT_RowData>({
         ...((otherProps.muiTopToolbarProps as any)?.sx || {}),
       },
     }),
-    [theme.palette.background.paper, useCompact, otherProps.muiTopToolbarProps]
+    [theme.palette.background.paper, theme.palette.text.primary, useCompact, otherProps.muiTopToolbarProps]
   );
 
   // Bottom toolbar styles - compact on mobile

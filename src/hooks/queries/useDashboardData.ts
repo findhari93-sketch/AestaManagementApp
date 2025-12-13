@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase/client";
+import { queryKeys } from "@/lib/cache/keys";
 import dayjs from "dayjs";
 
 interface DashboardStats {
@@ -85,7 +86,8 @@ async function fetchDashboardStats(siteId: string): Promise<DashboardStats> {
   return {
     todayLaborers: todayAttendance?.length || 0,
     todayCost:
-      todayAttendance?.reduce((sum, a) => sum + (a.daily_earnings || 0), 0) || 0,
+      todayAttendance?.reduce((sum, a) => sum + (a.daily_earnings || 0), 0) ||
+      0,
     weekTotal:
       weekAttendance?.reduce((sum, a) => sum + (a.daily_earnings || 0), 0) || 0,
     pendingSalaries: pendingSalaryData?.length || 0,
@@ -109,7 +111,7 @@ async function fetchRecentAttendance(
     .limit(5);
 
   if (error) throw error;
-  return (data || []).map(d => ({
+  return (data || []).map((d) => ({
     date: d.date || "",
     laborer_name: d.laborer_name || "",
     work_days: d.work_days || 0,
@@ -129,7 +131,7 @@ async function fetchPendingSalaries(siteId: string): Promise<PendingSalary[]> {
     .limit(5);
 
   if (error) throw error;
-  return (data || []).map(d => ({
+  return (data || []).map((d) => ({
     laborer_name: d.laborer_name || "",
     week_ending: d.week_ending || "",
     balance_due: d.balance_due || 0,
@@ -232,7 +234,7 @@ async function fetchExpenseBreakdown(
 // React Query hooks
 export function useDashboardStats(siteId: string | undefined) {
   return useQuery({
-    queryKey: ["dashboardStats", siteId],
+    queryKey: [...queryKeys.dashboard.site(siteId || ""), "stats"],
     queryFn: () => fetchDashboardStats(siteId!),
     enabled: !!siteId,
   });
@@ -240,7 +242,7 @@ export function useDashboardStats(siteId: string | undefined) {
 
 export function useRecentAttendance(siteId: string | undefined) {
   return useQuery({
-    queryKey: ["recentAttendance", siteId],
+    queryKey: [...queryKeys.dashboard.site(siteId || ""), "recent-attendance"],
     queryFn: () => fetchRecentAttendance(siteId!),
     enabled: !!siteId,
   });
@@ -248,7 +250,7 @@ export function useRecentAttendance(siteId: string | undefined) {
 
 export function usePendingSalaries(siteId: string | undefined) {
   return useQuery({
-    queryKey: ["pendingSalaries", siteId],
+    queryKey: [...queryKeys.dashboard.site(siteId || ""), "pending-salaries"],
     queryFn: () => fetchPendingSalaries(siteId!),
     enabled: !!siteId,
   });
@@ -256,7 +258,7 @@ export function usePendingSalaries(siteId: string | undefined) {
 
 export function useWeeklyTrendData(siteId: string | undefined) {
   return useQuery({
-    queryKey: ["weeklyTrendData", siteId],
+    queryKey: [...queryKeys.dashboard.site(siteId || ""), "weekly-trend"],
     queryFn: () => fetchWeeklyTrendData(siteId!),
     enabled: !!siteId,
   });
@@ -264,7 +266,7 @@ export function useWeeklyTrendData(siteId: string | undefined) {
 
 export function useExpenseBreakdown(siteId: string | undefined) {
   return useQuery({
-    queryKey: ["expenseBreakdown", siteId],
+    queryKey: [...queryKeys.dashboard.site(siteId || ""), "expense-breakdown"],
     queryFn: () => fetchExpenseBreakdown(siteId!),
     enabled: !!siteId,
   });

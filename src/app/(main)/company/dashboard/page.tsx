@@ -116,8 +116,6 @@ export default function CompanyDashboardPage() {
       <PageHeader
         title="Company Dashboard"
         subtitle={`Overview of all sites and resources • Welcome, ${userProfile?.name}`}
-        onRefresh={handleRefresh}
-        isLoading={loading}
         showBack={false}
       />
 

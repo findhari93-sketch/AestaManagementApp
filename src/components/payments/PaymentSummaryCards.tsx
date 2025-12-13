@@ -216,16 +216,17 @@ export default function PaymentSummaryCards({
                         primary={sc.subcontractTitle}
                         secondary={
                           <Box
+                            component="span"
                             sx={{
                               display: "flex",
                               gap: 2,
                               mt: 0.5,
                             }}
                           >
-                            <Typography variant="caption" color="success.main">
+                            <Typography component="span" variant="caption" color="success.main">
                               Paid: {formatCurrency(sc.totalPaid)}
                             </Typography>
-                            <Typography variant="caption" color="warning.main">
+                            <Typography component="span" variant="caption" color="warning.main">
                               Due: {formatCurrency(sc.totalDue)}
                             </Typography>
                           </Box>

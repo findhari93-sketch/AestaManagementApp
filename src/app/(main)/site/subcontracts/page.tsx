@@ -707,8 +707,6 @@ export default function SiteSubcontractsPage() {
       <PageHeader
         title="Sub Contract Management"
         subtitle={`Manage subcontracts for ${selectedSite.name}`}
-        onRefresh={fetchSubcontracts}
-        isLoading={loading}
         actions={
           <Button
             variant="contained"

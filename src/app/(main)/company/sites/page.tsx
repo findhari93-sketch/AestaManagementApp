@@ -1316,8 +1316,6 @@ export default function CompanySitesPage() {
       <PageHeader
         title="Sites Management"
         subtitle="Manage construction sites and client contracts"
-        onRefresh={fetchSites}
-        isLoading={loading}
         actions={
           <Button
             variant="contained"

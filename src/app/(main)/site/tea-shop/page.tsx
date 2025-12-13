@@ -40,6 +40,7 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { useSite } from "@/contexts/SiteContext";
 import { useAuth } from "@/contexts/AuthContext";
+import { useDateRange } from "@/contexts/DateRangeContext";
 import PageHeader from "@/components/layout/PageHeader";
 import { hasEditPermission } from "@/lib/permissions";
 import TeaShopDrawer from "@/components/tea-shop/TeaShopDrawer";
@@ -67,7 +68,10 @@ function TabPanel(props: TabPanelProps) {
 export default function TeaShopPage() {
   const { selectedSite } = useSite();
   const { userProfile } = useAuth();
+  const { formatForApi, isAllTime } = useDateRange();
   const supabase = createClient();
+
+  const { dateFrom, dateTo } = formatForApi();
 
   const [loading, setLoading] = useState(false);
   const [tabValue, setTabValue] = useState(0);
@@ -85,17 +89,15 @@ export default function TeaShopPage() {
   const [editingEntry, setEditingEntry] = useState<TeaShopEntry | null>(null);
   const [editingSettlement, setEditingSettlement] = useState<TeaShopSettlement | null>(null);
 
-  // Date filters
-  const [dateFrom, setDateFrom] = useState(dayjs().subtract(7, "days").format("YYYY-MM-DD"));
-  const [dateTo, setDateTo] = useState(dayjs().format("YYYY-MM-DD"));
-
   const canEdit = hasEditPermission(userProfile?.role);
 
   // Calculate summary stats
   const stats = useMemo(() => {
-    const filteredEntries = entries.filter(
-      (e) => e.date >= dateFrom && e.date <= dateTo
-    );
+    const filteredEntries = isAllTime
+      ? entries
+      : entries.filter(
+          (e) => dateFrom && dateTo && e.date >= dateFrom && e.date <= dateTo
+        );
 
     const totalEntries = filteredEntries.reduce((sum, e) => sum + (e.total_amount || 0), 0);
     const totalTea = filteredEntries.reduce((sum, e) => sum + (e.tea_total || 0), 0);
@@ -134,7 +136,7 @@ export default function TeaShopPage() {
       thisMonthTotal,
       lastSettlement,
     };
-  }, [entries, settlements, dateFrom, dateTo]);
+  }, [entries, settlements, dateFrom, dateTo, isAllTime]);
 
   const fetchData = async () => {
     if (!selectedSite) return;
@@ -259,9 +261,11 @@ export default function TeaShopPage() {
     setSettlementDialogOpen(true);
   };
 
-  const filteredEntries = entries.filter(
-    (e) => e.date >= dateFrom && e.date <= dateTo
-  );
+  const filteredEntries = isAllTime
+    ? entries
+    : entries.filter(
+        (e) => dateFrom && dateTo && e.date >= dateFrom && e.date <= dateTo
+      );
 
   if (!selectedSite) {
     return (
@@ -278,8 +282,6 @@ export default function TeaShopPage() {
       <PageHeader
         title="Tea Shop"
         subtitle={shop ? shop.shop_name : "No shop configured"}
-        onRefresh={fetchData}
-        isLoading={loading}
         actions={
           <Box sx={{ display: "flex", gap: 0.5 }}>
             {/* Desktop buttons - hidden on mobile via CSS */}
@@ -416,27 +418,8 @@ export default function TeaShopPage() {
 
           {/* Entries Tab */}
           <TabPanel value={tabValue} index={0}>
-            {/* Date Filters */}
-            <Box sx={{ display: "flex", gap: 2, mb: 2, flexWrap: "wrap" }}>
-              <TextField
-                label="From"
-                type="date"
-                value={dateFrom}
-                onChange={(e) => setDateFrom(e.target.value)}
-                slotProps={{ inputLabel: { shrink: true } }}
-                size="small"
-                sx={{ width: 160 }}
-              />
-              <TextField
-                label="To"
-                type="date"
-                value={dateTo}
-                onChange={(e) => setDateTo(e.target.value)}
-                slotProps={{ inputLabel: { shrink: true } }}
-                size="small"
-                sx={{ width: 160 }}
-              />
-              <Box sx={{ flex: 1 }} />
+            {/* Summary Chips */}
+            <Box sx={{ display: "flex", gap: 2, mb: 2, flexWrap: "wrap", justifyContent: "flex-end" }}>
               <Box sx={{ display: { xs: 'none', sm: 'flex' }, gap: 1, alignItems: "center" }}>
                 <Chip
                   icon={<LocalCafe />}

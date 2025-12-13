@@ -10,11 +10,15 @@ import {
   Alert,
   Skeleton,
 } from "@mui/material";
-import { Construction as ConstructionIcon } from "@mui/icons-material";
+import {
+  Construction as ConstructionIcon,
+  People as PeopleIcon,
+} from "@mui/icons-material";
 import { useSite } from "@/contexts/SiteContext";
 import { useAuth } from "@/contexts/AuthContext";
 import PageHeader from "@/components/layout/PageHeader";
 import SiteSectionsManager from "@/components/site-settings/SiteSectionsManager";
+import SitePayersManager from "@/components/site-settings/SitePayersManager";
 import { createClient } from "@/lib/supabase/client";
 
 interface TabPanelProps {
@@ -126,7 +130,11 @@ export default function SiteSettingsPage() {
             iconPosition="start"
             label="Work Sections"
           />
-          {/* Future tabs can be added here */}
+          <Tab
+            icon={<PeopleIcon sx={{ fontSize: 20 }} />}
+            iconPosition="start"
+            label="Payers"
+          />
         </Tabs>
 
         {/* Work Sections Tab */}
@@ -151,6 +159,23 @@ export default function SiteSettingsPage() {
                 onDefaultChange={handleDefaultChange}
               />
             )}
+          </Box>
+        </TabPanel>
+
+        {/* Payers Tab */}
+        <TabPanel value={tabValue} index={1}>
+          <Box sx={{ px: { xs: 1, sm: 2 }, pb: 2 }}>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              Manage payers who contribute to expenses for this site. Enable multiple payers mode to track who paid for each expense.
+            </Typography>
+
+            <SitePayersManager
+              siteId={siteId || ""}
+              onSettingChange={async () => {
+                await fetchSiteSettings();
+                await refreshSites();
+              }}
+            />
           </Box>
         </TabPanel>
       </Paper>

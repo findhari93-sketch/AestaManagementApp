@@ -1,6 +1,12 @@
 "use client";
 
-import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import React, {
+  useState,
+  useEffect,
+  useMemo,
+  useRef,
+  useCallback,
+} from "react";
 import {
   Box,
   Button,
@@ -37,7 +43,10 @@ import {
 } from "@mui/material";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useFullscreen } from "@/hooks/useFullscreen";
-import { getPersistedDrawerState, clearPersistedDrawerState } from "@/hooks/useDrawerPersistence";
+import {
+  getPersistedDrawerState,
+  clearPersistedDrawerState,
+} from "@/hooks/useDrawerPersistence";
 import {
   ExpandMore,
   ExpandLess,
@@ -72,11 +81,11 @@ import type { DailyPaymentRecord } from "@/types/payment.types";
 import { createClient } from "@/lib/supabase/client";
 import { useSite } from "@/contexts/SiteContext";
 import { useAuth } from "@/contexts/AuthContext";
+import { useDateRange } from "@/contexts/DateRangeContext";
 import PageHeader from "@/components/layout/PageHeader";
 import { hasEditPermission } from "@/lib/permissions";
 import type { LaborerType, DailyWorkSummary } from "@/types/database.types";
 import dayjs from "dayjs";
-import DateRangePicker from "@/components/common/DateRangePicker";
 
 interface AttendanceRecord {
   id: string;
@@ -197,8 +206,11 @@ interface DateSummary {
 export default function AttendancePage() {
   const { selectedSite } = useSite();
   const { userProfile } = useAuth();
+  const { formatForApi, isAllTime } = useDateRange();
   const supabase = createClient();
   const isMobile = useIsMobile();
+
+  const { dateFrom, dateTo } = formatForApi();
 
   const [loading, setLoading] = useState(false);
   const [attendanceRecords, setAttendanceRecords] = useState<
@@ -218,12 +230,6 @@ export default function AttendancePage() {
 
   // Fetch version counter to handle race conditions
   const fetchVersionRef = useRef(0);
-
-  // Date filters in title bar - Default to last 30 days for better performance
-  const [dateFrom, setDateFrom] = useState(
-    dayjs().subtract(30, "day").format("YYYY-MM-DD")
-  );
-  const [dateTo, setDateTo] = useState(dayjs().format("YYYY-MM-DD"));
 
   // Mobile UI states
   const [summaryExpanded, setSummaryExpanded] = useState(false);
@@ -293,7 +299,9 @@ export default function AttendancePage() {
 
   // Holiday management state
   const [holidayDialogOpen, setHolidayDialogOpen] = useState(false);
-  const [holidayDialogMode, setHolidayDialogMode] = useState<"mark" | "revoke" | "list">("mark");
+  const [holidayDialogMode, setHolidayDialogMode] = useState<
+    "mark" | "revoke" | "list"
+  >("mark");
   const [todayHoliday, setTodayHoliday] = useState<{
     id: string;
     site_id: string;
@@ -303,15 +311,17 @@ export default function AttendancePage() {
     created_at: string;
     created_by: string | null;
   } | null>(null);
-  const [recentHolidays, setRecentHolidays] = useState<Array<{
-    id: string;
-    site_id: string;
-    date: string;
-    reason: string | null;
-    is_paid_holiday: boolean | null;
-    created_at: string;
-    created_by: string | null;
-  }>>([]);
+  const [recentHolidays, setRecentHolidays] = useState<
+    Array<{
+      id: string;
+      site_id: string;
+      date: string;
+      reason: string | null;
+      is_paid_holiday: boolean | null;
+      created_at: string;
+      created_by: string | null;
+    }>
+  >([]);
 
   // SpeedDial controlled state (click-only, not hover)
   const [speedDialOpen, setSpeedDialOpen] = useState(false);
@@ -320,11 +330,14 @@ export default function AttendancePage() {
   const [viewSummaryDate, setViewSummaryDate] = useState<string | null>(null);
 
   // Restoration message state
-  const [restorationMessage, setRestorationMessage] = useState<string | null>(null);
+  const [restorationMessage, setRestorationMessage] = useState<string | null>(
+    null
+  );
 
   // Market laborer edit dialog state
   const [marketLaborerEditOpen, setMarketLaborerEditOpen] = useState(false);
-  const [editingMarketLaborer, setEditingMarketLaborer] = useState<MarketLaborerRecord | null>(null);
+  const [editingMarketLaborer, setEditingMarketLaborer] =
+    useState<MarketLaborerRecord | null>(null);
   const [marketLaborerEditForm, setMarketLaborerEditForm] = useState({
     count: 1,
     day_units: 1,
@@ -336,7 +349,11 @@ export default function AttendancePage() {
   // Check for persisted drawer state on mount and restore if found
   useEffect(() => {
     const persistedState = getPersistedDrawerState();
-    if (persistedState && persistedState.dirty && selectedSite?.id === persistedState.siteId) {
+    if (
+      persistedState &&
+      persistedState.dirty &&
+      selectedSite?.id === persistedState.siteId
+    ) {
       // Restore the drawer state
       setDrawerOpen(true);
       setDrawerMode(persistedState.mode);
@@ -408,11 +425,10 @@ export default function AttendancePage() {
     // Filter holidays within selected date range that don't have attendance
     const holidayOnlyEntries = recentHolidays
       .filter((h) => {
+        if (!dateFrom || !dateTo) return false;
         const hDate = h.date;
         return (
-          hDate >= dateFrom &&
-          hDate <= dateTo &&
-          !attendanceDates.has(hDate)
+          hDate >= dateFrom && hDate <= dateTo && !attendanceDates.has(hDate)
         );
       })
       .map((h) => ({
@@ -433,15 +449,14 @@ export default function AttendancePage() {
     });
 
     // Combine and sort by date descending
-    const combined = [
-      ...attendanceEntries,
-      ...holidayOnlyEntries,
-    ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    const combined = [...attendanceEntries, ...holidayOnlyEntries].sort(
+      (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+    );
 
     return combined;
   }, [dateSummaries, recentHolidays, dateFrom, dateTo]);
 
-  const fetchAttendanceHistory = async () => {
+  const fetchAttendanceHistory = useCallback(async () => {
     if (!selectedSite) return;
 
     // Increment version and capture current version for this fetch
@@ -449,8 +464,8 @@ export default function AttendancePage() {
 
     setLoading(true);
     try {
-      // Fetch daily attendance with audit fields and two-phase status
-      const { data: attendanceData, error } = await supabase
+      // Build daily attendance query
+      let attendanceQuery = supabase
         .from("daily_attendance")
         .select(
           `
@@ -466,41 +481,51 @@ export default function AttendancePage() {
         `
         )
         .eq("site_id", selectedSite.id)
-        .gte("date", dateFrom)
-        .lte("date", dateTo)
         .order("date", { ascending: false });
+
+      // Only apply date filters if not "All Time"
+      if (!isAllTime && dateFrom && dateTo) {
+        attendanceQuery = attendanceQuery.gte("date", dateFrom).lte("date", dateTo);
+      }
+
+      const { data: attendanceData, error } = await attendanceQuery;
 
       if (error) throw error;
 
-      // Fetch market laborer attendance
-      const { data: marketData } = await (
-        supabase.from("market_laborer_attendance") as any
-      )
+      // Build market laborer attendance query
+      let marketQuery = (supabase.from("market_laborer_attendance") as any)
         .select(
           "id, role_id, date, count, work_days, rate_per_person, total_cost, day_units, snacks_per_person, total_snacks, in_time, out_time, is_paid, labor_roles(name)"
         )
-        .eq("site_id", selectedSite.id)
-        .gte("date", dateFrom)
-        .lte("date", dateTo);
+        .eq("site_id", selectedSite.id);
 
-      // Fetch work summaries
-      const { data: summaryData } = await (
-        supabase.from("daily_work_summary") as any
-      )
+      if (!isAllTime && dateFrom && dateTo) {
+        marketQuery = marketQuery.gte("date", dateFrom).lte("date", dateTo);
+      }
+
+      const { data: marketData } = await marketQuery;
+
+      // Build work summaries query
+      let summaryQuery = (supabase.from("daily_work_summary") as any)
         .select("*")
-        .eq("site_id", selectedSite.id)
-        .gte("date", dateFrom)
-        .lte("date", dateTo);
+        .eq("site_id", selectedSite.id);
 
-      // Fetch tea shop entries (using base columns - V2 migration columns may not exist yet)
-      // Note: site_id exists on tea_shop_entries, V2 columns (working_laborer_count, etc.) may not
-      const { data: teaShopData } = await (
-        supabase.from("tea_shop_entries") as any
-      )
+      if (!isAllTime && dateFrom && dateTo) {
+        summaryQuery = summaryQuery.gte("date", dateFrom).lte("date", dateTo);
+      }
+
+      const { data: summaryData } = await summaryQuery;
+
+      // Build tea shop entries query
+      let teaShopQuery = (supabase.from("tea_shop_entries") as any)
         .select("date, tea_total, snacks_total, total_amount")
-        .eq("site_id", selectedSite.id)
-        .gte("date", dateFrom)
-        .lte("date", dateTo);
+        .eq("site_id", selectedSite.id);
+
+      if (!isAllTime && dateFrom && dateTo) {
+        teaShopQuery = teaShopQuery.gte("date", dateFrom).lte("date", dateTo);
+      }
+
+      const { data: teaShopData } = await teaShopQuery;
 
       // Build tea shop map (by date, aggregate if multiple entries per day)
       // Note: V2 columns (working_laborer_count, etc.) may not exist yet - using defaults
@@ -741,7 +766,7 @@ export default function AttendancePage() {
             date: record.date,
             records: [record],
             marketLaborers: market?.expandedRecords || [],
-            dailyLaborerCount: record.laborer_type === "daily_wage" ? 1 : 0,
+            dailyLaborerCount: record.laborer_type !== "contract" ? 1 : 0,
             contractLaborerCount: record.laborer_type === "contract" ? 1 : 0,
             marketLaborerCount: market?.count || 0,
             totalLaborerCount: 1 + (market?.count || 0),
@@ -756,9 +781,7 @@ export default function AttendancePage() {
               (market?.snacks || 0),
             // Amounts by laborer type
             dailyLaborerAmount:
-              record.laborer_type === "daily_wage"
-                ? record.daily_earnings
-                : 0,
+              record.laborer_type !== "contract" ? record.daily_earnings : 0,
             contractLaborerAmount:
               record.laborer_type === "contract" ? record.daily_earnings : 0,
             marketLaborerAmount: market?.salary || 0,
@@ -841,11 +864,11 @@ export default function AttendancePage() {
         setLoading(false);
       }
     }
-  };
+  }, [dateFrom, dateTo, isAllTime, selectedSite, supabase]);
 
   useEffect(() => {
     fetchAttendanceHistory();
-  }, [selectedSite, dateFrom, dateTo]);
+  }, [fetchAttendanceHistory]);
 
   // Check if today is a holiday for the selected site
   const checkTodayHoliday = useCallback(async () => {
@@ -917,17 +940,17 @@ export default function AttendancePage() {
     );
   };
 
-  const handleOpenEditDialog = (record: AttendanceRecord) => {
+  const handleOpenEditDialog = useCallback((record: AttendanceRecord) => {
     setEditingRecord(record);
     setEditForm({
       work_days: record.work_days,
       daily_rate_applied: record.daily_rate_applied,
     });
     setEditDialogOpen(true);
-  };
+  }, []);
 
   // Handler to open payment dialog for a single record
-  const handleOpenPaymentDialog = (record: AttendanceRecord) => {
+  const handleOpenPaymentDialog = useCallback((record: AttendanceRecord) => {
     const paymentRecord: DailyPaymentRecord = {
       id: `daily-${record.id}`,
       sourceType: "daily",
@@ -950,7 +973,7 @@ export default function AttendancePage() {
     };
     setPaymentRecords([paymentRecord]);
     setPaymentDialogOpen(true);
-  };
+  }, []);
 
   const handlePaymentSuccess = () => {
     setPaymentDialogOpen(false);
@@ -973,8 +996,6 @@ export default function AttendancePage() {
           hours_worked: editForm.work_days * 8,
         })
         .eq("id", editingRecord.id);
-
-      if (error) throw error;
 
       setEditDialogOpen(false);
       setEditingRecord(null);
@@ -1059,24 +1080,27 @@ export default function AttendancePage() {
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm("Are you sure you want to delete this attendance record?"))
-      return;
+  const handleDelete = useCallback(
+    async (id: string) => {
+      if (!confirm("Are you sure you want to delete this attendance record?"))
+        return;
 
-    setLoading(true);
-    try {
-      const { error } = await supabase
-        .from("daily_attendance")
-        .delete()
-        .eq("id", id);
-      if (error) throw error;
-      fetchAttendanceHistory();
-    } catch (error: any) {
-      alert("Failed to delete: " + error.message);
-    } finally {
-      setLoading(false);
-    }
-  };
+      setLoading(true);
+      try {
+        const { error } = await supabase
+          .from("daily_attendance")
+          .delete()
+          .eq("id", id);
+        if (error) throw error;
+        fetchAttendanceHistory();
+      } catch (error: any) {
+        alert("Failed to delete: " + error.message);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [fetchAttendanceHistory, supabase]
+  );
 
   // Market laborer edit handlers
   const handleOpenMarketLaborerEdit = (record: MarketLaborerRecord) => {
@@ -1094,9 +1118,14 @@ export default function AttendancePage() {
 
     setLoading(true);
     try {
-      const totalCost = marketLaborerEditForm.count * marketLaborerEditForm.rate_per_person * marketLaborerEditForm.day_units;
+      const totalCost =
+        marketLaborerEditForm.count *
+        marketLaborerEditForm.rate_per_person *
+        marketLaborerEditForm.day_units;
 
-      const { error } = await (supabase.from("market_laborer_attendance") as any)
+      const { error } = await (
+        supabase.from("market_laborer_attendance") as any
+      )
         .update({
           count: marketLaborerEditForm.count,
           day_units: marketLaborerEditForm.day_units,
@@ -1121,15 +1150,18 @@ export default function AttendancePage() {
   };
 
   const handleDeleteMarketLaborer = async (record: MarketLaborerRecord) => {
-    const confirmMsg = record.groupCount > 1
-      ? `This will delete all ${record.groupCount} ${record.roleName}(s) for this date. Continue?`
-      : `Are you sure you want to delete this ${record.roleName}?`;
+    const confirmMsg =
+      record.groupCount > 1
+        ? `This will delete all ${record.groupCount} ${record.roleName}(s) for this date. Continue?`
+        : `Are you sure you want to delete this ${record.roleName}?`;
 
     if (!confirm(confirmMsg)) return;
 
     setLoading(true);
     try {
-      const { error } = await (supabase.from("market_laborer_attendance") as any)
+      const { error } = await (
+        supabase.from("market_laborer_attendance") as any
+      )
         .delete()
         .eq("id", record.originalDbId);
 
@@ -1376,7 +1408,13 @@ export default function AttendancePage() {
         ),
       },
     ],
-    [canEdit]
+    [
+      canEdit,
+      formatTime,
+      handleDelete,
+      handleOpenEditDialog,
+      handleOpenPaymentDialog,
+    ]
   );
 
   if (!selectedSite) {
@@ -1415,8 +1453,6 @@ export default function AttendancePage() {
             />
           ) : null
         }
-        onRefresh={fetchAttendanceHistory}
-        isLoading={loading}
         actions={
           <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
             {/* View Mode Toggle */}
@@ -1442,96 +1478,6 @@ export default function AttendancePage() {
       />
 
       {/* ===== HEADER ROW 2: Date Picker + Show Last Quick Filters (Same Row) ===== */}
-      <Box
-        sx={{
-          display: "flex",
-          flexDirection: "row",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: { xs: 0.5, sm: 2 },
-          mb: { xs: 1, sm: 2 },
-          flexWrap: "nowrap",
-        }}
-      >
-        {/* Date Range Picker */}
-        <Box sx={{ flexShrink: 1, minWidth: 0 }}>
-          <DateRangePicker
-            startDate={new Date(dateFrom)}
-            endDate={new Date(dateTo)}
-            onChange={(start, end) => {
-              setDateFrom(dayjs(start).format("YYYY-MM-DD"));
-              setDateTo(dayjs(end).format("YYYY-MM-DD"));
-            }}
-          />
-        </Box>
-
-        {/* Show Last: Quick Filter Tags */}
-        <Box
-          sx={{
-            display: "flex",
-            alignItems: "center",
-            gap: 0.5,
-            flexShrink: 0,
-          }}
-        >
-          <Typography
-            variant="caption"
-            color="text.secondary"
-            sx={{
-              fontSize: { xs: "0.65rem", sm: "0.8rem" },
-              whiteSpace: "nowrap",
-            }}
-          >
-            <Box
-              component="span"
-              sx={{ display: { xs: "none", sm: "inline" } }}
-            >
-              Show Last:
-            </Box>
-            <Box
-              component="span"
-              sx={{ display: { xs: "inline", sm: "none" } }}
-            >
-              SL
-            </Box>
-          </Typography>
-          <Chip
-            label="Week"
-            size="small"
-            variant="outlined"
-            onClick={() => {
-              // Current week from Sunday to today
-              setDateFrom(dayjs().startOf("week").format("YYYY-MM-DD"));
-              setDateTo(dayjs().format("YYYY-MM-DD"));
-            }}
-            sx={{
-              height: { xs: 22, sm: 28 },
-              fontSize: { xs: "0.65rem", sm: "0.8rem" },
-              cursor: "pointer",
-              "&:hover": { bgcolor: "action.hover" },
-              "& .MuiChip-label": { px: { xs: 0.75, sm: 1.5 } },
-            }}
-          />
-          <Chip
-            label="Month"
-            size="small"
-            variant="outlined"
-            onClick={() => {
-              // Current month from 1st to today
-              setDateFrom(dayjs().startOf("month").format("YYYY-MM-DD"));
-              setDateTo(dayjs().format("YYYY-MM-DD"));
-            }}
-            sx={{
-              height: { xs: 22, sm: 28 },
-              fontSize: { xs: "0.65rem", sm: "0.8rem" },
-              cursor: "pointer",
-              "&:hover": { bgcolor: "action.hover" },
-              "& .MuiChip-label": { px: { xs: 0.75, sm: 1.5 } },
-            }}
-          />
-        </Box>
-      </Box>
-
       {/* Period Summary Bar - Collapsible on Mobile */}
       <Paper
         sx={{ p: { xs: 0.75, sm: 2 }, mb: { xs: 1, sm: 2 }, flexShrink: 0 }}
@@ -1593,19 +1539,39 @@ export default function AttendancePage() {
               {/* Row 1: Salary, Tea Shop */}
               <Box sx={{ display: "flex", alignItems: "stretch", mb: 1 }}>
                 <Box sx={{ flex: 1, textAlign: "center" }}>
-                  <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.6rem" }}>
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    sx={{ fontSize: "0.6rem" }}
+                  >
                     Salary
                   </Typography>
-                  <Typography sx={{ fontSize: "0.8rem", fontWeight: 600, color: "success.main" }}>
+                  <Typography
+                    sx={{
+                      fontSize: "0.8rem",
+                      fontWeight: 600,
+                      color: "success.main",
+                    }}
+                  >
                     ₹{periodTotals.totalSalary.toLocaleString()}
                   </Typography>
                 </Box>
                 <Divider orientation="vertical" flexItem sx={{ mx: 1 }} />
                 <Box sx={{ flex: 1, textAlign: "center" }}>
-                  <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.6rem" }}>
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    sx={{ fontSize: "0.6rem" }}
+                  >
                     Tea Shop
                   </Typography>
-                  <Typography sx={{ fontSize: "0.8rem", fontWeight: 600, color: "secondary.main" }}>
+                  <Typography
+                    sx={{
+                      fontSize: "0.8rem",
+                      fontWeight: 600,
+                      color: "secondary.main",
+                    }}
+                  >
                     ₹{periodTotals.totalTeaShop.toLocaleString()}
                   </Typography>
                 </Box>
@@ -1614,28 +1580,58 @@ export default function AttendancePage() {
               {/* Row 2: Daily, Contract, Market */}
               <Box sx={{ display: "flex", alignItems: "stretch", mb: 1 }}>
                 <Box sx={{ flex: 1, textAlign: "center" }}>
-                  <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.6rem" }}>
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    sx={{ fontSize: "0.6rem" }}
+                  >
                     Daily
                   </Typography>
-                  <Typography sx={{ fontSize: "0.8rem", fontWeight: 600, color: "warning.main" }}>
+                  <Typography
+                    sx={{
+                      fontSize: "0.8rem",
+                      fontWeight: 600,
+                      color: "warning.main",
+                    }}
+                  >
                     ₹{periodTotals.totalDailyAmount.toLocaleString()}
                   </Typography>
                 </Box>
                 <Divider orientation="vertical" flexItem sx={{ mx: 1 }} />
                 <Box sx={{ flex: 1, textAlign: "center" }}>
-                  <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.6rem" }}>
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    sx={{ fontSize: "0.6rem" }}
+                  >
                     Contract
                   </Typography>
-                  <Typography sx={{ fontSize: "0.8rem", fontWeight: 600, color: "info.main" }}>
+                  <Typography
+                    sx={{
+                      fontSize: "0.8rem",
+                      fontWeight: 600,
+                      color: "info.main",
+                    }}
+                  >
                     ₹{periodTotals.totalContractAmount.toLocaleString()}
                   </Typography>
                 </Box>
                 <Divider orientation="vertical" flexItem sx={{ mx: 1 }} />
                 <Box sx={{ flex: 1, textAlign: "center" }}>
-                  <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.6rem" }}>
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    sx={{ fontSize: "0.6rem" }}
+                  >
                     Market
                   </Typography>
-                  <Typography sx={{ fontSize: "0.8rem", fontWeight: 600, color: "secondary.main" }}>
+                  <Typography
+                    sx={{
+                      fontSize: "0.8rem",
+                      fontWeight: 600,
+                      color: "secondary.main",
+                    }}
+                  >
                     ₹{periodTotals.totalMarketAmount.toLocaleString()}
                   </Typography>
                 </Box>
@@ -1644,11 +1640,18 @@ export default function AttendancePage() {
               {/* Row 3: Avg/Day */}
               <Box sx={{ display: "flex", alignItems: "stretch" }}>
                 <Box sx={{ flex: 1, textAlign: "center" }}>
-                  <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.6rem" }}>
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    sx={{ fontSize: "0.6rem" }}
+                  >
                     Avg/Day
                   </Typography>
                   <Typography sx={{ fontSize: "0.8rem", fontWeight: 600 }}>
-                    ₹{periodTotals.avgPerDay.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                    ₹
+                    {periodTotals.avgPerDay.toLocaleString(undefined, {
+                      maximumFractionDigits: 0,
+                    })}
                   </Typography>
                 </Box>
               </Box>
@@ -1753,7 +1756,11 @@ export default function AttendancePage() {
                 Contract
               </Typography>
               <Typography
-                sx={{ fontSize: "1.125rem", fontWeight: 600, color: "info.main" }}
+                sx={{
+                  fontSize: "1.125rem",
+                  fontWeight: 600,
+                  color: "info.main",
+                }}
               >
                 ₹{periodTotals.totalContractAmount.toLocaleString()}
               </Typography>
@@ -1790,7 +1797,14 @@ export default function AttendancePage() {
               >
                 Paid
               </Typography>
-              <Box sx={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 0.5 }}>
+              <Box
+                sx={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 0.5,
+                }}
+              >
                 <Typography
                   sx={{
                     fontSize: "1.125rem",
@@ -1820,7 +1834,14 @@ export default function AttendancePage() {
               >
                 Pending
               </Typography>
-              <Box sx={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 0.5 }}>
+              <Box
+                sx={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 0.5,
+                }}
+              >
                 <Typography
                   sx={{
                     fontSize: "1.125rem",
@@ -1952,1297 +1973,1465 @@ export default function AttendancePage() {
                 </IconButton>
               </Tooltip>
             )}
-          <TableContainer
-            sx={{
-              flex: 1,
-              maxHeight: isFullscreen
-                ? "calc(100vh - 56px)"
-                : { xs: "calc(100vh - 320px)", sm: "calc(100vh - 300px)" },
-              overflowX: "auto",
-              overflowY: "auto",
-              WebkitOverflowScrolling: "touch",
-              width: "100%",
-              // Make scrollbar visible on mobile
-              "&::-webkit-scrollbar": {
-                height: 8,
-                width: 8,
-                display: "block",
-              },
-              "&::-webkit-scrollbar-track": {
-                bgcolor: "action.selected",
-              },
-              "&::-webkit-scrollbar-thumb": {
-                bgcolor: "grey.400",
-                borderRadius: 4,
-              },
-            }}
-          >
-            <Table
-              stickyHeader
-              size="small"
-              sx={{ minWidth: { xs: 600, sm: 800 } }}
+            <TableContainer
+              sx={{
+                flex: 1,
+                maxHeight: isFullscreen
+                  ? "calc(100vh - 56px)"
+                  : { xs: "calc(100vh - 320px)", sm: "calc(100vh - 300px)" },
+                overflowX: "auto",
+                overflowY: "auto",
+                WebkitOverflowScrolling: "touch",
+                width: "100%",
+                // Make scrollbar visible on mobile
+                "&::-webkit-scrollbar": {
+                  height: 8,
+                  width: 8,
+                  display: "block",
+                },
+                "&::-webkit-scrollbar-track": {
+                  bgcolor: "action.selected",
+                },
+                "&::-webkit-scrollbar-thumb": {
+                  bgcolor: "grey.400",
+                  borderRadius: 4,
+                },
+              }}
             >
-              <TableHead>
-                <TableRow sx={{ bgcolor: "primary.dark" }}>
-                  {/* Sticky expand column */}
-                  <TableCell
-                    sx={{
-                      width: 40,
-                      minWidth: 40,
-                      bgcolor: "primary.dark",
-                      color: "primary.contrastText",
-                      fontWeight: 700,
-                      position: "sticky",
-                      left: 0,
-                      zIndex: 3,
-                    }}
-                  ></TableCell>
-                  {/* Sticky date column */}
-                  <TableCell
-                    sx={{
-                      bgcolor: "primary.dark",
-                      color: "primary.contrastText",
-                      fontWeight: 700,
-                      position: "sticky",
-                      left: 40,
-                      zIndex: 3,
-                      minWidth: { xs: 60, sm: 80 },
-                      "&::after": {
-                        content: '""',
-                        position: "absolute",
-                        right: 0,
-                        top: 0,
-                        bottom: 0,
-                        width: 4,
-                        background:
-                          "linear-gradient(to right, rgba(0,0,0,0.15), transparent)",
-                      },
-                    }}
-                  >
-                    Date
-                  </TableCell>
-                  <TableCell
-                    sx={{
-                      bgcolor: "primary.dark",
-                      color: "primary.contrastText",
-                      fontWeight: 700,
-                      minWidth: { xs: 30, sm: 50 },
-                      px: { xs: 0.5, sm: 1 },
-                    }}
-                    align="center"
-                  >
-                    <Box sx={{ display: { xs: "none", sm: "inline" } }}>
-                      Daily
-                    </Box>
-                    <Box sx={{ display: { xs: "inline", sm: "none" } }}>D</Box>
-                  </TableCell>
-                  <TableCell
-                    sx={{
-                      bgcolor: "primary.dark",
-                      color: "primary.contrastText",
-                      fontWeight: 700,
-                      minWidth: { xs: 30, sm: 55 },
-                      px: { xs: 0.5, sm: 1 },
-                    }}
-                    align="center"
-                  >
-                    <Box sx={{ display: { xs: "none", sm: "inline" } }}>
-                      Contract
-                    </Box>
-                    <Box sx={{ display: { xs: "inline", sm: "none" } }}>C</Box>
-                  </TableCell>
-                  <TableCell
-                    sx={{
-                      bgcolor: "primary.dark",
-                      color: "primary.contrastText",
-                      fontWeight: 700,
-                      minWidth: { xs: 30, sm: 50 },
-                      px: { xs: 0.5, sm: 1 },
-                    }}
-                    align="center"
-                  >
-                    <Box sx={{ display: { xs: "none", sm: "inline" } }}>
-                      Market
-                    </Box>
-                    <Box sx={{ display: { xs: "inline", sm: "none" } }}>M</Box>
-                  </TableCell>
-                  <TableCell
-                    sx={{
-                      bgcolor: "primary.dark",
-                      color: "primary.contrastText",
-                      fontWeight: 700,
-                      minWidth: { xs: 30, sm: 45 },
-                      px: { xs: 0.5, sm: 1 },
-                    }}
-                    align="center"
-                  >
-                    <Box sx={{ display: { xs: "none", sm: "inline" } }}>
-                      Total
-                    </Box>
-                    <Box sx={{ display: { xs: "inline", sm: "none" } }}>T</Box>
-                  </TableCell>
-                  <TableCell
-                    sx={{
-                      bgcolor: "primary.dark",
-                      color: "primary.contrastText",
-                      fontWeight: 700,
-                      minWidth: 45,
-                      display: { xs: "none", md: "table-cell" },
-                    }}
-                    align="center"
-                  >
-                    In
-                  </TableCell>
-                  <TableCell
-                    sx={{
-                      bgcolor: "primary.dark",
-                      color: "primary.contrastText",
-                      fontWeight: 700,
-                      minWidth: 45,
-                      display: { xs: "none", md: "table-cell" },
-                    }}
-                    align="center"
-                  >
-                    Out
-                  </TableCell>
-                  <TableCell
-                    sx={{
-                      bgcolor: "primary.dark",
-                      color: "primary.contrastText",
-                      fontWeight: 700,
-                      minWidth: { xs: 55, sm: 70 },
-                      px: { xs: 0.5, sm: 1 },
-                    }}
-                    align="right"
-                  >
-                    <Box sx={{ display: { xs: "none", sm: "inline" } }}>
-                      Salary
-                    </Box>
-                    <Box sx={{ display: { xs: "inline", sm: "none" } }}>
-                      Sal
-                    </Box>
-                  </TableCell>
-                  <TableCell
-                    sx={{
-                      bgcolor: "primary.dark",
-                      color: "primary.contrastText",
-                      fontWeight: 700,
-                      minWidth: 80,
-                      display: { xs: "none", sm: "table-cell" },
-                    }}
-                    align="center"
-                  >
-                    Tea Shop
-                  </TableCell>
-                  <TableCell
-                    sx={{
-                      bgcolor: "primary.dark",
-                      color: "primary.contrastText",
-                      fontWeight: 700,
-                      minWidth: { xs: 55, sm: 70 },
-                      px: { xs: 0.5, sm: 1 },
-                    }}
-                    align="right"
-                  >
-                    <Box sx={{ display: { xs: "none", sm: "inline" } }}>
-                      Expense
-                    </Box>
-                    <Box sx={{ display: { xs: "inline", sm: "none" } }}>
-                      Exp
-                    </Box>
-                  </TableCell>
-                  <TableCell
-                    sx={{
-                      bgcolor: "primary.dark",
-                      color: "primary.contrastText",
-                      fontWeight: 700,
-                      minWidth: 120,
-                      display: { xs: "none", md: "table-cell" },
-                    }}
-                  >
-                    Work
-                  </TableCell>
-                  <TableCell
-                    sx={{
-                      bgcolor: "primary.dark",
-                      color: "primary.contrastText",
-                      fontWeight: 700,
-                      minWidth: { xs: 50, sm: 90 },
-                      px: { xs: 0.5, sm: 1 },
-                    }}
-                  >
-                    <Box sx={{ display: { xs: "none", sm: "inline" } }}>
-                      Status
-                    </Box>
-                    <Box sx={{ display: { xs: "inline", sm: "none" } }}>St</Box>
-                  </TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {combinedDateEntries.map((entry) => (
-                  <React.Fragment key={entry.date}>
-                    {/* Holiday-only row (no attendance data) */}
-                    {entry.type === "holiday" && (
-                      <TableRow
-                        sx={{
-                          bgcolor: "warning.50",
-                          "&:hover": { bgcolor: "warning.100" },
-                        }}
-                      >
-                        <TableCell
-                          colSpan={13}
-                          sx={{
-                            py: 1.5,
-                            borderLeft: 4,
-                            borderLeftColor: "warning.main",
-                          }}
-                        >
-                          <Box
-                            sx={{
-                              display: "flex",
-                              alignItems: "center",
-                              gap: 1.5,
-                              flexWrap: "wrap",
-                            }}
-                          >
-                            <BeachAccessIcon
-                              sx={{ color: "warning.main", fontSize: 24 }}
-                            />
-                            <Typography
-                              variant="body2"
-                              fontWeight={600}
-                              sx={{ minWidth: 80 }}
-                            >
-                              {dayjs(entry.date).format("DD MMM")}
-                            </Typography>
-                            <Typography
-                              variant="caption"
-                              color="text.secondary"
-                            >
-                              {dayjs(entry.date).format("dddd")}
-                            </Typography>
-                            <Chip
-                              label="Holiday"
-                              size="small"
-                              color="warning"
-                              sx={{ fontWeight: 600 }}
-                            />
-                            <Typography
-                              variant="body2"
-                              color="text.secondary"
-                              sx={{ fontStyle: "italic" }}
-                            >
-                              {entry.holiday?.reason || "No reason specified"}
-                            </Typography>
-                          </Box>
-                        </TableCell>
-                      </TableRow>
-                    )}
-
-                    {/* Attendance row (with optional holiday indicator) */}
-                    {entry.type === "attendance" && (
-                      <>
-                    <TableRow
-                      hover
-                      onClick={() => toggleDateExpanded(entry.summary.date)}
+              <Table
+                stickyHeader
+                size="small"
+                sx={{ minWidth: { xs: 600, sm: 800 } }}
+              >
+                <TableHead>
+                  <TableRow sx={{ bgcolor: "primary.dark" }}>
+                    {/* Sticky expand column */}
+                    <TableCell
                       sx={{
-                        cursor: "pointer",
-                        "&:hover": { bgcolor: "action.hover" },
-                        // Highlight if this date is also a holiday
-                        ...(entry.holiday && {
-                          bgcolor: "warning.50",
-                          borderLeft: 4,
-                          borderLeftColor: "warning.main",
-                        }),
+                        width: 40,
+                        minWidth: 40,
+                        bgcolor: "primary.dark",
+                        color: "primary.contrastText",
+                        fontWeight: 700,
+                        position: "sticky",
+                        left: 0,
+                        zIndex: 3,
+                      }}
+                    ></TableCell>
+                    {/* Sticky date column */}
+                    <TableCell
+                      sx={{
+                        bgcolor: "primary.dark",
+                        color: "primary.contrastText",
+                        fontWeight: 700,
+                        position: "sticky",
+                        left: 40,
+                        zIndex: 3,
+                        minWidth: { xs: 60, sm: 80 },
+                        "&::after": {
+                          content: '""',
+                          position: "absolute",
+                          right: 0,
+                          top: 0,
+                          bottom: 0,
+                          width: 4,
+                          background:
+                            "linear-gradient(to right, rgba(0,0,0,0.15), transparent)",
+                        },
                       }}
                     >
-                      {/* Sticky expand cell */}
-                      <TableCell
-                        sx={{
-                          position: "sticky",
-                          left: 0,
-                          bgcolor: entry.holiday ? "warning.50" : "background.paper",
-                          zIndex: 1,
-                        }}
-                      >
-                        <IconButton size="small">
-                          {entry.summary.isExpanded ? <ExpandLess /> : <ExpandMore />}
-                        </IconButton>
-                      </TableCell>
-                      {/* Sticky date cell */}
-                      <TableCell
-                        sx={{
-                          position: "sticky",
-                          left: 40,
-                          bgcolor: entry.holiday ? "warning.50" : "background.paper",
-                          zIndex: 1,
-                          "&::after": {
-                            content: '""',
-                            position: "absolute",
-                            right: 0,
-                            top: 0,
-                            bottom: 0,
-                            width: 4,
-                            background:
-                              "linear-gradient(to right, rgba(0,0,0,0.08), transparent)",
-                          },
-                        }}
-                      >
-                        <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-                          {entry.holiday && (
-                            <Tooltip title={`Holiday: ${entry.holiday.reason || "No reason"}`}>
-                              <BeachAccessIcon
-                                sx={{ color: "warning.main", fontSize: 16 }}
-                              />
-                            </Tooltip>
-                          )}
-                          <Box>
-                            <Typography
-                              variant="body2"
-                              fontWeight={600}
-                              sx={{ fontSize: { xs: "0.75rem", sm: "0.875rem" } }}
-                            >
-                              {dayjs(entry.summary.date).format("DD MMM")}
-                            </Typography>
-                            <Typography
-                              variant="caption"
-                              color="text.secondary"
-                              sx={{ fontSize: { xs: "0.65rem", sm: "0.75rem" } }}
-                            >
-                              {dayjs(entry.summary.date).format("ddd")}
-                            </Typography>
-                          </Box>
-                        </Box>
-                      </TableCell>
-                      <TableCell align="center">
-                        <Chip
-                          label={entry.summary.dailyLaborerCount}
-                          size="small"
-                          color="warning"
-                          variant="outlined"
-                        />
-                      </TableCell>
-                      <TableCell align="center">
-                        <Chip
-                          label={entry.summary.contractLaborerCount}
-                          size="small"
-                          color="info"
-                          variant="outlined"
-                        />
-                      </TableCell>
-                      <TableCell align="center">
-                        <Chip
-                          label={entry.summary.marketLaborerCount}
-                          size="small"
-                          color="secondary"
-                          variant="outlined"
-                        />
-                      </TableCell>
-                      <TableCell align="center">
-                        <Typography variant="body2" fontWeight={700}>
-                          {entry.summary.totalLaborerCount}
-                        </Typography>
-                      </TableCell>
-                      <TableCell
-                        align="center"
-                        sx={{ display: { xs: "none", md: "table-cell" } }}
-                      >
-                        <Typography variant="caption">
-                          {formatTime(entry.summary.firstInTime)}
-                        </Typography>
-                      </TableCell>
-                      <TableCell
-                        align="center"
-                        sx={{ display: { xs: "none", md: "table-cell" } }}
-                      >
-                        <Typography variant="caption">
-                          {entry.summary.attendanceStatus === "morning_entry"
-                            ? "-"
-                            : formatTime(entry.summary.lastOutTime)}
-                        </Typography>
-                      </TableCell>
-                      <TableCell align="right">
-                        <Typography
-                          variant="body2"
-                          fontWeight={600}
-                          color="success.main"
+                      Date
+                    </TableCell>
+                    <TableCell
+                      sx={{
+                        bgcolor: "primary.dark",
+                        color: "primary.contrastText",
+                        fontWeight: 700,
+                        minWidth: { xs: 30, sm: 50 },
+                        px: { xs: 0.5, sm: 1 },
+                      }}
+                      align="center"
+                    >
+                      <Box sx={{ display: { xs: "none", sm: "inline" } }}>
+                        Daily
+                      </Box>
+                      <Box sx={{ display: { xs: "inline", sm: "none" } }}>
+                        D
+                      </Box>
+                    </TableCell>
+                    <TableCell
+                      sx={{
+                        bgcolor: "primary.dark",
+                        color: "primary.contrastText",
+                        fontWeight: 700,
+                        minWidth: { xs: 30, sm: 55 },
+                        px: { xs: 0.5, sm: 1 },
+                      }}
+                      align="center"
+                    >
+                      <Box sx={{ display: { xs: "none", sm: "inline" } }}>
+                        Contract
+                      </Box>
+                      <Box sx={{ display: { xs: "inline", sm: "none" } }}>
+                        C
+                      </Box>
+                    </TableCell>
+                    <TableCell
+                      sx={{
+                        bgcolor: "primary.dark",
+                        color: "primary.contrastText",
+                        fontWeight: 700,
+                        minWidth: { xs: 30, sm: 50 },
+                        px: { xs: 0.5, sm: 1 },
+                      }}
+                      align="center"
+                    >
+                      <Box sx={{ display: { xs: "none", sm: "inline" } }}>
+                        Market
+                      </Box>
+                      <Box sx={{ display: { xs: "inline", sm: "none" } }}>
+                        M
+                      </Box>
+                    </TableCell>
+                    <TableCell
+                      sx={{
+                        bgcolor: "primary.dark",
+                        color: "primary.contrastText",
+                        fontWeight: 700,
+                        minWidth: { xs: 30, sm: 45 },
+                        px: { xs: 0.5, sm: 1 },
+                      }}
+                      align="center"
+                    >
+                      <Box sx={{ display: { xs: "none", sm: "inline" } }}>
+                        Total
+                      </Box>
+                      <Box sx={{ display: { xs: "inline", sm: "none" } }}>
+                        T
+                      </Box>
+                    </TableCell>
+                    <TableCell
+                      sx={{
+                        bgcolor: "primary.dark",
+                        color: "primary.contrastText",
+                        fontWeight: 700,
+                        minWidth: 45,
+                        display: { xs: "none", md: "table-cell" },
+                      }}
+                      align="center"
+                    >
+                      In
+                    </TableCell>
+                    <TableCell
+                      sx={{
+                        bgcolor: "primary.dark",
+                        color: "primary.contrastText",
+                        fontWeight: 700,
+                        minWidth: 45,
+                        display: { xs: "none", md: "table-cell" },
+                      }}
+                      align="center"
+                    >
+                      Out
+                    </TableCell>
+                    <TableCell
+                      sx={{
+                        bgcolor: "primary.dark",
+                        color: "primary.contrastText",
+                        fontWeight: 700,
+                        minWidth: { xs: 55, sm: 70 },
+                        px: { xs: 0.5, sm: 1 },
+                      }}
+                      align="right"
+                    >
+                      <Box sx={{ display: { xs: "none", sm: "inline" } }}>
+                        Salary
+                      </Box>
+                      <Box sx={{ display: { xs: "inline", sm: "none" } }}>
+                        Sal
+                      </Box>
+                    </TableCell>
+                    <TableCell
+                      sx={{
+                        bgcolor: "primary.dark",
+                        color: "primary.contrastText",
+                        fontWeight: 700,
+                        minWidth: 80,
+                        display: { xs: "none", sm: "table-cell" },
+                      }}
+                      align="center"
+                    >
+                      Tea Shop
+                    </TableCell>
+                    <TableCell
+                      sx={{
+                        bgcolor: "primary.dark",
+                        color: "primary.contrastText",
+                        fontWeight: 700,
+                        minWidth: { xs: 55, sm: 70 },
+                        px: { xs: 0.5, sm: 1 },
+                      }}
+                      align="right"
+                    >
+                      <Box sx={{ display: { xs: "none", sm: "inline" } }}>
+                        Expense
+                      </Box>
+                      <Box sx={{ display: { xs: "inline", sm: "none" } }}>
+                        Exp
+                      </Box>
+                    </TableCell>
+                    <TableCell
+                      sx={{
+                        bgcolor: "primary.dark",
+                        color: "primary.contrastText",
+                        fontWeight: 700,
+                        minWidth: 120,
+                        display: { xs: "none", md: "table-cell" },
+                      }}
+                    >
+                      Work
+                    </TableCell>
+                    <TableCell
+                      sx={{
+                        bgcolor: "primary.dark",
+                        color: "primary.contrastText",
+                        fontWeight: 700,
+                        minWidth: { xs: 50, sm: 90 },
+                        px: { xs: 0.5, sm: 1 },
+                      }}
+                    >
+                      <Box sx={{ display: { xs: "none", sm: "inline" } }}>
+                        Status
+                      </Box>
+                      <Box sx={{ display: { xs: "inline", sm: "none" } }}>
+                        St
+                      </Box>
+                    </TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {combinedDateEntries.map((entry) => (
+                    <React.Fragment key={entry.date}>
+                      {/* Holiday-only row (no attendance data) */}
+                      {entry.type === "holiday" && (
+                        <TableRow
+                          sx={{
+                            bgcolor: "warning.50",
+                            "&:hover": { bgcolor: "warning.100" },
+                          }}
                         >
-                          ₹{entry.summary.totalSalary.toLocaleString()}
-                        </Typography>
-                      </TableCell>
-                      <TableCell
-                        align="center"
-                        sx={{ display: { xs: "none", sm: "table-cell" } }}
-                      >
-                        {entry.summary.teaShop ? (
-                          <Chip
-                            icon={<TeaIcon fontSize="small" />}
-                            label={`₹${entry.summary.teaShop.total.toLocaleString()}`}
-                            size="small"
-                            color="secondary"
-                            variant="outlined"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setTeaShopPopoverAnchor(e.currentTarget);
-                              setTeaShopPopoverData({
-                                date: entry.summary.date,
-                                data: entry.summary.teaShop!,
-                              });
+                          <TableCell
+                            colSpan={13}
+                            sx={{
+                              py: 1.5,
+                              borderLeft: 4,
+                              borderLeftColor: "warning.main",
                             }}
-                            sx={{ cursor: "pointer" }}
-                          />
-                        ) : (
-                          <Chip
-                            icon={<TeaIcon fontSize="small" />}
-                            label="Add"
-                            size="small"
-                            variant="outlined"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleOpenTeaShopDialog(entry.summary.date);
-                            }}
-                            sx={{ cursor: "pointer", opacity: 0.6 }}
-                          />
-                        )}
-                      </TableCell>
-                      <TableCell align="right">
-                        <Typography
-                          variant="body2"
-                          fontWeight={700}
-                          color="primary.main"
-                        >
-                          ₹
-                          {(
-                            entry.summary.totalExpense + (entry.summary.teaShop?.total || 0)
-                          ).toLocaleString()}
-                        </Typography>
-                      </TableCell>
-                      <TableCell
-                        sx={{ display: { xs: "none", md: "table-cell" } }}
-                      >
-                        <Box
-                          sx={{ display: "flex", alignItems: "center", gap: 1 }}
-                        >
-                          <Tooltip
-                            title={
-                              entry.summary.workDescription ||
-                              entry.summary.workUpdates?.morning?.description ||
-                              "No description"
-                            }
                           >
-                            <Typography
-                              variant="caption"
-                              noWrap
-                              sx={{ maxWidth: 100, display: "block" }}
-                            >
-                              {entry.summary.workDescription ||
-                                entry.summary.workUpdates?.morning?.description ||
-                                "-"}
-                            </Typography>
-                          </Tooltip>
-                          {entry.summary.workUpdates && (
-                            <PhotoBadge
-                              photoCount={
-                                (entry.summary.workUpdates.morning?.photos?.length ||
-                                  0) +
-                                (entry.summary.workUpdates.evening?.photos?.length ||
-                                  0)
-                              }
-                              completionPercent={
-                                entry.summary.workUpdates.evening?.completionPercent
-                              }
-                              onClick={() => {
-                                setSelectedWorkUpdate({
-                                  workUpdates: entry.summary.workUpdates,
-                                  date: entry.summary.date,
-                                });
-                                setWorkUpdateViewerOpen(true);
-                              }}
-                            />
-                          )}
-                        </Box>
-                      </TableCell>
-                      <TableCell>
-                        {entry.summary.attendanceStatus === "morning_entry" ? (
-                          <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-                            <Chip
-                              label="🌅 Morning"
-                              size="small"
-                              color="warning"
-                              variant="outlined"
-                            />
-                            <Tooltip title="Edit morning entry">
-                              <IconButton
-                                size="small"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleOpenDrawerForDate(entry.summary.date, "morning");
-                                }}
-                                disabled={!canEdit}
-                              >
-                                <Edit sx={{ fontSize: 16 }} />
-                              </IconButton>
-                            </Tooltip>
-                            <Tooltip title="Confirm attendance">
-                              <Chip
-                                label="Confirm"
-                                size="small"
-                                color="info"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleOpenDrawerForDate(entry.summary.date, "evening");
-                                }}
-                                sx={{ cursor: canEdit ? "pointer" : "default" }}
-                                disabled={!canEdit}
-                              />
-                            </Tooltip>
-                          </Box>
-                        ) : (
-                          <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-                            <Chip
-                              label="✓ Confirmed"
-                              size="small"
-                              color="success"
-                              variant="outlined"
-                            />
-                            <Tooltip title="Edit attendance">
-                              <IconButton
-                                size="small"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleOpenDrawerForDate(entry.summary.date, "full");
-                                }}
-                                disabled={!canEdit}
-                              >
-                                <Edit sx={{ fontSize: 16 }} />
-                              </IconButton>
-                            </Tooltip>
-                          </Box>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                    <TableRow>
-                      <TableCell colSpan={13} sx={{ py: 0, border: 0 }}>
-                        <Collapse
-                          in={entry.summary.isExpanded}
-                          timeout="auto"
-                          unmountOnExit
-                        >
-                          <Box sx={{ p: 2, bgcolor: "action.hover" }}>
-                            {/* Header with Manage Button and Laborer Type Chips */}
                             <Box
                               sx={{
                                 display: "flex",
-                                justifyContent: "space-between",
                                 alignItems: "center",
-                                mb: 2,
+                                gap: 1.5,
                                 flexWrap: "wrap",
-                                gap: 1,
                               }}
                             >
-                              {/* Left side: Contract/Market chips */}
+                              <BeachAccessIcon
+                                sx={{ color: "warning.main", fontSize: 24 }}
+                              />
+                              <Typography
+                                variant="body2"
+                                fontWeight={600}
+                                sx={{ minWidth: 80 }}
+                              >
+                                {dayjs(entry.date).format("DD MMM")}
+                              </Typography>
+                              <Typography
+                                variant="caption"
+                                color="text.secondary"
+                              >
+                                {dayjs(entry.date).format("dddd")}
+                              </Typography>
+                              <Chip
+                                label="Holiday"
+                                size="small"
+                                color="warning"
+                                sx={{ fontWeight: 600 }}
+                              />
+                              <Typography
+                                variant="body2"
+                                color="text.secondary"
+                                sx={{ fontStyle: "italic" }}
+                              >
+                                {entry.holiday?.reason || "No reason specified"}
+                              </Typography>
+                            </Box>
+                          </TableCell>
+                        </TableRow>
+                      )}
+
+                      {/* Attendance row (with optional holiday indicator) */}
+                      {entry.type === "attendance" && (
+                        <>
+                          <TableRow
+                            hover
+                            onClick={() =>
+                              toggleDateExpanded(entry.summary.date)
+                            }
+                            sx={{
+                              cursor: "pointer",
+                              "&:hover": { bgcolor: "action.hover" },
+                              // Highlight if this date is also a holiday
+                              ...(entry.holiday && {
+                                bgcolor: "warning.50",
+                                borderLeft: 4,
+                                borderLeftColor: "warning.main",
+                              }),
+                            }}
+                          >
+                            {/* Sticky expand cell */}
+                            <TableCell
+                              sx={{
+                                position: "sticky",
+                                left: 0,
+                                bgcolor: entry.holiday
+                                  ? "warning.50"
+                                  : "background.paper",
+                                zIndex: 1,
+                              }}
+                            >
+                              <IconButton size="small">
+                                {entry.summary.isExpanded ? (
+                                  <ExpandLess />
+                                ) : (
+                                  <ExpandMore />
+                                )}
+                              </IconButton>
+                            </TableCell>
+                            {/* Sticky date cell */}
+                            <TableCell
+                              sx={{
+                                position: "sticky",
+                                left: 40,
+                                bgcolor: entry.holiday
+                                  ? "warning.50"
+                                  : "background.paper",
+                                zIndex: 1,
+                                "&::after": {
+                                  content: '""',
+                                  position: "absolute",
+                                  right: 0,
+                                  top: 0,
+                                  bottom: 0,
+                                  width: 4,
+                                  background:
+                                    "linear-gradient(to right, rgba(0,0,0,0.08), transparent)",
+                                },
+                              }}
+                            >
                               <Box
                                 sx={{
                                   display: "flex",
-                                  gap: { xs: 0.5, sm: 1 },
-                                  flexWrap: "wrap",
                                   alignItems: "center",
+                                  gap: 0.5,
                                 }}
                               >
-                                {entry.summary.contractLaborerCount > 0 && (
-                                  <Chip
-                                    label={
-                                      <Box
-                                        sx={{
-                                          display: "flex",
-                                          alignItems: "center",
-                                          gap: 0.5,
-                                        }}
-                                      >
-                                        Contract: ₹
-                                        {entry.summary.contractLaborerAmount.toLocaleString()}
-                                        <Box
-                                          component="span"
-                                          sx={{ opacity: 0.8 }}
-                                        >
-                                          ({entry.summary.contractLaborerCount})
-                                        </Box>
-                                      </Box>
-                                    }
-                                    size="small"
-                                    color="info"
-                                    variant="filled"
+                                {entry.holiday && (
+                                  <Tooltip
+                                    title={`Holiday: ${
+                                      entry.holiday.reason || "No reason"
+                                    }`}
+                                  >
+                                    <BeachAccessIcon
+                                      sx={{
+                                        color: "warning.main",
+                                        fontSize: 16,
+                                      }}
+                                    />
+                                  </Tooltip>
+                                )}
+                                <Box>
+                                  <Typography
+                                    variant="body2"
+                                    fontWeight={600}
                                     sx={{
-                                      height: { xs: 22, sm: 24 },
-                                      "& .MuiChip-label": {
-                                        px: { xs: 0.75, sm: 1 },
-                                        fontSize: {
-                                          xs: "0.65rem",
-                                          sm: "0.75rem",
-                                        },
+                                      fontSize: {
+                                        xs: "0.75rem",
+                                        sm: "0.875rem",
                                       },
                                     }}
-                                  />
-                                )}
-                                {entry.summary.marketLaborerCount > 0 && (
-                                  <Chip
-                                    label={
-                                      <Box
-                                        sx={{
-                                          display: "flex",
-                                          alignItems: "center",
-                                          gap: 0.5,
-                                        }}
-                                      >
-                                        Market: ₹
-                                        {entry.summary.marketLaborerAmount.toLocaleString()}
-                                        <Box
-                                          component="span"
-                                          sx={{ opacity: 0.8 }}
-                                        >
-                                          ({entry.summary.marketLaborerCount})
-                                        </Box>
-                                      </Box>
-                                    }
-                                    size="small"
-                                    color="secondary"
-                                    variant="filled"
+                                  >
+                                    {dayjs(entry.summary.date).format("DD MMM")}
+                                  </Typography>
+                                  <Typography
+                                    variant="caption"
+                                    color="text.secondary"
                                     sx={{
-                                      height: { xs: 22, sm: 24 },
-                                      "& .MuiChip-label": {
-                                        px: { xs: 0.75, sm: 1 },
-                                        fontSize: {
-                                          xs: "0.65rem",
-                                          sm: "0.75rem",
-                                        },
+                                      fontSize: {
+                                        xs: "0.65rem",
+                                        sm: "0.75rem",
                                       },
+                                    }}
+                                  >
+                                    {dayjs(entry.summary.date).format("ddd")}
+                                  </Typography>
+                                </Box>
+                              </Box>
+                            </TableCell>
+                            <TableCell align="center">
+                              <Chip
+                                label={entry.summary.dailyLaborerCount}
+                                size="small"
+                                color="warning"
+                                variant="outlined"
+                              />
+                            </TableCell>
+                            <TableCell align="center">
+                              <Chip
+                                label={entry.summary.contractLaborerCount}
+                                size="small"
+                                color="info"
+                                variant="outlined"
+                              />
+                            </TableCell>
+                            <TableCell align="center">
+                              <Chip
+                                label={entry.summary.marketLaborerCount}
+                                size="small"
+                                color="secondary"
+                                variant="outlined"
+                              />
+                            </TableCell>
+                            <TableCell align="center">
+                              <Typography variant="body2" fontWeight={700}>
+                                {entry.summary.totalLaborerCount}
+                              </Typography>
+                            </TableCell>
+                            <TableCell
+                              align="center"
+                              sx={{ display: { xs: "none", md: "table-cell" } }}
+                            >
+                              <Typography variant="caption">
+                                {formatTime(entry.summary.firstInTime)}
+                              </Typography>
+                            </TableCell>
+                            <TableCell
+                              align="center"
+                              sx={{ display: { xs: "none", md: "table-cell" } }}
+                            >
+                              <Typography variant="caption">
+                                {entry.summary.attendanceStatus ===
+                                "morning_entry"
+                                  ? "-"
+                                  : formatTime(entry.summary.lastOutTime)}
+                              </Typography>
+                            </TableCell>
+                            <TableCell align="right">
+                              <Typography
+                                variant="body2"
+                                fontWeight={600}
+                                color="success.main"
+                              >
+                                ₹{entry.summary.totalSalary.toLocaleString()}
+                              </Typography>
+                            </TableCell>
+                            <TableCell
+                              align="center"
+                              sx={{ display: { xs: "none", sm: "table-cell" } }}
+                            >
+                              {entry.summary.teaShop ? (
+                                <Chip
+                                  icon={<TeaIcon fontSize="small" />}
+                                  label={`₹${entry.summary.teaShop.total.toLocaleString()}`}
+                                  size="small"
+                                  color="secondary"
+                                  variant="outlined"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setTeaShopPopoverAnchor(e.currentTarget);
+                                    setTeaShopPopoverData({
+                                      date: entry.summary.date,
+                                      data: entry.summary.teaShop!,
+                                    });
+                                  }}
+                                  sx={{ cursor: "pointer" }}
+                                />
+                              ) : (
+                                <Chip
+                                  icon={<TeaIcon fontSize="small" />}
+                                  label="Add"
+                                  size="small"
+                                  variant="outlined"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleOpenTeaShopDialog(entry.summary.date);
+                                  }}
+                                  sx={{ cursor: "pointer", opacity: 0.6 }}
+                                />
+                              )}
+                            </TableCell>
+                            <TableCell align="right">
+                              <Typography
+                                variant="body2"
+                                fontWeight={700}
+                                color="primary.main"
+                              >
+                                ₹
+                                {(
+                                  entry.summary.totalExpense +
+                                  (entry.summary.teaShop?.total || 0)
+                                ).toLocaleString()}
+                              </Typography>
+                            </TableCell>
+                            <TableCell
+                              sx={{ display: { xs: "none", md: "table-cell" } }}
+                            >
+                              <Box
+                                sx={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: 1,
+                                }}
+                              >
+                                <Tooltip
+                                  title={
+                                    entry.summary.workDescription ||
+                                    entry.summary.workUpdates?.morning
+                                      ?.description ||
+                                    "No description"
+                                  }
+                                >
+                                  <Typography
+                                    variant="caption"
+                                    noWrap
+                                    sx={{ maxWidth: 100, display: "block" }}
+                                  >
+                                    {entry.summary.workDescription ||
+                                      entry.summary.workUpdates?.morning
+                                        ?.description ||
+                                      "-"}
+                                  </Typography>
+                                </Tooltip>
+                                {entry.summary.workUpdates && (
+                                  <PhotoBadge
+                                    photoCount={
+                                      (entry.summary.workUpdates.morning?.photos
+                                        ?.length || 0) +
+                                      (entry.summary.workUpdates.evening?.photos
+                                        ?.length || 0)
+                                    }
+                                    completionPercent={
+                                      entry.summary.workUpdates.evening
+                                        ?.completionPercent
+                                    }
+                                    onClick={() => {
+                                      setSelectedWorkUpdate({
+                                        workUpdates: entry.summary.workUpdates,
+                                        date: entry.summary.date,
+                                      });
+                                      setWorkUpdateViewerOpen(true);
                                     }}
                                   />
                                 )}
                               </Box>
-                              {/* Right side: Audit Avatar and Edit Button */}
-                              <Box
-                                sx={{
-                                  display: "flex",
-                                  alignItems: "center",
-                                  gap: 2,
-                                }}
-                              >
-                                {/* Audit Avatar - show who created/edited this entry */}
-                                {entry.summary.records.length > 0 && (
-                                  <AuditAvatarGroup
-                                    createdByName={
-                                      entry.summary.records[0]?.entered_by
-                                    }
-                                    createdByAvatar={
-                                      entry.summary.records[0]?.entered_by_avatar
-                                    }
-                                    createdAt={entry.summary.records[0]?.created_at}
-                                    updatedByName={
-                                      entry.summary.records[0]?.updated_by
-                                    }
-                                    updatedByAvatar={
-                                      entry.summary.records[0]?.updated_by_avatar
-                                    }
-                                    updatedAt={entry.summary.records[0]?.updated_at}
-                                    compact
+                            </TableCell>
+                            <TableCell>
+                              {entry.summary.attendanceStatus ===
+                              "morning_entry" ? (
+                                <Box
+                                  sx={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: 0.5,
+                                  }}
+                                >
+                                  <Chip
+                                    label="🌅 Morning"
                                     size="small"
+                                    color="warning"
+                                    variant="outlined"
                                   />
-                                )}
-                                {canEdit &&
-                                  entry.summary.attendanceStatus ===
-                                    "morning_entry" && (
-                                    <Button
-                                      variant="contained"
-                                      color="success"
+                                  <Tooltip title="Edit morning entry">
+                                    <IconButton
                                       size="small"
-                                      onClick={() =>
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleOpenDrawerForDate(
+                                          entry.summary.date,
+                                          "morning"
+                                        );
+                                      }}
+                                      disabled={!canEdit}
+                                    >
+                                      <Edit sx={{ fontSize: 16 }} />
+                                    </IconButton>
+                                  </Tooltip>
+                                  <Tooltip title="Confirm attendance">
+                                    <Chip
+                                      label="Confirm"
+                                      size="small"
+                                      color="info"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
                                         handleOpenDrawerForDate(
                                           entry.summary.date,
                                           "evening"
-                                        )
-                                      }
-                                    >
-                                      🌆 Confirm Attendance
-                                    </Button>
-                                  )}
-                                {/* View Summary Button */}
-                                <Tooltip title="View attendance summary">
-                                  <IconButton
+                                        );
+                                      }}
+                                      sx={{
+                                        cursor: canEdit ? "pointer" : "default",
+                                      }}
+                                      disabled={!canEdit}
+                                    />
+                                  </Tooltip>
+                                </Box>
+                              ) : (
+                                <Box
+                                  sx={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: 0.5,
+                                  }}
+                                >
+                                  <Chip
+                                    label="✓ Confirmed"
                                     size="small"
-                                    color="info"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setViewSummaryDate(entry.summary.date);
-                                    }}
-                                  >
-                                    <VisibilityIcon fontSize="small" />
-                                  </IconButton>
-                                </Tooltip>
-                                {canEdit &&
-                                  entry.summary.attendanceStatus !==
-                                    "morning_entry" && (
-                                    <Button
-                                      variant="contained"
+                                    color="success"
+                                    variant="outlined"
+                                  />
+                                  <Tooltip title="Edit attendance">
+                                    <IconButton
                                       size="small"
-                                      startIcon={<Edit />}
-                                      onClick={() =>
+                                      onClick={(e) => {
+                                        e.stopPropagation();
                                         handleOpenDrawerForDate(
                                           entry.summary.date,
                                           "full"
-                                        )
-                                      }
-                                    >
-                                      Edit Attendance
-                                    </Button>
-                                  )}
-                                {canEdit && (
-                                  <Tooltip title="Delete all attendance for this day">
-                                    <IconButton
-                                      size="small"
-                                      color="error"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleDeleteDateAttendance(
-                                          entry.summary.date
                                         );
                                       }}
+                                      disabled={!canEdit}
                                     >
-                                      <Delete fontSize="small" />
+                                      <Edit sx={{ fontSize: 16 }} />
                                     </IconButton>
                                   </Tooltip>
-                                )}
-                              </Box>
-                            </Box>
-
-                            {/* Work Description */}
-                            {(entry.summary.workDescription || entry.summary.comments) && (
-                              <Box
-                                sx={{
-                                  mb: 2,
-                                  p: 1.5,
-                                  bgcolor: "background.paper",
-                                  borderRadius: 1,
-                                  border: "1px solid",
-                                  borderColor: "divider",
-                                }}
+                                </Box>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                          <TableRow>
+                            <TableCell colSpan={13} sx={{ py: 0, border: 0 }}>
+                              <Collapse
+                                in={entry.summary.isExpanded}
+                                timeout="auto"
+                                unmountOnExit
                               >
-                                {entry.summary.workDescription && (
-                                  <Typography variant="body2" sx={{ mb: 0.5 }}>
-                                    <strong>Work:</strong>{" "}
-                                    {entry.summary.workDescription}
-                                  </Typography>
-                                )}
-                                {entry.summary.workStatus && (
-                                  <Typography variant="body2" sx={{ mb: 0.5 }}>
-                                    <strong>Status:</strong>{" "}
-                                    {entry.summary.workStatus}
-                                  </Typography>
-                                )}
-                                {entry.summary.comments && (
-                                  <Typography
-                                    variant="body2"
-                                    color="text.secondary"
+                                <Box sx={{ p: 2, bgcolor: "action.hover" }}>
+                                  {/* Header with Manage Button and Laborer Type Chips */}
+                                  <Box
+                                    sx={{
+                                      display: "flex",
+                                      justifyContent: "space-between",
+                                      alignItems: "center",
+                                      mb: 2,
+                                      flexWrap: "wrap",
+                                      gap: 1,
+                                    }}
                                   >
-                                    <strong>Comments:</strong>{" "}
-                                    {entry.summary.comments}
-                                  </Typography>
-                                )}
-                              </Box>
-                            )}
-
-                            {/* Individual Records Table */}
-                            {entry.summary.records.length > 0 && (
-                              <Table size="small">
-                                <TableHead>
-                                  <TableRow sx={{ bgcolor: "primary.light" }}>
-                                    <TableCell sx={{ fontWeight: 700 }}>
-                                      Name
-                                    </TableCell>
-                                    <TableCell sx={{ fontWeight: 700 }}>
-                                      Type
-                                    </TableCell>
-                                    <TableCell sx={{ fontWeight: 700 }}>
-                                      Team
-                                    </TableCell>
-                                    <TableCell
-                                      sx={{ fontWeight: 700 }}
-                                      align="center"
+                                    {/* Left side: Contract/Market chips */}
+                                    <Box
+                                      sx={{
+                                        display: "flex",
+                                        gap: { xs: 0.5, sm: 1 },
+                                        flexWrap: "wrap",
+                                        alignItems: "center",
+                                      }}
                                     >
-                                      In
-                                    </TableCell>
-                                    <TableCell
-                                      sx={{ fontWeight: 700 }}
-                                      align="center"
-                                    >
-                                      Out
-                                    </TableCell>
-                                    <TableCell
-                                      sx={{ fontWeight: 700 }}
-                                      align="center"
-                                    >
-                                      Work Hrs
-                                    </TableCell>
-                                    <TableCell
-                                      sx={{ fontWeight: 700 }}
-                                      align="center"
-                                    >
-                                      W/D Units
-                                    </TableCell>
-                                    <TableCell
-                                      sx={{ fontWeight: 700 }}
-                                      align="right"
-                                    >
-                                      Salary
-                                    </TableCell>
-                                    <TableCell
-                                      sx={{ fontWeight: 700 }}
-                                      align="right"
-                                    >
-                                      Snacks
-                                    </TableCell>
-                                    <TableCell
-                                      sx={{ fontWeight: 700 }}
-                                      align="center"
-                                    >
-                                      Payment
-                                    </TableCell>
-                                    <TableCell
-                                      sx={{ fontWeight: 700 }}
-                                      align="center"
-                                    >
-                                      Actions
-                                    </TableCell>
-                                  </TableRow>
-                                </TableHead>
-                                <TableBody>
-                                  {entry.summary.records.map((record) => (
-                                    <TableRow key={record.id} hover>
-                                      <TableCell>
-                                        {record.laborer_name}
-                                      </TableCell>
-                                      <TableCell>
+                                      {entry.summary.contractLaborerCount >
+                                        0 && (
                                         <Chip
                                           label={
-                                            record.laborer_type === "contract"
-                                              ? "C"
-                                              : "D"
+                                            <Box
+                                              sx={{
+                                                display: "flex",
+                                                alignItems: "center",
+                                                gap: 0.5,
+                                              }}
+                                            >
+                                              Contract: ₹
+                                              {entry.summary.contractLaborerAmount.toLocaleString()}
+                                              <Box
+                                                component="span"
+                                                sx={{ opacity: 0.8 }}
+                                              >
+                                                (
+                                                {
+                                                  entry.summary
+                                                    .contractLaborerCount
+                                                }
+                                                )
+                                              </Box>
+                                            </Box>
                                           }
                                           size="small"
-                                          color={
-                                            record.laborer_type === "contract"
-                                              ? "info"
-                                              : "warning"
-                                          }
-                                          variant="outlined"
-                                        />
-                                      </TableCell>
-                                      <TableCell>
-                                        {record.team_name || "-"}
-                                      </TableCell>
-                                      <TableCell align="center">
-                                        {formatTime(record.in_time)}
-                                      </TableCell>
-                                      <TableCell align="center">
-                                        {record.attendance_status ===
-                                        "morning_entry"
-                                          ? "-"
-                                          : formatTime(record.out_time)}
-                                      </TableCell>
-                                      <TableCell align="center">
-                                        {record.work_hours
-                                          ? `${record.work_hours}h`
-                                          : "-"}
-                                      </TableCell>
-                                      <TableCell align="center">
-                                        <Chip
-                                          label={
-                                            record.day_units || record.work_days
-                                          }
-                                          size="small"
-                                          color="primary"
-                                          variant="outlined"
-                                        />
-                                      </TableCell>
-                                      <TableCell align="right">
-                                        ₹
-                                        {record.daily_earnings.toLocaleString()}
-                                      </TableCell>
-                                      <TableCell align="right">
-                                        {record.snacks_amount
-                                          ? `₹${record.snacks_amount}`
-                                          : "-"}
-                                      </TableCell>
-                                      <TableCell align="center">
-                                        {record.laborer_type === "contract" ? (
-                                          <Chip
-                                            label="In Contract"
-                                            size="small"
-                                            color="info"
-                                            variant="outlined"
-                                          />
-                                        ) : record.is_paid ? (
-                                          <Chip
-                                            label="PAID"
-                                            size="small"
-                                            color="success"
-                                            variant="filled"
-                                          />
-                                        ) : (
-                                          <Chip
-                                            label="PENDING"
-                                            size="small"
-                                            color="warning"
-                                            variant="outlined"
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              if (canEdit)
-                                                handleOpenPaymentDialog(record);
-                                            }}
-                                            sx={{
-                                              cursor: canEdit
-                                                ? "pointer"
-                                                : "default",
-                                            }}
-                                          />
-                                        )}
-                                      </TableCell>
-                                      <TableCell align="center">
-                                        <Box
+                                          color="info"
+                                          variant="filled"
                                           sx={{
-                                            display: "flex",
-                                            gap: 0.5,
-                                            justifyContent: "center",
+                                            height: { xs: 22, sm: 24 },
+                                            "& .MuiChip-label": {
+                                              px: { xs: 0.75, sm: 1 },
+                                              fontSize: {
+                                                xs: "0.65rem",
+                                                sm: "0.75rem",
+                                              },
+                                            },
+                                          }}
+                                        />
+                                      )}
+                                      {entry.summary.marketLaborerCount > 0 && (
+                                        <Chip
+                                          label={
+                                            <Box
+                                              sx={{
+                                                display: "flex",
+                                                alignItems: "center",
+                                                gap: 0.5,
+                                              }}
+                                            >
+                                              Market: ₹
+                                              {entry.summary.marketLaborerAmount.toLocaleString()}
+                                              <Box
+                                                component="span"
+                                                sx={{ opacity: 0.8 }}
+                                              >
+                                                (
+                                                {
+                                                  entry.summary
+                                                    .marketLaborerCount
+                                                }
+                                                )
+                                              </Box>
+                                            </Box>
+                                          }
+                                          size="small"
+                                          color="secondary"
+                                          variant="filled"
+                                          sx={{
+                                            height: { xs: 22, sm: 24 },
+                                            "& .MuiChip-label": {
+                                              px: { xs: 0.75, sm: 1 },
+                                              fontSize: {
+                                                xs: "0.65rem",
+                                                sm: "0.75rem",
+                                              },
+                                            },
+                                          }}
+                                        />
+                                      )}
+                                    </Box>
+                                    {/* Right side: Audit Avatar and Edit Button */}
+                                    <Box
+                                      sx={{
+                                        display: "flex",
+                                        alignItems: "center",
+                                        gap: 2,
+                                      }}
+                                    >
+                                      {/* Audit Avatar - show who created/edited this entry */}
+                                      {entry.summary.records.length > 0 && (
+                                        <AuditAvatarGroup
+                                          createdByName={
+                                            entry.summary.records[0]?.entered_by
+                                          }
+                                          createdByAvatar={
+                                            entry.summary.records[0]
+                                              ?.entered_by_avatar
+                                          }
+                                          createdAt={
+                                            entry.summary.records[0]?.created_at
+                                          }
+                                          updatedByName={
+                                            entry.summary.records[0]?.updated_by
+                                          }
+                                          updatedByAvatar={
+                                            entry.summary.records[0]
+                                              ?.updated_by_avatar
+                                          }
+                                          updatedAt={
+                                            entry.summary.records[0]?.updated_at
+                                          }
+                                          compact
+                                          size="small"
+                                        />
+                                      )}
+                                      {canEdit &&
+                                        entry.summary.attendanceStatus ===
+                                          "morning_entry" && (
+                                          <Button
+                                            variant="contained"
+                                            color="success"
+                                            size="small"
+                                            onClick={() =>
+                                              handleOpenDrawerForDate(
+                                                entry.summary.date,
+                                                "evening"
+                                              )
+                                            }
+                                          >
+                                            🌆 Confirm Attendance
+                                          </Button>
+                                        )}
+                                      {/* View Summary Button */}
+                                      <Tooltip title="View attendance summary">
+                                        <IconButton
+                                          size="small"
+                                          color="info"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setViewSummaryDate(
+                                              entry.summary.date
+                                            );
                                           }}
                                         >
-                                          {/* Record Payment button for pending daily laborers */}
-                                          {record.laborer_type !== "contract" &&
-                                            !record.is_paid &&
-                                            canEdit && (
-                                              <Button
-                                                size="small"
-                                                variant="outlined"
-                                                color="success"
-                                                onClick={(e) => {
-                                                  e.stopPropagation();
-                                                  handleOpenPaymentDialog(
-                                                    record
-                                                  );
-                                                }}
-                                                sx={{
-                                                  minWidth: 50,
-                                                  px: 1,
-                                                  fontSize: 11,
-                                                }}
-                                              >
-                                                Pay
-                                              </Button>
-                                            )}
-                                          <IconButton
+                                          <VisibilityIcon fontSize="small" />
+                                        </IconButton>
+                                      </Tooltip>
+                                      {canEdit &&
+                                        entry.summary.attendanceStatus !==
+                                          "morning_entry" && (
+                                          <Button
+                                            variant="contained"
                                             size="small"
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              handleOpenEditDialog(record);
-                                            }}
-                                            disabled={!canEdit}
+                                            startIcon={<Edit />}
+                                            onClick={() =>
+                                              handleOpenDrawerForDate(
+                                                entry.summary.date,
+                                                "full"
+                                              )
+                                            }
                                           >
-                                            <Edit fontSize="small" />
-                                          </IconButton>
+                                            Edit Attendance
+                                          </Button>
+                                        )}
+                                      {canEdit && (
+                                        <Tooltip title="Delete all attendance for this day">
                                           <IconButton
                                             size="small"
                                             color="error"
                                             onClick={(e) => {
                                               e.stopPropagation();
-                                              handleDelete(record.id);
+                                              handleDeleteDateAttendance(
+                                                entry.summary.date
+                                              );
                                             }}
-                                            disabled={!canEdit}
                                           >
                                             <Delete fontSize="small" />
                                           </IconButton>
-                                        </Box>
-                                      </TableCell>
-                                    </TableRow>
-                                  ))}
-                                </TableBody>
-                              </Table>
-                            )}
+                                        </Tooltip>
+                                      )}
+                                    </Box>
+                                  </Box>
 
-                            {/* Market Laborers Section */}
-                            {entry.summary.marketLaborers &&
-                              entry.summary.marketLaborers.length > 0 && (
-                                <Box
-                                  sx={{
-                                    mt: entry.summary.records.length > 0 ? 2 : 0,
-                                  }}
-                                >
-                                  <Typography
-                                    variant="subtitle2"
-                                    sx={{
-                                      mb: 1,
-                                      display: "flex",
-                                      alignItems: "center",
-                                      gap: 1,
-                                    }}
-                                  >
-                                    <Chip
-                                      label="Market Laborers"
-                                      size="small"
-                                      color="secondary"
-                                    />
-                                    <Typography
-                                      variant="caption"
-                                      color="text.secondary"
+                                  {/* Work Description */}
+                                  {(entry.summary.workDescription ||
+                                    entry.summary.comments) && (
+                                    <Box
+                                      sx={{
+                                        mb: 2,
+                                        p: 1.5,
+                                        bgcolor: "background.paper",
+                                        borderRadius: 1,
+                                        border: "1px solid",
+                                        borderColor: "divider",
+                                      }}
                                     >
-                                      ({entry.summary.marketLaborers.length} workers)
-                                    </Typography>
-                                  </Typography>
-                                  <Table
-                                    size="small"
-                                    sx={{ bgcolor: "secondary.50" }}
-                                  >
-                                    <TableHead>
-                                      <TableRow sx={{ bgcolor: "secondary.main" }}>
-                                        <TableCell
-                                          sx={{
-                                            fontWeight: 700,
-                                            color: "white",
-                                          }}
+                                      {entry.summary.workDescription && (
+                                        <Typography
+                                          variant="body2"
+                                          sx={{ mb: 0.5 }}
                                         >
-                                          Name
-                                        </TableCell>
-                                        <TableCell
-                                          sx={{
-                                            fontWeight: 700,
-                                            color: "white",
-                                          }}
+                                          <strong>Work:</strong>{" "}
+                                          {entry.summary.workDescription}
+                                        </Typography>
+                                      )}
+                                      {entry.summary.workStatus && (
+                                        <Typography
+                                          variant="body2"
+                                          sx={{ mb: 0.5 }}
                                         >
-                                          Role
-                                        </TableCell>
-                                        <TableCell
-                                          sx={{
-                                            fontWeight: 700,
-                                            color: "white",
-                                          }}
-                                          align="center"
+                                          <strong>Status:</strong>{" "}
+                                          {entry.summary.workStatus}
+                                        </Typography>
+                                      )}
+                                      {entry.summary.comments && (
+                                        <Typography
+                                          variant="body2"
+                                          color="text.secondary"
                                         >
-                                          In
-                                        </TableCell>
-                                        <TableCell
-                                          sx={{
-                                            fontWeight: 700,
-                                            color: "white",
-                                          }}
-                                          align="center"
-                                        >
-                                          Out
-                                        </TableCell>
-                                        <TableCell
-                                          sx={{
-                                            fontWeight: 700,
-                                            color: "white",
-                                          }}
-                                          align="center"
-                                        >
-                                          Units
-                                        </TableCell>
-                                        <TableCell
-                                          sx={{
-                                            fontWeight: 700,
-                                            color: "white",
-                                          }}
-                                          align="right"
-                                        >
-                                          Rate
-                                        </TableCell>
-                                        <TableCell
-                                          sx={{
-                                            fontWeight: 700,
-                                            color: "white",
-                                          }}
-                                          align="right"
-                                        >
-                                          Salary
-                                        </TableCell>
-                                        <TableCell
-                                          sx={{
-                                            fontWeight: 700,
-                                            color: "white",
-                                          }}
-                                          align="center"
-                                        >
-                                          Payment
-                                        </TableCell>
-                                        <TableCell
-                                          sx={{
-                                            fontWeight: 700,
-                                            color: "white",
-                                          }}
-                                          align="center"
-                                        >
-                                          Actions
-                                        </TableCell>
-                                      </TableRow>
-                                    </TableHead>
-                                    <TableBody>
-                                      {entry.summary.marketLaborers.map((ml) => (
+                                          <strong>Comments:</strong>{" "}
+                                          {entry.summary.comments}
+                                        </Typography>
+                                      )}
+                                    </Box>
+                                  )}
+
+                                  {/* Individual Records Table */}
+                                  {entry.summary.records.length > 0 && (
+                                    <Table size="small">
+                                      <TableHead>
                                         <TableRow
-                                          key={ml.id}
-                                          sx={{
-                                            "&:hover": {
-                                              bgcolor: "secondary.100 !important",
-                                            },
-                                          }}
+                                          sx={{ bgcolor: "primary.light" }}
                                         >
-                                          <TableCell>
-                                            <Typography
-                                              variant="body2"
-                                              fontWeight={500}
-                                            >
-                                              {ml.tempName}
-                                            </Typography>
+                                          <TableCell sx={{ fontWeight: 700 }}>
+                                            Name
                                           </TableCell>
-                                          <TableCell>
-                                            <Chip
-                                              label={ml.roleName}
-                                              size="small"
-                                              variant="outlined"
-                                              color="secondary"
-                                              sx={{ fontSize: "0.7rem" }}
-                                            />
+                                          <TableCell sx={{ fontWeight: 700 }}>
+                                            Type
                                           </TableCell>
-                                          <TableCell align="center">
-                                            {ml.inTime
-                                              ? ml.inTime.substring(0, 5)
-                                              : "-"}
+                                          <TableCell sx={{ fontWeight: 700 }}>
+                                            Team
                                           </TableCell>
-                                          <TableCell align="center">
-                                            {ml.outTime
-                                              ? ml.outTime.substring(0, 5)
-                                              : "-"}
+                                          <TableCell
+                                            sx={{ fontWeight: 700 }}
+                                            align="center"
+                                          >
+                                            In
                                           </TableCell>
-                                          <TableCell align="center">
-                                            {ml.dayUnits}
+                                          <TableCell
+                                            sx={{ fontWeight: 700 }}
+                                            align="center"
+                                          >
+                                            Out
                                           </TableCell>
-                                          <TableCell align="right">
-                                            ₹{ml.ratePerPerson.toLocaleString()}
+                                          <TableCell
+                                            sx={{ fontWeight: 700 }}
+                                            align="center"
+                                          >
+                                            Work Hrs
                                           </TableCell>
-                                          <TableCell align="right">
-                                            <Typography fontWeight={600}>
-                                              ₹
-                                              {ml.dailyEarnings.toLocaleString()}
-                                            </Typography>
+                                          <TableCell
+                                            sx={{ fontWeight: 700 }}
+                                            align="center"
+                                          >
+                                            W/D Units
                                           </TableCell>
-                                          <TableCell align="center">
-                                            <Chip
-                                              label={
-                                                ml.isPaid ? "Paid" : "Pending"
-                                              }
-                                              size="small"
-                                              color={
-                                                ml.isPaid
-                                                  ? "success"
-                                                  : "warning"
-                                              }
-                                              variant={
-                                                ml.isPaid
-                                                  ? "filled"
-                                                  : "outlined"
-                                              }
-                                              sx={{ fontSize: "0.65rem" }}
-                                            />
+                                          <TableCell
+                                            sx={{ fontWeight: 700 }}
+                                            align="right"
+                                          >
+                                            Salary
                                           </TableCell>
-                                          <TableCell align="center">
-                                            <Box sx={{ display: "flex", gap: 0.5, justifyContent: "center" }}>
-                                              <Tooltip title={ml.groupCount > 1 ? `Edit all ${ml.groupCount} ${ml.roleName}(s)` : "Edit"}>
-                                                <span>
-                                                  <IconButton
-                                                    size="small"
-                                                    onClick={(e) => {
-                                                      e.stopPropagation();
-                                                      handleOpenMarketLaborerEdit(ml);
-                                                    }}
-                                                    disabled={!canEdit}
-                                                  >
-                                                    <Edit fontSize="small" />
-                                                  </IconButton>
-                                                </span>
-                                              </Tooltip>
-                                              <Tooltip title={ml.groupCount > 1 ? `Delete all ${ml.groupCount} ${ml.roleName}(s)` : "Delete"}>
-                                                <span>
-                                                  <IconButton
-                                                    size="small"
-                                                    color="error"
-                                                    onClick={(e) => {
-                                                      e.stopPropagation();
-                                                      handleDeleteMarketLaborer(ml);
-                                                    }}
-                                                    disabled={!canEdit}
-                                                  >
-                                                    <Delete fontSize="small" />
-                                                  </IconButton>
-                                                </span>
-                                              </Tooltip>
-                                            </Box>
+                                          <TableCell
+                                            sx={{ fontWeight: 700 }}
+                                            align="right"
+                                          >
+                                            Snacks
+                                          </TableCell>
+                                          <TableCell
+                                            sx={{ fontWeight: 700 }}
+                                            align="center"
+                                          >
+                                            Payment
+                                          </TableCell>
+                                          <TableCell
+                                            sx={{ fontWeight: 700 }}
+                                            align="center"
+                                          >
+                                            Actions
                                           </TableCell>
                                         </TableRow>
-                                      ))}
-                                      {/* Market Laborers Total Row */}
-                                      <TableRow
-                                        sx={{ bgcolor: "secondary.100" }}
+                                      </TableHead>
+                                      <TableBody>
+                                        {entry.summary.records.map((record) => (
+                                          <TableRow key={record.id} hover>
+                                            <TableCell>
+                                              {record.laborer_name}
+                                            </TableCell>
+                                            <TableCell>
+                                              <Chip
+                                                label={
+                                                  record.laborer_type ===
+                                                  "contract"
+                                                    ? "C"
+                                                    : "D"
+                                                }
+                                                size="small"
+                                                color={
+                                                  record.laborer_type ===
+                                                  "contract"
+                                                    ? "info"
+                                                    : "warning"
+                                                }
+                                                variant="outlined"
+                                              />
+                                            </TableCell>
+                                            <TableCell>
+                                              {record.team_name || "-"}
+                                            </TableCell>
+                                            <TableCell align="center">
+                                              {formatTime(record.in_time)}
+                                            </TableCell>
+                                            <TableCell align="center">
+                                              {record.attendance_status ===
+                                              "morning_entry"
+                                                ? "-"
+                                                : formatTime(record.out_time)}
+                                            </TableCell>
+                                            <TableCell align="center">
+                                              {record.work_hours
+                                                ? `${record.work_hours}h`
+                                                : "-"}
+                                            </TableCell>
+                                            <TableCell align="center">
+                                              <Chip
+                                                label={
+                                                  record.day_units ||
+                                                  record.work_days
+                                                }
+                                                size="small"
+                                                color="primary"
+                                                variant="outlined"
+                                              />
+                                            </TableCell>
+                                            <TableCell align="right">
+                                              ₹
+                                              {record.daily_earnings.toLocaleString()}
+                                            </TableCell>
+                                            <TableCell align="right">
+                                              {record.snacks_amount
+                                                ? `₹${record.snacks_amount}`
+                                                : "-"}
+                                            </TableCell>
+                                            <TableCell align="center">
+                                              {record.laborer_type ===
+                                              "contract" ? (
+                                                <Chip
+                                                  label="In Contract"
+                                                  size="small"
+                                                  color="info"
+                                                  variant="outlined"
+                                                />
+                                              ) : record.is_paid ? (
+                                                <Chip
+                                                  label="PAID"
+                                                  size="small"
+                                                  color="success"
+                                                  variant="filled"
+                                                />
+                                              ) : (
+                                                <Chip
+                                                  label="PENDING"
+                                                  size="small"
+                                                  color="warning"
+                                                  variant="outlined"
+                                                  onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    if (canEdit)
+                                                      handleOpenPaymentDialog(
+                                                        record
+                                                      );
+                                                  }}
+                                                  sx={{
+                                                    cursor: canEdit
+                                                      ? "pointer"
+                                                      : "default",
+                                                  }}
+                                                />
+                                              )}
+                                            </TableCell>
+                                            <TableCell align="center">
+                                              <Box
+                                                sx={{
+                                                  display: "flex",
+                                                  gap: 0.5,
+                                                  justifyContent: "center",
+                                                }}
+                                              >
+                                                {/* Record Payment button for pending daily laborers */}
+                                                {record.laborer_type !==
+                                                  "contract" &&
+                                                  !record.is_paid &&
+                                                  canEdit && (
+                                                    <Button
+                                                      size="small"
+                                                      variant="outlined"
+                                                      color="success"
+                                                      onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        handleOpenPaymentDialog(
+                                                          record
+                                                        );
+                                                      }}
+                                                      sx={{
+                                                        minWidth: 50,
+                                                        px: 1,
+                                                        fontSize: 11,
+                                                      }}
+                                                    >
+                                                      Pay
+                                                    </Button>
+                                                  )}
+                                                <IconButton
+                                                  size="small"
+                                                  onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    handleOpenEditDialog(
+                                                      record
+                                                    );
+                                                  }}
+                                                  disabled={!canEdit}
+                                                >
+                                                  <Edit fontSize="small" />
+                                                </IconButton>
+                                                <IconButton
+                                                  size="small"
+                                                  color="error"
+                                                  onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    handleDelete(record.id);
+                                                  }}
+                                                  disabled={!canEdit}
+                                                >
+                                                  <Delete fontSize="small" />
+                                                </IconButton>
+                                              </Box>
+                                            </TableCell>
+                                          </TableRow>
+                                        ))}
+                                      </TableBody>
+                                    </Table>
+                                  )}
+
+                                  {/* Market Laborers Section */}
+                                  {entry.summary.marketLaborers &&
+                                    entry.summary.marketLaborers.length > 0 && (
+                                      <Box
+                                        sx={{
+                                          mt:
+                                            entry.summary.records.length > 0
+                                              ? 2
+                                              : 0,
+                                        }}
                                       >
-                                        <TableCell colSpan={6}>
+                                        <Typography
+                                          variant="subtitle2"
+                                          sx={{
+                                            mb: 1,
+                                            display: "flex",
+                                            alignItems: "center",
+                                            gap: 1,
+                                          }}
+                                        >
+                                          <Chip
+                                            label="Market Laborers"
+                                            size="small"
+                                            color="secondary"
+                                          />
                                           <Typography
-                                            variant="body2"
-                                            fontWeight={700}
+                                            variant="caption"
+                                            color="text.secondary"
                                           >
-                                            Market Labor Total (
-                                            {entry.summary.marketLaborers.length}{" "}
+                                            (
+                                            {
+                                              entry.summary.marketLaborers
+                                                .length
+                                            }{" "}
                                             workers)
                                           </Typography>
-                                        </TableCell>
-                                        <TableCell align="right">
-                                          <Typography
-                                            fontWeight={700}
-                                            color="secondary.main"
-                                          >
-                                            ₹
-                                            {entry.summary.marketLaborerAmount.toLocaleString()}
-                                          </Typography>
-                                        </TableCell>
-                                        <TableCell align="center">
-                                          <Chip
-                                            label={`Pending: ₹${entry.summary.marketLaborerAmount.toLocaleString()}`}
-                                            size="small"
-                                            color="warning"
-                                            sx={{ fontSize: "0.65rem" }}
-                                          />
-                                        </TableCell>
-                                        <TableCell />
-                                      </TableRow>
-                                    </TableBody>
-                                  </Table>
+                                        </Typography>
+                                        <Table
+                                          size="small"
+                                          sx={{ bgcolor: "secondary.50" }}
+                                        >
+                                          <TableHead>
+                                            <TableRow
+                                              sx={{ bgcolor: "secondary.main" }}
+                                            >
+                                              <TableCell
+                                                sx={{
+                                                  fontWeight: 700,
+                                                  color: "white",
+                                                }}
+                                              >
+                                                Name
+                                              </TableCell>
+                                              <TableCell
+                                                sx={{
+                                                  fontWeight: 700,
+                                                  color: "white",
+                                                }}
+                                              >
+                                                Role
+                                              </TableCell>
+                                              <TableCell
+                                                sx={{
+                                                  fontWeight: 700,
+                                                  color: "white",
+                                                }}
+                                                align="center"
+                                              >
+                                                In
+                                              </TableCell>
+                                              <TableCell
+                                                sx={{
+                                                  fontWeight: 700,
+                                                  color: "white",
+                                                }}
+                                                align="center"
+                                              >
+                                                Out
+                                              </TableCell>
+                                              <TableCell
+                                                sx={{
+                                                  fontWeight: 700,
+                                                  color: "white",
+                                                }}
+                                                align="center"
+                                              >
+                                                Units
+                                              </TableCell>
+                                              <TableCell
+                                                sx={{
+                                                  fontWeight: 700,
+                                                  color: "white",
+                                                }}
+                                                align="right"
+                                              >
+                                                Rate
+                                              </TableCell>
+                                              <TableCell
+                                                sx={{
+                                                  fontWeight: 700,
+                                                  color: "white",
+                                                }}
+                                                align="right"
+                                              >
+                                                Salary
+                                              </TableCell>
+                                              <TableCell
+                                                sx={{
+                                                  fontWeight: 700,
+                                                  color: "white",
+                                                }}
+                                                align="center"
+                                              >
+                                                Payment
+                                              </TableCell>
+                                              <TableCell
+                                                sx={{
+                                                  fontWeight: 700,
+                                                  color: "white",
+                                                }}
+                                                align="center"
+                                              >
+                                                Actions
+                                              </TableCell>
+                                            </TableRow>
+                                          </TableHead>
+                                          <TableBody>
+                                            {entry.summary.marketLaborers.map(
+                                              (ml) => (
+                                                <TableRow
+                                                  key={ml.id}
+                                                  sx={{
+                                                    "&:hover": {
+                                                      bgcolor:
+                                                        "secondary.100 !important",
+                                                    },
+                                                  }}
+                                                >
+                                                  <TableCell>
+                                                    <Typography
+                                                      variant="body2"
+                                                      fontWeight={500}
+                                                    >
+                                                      {ml.tempName}
+                                                    </Typography>
+                                                  </TableCell>
+                                                  <TableCell>
+                                                    <Chip
+                                                      label={ml.roleName}
+                                                      size="small"
+                                                      variant="outlined"
+                                                      color="secondary"
+                                                      sx={{
+                                                        fontSize: "0.7rem",
+                                                      }}
+                                                    />
+                                                  </TableCell>
+                                                  <TableCell align="center">
+                                                    {ml.inTime
+                                                      ? ml.inTime.substring(
+                                                          0,
+                                                          5
+                                                        )
+                                                      : "-"}
+                                                  </TableCell>
+                                                  <TableCell align="center">
+                                                    {ml.outTime
+                                                      ? ml.outTime.substring(
+                                                          0,
+                                                          5
+                                                        )
+                                                      : "-"}
+                                                  </TableCell>
+                                                  <TableCell align="center">
+                                                    {ml.dayUnits}
+                                                  </TableCell>
+                                                  <TableCell align="right">
+                                                    ₹
+                                                    {ml.ratePerPerson.toLocaleString()}
+                                                  </TableCell>
+                                                  <TableCell align="right">
+                                                    <Typography
+                                                      fontWeight={600}
+                                                    >
+                                                      ₹
+                                                      {ml.dailyEarnings.toLocaleString()}
+                                                    </Typography>
+                                                  </TableCell>
+                                                  <TableCell align="center">
+                                                    <Chip
+                                                      label={
+                                                        ml.isPaid
+                                                          ? "Paid"
+                                                          : "Pending"
+                                                      }
+                                                      size="small"
+                                                      color={
+                                                        ml.isPaid
+                                                          ? "success"
+                                                          : "warning"
+                                                      }
+                                                      variant={
+                                                        ml.isPaid
+                                                          ? "filled"
+                                                          : "outlined"
+                                                      }
+                                                      sx={{
+                                                        fontSize: "0.65rem",
+                                                      }}
+                                                    />
+                                                  </TableCell>
+                                                  <TableCell align="center">
+                                                    <Box
+                                                      sx={{
+                                                        display: "flex",
+                                                        gap: 0.5,
+                                                        justifyContent:
+                                                          "center",
+                                                      }}
+                                                    >
+                                                      <Tooltip
+                                                        title={
+                                                          ml.groupCount > 1
+                                                            ? `Edit all ${ml.groupCount} ${ml.roleName}(s)`
+                                                            : "Edit"
+                                                        }
+                                                      >
+                                                        <span>
+                                                          <IconButton
+                                                            size="small"
+                                                            onClick={(e) => {
+                                                              e.stopPropagation();
+                                                              handleOpenMarketLaborerEdit(
+                                                                ml
+                                                              );
+                                                            }}
+                                                            disabled={!canEdit}
+                                                          >
+                                                            <Edit fontSize="small" />
+                                                          </IconButton>
+                                                        </span>
+                                                      </Tooltip>
+                                                      <Tooltip
+                                                        title={
+                                                          ml.groupCount > 1
+                                                            ? `Delete all ${ml.groupCount} ${ml.roleName}(s)`
+                                                            : "Delete"
+                                                        }
+                                                      >
+                                                        <span>
+                                                          <IconButton
+                                                            size="small"
+                                                            color="error"
+                                                            onClick={(e) => {
+                                                              e.stopPropagation();
+                                                              handleDeleteMarketLaborer(
+                                                                ml
+                                                              );
+                                                            }}
+                                                            disabled={!canEdit}
+                                                          >
+                                                            <Delete fontSize="small" />
+                                                          </IconButton>
+                                                        </span>
+                                                      </Tooltip>
+                                                    </Box>
+                                                  </TableCell>
+                                                </TableRow>
+                                              )
+                                            )}
+                                            {/* Market Laborers Total Row */}
+                                            <TableRow
+                                              sx={{ bgcolor: "secondary.100" }}
+                                            >
+                                              <TableCell colSpan={6}>
+                                                <Typography
+                                                  variant="body2"
+                                                  fontWeight={700}
+                                                >
+                                                  Market Labor Total (
+                                                  {
+                                                    entry.summary.marketLaborers
+                                                      .length
+                                                  }{" "}
+                                                  workers)
+                                                </Typography>
+                                              </TableCell>
+                                              <TableCell align="right">
+                                                <Typography
+                                                  fontWeight={700}
+                                                  color="secondary.main"
+                                                >
+                                                  ₹
+                                                  {entry.summary.marketLaborerAmount.toLocaleString()}
+                                                </Typography>
+                                              </TableCell>
+                                              <TableCell align="center">
+                                                <Chip
+                                                  label={`Pending: ₹${entry.summary.marketLaborerAmount.toLocaleString()}`}
+                                                  size="small"
+                                                  color="warning"
+                                                  sx={{ fontSize: "0.65rem" }}
+                                                />
+                                              </TableCell>
+                                              <TableCell />
+                                            </TableRow>
+                                          </TableBody>
+                                        </Table>
+                                      </Box>
+                                    )}
                                 </Box>
-                              )}
-                          </Box>
-                        </Collapse>
+                              </Collapse>
+                            </TableCell>
+                          </TableRow>
+                        </>
+                      )}
+                    </React.Fragment>
+                  ))}
+                  {combinedDateEntries.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={13} align="center" sx={{ py: 4 }}>
+                        <Typography color="text.secondary">
+                          No attendance records found for the selected date
+                          range
+                        </Typography>
                       </TableCell>
                     </TableRow>
-                      </>
-                    )}
-                  </React.Fragment>
-                ))}
-                {combinedDateEntries.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={13} align="center" sx={{ py: 4 }}>
-                      <Typography color="text.secondary">
-                        No attendance records found for the selected date range
-                      </Typography>
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </TableContainer>
+                  )}
+                </TableBody>
+              </Table>
+            </TableContainer>
           </Paper>
         </Box>
       ) : (
@@ -3421,19 +3610,23 @@ export default function AttendancePage() {
           Edit Market Laborer
           {editingMarketLaborer && editingMarketLaborer.groupCount > 1 && (
             <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>
-              (All {editingMarketLaborer.groupCount} {editingMarketLaborer.roleName}s)
+              (All {editingMarketLaborer.groupCount}{" "}
+              {editingMarketLaborer.roleName}s)
             </Typography>
           )}
         </DialogTitle>
         <DialogContent>
           {editingMarketLaborer && (
-            <Box sx={{ display: "flex", flexDirection: "column", gap: 2, mt: 2 }}>
+            <Box
+              sx={{ display: "flex", flexDirection: "column", gap: 2, mt: 2 }}
+            >
               <Alert severity="info">
                 Editing <strong>{editingMarketLaborer.roleName}</strong> on{" "}
                 {dayjs(editingMarketLaborer.date).format("DD MMM YYYY")}
                 {editingMarketLaborer.groupCount > 1 && (
                   <Typography variant="body2" sx={{ mt: 0.5 }}>
-                    This will update all {editingMarketLaborer.groupCount} workers in this group.
+                    This will update all {editingMarketLaborer.groupCount}{" "}
+                    workers in this group.
                   </Typography>
                 )}
               </Alert>
@@ -3500,12 +3693,22 @@ export default function AttendancePage() {
                   borderRadius: 1,
                 }}
               >
-                <Box sx={{ display: "flex", justifyContent: "space-between", mb: 1 }}>
+                <Box
+                  sx={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    mb: 1,
+                  }}
+                >
                   <Typography variant="body2" color="text.secondary">
                     Per Person:
                   </Typography>
                   <Typography variant="body2" fontWeight={500}>
-                    ₹{(marketLaborerEditForm.rate_per_person * marketLaborerEditForm.day_units).toLocaleString()}
+                    ₹
+                    {(
+                      marketLaborerEditForm.rate_per_person *
+                      marketLaborerEditForm.day_units
+                    ).toLocaleString()}
                   </Typography>
                 </Box>
                 <Divider sx={{ my: 1 }} />
@@ -3513,8 +3716,17 @@ export default function AttendancePage() {
                   <Typography variant="body1" fontWeight={600}>
                     Total ({marketLaborerEditForm.count} workers):
                   </Typography>
-                  <Typography variant="body1" fontWeight={700} color="success.main">
-                    ₹{(marketLaborerEditForm.count * marketLaborerEditForm.rate_per_person * marketLaborerEditForm.day_units).toLocaleString()}
+                  <Typography
+                    variant="body1"
+                    fontWeight={700}
+                    color="success.main"
+                  >
+                    ₹
+                    {(
+                      marketLaborerEditForm.count *
+                      marketLaborerEditForm.rate_per_person *
+                      marketLaborerEditForm.day_units
+                    ).toLocaleString()}
                   </Typography>
                 </Box>
               </Box>
@@ -3710,7 +3922,9 @@ export default function AttendancePage() {
                 for this date. This action cannot be undone.
               </Alert>
 
-              <Box sx={{ bgcolor: "action.hover", p: 2, borderRadius: 1, mb: 2 }}>
+              <Box
+                sx={{ bgcolor: "action.hover", p: 2, borderRadius: 1, mb: 2 }}
+              >
                 <Box
                   sx={{
                     display: "flex",
@@ -3824,223 +4038,364 @@ export default function AttendancePage() {
         maxWidth="md"
         fullWidth
       >
-        {viewSummaryDate && (() => {
-          const summaryEntry = combinedDateEntries.find(
-            (e) => e.type === "attendance" && e.date === viewSummaryDate
-          );
-          const summary = summaryEntry?.type === "attendance" ? summaryEntry.summary : null;
+        {viewSummaryDate &&
+          (() => {
+            const summaryEntry = combinedDateEntries.find(
+              (e) => e.type === "attendance" && e.date === viewSummaryDate
+            );
+            const summary =
+              summaryEntry?.type === "attendance" ? summaryEntry.summary : null;
 
-          if (!summary) return null;
+            if (!summary) return null;
 
-          return (
-            <>
-              <DialogTitle sx={{ bgcolor: "primary.main", color: "white" }}>
-                <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
-                  <VisibilityIcon />
-                  <Box>
-                    <Typography variant="h6">
-                      Attendance Summary
-                    </Typography>
-                    <Typography variant="body2" sx={{ opacity: 0.9 }}>
-                      {dayjs(viewSummaryDate).format("dddd, DD MMMM YYYY")}
-                    </Typography>
+            return (
+              <>
+                <DialogTitle sx={{ bgcolor: "primary.main", color: "white" }}>
+                  <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
+                    <VisibilityIcon />
+                    <Box>
+                      <Typography variant="h6">Attendance Summary</Typography>
+                      <Typography variant="body2" sx={{ opacity: 0.9 }}>
+                        {dayjs(viewSummaryDate).format("dddd, DD MMMM YYYY")}
+                      </Typography>
+                    </Box>
                   </Box>
-                </Box>
-              </DialogTitle>
-              <DialogContent sx={{ p: 3 }}>
-                {/* Summary Stats */}
-                <Box sx={{ display: "flex", flexWrap: "wrap", gap: 2, mb: 3 }}>
-                  <Paper sx={{ p: 2, flex: "1 1 150px", textAlign: "center" }}>
-                    <Typography variant="caption" color="text.secondary">Total Laborers</Typography>
-                    <Typography variant="h4" fontWeight={700}>{summary.totalLaborerCount}</Typography>
-                  </Paper>
-                  <Paper sx={{ p: 2, flex: "1 1 150px", textAlign: "center" }}>
-                    <Typography variant="caption" color="text.secondary">Daily/Contract</Typography>
-                    <Typography variant="h4" fontWeight={700} color="info.main">
-                      {summary.dailyLaborerCount + summary.contractLaborerCount}
-                    </Typography>
-                  </Paper>
-                  <Paper sx={{ p: 2, flex: "1 1 150px", textAlign: "center" }}>
-                    <Typography variant="caption" color="text.secondary">Market</Typography>
-                    <Typography variant="h4" fontWeight={700} color="secondary.main">
-                      {summary.marketLaborerCount}
-                    </Typography>
-                  </Paper>
-                  <Paper sx={{ p: 2, flex: "1 1 150px", textAlign: "center" }}>
-                    <Typography variant="caption" color="text.secondary">Total Expense</Typography>
-                    <Typography variant="h4" fontWeight={700} color="success.main">
-                      ₹{(summary.totalExpense + (summary.teaShop?.total || 0)).toLocaleString()}
-                    </Typography>
-                  </Paper>
-                </Box>
-
-                {/* Status */}
-                <Box sx={{ mb: 3 }}>
-                  <Typography variant="subtitle2" sx={{ mb: 1 }}>Status</Typography>
-                  <Chip
-                    label={summary.attendanceStatus === "morning_entry" ? "🌅 Morning Only" : "✓ Confirmed"}
-                    color={summary.attendanceStatus === "morning_entry" ? "warning" : "success"}
-                  />
-                </Box>
-
-                {/* Timing */}
-                <Box sx={{ mb: 3 }}>
-                  <Typography variant="subtitle2" sx={{ mb: 1 }}>Work Timing</Typography>
-                  <Box sx={{ display: "flex", gap: 3 }}>
-                    <Typography variant="body2">
-                      <strong>First In:</strong> {formatTime(summary.firstInTime) || "N/A"}
-                    </Typography>
-                    <Typography variant="body2">
-                      <strong>Last Out:</strong> {summary.attendanceStatus === "morning_entry" ? "Pending" : formatTime(summary.lastOutTime) || "N/A"}
-                    </Typography>
-                  </Box>
-                </Box>
-
-                {/* Work Description */}
-                {(summary.workDescription || summary.comments) && (
-                  <Box sx={{ mb: 3 }}>
-                    <Typography variant="subtitle2" sx={{ mb: 1 }}>Work Description</Typography>
-                    <Paper sx={{ p: 2, bgcolor: "action.hover" }}>
-                      {summary.workDescription && (
-                        <Typography variant="body2" sx={{ mb: 0.5 }}>
-                          {summary.workDescription}
-                        </Typography>
-                      )}
-                      {summary.comments && (
-                        <Typography variant="body2" color="text.secondary">
-                          Comments: {summary.comments}
-                        </Typography>
-                      )}
+                </DialogTitle>
+                <DialogContent sx={{ p: 3 }}>
+                  {/* Summary Stats */}
+                  <Box
+                    sx={{ display: "flex", flexWrap: "wrap", gap: 2, mb: 3 }}
+                  >
+                    <Paper
+                      sx={{ p: 2, flex: "1 1 150px", textAlign: "center" }}
+                    >
+                      <Typography variant="caption" color="text.secondary">
+                        Total Laborers
+                      </Typography>
+                      <Typography variant="h4" fontWeight={700}>
+                        {summary.totalLaborerCount}
+                      </Typography>
+                    </Paper>
+                    <Paper
+                      sx={{ p: 2, flex: "1 1 150px", textAlign: "center" }}
+                    >
+                      <Typography variant="caption" color="text.secondary">
+                        Daily/Contract
+                      </Typography>
+                      <Typography
+                        variant="h4"
+                        fontWeight={700}
+                        color="info.main"
+                      >
+                        {summary.dailyLaborerCount +
+                          summary.contractLaborerCount}
+                      </Typography>
+                    </Paper>
+                    <Paper
+                      sx={{ p: 2, flex: "1 1 150px", textAlign: "center" }}
+                    >
+                      <Typography variant="caption" color="text.secondary">
+                        Market
+                      </Typography>
+                      <Typography
+                        variant="h4"
+                        fontWeight={700}
+                        color="secondary.main"
+                      >
+                        {summary.marketLaborerCount}
+                      </Typography>
+                    </Paper>
+                    <Paper
+                      sx={{ p: 2, flex: "1 1 150px", textAlign: "center" }}
+                    >
+                      <Typography variant="caption" color="text.secondary">
+                        Total Expense
+                      </Typography>
+                      <Typography
+                        variant="h4"
+                        fontWeight={700}
+                        color="success.main"
+                      >
+                        ₹
+                        {(
+                          summary.totalExpense + (summary.teaShop?.total || 0)
+                        ).toLocaleString()}
+                      </Typography>
                     </Paper>
                   </Box>
-                )}
 
-                {/* Laborers List */}
-                {summary.records.length > 0 && (
+                  {/* Status */}
                   <Box sx={{ mb: 3 }}>
                     <Typography variant="subtitle2" sx={{ mb: 1 }}>
-                      Laborers ({summary.records.length})
+                      Status
                     </Typography>
-                    <TableContainer component={Paper} variant="outlined">
-                      <Table size="small">
-                        <TableHead>
-                          <TableRow sx={{ bgcolor: "action.selected" }}>
-                            <TableCell sx={{ fontWeight: 700 }}>Name</TableCell>
-                            <TableCell sx={{ fontWeight: 700 }}>Type</TableCell>
-                            <TableCell sx={{ fontWeight: 700 }}>Team</TableCell>
-                            <TableCell align="center" sx={{ fontWeight: 700 }}>In</TableCell>
-                            <TableCell align="center" sx={{ fontWeight: 700 }}>Out</TableCell>
-                            <TableCell align="center" sx={{ fontWeight: 700 }}>Days</TableCell>
-                            <TableCell align="right" sx={{ fontWeight: 700 }}>Earnings</TableCell>
-                            <TableCell align="center" sx={{ fontWeight: 700 }}>Payment</TableCell>
-                          </TableRow>
-                        </TableHead>
-                        <TableBody>
-                          {summary.records.map((record) => (
-                            <TableRow key={record.id}>
-                              <TableCell>{record.laborer_name}</TableCell>
-                              <TableCell>
-                                <Chip
-                                  label={record.laborer_type === "contract" ? "Contract" : "Daily"}
-                                  size="small"
-                                  color={record.laborer_type === "contract" ? "info" : "warning"}
-                                  variant="outlined"
-                                />
-                              </TableCell>
-                              <TableCell>{record.team_name || "-"}</TableCell>
-                              <TableCell align="center">{formatTime(record.in_time) || "-"}</TableCell>
-                              <TableCell align="center">{formatTime(record.out_time) || "-"}</TableCell>
-                              <TableCell align="center">{record.work_days}</TableCell>
-                              <TableCell align="right">₹{record.daily_earnings.toLocaleString()}</TableCell>
-                              <TableCell align="center">
-                                <Chip
-                                  label={record.is_paid ? "Paid" : "Pending"}
-                                  size="small"
-                                  color={record.is_paid ? "success" : "warning"}
-                                  variant={record.is_paid ? "filled" : "outlined"}
-                                />
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </TableContainer>
+                    <Chip
+                      label={
+                        summary.attendanceStatus === "morning_entry"
+                          ? "🌅 Morning Only"
+                          : "✓ Confirmed"
+                      }
+                      color={
+                        summary.attendanceStatus === "morning_entry"
+                          ? "warning"
+                          : "success"
+                      }
+                      variant="outlined"
+                    />
                   </Box>
-                )}
 
-                {/* Market Laborers */}
-                {summary.marketLaborers && summary.marketLaborers.length > 0 && (
+                  {/* Timing */}
                   <Box sx={{ mb: 3 }}>
                     <Typography variant="subtitle2" sx={{ mb: 1 }}>
-                      Market Laborers ({summary.marketLaborers.length})
+                      Work Timing
                     </Typography>
-                    <TableContainer component={Paper} variant="outlined">
-                      <Table size="small">
-                        <TableHead>
-                          <TableRow sx={{ bgcolor: "secondary.50" }}>
-                            <TableCell sx={{ fontWeight: 700 }}>Name</TableCell>
-                            <TableCell sx={{ fontWeight: 700 }}>Role</TableCell>
-                            <TableCell align="center" sx={{ fontWeight: 700 }}>In</TableCell>
-                            <TableCell align="center" sx={{ fontWeight: 700 }}>Out</TableCell>
-                            <TableCell align="center" sx={{ fontWeight: 700 }}>Days</TableCell>
-                            <TableCell align="right" sx={{ fontWeight: 700 }}>Earnings</TableCell>
-                          </TableRow>
-                        </TableHead>
-                        <TableBody>
-                          {summary.marketLaborers.map((ml) => (
-                            <TableRow key={ml.id}>
-                              <TableCell>{ml.tempName}</TableCell>
-                              <TableCell>
-                                <Chip
-                                  label={ml.roleName}
-                                  size="small"
-                                  color="secondary"
-                                  variant="outlined"
-                                />
-                              </TableCell>
-                              <TableCell align="center">{ml.inTime?.substring(0, 5) || "-"}</TableCell>
-                              <TableCell align="center">{ml.outTime?.substring(0, 5) || "-"}</TableCell>
-                              <TableCell align="center">{ml.dayUnits}</TableCell>
-                              <TableCell align="right">₹{ml.dailyEarnings.toLocaleString()}</TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </TableContainer>
+                    <Box sx={{ display: "flex", gap: 3 }}>
+                      <Typography variant="body2">
+                        <strong>First In:</strong>{" "}
+                        {formatTime(summary.firstInTime) || "N/A"}
+                      </Typography>
+                      <Typography variant="body2">
+                        <strong>Last Out:</strong>{" "}
+                        {summary.attendanceStatus === "morning_entry"
+                          ? "Pending"
+                          : formatTime(summary.lastOutTime) || "N/A"}
+                      </Typography>
+                    </Box>
                   </Box>
-                )}
 
-                {/* Tea Shop */}
-                {summary.teaShop && (
-                  <Box>
-                    <Typography variant="subtitle2" sx={{ mb: 1 }}>Tea Shop</Typography>
-                    <Paper sx={{ p: 2, bgcolor: "action.hover" }}>
-                      <Box sx={{ display: "flex", gap: 3 }}>
-                        <Typography variant="body2">
-                          <strong>Tea:</strong> ₹{summary.teaShop.teaTotal.toLocaleString()}
+                  {/* Work Description */}
+                  {(summary.workDescription || summary.comments) && (
+                    <Box sx={{ mb: 3 }}>
+                      <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                        Work Description
+                      </Typography>
+                      <Paper sx={{ p: 2, bgcolor: "action.hover" }}>
+                        {summary.workDescription && (
+                          <Typography variant="body2" sx={{ mb: 0.5 }}>
+                            {summary.workDescription}
+                          </Typography>
+                        )}
+                        {summary.comments && (
+                          <Typography variant="body2" color="text.secondary">
+                            Comments: {summary.comments}
+                          </Typography>
+                        )}
+                      </Paper>
+                    </Box>
+                  )}
+
+                  {/* Laborers List */}
+                  {summary.records.length > 0 && (
+                    <Box sx={{ mb: 3 }}>
+                      <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                        Laborers ({summary.records.length})
+                      </Typography>
+                      <TableContainer component={Paper} variant="outlined">
+                        <Table size="small">
+                          <TableHead>
+                            <TableRow sx={{ bgcolor: "action.selected" }}>
+                              <TableCell sx={{ fontWeight: 700 }}>
+                                Name
+                              </TableCell>
+                              <TableCell sx={{ fontWeight: 700 }}>
+                                Type
+                              </TableCell>
+                              <TableCell sx={{ fontWeight: 700 }}>
+                                Team
+                              </TableCell>
+                              <TableCell
+                                align="center"
+                                sx={{ fontWeight: 700 }}
+                              >
+                                In
+                              </TableCell>
+                              <TableCell
+                                align="center"
+                                sx={{ fontWeight: 700 }}
+                              >
+                                Out
+                              </TableCell>
+                              <TableCell
+                                align="center"
+                                sx={{ fontWeight: 700 }}
+                              >
+                                Days
+                              </TableCell>
+                              <TableCell align="right" sx={{ fontWeight: 700 }}>
+                                Earnings
+                              </TableCell>
+                              <TableCell
+                                align="center"
+                                sx={{ fontWeight: 700 }}
+                              >
+                                Payment
+                              </TableCell>
+                            </TableRow>
+                          </TableHead>
+                          <TableBody>
+                            {summary.records.map((record) => (
+                              <TableRow key={record.id}>
+                                <TableCell>{record.laborer_name}</TableCell>
+                                <TableCell>
+                                  <Chip
+                                    label={
+                                      record.laborer_type === "contract"
+                                        ? "Contract"
+                                        : "Daily"
+                                    }
+                                    size="small"
+                                    color={
+                                      record.laborer_type === "contract"
+                                        ? "info"
+                                        : "warning"
+                                    }
+                                    variant="outlined"
+                                  />
+                                </TableCell>
+                                <TableCell>{record.team_name || "-"}</TableCell>
+                                <TableCell align="center">
+                                  {formatTime(record.in_time) || "-"}
+                                </TableCell>
+                                <TableCell align="center">
+                                  {formatTime(record.out_time) || "-"}
+                                </TableCell>
+                                <TableCell align="center">
+                                  {record.work_days}
+                                </TableCell>
+                                <TableCell align="right">
+                                  ₹{record.daily_earnings.toLocaleString()}
+                                </TableCell>
+                                <TableCell align="center">
+                                  <Chip
+                                    label={record.is_paid ? "Paid" : "Pending"}
+                                    size="small"
+                                    color={
+                                      record.is_paid ? "success" : "warning"
+                                    }
+                                    variant={
+                                      record.is_paid ? "filled" : "outlined"
+                                    }
+                                  />
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </TableContainer>
+                    </Box>
+                  )}
+
+                  {/* Market Laborers */}
+                  {summary.marketLaborers &&
+                    summary.marketLaborers.length > 0 && (
+                      <Box sx={{ mb: 3 }}>
+                        <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                          Market Laborers ({summary.marketLaborers.length})
                         </Typography>
-                        <Typography variant="body2">
-                          <strong>Snacks:</strong> ₹{summary.teaShop.snacksTotal.toLocaleString()}
-                        </Typography>
-                        <Typography variant="body2" fontWeight={700}>
-                          <strong>Total:</strong> ₹{summary.teaShop.total.toLocaleString()}
-                        </Typography>
+                        <TableContainer component={Paper} variant="outlined">
+                          <Table size="small">
+                            <TableHead>
+                              <TableRow sx={{ bgcolor: "secondary.50" }}>
+                                <TableCell sx={{ fontWeight: 700 }}>
+                                  Name
+                                </TableCell>
+                                <TableCell sx={{ fontWeight: 700 }}>
+                                  Role
+                                </TableCell>
+                                <TableCell
+                                  align="center"
+                                  sx={{ fontWeight: 700 }}
+                                >
+                                  In
+                                </TableCell>
+                                <TableCell
+                                  align="center"
+                                  sx={{ fontWeight: 700 }}
+                                >
+                                  Out
+                                </TableCell>
+                                <TableCell
+                                  align="center"
+                                  sx={{ fontWeight: 700 }}
+                                >
+                                  Days
+                                </TableCell>
+                                <TableCell
+                                  align="right"
+                                  sx={{ fontWeight: 700 }}
+                                >
+                                  Earnings
+                                </TableCell>
+                              </TableRow>
+                            </TableHead>
+                            <TableBody>
+                              {summary.marketLaborers.map((ml) => (
+                                <TableRow key={ml.id}>
+                                  <TableCell>{ml.tempName}</TableCell>
+                                  <TableCell>
+                                    <Chip
+                                      label={ml.roleName}
+                                      size="small"
+                                      color="secondary"
+                                      variant="outlined"
+                                    />
+                                  </TableCell>
+                                  <TableCell align="center">
+                                    {ml.inTime?.substring(0, 5) || "-"}
+                                  </TableCell>
+                                  <TableCell align="center">
+                                    {ml.outTime?.substring(0, 5) || "-"}
+                                  </TableCell>
+                                  <TableCell align="center">
+                                    {ml.dayUnits}
+                                  </TableCell>
+                                  <TableCell align="right">
+                                    ₹{ml.dailyEarnings.toLocaleString()}
+                                  </TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </TableContainer>
                       </Box>
-                    </Paper>
-                  </Box>
-                )}
-              </DialogContent>
-              <DialogActions sx={{ px: 3, pb: 2 }}>
-                <Button
-                  onClick={() => setViewSummaryDate(null)}
-                  variant="contained"
-                >
-                  Close
-                </Button>
-              </DialogActions>
-            </>
-          );
-        })()}
+                    )}
+
+                  {/* Tea Shop */}
+                  {summary.teaShop && (
+                    <Box>
+                      <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                        Tea Shop
+                      </Typography>
+                      <Paper sx={{ p: 2, bgcolor: "action.hover" }}>
+                        <Box sx={{ display: "flex", gap: 3 }}>
+                          <Typography variant="body2">
+                            <strong>Tea:</strong> ₹
+                            {summary.teaShop.teaTotal.toLocaleString()}
+                          </Typography>
+                          <Typography variant="body2">
+                            <strong>Snacks:</strong> ₹
+                            {summary.teaShop.snacksTotal.toLocaleString()}
+                          </Typography>
+                          <Typography variant="body2" fontWeight={700}>
+                            <strong>Total:</strong> ₹
+                            {summary.teaShop.total.toLocaleString()}
+                          </Typography>
+                        </Box>
+                      </Paper>
+                    </Box>
+                  )}
+                </DialogContent>
+                <DialogActions sx={{ px: 3, pb: 2 }}>
+                  <Button
+                    onClick={() => setViewSummaryDate(null)}
+                    variant="contained"
+                  >
+                    Close
+                  </Button>
+                </DialogActions>
+              </>
+            );
+          })()}
       </Dialog>
 
       {/* SpeedDial for Add Attendance - Click-only (not hover) */}
@@ -4112,7 +4467,9 @@ export default function AttendancePage() {
               "& .MuiSpeedDialAction-staticTooltipLabel": {
                 whiteSpace: "nowrap",
                 bgcolor: todayHoliday ? "error.main" : "success.main",
-                color: todayHoliday ? "error.contrastText" : "success.contrastText",
+                color: todayHoliday
+                  ? "error.contrastText"
+                  : "success.contrastText",
               },
             }}
           />

@@ -39,6 +39,7 @@ import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
 import { createClient } from "@/lib/supabase/client";
 import { useSite } from "@/contexts/SiteContext";
 import { useAuth } from "@/contexts/AuthContext";
+import { useDateRange } from "@/contexts/DateRangeContext";
 import PageHeader from "@/components/layout/PageHeader";
 import { hasEditPermission } from "@/lib/permissions";
 import type {
@@ -49,15 +50,25 @@ import type {
 import dayjs from "dayjs";
 import { useRouter } from "next/navigation";
 
+interface SitePayer {
+  id: string;
+  name: string;
+  is_active: boolean;
+}
+
 interface ExpenseWithCategory extends Expense {
   category_name?: string;
+  payer_name?: string;
 }
 
 export default function ExpensesPage() {
   const { selectedSite } = useSite();
   const { userProfile } = useAuth();
+  const { formatForApi, isAllTime } = useDateRange();
   const supabase = createClient();
   const router = useRouter();
+
+  const { dateFrom, dateTo } = formatForApi();
 
   const [expenses, setExpenses] = useState<ExpenseWithCategory[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
@@ -65,10 +76,10 @@ export default function ExpensesPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
   const [activeTab, setActiveTab] = useState<ExpenseModule | "all">("all");
-  const [dateFrom, setDateFrom] = useState(
-    dayjs().subtract(30, "days").format("YYYY-MM-DD")
-  );
-  const [dateTo, setDateTo] = useState(dayjs().format("YYYY-MM-DD"));
+
+  // Multi-payer state
+  const [hasMultiplePayers, setHasMultiplePayers] = useState(false);
+  const [sitePayers, setSitePayers] = useState<SitePayer[]>([]);
 
   const [form, setForm] = useState({
     module: "general" as ExpenseModule,
@@ -79,6 +90,7 @@ export default function ExpensesPage() {
     description: "",
     payment_mode: "cash" as PaymentMode,
     is_cleared: false,
+    site_payer_id: "",
   });
 
   const canEdit = hasEditPermission(userProfile?.role);
@@ -95,17 +107,62 @@ export default function ExpensesPage() {
     fetchCategories();
   }, []);
 
+  // Fetch multi-payer settings when site changes
+  useEffect(() => {
+    const fetchPayerSettings = async () => {
+      if (!selectedSite) {
+        setHasMultiplePayers(false);
+        setSitePayers([]);
+        return;
+      }
+
+      try {
+        // Fetch site's multi-payer setting
+        // Note: Using type assertion until migration is run and types regenerated
+        const { data: siteData } = await supabase
+          .from("sites")
+          .select("*")
+          .eq("id", selectedSite.id)
+          .single();
+
+        const isMultiPayer = (siteData as any)?.has_multiple_payers || false;
+        setHasMultiplePayers(isMultiPayer);
+
+        // Fetch payers if multi-payer is enabled
+        if (isMultiPayer) {
+          // Note: Using type assertion until migration is run and types regenerated
+          const { data: payersData } = await (supabase as any)
+            .from("site_payers")
+            .select("id, name, is_active")
+            .eq("site_id", selectedSite.id)
+            .eq("is_active", true)
+            .order("name");
+          setSitePayers(payersData || []);
+        } else {
+          setSitePayers([]);
+        }
+      } catch (err) {
+        console.error("Error fetching payer settings:", err);
+      }
+    };
+
+    fetchPayerSettings();
+  }, [selectedSite]);
+
   const fetchExpenses = async () => {
     if (!selectedSite) return;
     setLoading(true);
     try {
       let query = supabase
         .from("expenses")
-        .select(`*, expense_categories(name)`)
+        .select(`*, expense_categories(name), site_payers(name)`)
         .eq("site_id", selectedSite.id)
-        .gte("date", dateFrom)
-        .lte("date", dateTo)
         .order("date", { ascending: false });
+
+      // Only apply date filters if not "All Time"
+      if (!isAllTime && dateFrom && dateTo) {
+        query = query.gte("date", dateFrom).lte("date", dateTo);
+      }
 
       if (activeTab !== "all") query = query.eq("module", activeTab);
       const { data, error } = await query;
@@ -115,6 +172,7 @@ export default function ExpensesPage() {
         (data || []).map((e: any) => ({
           ...e,
           category_name: e.expense_categories?.name,
+          payer_name: e.site_payers?.name,
         }))
       );
     } catch (error: any) {
@@ -126,7 +184,7 @@ export default function ExpensesPage() {
 
   useEffect(() => {
     fetchExpenses();
-  }, [selectedSite, dateFrom, dateTo, activeTab]);
+  }, [selectedSite, dateFrom, dateTo, activeTab, isAllTime]);
 
   const handleOpenDialog = (expense?: Expense) => {
     if (expense) {
@@ -140,6 +198,7 @@ export default function ExpensesPage() {
         description: expense.description || "",
         payment_mode: expense.payment_mode || "cash",
         is_cleared: expense.is_cleared,
+        site_payer_id: (expense as any).site_payer_id || "",
       });
     } else {
       setEditingExpense(null);
@@ -152,6 +211,7 @@ export default function ExpensesPage() {
         description: "",
         payment_mode: "cash",
         is_cleared: false,
+        site_payer_id: "",
       });
     }
     setDialogOpen(true);
@@ -174,6 +234,7 @@ export default function ExpensesPage() {
         description: form.description || null,
         payment_mode: form.payment_mode,
         is_cleared: form.is_cleared,
+        site_payer_id: form.site_payer_id || null,
       };
 
       if (editingExpense) {
@@ -213,8 +274,8 @@ export default function ExpensesPage() {
     return { total, cleared, pending: total - cleared };
   }, [expenses]);
 
-  const columns = useMemo<MRT_ColumnDef<ExpenseWithCategory>[]>(
-    () => [
+  const columns = useMemo<MRT_ColumnDef<ExpenseWithCategory>[]>(() => {
+    const cols: MRT_ColumnDef<ExpenseWithCategory>[] = [
       {
         accessorKey: "date",
         header: "Date",
@@ -247,6 +308,26 @@ export default function ExpensesPage() {
         size: 150,
         Cell: ({ cell }) => cell.getValue<string>() || "-",
       },
+    ];
+
+    // Add Paid By column if multi-payer is enabled
+    if (hasMultiplePayers) {
+      cols.push({
+        accessorKey: "payer_name",
+        header: "Paid By",
+        size: 120,
+        Cell: ({ cell }) => {
+          const value = cell.getValue<string>();
+          return value ? (
+            <Chip label={value} size="small" variant="outlined" color="primary" />
+          ) : (
+            <Typography variant="body2" color="text.secondary">-</Typography>
+          );
+        },
+      });
+    }
+
+    cols.push(
       {
         accessorKey: "is_cleared",
         header: "Status",
@@ -282,10 +363,11 @@ export default function ExpensesPage() {
             </IconButton>
           </Box>
         ),
-      },
-    ],
-    [canEdit]
-  );
+      }
+    );
+
+    return cols;
+  }, [canEdit, hasMultiplePayers]);
 
   if (!selectedSite)
     return (
@@ -300,8 +382,6 @@ export default function ExpensesPage() {
       <PageHeader
         title="Daily Expenses"
         subtitle={`Track expenses for ${selectedSite.name}`}
-        onRefresh={fetchExpenses}
-        isLoading={loading}
         actions={
           <Button
             variant="contained"
@@ -363,7 +443,6 @@ export default function ExpensesPage() {
           <Tabs
             value={activeTab}
             onChange={(_, v) => setActiveTab(v)}
-            sx={{ mb: 2 }}
           >
             <Tab label="All" value="all" />
             <Tab label="Labor" value="labor" />
@@ -371,28 +450,6 @@ export default function ExpensesPage() {
             <Tab label="Machinery" value="machinery" />
             <Tab label="General" value="general" />
           </Tabs>
-          <Grid container spacing={2}>
-            <Grid size={{ xs: 12, sm: 6 }}>
-              <TextField
-                fullWidth
-                label="From"
-                type="date"
-                value={dateFrom}
-                onChange={(e) => setDateFrom(e.target.value)}
-                slotProps={{ inputLabel: { shrink: true } }}
-              />
-            </Grid>
-            <Grid size={{ xs: 12, sm: 6 }}>
-              <TextField
-                fullWidth
-                label="To"
-                type="date"
-                value={dateTo}
-                onChange={(e) => setDateTo(e.target.value)}
-                slotProps={{ inputLabel: { shrink: true } }}
-              />
-            </Grid>
-          </Grid>
         </CardContent>
       </Card>
 
@@ -510,6 +567,27 @@ export default function ExpensesPage() {
                 <MenuItem value="cheque">Cheque</MenuItem>
               </Select>
             </FormControl>
+            {hasMultiplePayers && sitePayers.length > 0 && (
+              <FormControl fullWidth>
+                <InputLabel>Paid By</InputLabel>
+                <Select
+                  value={form.site_payer_id}
+                  onChange={(e) =>
+                    setForm({ ...form, site_payer_id: e.target.value })
+                  }
+                  label="Paid By"
+                >
+                  <MenuItem value="">
+                    <em>Not specified</em>
+                  </MenuItem>
+                  {sitePayers.map((payer) => (
+                    <MenuItem key={payer.id} value={payer.id}>
+                      {payer.name}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            )}
             <FormControlLabel
               control={
                 <Switch

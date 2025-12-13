@@ -241,8 +241,6 @@ export default function HolidaysPage() {
       <PageHeader
         title="Site Holidays"
         subtitle={`Manage holidays for ${selectedSite.name}`}
-        onRefresh={fetchHolidays}
-        isLoading={loading}
         actions={
           <Button
             variant="contained"

@@ -1,0 +1,522 @@
+"use client";
+
+import { useMemo, useState, useCallback } from "react";
+import {
+  Box,
+  Button,
+  Chip,
+  IconButton,
+  Typography,
+  TextField,
+  InputAdornment,
+  Fab,
+  Tooltip,
+  Tabs,
+  Tab,
+  Card,
+  CardContent,
+  Grid,
+  Stack,
+} from "@mui/material";
+import {
+  Add as AddIcon,
+  Edit as EditIcon,
+  Search as SearchIcon,
+  Visibility as ViewIcon,
+  CheckCircle as ApproveIcon,
+  Cancel as CancelIcon,
+  ShoppingCart as ConvertIcon,
+} from "@mui/icons-material";
+import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
+import PageHeader from "@/components/layout/PageHeader";
+import { useAuth } from "@/contexts/AuthContext";
+import { useSite } from "@/contexts/SiteContext";
+import { useIsMobile } from "@/hooks/useIsMobile";
+import { hasAdminPermission, hasEditPermission } from "@/lib/permissions";
+import {
+  useMaterialRequests,
+  useRequestSummary,
+  useCancelMaterialRequest,
+  useApproveMaterialRequest,
+  useRejectMaterialRequest,
+} from "@/hooks/queries/useMaterialRequests";
+import MaterialRequestDialog from "@/components/materials/MaterialRequestDialog";
+import RequestApprovalDialog from "@/components/materials/RequestApprovalDialog";
+import RequestDetailsDrawer from "@/components/materials/RequestDetailsDrawer";
+import type {
+  MaterialRequestWithDetails,
+  MaterialRequestStatus,
+  RequestPriority,
+} from "@/types/material.types";
+import { formatDate } from "@/lib/formatters";
+
+const STATUS_COLORS: Record<MaterialRequestStatus, "default" | "info" | "warning" | "success" | "error"> = {
+  draft: "default",
+  pending: "warning",
+  approved: "info",
+  rejected: "error",
+  ordered: "info",
+  partial_fulfilled: "warning",
+  fulfilled: "success",
+  cancelled: "error",
+};
+
+const STATUS_LABELS: Record<MaterialRequestStatus, string> = {
+  draft: "Draft",
+  pending: "Pending",
+  approved: "Approved",
+  rejected: "Rejected",
+  ordered: "Ordered",
+  partial_fulfilled: "Partial",
+  fulfilled: "Fulfilled",
+  cancelled: "Cancelled",
+};
+
+const PRIORITY_COLORS: Record<RequestPriority, "default" | "info" | "warning" | "error"> = {
+  low: "default",
+  normal: "info",
+  high: "warning",
+  urgent: "error",
+};
+
+type TabValue = "all" | "pending" | "approved" | "fulfilled" | "rejected";
+
+export default function MaterialRequestsPage() {
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [approvalDialogOpen, setApprovalDialogOpen] = useState(false);
+  const [detailsDrawerOpen, setDetailsDrawerOpen] = useState(false);
+  const [editingRequest, setEditingRequest] = useState<MaterialRequestWithDetails | null>(null);
+  const [selectedRequest, setSelectedRequest] = useState<MaterialRequestWithDetails | null>(null);
+  const [currentTab, setCurrentTab] = useState<TabValue>("all");
+  const [searchTerm, setSearchTerm] = useState("");
+
+  const { userProfile, user } = useAuth();
+  const { selectedSite } = useSite();
+  const isMobile = useIsMobile();
+  const canEdit = hasEditPermission(userProfile?.role);
+  const isAdmin = hasAdminPermission(userProfile?.role);
+
+  const { data: allRequests = [], isLoading } = useMaterialRequests(selectedSite?.id);
+  const { data: summary } = useRequestSummary(selectedSite?.id);
+
+  const cancelRequest = useCancelMaterialRequest();
+  const approveRequest = useApproveMaterialRequest();
+  const rejectRequest = useRejectMaterialRequest();
+
+  // Filter requests based on tab and search
+  const filteredRequests = useMemo(() => {
+    let filtered = allRequests;
+
+    // Filter by tab
+    switch (currentTab) {
+      case "pending":
+        filtered = filtered.filter((r) => r.status === "pending");
+        break;
+      case "approved":
+        filtered = filtered.filter((r) =>
+          ["approved", "ordered", "partial_fulfilled"].includes(r.status)
+        );
+        break;
+      case "fulfilled":
+        filtered = filtered.filter((r) => r.status === "fulfilled");
+        break;
+      case "rejected":
+        filtered = filtered.filter((r) =>
+          ["rejected", "cancelled"].includes(r.status)
+        );
+        break;
+    }
+
+    // Filter by search
+    if (searchTerm) {
+      const term = searchTerm.toLowerCase();
+      filtered = filtered.filter(
+        (r) =>
+          r.request_number.toLowerCase().includes(term) ||
+          r.section?.name?.toLowerCase().includes(term)
+      );
+    }
+
+    return filtered;
+  }, [allRequests, currentTab, searchTerm]);
+
+  const handleOpenDialog = useCallback((request?: MaterialRequestWithDetails) => {
+    setEditingRequest(request || null);
+    setDialogOpen(true);
+  }, []);
+
+  const handleCloseDialog = useCallback(() => {
+    setDialogOpen(false);
+    setEditingRequest(null);
+  }, []);
+
+  const handleOpenApprovalDialog = useCallback((request: MaterialRequestWithDetails) => {
+    setSelectedRequest(request);
+    setApprovalDialogOpen(true);
+  }, []);
+
+  const handleCloseApprovalDialog = useCallback(() => {
+    setApprovalDialogOpen(false);
+    setSelectedRequest(null);
+  }, []);
+
+  const handleViewDetails = useCallback((request: MaterialRequestWithDetails) => {
+    setSelectedRequest(request);
+    setDetailsDrawerOpen(true);
+  }, []);
+
+  const handleCloseDetails = useCallback(() => {
+    setDetailsDrawerOpen(false);
+    setSelectedRequest(null);
+  }, []);
+
+  const handleCancel = useCallback(
+    async (request: MaterialRequestWithDetails) => {
+      if (!confirm("Are you sure you want to cancel this request?")) return;
+      try {
+        await cancelRequest.mutateAsync(request.id);
+      } catch (error) {
+        console.error("Failed to cancel request:", error);
+      }
+    },
+    [cancelRequest]
+  );
+
+  const handleReject = useCallback(
+    async (request: MaterialRequestWithDetails) => {
+      if (!user?.id) return;
+      const reason = prompt("Enter rejection reason:");
+      if (reason === null) return;
+      try {
+        await rejectRequest.mutateAsync({ id: request.id, userId: user.id, reason });
+      } catch (error) {
+        console.error("Failed to reject request:", error);
+      }
+    },
+    [rejectRequest, user?.id]
+  );
+
+  // Table columns
+  const columns = useMemo<MRT_ColumnDef<MaterialRequestWithDetails>[]>(
+    () => [
+      {
+        accessorKey: "request_number",
+        header: "Request #",
+        size: 130,
+        Cell: ({ row }) => (
+          <Box>
+            <Typography
+              variant="body2"
+              fontWeight={500}
+              sx={{ cursor: "pointer", color: "primary.main" }}
+              onClick={() => handleViewDetails(row.original)}
+            >
+              {row.original.request_number}
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              {formatDate(row.original.request_date)}
+            </Typography>
+          </Box>
+        ),
+      },
+      {
+        accessorKey: "section.name",
+        header: "Section",
+        size: 150,
+        Cell: ({ row }) =>
+          row.original.section?.name ? (
+            <Chip
+              label={row.original.section.name}
+              size="small"
+              variant="outlined"
+            />
+          ) : (
+            "-"
+          ),
+      },
+      {
+        accessorKey: "priority",
+        header: "Priority",
+        size: 100,
+        Cell: ({ row }) => (
+          <Chip
+            label={row.original.priority}
+            color={PRIORITY_COLORS[row.original.priority]}
+            size="small"
+          />
+        ),
+      },
+      {
+        accessorKey: "status",
+        header: "Status",
+        size: 120,
+        Cell: ({ row }) => (
+          <Chip
+            label={STATUS_LABELS[row.original.status]}
+            color={STATUS_COLORS[row.original.status]}
+            size="small"
+          />
+        ),
+      },
+      {
+        accessorKey: "items",
+        header: "Items",
+        size: 80,
+        Cell: ({ row }) => row.original.items?.length || 0,
+      },
+      {
+        accessorKey: "required_by_date",
+        header: "Required By",
+        size: 110,
+        Cell: ({ row }) =>
+          row.original.required_by_date
+            ? formatDate(row.original.required_by_date)
+            : "-",
+      },
+    ],
+    [handleViewDetails]
+  );
+
+  // Row actions
+  const renderRowActions = useCallback(
+    ({ row }: { row: { original: MaterialRequestWithDetails } }) => {
+      const request = row.original;
+      return (
+        <Box sx={{ display: "flex", gap: 0.5 }}>
+          <Tooltip title="View Details">
+            <IconButton size="small" onClick={() => handleViewDetails(request)}>
+              <ViewIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+
+          {request.status === "pending" && isAdmin && (
+            <>
+              <Tooltip title="Approve">
+                <IconButton
+                  size="small"
+                  color="success"
+                  onClick={() => handleOpenApprovalDialog(request)}
+                >
+                  <ApproveIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+              <Tooltip title="Reject">
+                <IconButton
+                  size="small"
+                  color="error"
+                  onClick={() => handleReject(request)}
+                >
+                  <CancelIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            </>
+          )}
+
+          {["draft", "pending"].includes(request.status) && canEdit && (
+            <>
+              <Tooltip title="Edit">
+                <IconButton
+                  size="small"
+                  onClick={() => handleOpenDialog(request)}
+                >
+                  <EditIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+              <Tooltip title="Cancel">
+                <IconButton
+                  size="small"
+                  color="error"
+                  onClick={() => handleCancel(request)}
+                >
+                  <CancelIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            </>
+          )}
+
+          {request.status === "approved" && isAdmin && (
+            <Tooltip title="Convert to PO">
+              <IconButton size="small" color="primary">
+                <ConvertIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          )}
+        </Box>
+      );
+    },
+    [
+      canEdit,
+      isAdmin,
+      handleViewDetails,
+      handleOpenDialog,
+      handleOpenApprovalDialog,
+      handleCancel,
+      handleReject,
+    ]
+  );
+
+  if (!selectedSite) {
+    return (
+      <Box sx={{ p: 3, textAlign: "center" }}>
+        <Typography color="text.secondary">
+          Please select a site to manage material requests
+        </Typography>
+      </Box>
+    );
+  }
+
+  return (
+    <Box>
+      <PageHeader
+        title="Material Requests"
+        actions={
+          !isMobile && canEdit ? (
+            <Button
+              variant="contained"
+              startIcon={<AddIcon />}
+              onClick={() => handleOpenDialog()}
+            >
+              New Request
+            </Button>
+          ) : null
+        }
+      />
+
+      {/* Summary Cards */}
+      <Grid container spacing={2} sx={{ mb: 2 }}>
+        <Grid size={{ xs: 6, sm: 3 }}>
+          <Card>
+            <CardContent sx={{ py: 1.5 }}>
+              <Typography variant="caption" color="text.secondary">
+                Pending Approval
+              </Typography>
+              <Typography variant="h5" color="warning.main">
+                {summary?.pending || 0}
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid size={{ xs: 6, sm: 3 }}>
+          <Card>
+            <CardContent sx={{ py: 1.5 }}>
+              <Typography variant="caption" color="text.secondary">
+                Approved
+              </Typography>
+              <Typography variant="h5" color="info.main">
+                {(summary?.approved || 0) +
+                  (summary?.ordered || 0) +
+                  (summary?.partial_fulfilled || 0)}
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid size={{ xs: 6, sm: 3 }}>
+          <Card>
+            <CardContent sx={{ py: 1.5 }}>
+              <Typography variant="caption" color="text.secondary">
+                Fulfilled
+              </Typography>
+              <Typography variant="h5" color="success.main">
+                {summary?.fulfilled || 0}
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid size={{ xs: 6, sm: 3 }}>
+          <Card>
+            <CardContent sx={{ py: 1.5 }}>
+              <Typography variant="caption" color="text.secondary">
+                Total Requests
+              </Typography>
+              <Typography variant="h5">{summary?.total || 0}</Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+      </Grid>
+
+      {/* Tabs and Search */}
+      <Box sx={{ mb: 2 }}>
+        <Tabs
+          value={currentTab}
+          onChange={(_, v) => setCurrentTab(v)}
+          sx={{ mb: 2 }}
+          variant={isMobile ? "scrollable" : "standard"}
+          scrollButtons="auto"
+        >
+          <Tab label="All" value="all" />
+          <Tab label="Pending" value="pending" />
+          <Tab label="Approved" value="approved" />
+          <Tab label="Fulfilled" value="fulfilled" />
+          <Tab label="Rejected" value="rejected" />
+        </Tabs>
+
+        <TextField
+          size="small"
+          placeholder="Search request number..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          slotProps={{
+            input: {
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon fontSize="small" />
+                </InputAdornment>
+              ),
+            },
+          }}
+          sx={{ minWidth: 280 }}
+        />
+      </Box>
+
+      {/* Data Table */}
+      <DataTable
+        columns={columns}
+        data={filteredRequests}
+        isLoading={isLoading}
+        enableRowActions
+        renderRowActions={renderRowActions}
+        mobileHiddenColumns={["items", "required_by_date"]}
+        initialState={{
+          sorting: [{ id: "request_number", desc: true }],
+        }}
+      />
+
+      {/* Mobile FAB */}
+      {isMobile && canEdit && (
+        <Fab
+          color="primary"
+          sx={{ position: "fixed", bottom: 16, right: 16 }}
+          onClick={() => handleOpenDialog()}
+        >
+          <AddIcon />
+        </Fab>
+      )}
+
+      {/* Create/Edit Request Dialog */}
+      <MaterialRequestDialog
+        open={dialogOpen}
+        onClose={handleCloseDialog}
+        request={editingRequest}
+        siteId={selectedSite.id}
+      />
+
+      {/* Approval Dialog */}
+      <RequestApprovalDialog
+        open={approvalDialogOpen}
+        onClose={handleCloseApprovalDialog}
+        request={selectedRequest}
+      />
+
+      {/* Request Details Drawer */}
+      <RequestDetailsDrawer
+        open={detailsDrawerOpen}
+        onClose={handleCloseDetails}
+        request={selectedRequest}
+        onEdit={handleOpenDialog}
+        onApprove={handleOpenApprovalDialog}
+        canEdit={canEdit}
+        isAdmin={isAdmin}
+      />
+    </Box>
+  );
+}
