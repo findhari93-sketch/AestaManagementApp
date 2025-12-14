@@ -1090,6 +1090,13 @@ export default function AttendanceDrawer({
       return;
     }
 
+    // Prevent future attendance
+    const today = new Date().toISOString().split('T')[0];
+    if (selectedDate > today) {
+      setError("Cannot add attendance for future dates");
+      return;
+    }
+
     // For new dates, check if attendance already exists
     if (!initialDate) {
       const { data: existingData } = await supabase
@@ -1667,7 +1674,10 @@ export default function AttendanceDrawer({
                   type="date"
                   value={selectedDate}
                   onChange={(e) => setSelectedDate(e.target.value)}
-                  slotProps={{ inputLabel: { shrink: true } }}
+                  slotProps={{
+                    inputLabel: { shrink: true },
+                    htmlInput: { max: new Date().toISOString().split('T')[0] }
+                  }}
                   size="small"
                   disabled={!!initialDate}
                   sx={{ flex: { xs: "none", sm: 1 }, minWidth: { sm: 140 } }}

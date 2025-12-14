@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import {
   Box,
   Typography,
@@ -20,12 +20,15 @@ import { useAuth } from "@/contexts/AuthContext";
 import dayjs from "dayjs";
 import DateGroupRow from "./DateGroupRow";
 import PaymentDialog from "./PaymentDialog";
+import CancelPaymentDialog from "./CancelPaymentDialog";
 import type {
   DateGroup,
   DailyPaymentRecord,
   PaymentFilterState,
 } from "@/types/payment.types";
 import { hasEditPermission } from "@/lib/permissions";
+import { notifyEngineerPaymentReminder } from "@/lib/services/notificationService";
+import { generateWhatsAppUrl, generatePaymentReminderMessage } from "@/lib/formatters";
 
 interface DailyMarketPaymentsTabProps {
   dateFrom: string;
@@ -69,8 +72,23 @@ export default function DailyMarketPaymentsTab({
     DailyPaymentRecord[]
   >([]);
 
+  // Cancel payment dialog state
+  const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
+  const [recordToCancel, setRecordToCancel] = useState<DailyPaymentRecord | null>(null);
+  const [engineerNameToCancel, setEngineerNameToCancel] = useState<string>("");
+
+  // Bulk cancel state
+  const [bulkCancelRecords, setBulkCancelRecords] = useState<DailyPaymentRecord[]>([]);
+  const [bulkCancelProcessing, setBulkCancelProcessing] = useState(false);
+
   // Expanded state
   const [expandedDates, setExpandedDates] = useState<Set<string>>(new Set());
+  const expandedDatesRef = useRef<Set<string>>(new Set());
+
+  // Keep ref in sync with state
+  useEffect(() => {
+    expandedDatesRef.current = expandedDates;
+  }, [expandedDates]);
 
   const canEdit = hasEditPermission(userProfile?.role);
 
@@ -82,7 +100,7 @@ export default function DailyMarketPaymentsTab({
     setError(null);
 
     try {
-      // Fetch daily attendance (non-contract laborers)
+      // Fetch daily attendance (non-contract laborers) with settlement status
       const { data: dailyData, error: dailyError } = await supabase
         .from("daily_attendance")
         .select(
@@ -98,8 +116,17 @@ export default function DailyMarketPaymentsTab({
           engineer_transaction_id,
           payment_proof_url,
           subcontract_id,
+          expense_id,
           laborers!inner(name, laborer_type, labor_categories(name), labor_roles(name)),
-          subcontracts(title)
+          subcontracts(title),
+          site_engineer_transactions!engineer_transaction_id(
+            settlement_status,
+            proof_url,
+            settlement_proof_url,
+            transaction_date,
+            settled_date,
+            confirmed_at
+          )
         `
         )
         .eq("site_id", selectedSite.id)
@@ -110,7 +137,7 @@ export default function DailyMarketPaymentsTab({
 
       if (dailyError) throw dailyError;
 
-      // Fetch market attendance
+      // Fetch market attendance with settlement status
       const { data: marketData, error: marketError } = await supabase
         .from("market_laborer_attendance")
         .select(
@@ -125,7 +152,16 @@ export default function DailyMarketPaymentsTab({
           paid_via,
           engineer_transaction_id,
           payment_proof_url,
-          labor_roles(name)
+          expense_id,
+          labor_roles(name),
+          site_engineer_transactions!engineer_transaction_id(
+            settlement_status,
+            proof_url,
+            settlement_proof_url,
+            transaction_date,
+            settled_date,
+            confirmed_at
+          )
         `
         )
         .eq("site_id", selectedSite.id)
@@ -156,6 +192,14 @@ export default function DailyMarketPaymentsTab({
           proofUrl: r.payment_proof_url,
           subcontractId: r.subcontract_id,
           subcontractTitle: r.subcontracts?.title,
+          expenseId: r.expense_id || null,
+          settlementStatus: r.site_engineer_transactions?.settlement_status || null,
+          // Settlement tracking fields from engineer transaction
+          companyProofUrl: r.site_engineer_transactions?.proof_url || null,
+          engineerProofUrl: r.site_engineer_transactions?.settlement_proof_url || null,
+          transactionDate: r.site_engineer_transactions?.transaction_date || null,
+          settledDate: r.site_engineer_transactions?.settled_date || null,
+          confirmedAt: r.site_engineer_transactions?.confirmed_at || null,
         })
       );
 
@@ -179,6 +223,14 @@ export default function DailyMarketPaymentsTab({
           proofUrl: r.payment_proof_url,
           subcontractId: null,
           subcontractTitle: null,
+          expenseId: r.expense_id || null,
+          settlementStatus: r.site_engineer_transactions?.settlement_status || null,
+          // Settlement tracking fields from engineer transaction
+          companyProofUrl: r.site_engineer_transactions?.proof_url || null,
+          engineerProofUrl: r.site_engineer_transactions?.settlement_proof_url || null,
+          transactionDate: r.site_engineer_transactions?.transaction_date || null,
+          settledDate: r.site_engineer_transactions?.settled_date || null,
+          confirmedAt: r.site_engineer_transactions?.confirmed_at || null,
         })
       );
 
@@ -210,9 +262,9 @@ export default function DailyMarketPaymentsTab({
         (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
       );
 
-      // Restore expanded state
+      // Restore expanded state using ref (to avoid stale closure)
       groups.forEach((g) => {
-        g.isExpanded = expandedDates.has(g.date);
+        g.isExpanded = expandedDatesRef.current.has(g.date);
       });
 
       setDateGroups(groups);
@@ -231,7 +283,8 @@ export default function DailyMarketPaymentsTab({
     } finally {
       setLoading(false);
     }
-  }, [selectedSite?.id, dateFrom, dateTo, expandedDates, supabase]);
+  // Note: expandedDates removed from deps to prevent refetch on expand/collapse
+  }, [selectedSite?.id, dateFrom, dateTo, supabase]);
 
   useEffect(() => {
     fetchData();
@@ -414,6 +467,379 @@ export default function DailyMarketPaymentsTab({
     setPaymentDialogOpen(true);
   };
 
+  // Handle "Notify Engineer" button click for single record
+  const handleNotifyEngineer = async (record: DailyPaymentRecord) => {
+    if (!record.engineerTransactionId) {
+      console.error("No engineer transaction ID found");
+      return;
+    }
+
+    try {
+      // Fetch engineer details from the transaction
+      const { data: txData, error: txError } = await supabase
+        .from("site_engineer_transactions")
+        .select(`
+          id,
+          user_id,
+          amount,
+          transaction_date,
+          users!site_engineer_transactions_user_id_fkey (name, phone)
+        `)
+        .eq("id", record.engineerTransactionId)
+        .single();
+
+      if (txError || !txData) {
+        console.error("Error fetching engineer transaction:", txError);
+        return;
+      }
+
+      const engineerName = (txData.users as unknown as { name: string; phone: string } | null)?.name || "Engineer";
+      const engineerPhone = (txData.users as unknown as { name: string; phone: string } | null)?.phone;
+
+      // Send in-app notification
+      await notifyEngineerPaymentReminder(
+        supabase,
+        txData.user_id,
+        record.engineerTransactionId,
+        record.amount,
+        1, // laborerCount for single record
+        selectedSite?.name,
+        record.date
+      );
+
+      // Open WhatsApp with pre-filled message
+      if (engineerPhone) {
+        const message = generatePaymentReminderMessage({
+          engineerName,
+          paymentDate: dayjs(record.date).format("MMM D, YYYY"),
+          amount: record.amount,
+          laborerCount: 1,
+          siteName: selectedSite?.name || "the site",
+        });
+        const whatsappUrl = generateWhatsAppUrl(engineerPhone, message);
+        if (whatsappUrl) {
+          window.open(whatsappUrl, "_blank");
+        }
+      }
+    } catch (err) {
+      console.error("Error notifying engineer:", err);
+    }
+  };
+
+  // Handle "Notify Engineer" button click for all records on a date (bulk notification)
+  const handleNotifyDate = async (date: string, records: DailyPaymentRecord[]) => {
+    if (records.length === 0) return;
+
+    try {
+      // Group records by engineer transaction ID to avoid duplicate notifications
+      const byEngineerTx = new Map<string, { records: DailyPaymentRecord[]; totalAmount: number }>();
+
+      records.forEach((record) => {
+        if (!record.engineerTransactionId) return;
+
+        const existing = byEngineerTx.get(record.engineerTransactionId);
+        if (existing) {
+          existing.records.push(record);
+          existing.totalAmount += record.amount;
+        } else {
+          byEngineerTx.set(record.engineerTransactionId, {
+            records: [record],
+            totalAmount: record.amount,
+          });
+        }
+      });
+
+      // For each unique engineer transaction, send notification
+      for (const [txId, { records: txRecords, totalAmount }] of byEngineerTx) {
+        // Fetch engineer details
+        const { data: txData, error: txError } = await supabase
+          .from("site_engineer_transactions")
+          .select(`
+            id,
+            user_id,
+            amount,
+            transaction_date,
+            users!site_engineer_transactions_user_id_fkey (name, phone)
+          `)
+          .eq("id", txId)
+          .single();
+
+        if (txError || !txData) {
+          console.error("Error fetching engineer transaction:", txError);
+          continue;
+        }
+
+        const engineerName = (txData.users as unknown as { name: string; phone: string } | null)?.name || "Engineer";
+        const engineerPhone = (txData.users as unknown as { name: string; phone: string } | null)?.phone;
+        const laborerCount = txRecords.length;
+
+        // Send in-app notification
+        await notifyEngineerPaymentReminder(
+          supabase,
+          txData.user_id,
+          txId,
+          totalAmount,
+          laborerCount,
+          selectedSite?.name,
+          date
+        );
+
+        // Open WhatsApp with pre-filled message (only for first/primary engineer)
+        if (engineerPhone) {
+          const message = generatePaymentReminderMessage({
+            engineerName,
+            paymentDate: dayjs(date).format("MMM D, YYYY"),
+            amount: totalAmount,
+            laborerCount,
+            siteName: selectedSite?.name || "the site",
+          });
+          const whatsappUrl = generateWhatsAppUrl(engineerPhone, message);
+          if (whatsappUrl) {
+            window.open(whatsappUrl, "_blank");
+          }
+        }
+      }
+    } catch (err) {
+      console.error("Error notifying engineer for date:", err);
+    }
+  };
+
+  // Handle opening cancel payment dialog
+  const handleOpenCancelDialog = async (record: DailyPaymentRecord) => {
+    try {
+      let engineerName = "";
+
+      // For engineer wallet payments, fetch engineer name
+      if (record.engineerTransactionId) {
+        const { data: txData, error: txError } = await supabase
+          .from("site_engineer_transactions")
+          .select(`
+            id,
+            users!site_engineer_transactions_user_id_fkey (name)
+          `)
+          .eq("id", record.engineerTransactionId)
+          .single();
+
+        if (txError) {
+          console.error("Error fetching engineer transaction:", txError);
+        }
+
+        engineerName = (txData?.users as unknown as { name: string } | null)?.name || "Engineer";
+      }
+      // For direct payments, no engineer involved
+      // engineerName stays empty
+
+      setRecordToCancel(record);
+      setEngineerNameToCancel(engineerName);
+      setCancelDialogOpen(true);
+    } catch (err) {
+      console.error("Error opening cancel dialog:", err);
+    }
+  };
+
+  // Handle cancel payment confirmation
+  const handleCancelPayment = async (reason?: string) => {
+    if (!recordToCancel || !userProfile) {
+      throw new Error("Missing required data for cancellation");
+    }
+
+    // 1. Reset attendance record(s) to unpaid state
+    if (recordToCancel.sourceType === "daily") {
+      const { error: dailyError } = await supabase
+        .from("daily_attendance")
+        .update({
+          is_paid: false,
+          payment_date: null,
+          payment_mode: null,
+          paid_via: null,
+          engineer_transaction_id: null,
+          payment_proof_url: null,
+          subcontract_id: null,
+        })
+        .eq("id", recordToCancel.sourceId);
+
+      if (dailyError) throw dailyError;
+    } else if (recordToCancel.sourceType === "market") {
+      const { error: marketError } = await supabase
+        .from("market_laborer_attendance")
+        .update({
+          is_paid: false,
+          payment_date: null,
+          payment_mode: null,
+          paid_via: null,
+          engineer_transaction_id: null,
+          payment_proof_url: null,
+        })
+        .eq("id", recordToCancel.sourceId);
+
+      if (marketError) throw marketError;
+    }
+
+    // 2. For engineer wallet payments, handle the transaction
+    if (recordToCancel.engineerTransactionId) {
+      const transactionId = recordToCancel.engineerTransactionId;
+
+      // Check if there are other records linked to this transaction
+      const { count: dailyCount } = await supabase
+        .from("daily_attendance")
+        .select("*", { count: "exact", head: true })
+        .eq("engineer_transaction_id", transactionId);
+
+      const { count: marketCount } = await supabase
+        .from("market_laborer_attendance")
+        .select("*", { count: "exact", head: true })
+        .eq("engineer_transaction_id", transactionId);
+
+      const remainingLinkedRecords = (dailyCount || 0) + (marketCount || 0);
+
+      // If no more linked records, mark transaction as cancelled
+      if (remainingLinkedRecords === 0) {
+        const { error: txError } = await supabase
+          .from("site_engineer_transactions")
+          .update({
+            settlement_status: "cancelled",
+            cancelled_at: new Date().toISOString(),
+            cancelled_by: userProfile.name,
+            cancelled_by_user_id: userProfile.id,
+            cancellation_reason: reason || null,
+          })
+          .eq("id", transactionId);
+
+        if (txError) throw txError;
+      }
+    }
+    // For direct payments (no engineerTransactionId), no transaction to update
+
+    // 3. Delete the expense record
+    if (recordToCancel.expenseId) {
+      // Delete by expense_id (most reliable - direct link)
+      await supabase
+        .from("expenses")
+        .delete()
+        .eq("id", recordToCancel.expenseId);
+    } else if (recordToCancel.engineerTransactionId) {
+      // Fallback: For engineer payments - delete by transaction ID
+      await supabase
+        .from("expenses")
+        .delete()
+        .eq("engineer_transaction_id", recordToCancel.engineerTransactionId);
+    } else if (selectedSite && recordToCancel.subcontractId) {
+      // Fallback for old direct payments: match by subcontract, date, amount
+      await supabase
+        .from("expenses")
+        .delete()
+        .eq("site_id", selectedSite.id)
+        .eq("contract_id", recordToCancel.subcontractId)
+        .eq("date", recordToCancel.date)
+        .eq("amount", recordToCancel.amount)
+        .eq("module", "labor");
+    }
+
+    // Note: Subcontract paid totals are calculated by summing linked expenses,
+    // so deleting the expense above automatically updates the subcontract's paid amount.
+
+    // 4. Refresh data
+    fetchData();
+    onDataChange?.();
+  };
+
+  // Handle opening bulk cancel confirmation
+  const handleOpenBulkCancelDialog = (records: DailyPaymentRecord[]) => {
+    setBulkCancelRecords(records);
+    // Use the first record to show in dialog (for display purposes)
+    if (records.length > 0) {
+      setRecordToCancel({
+        ...records[0],
+        // Override laborer name to show count
+        laborerName: `${records.length} payments`,
+        // Sum up total amount
+        amount: records.reduce((sum, r) => sum + r.amount, 0),
+      });
+      setEngineerNameToCancel(""); // Direct payments don't have engineer
+      setCancelDialogOpen(true);
+    }
+  };
+
+  // Handle bulk cancel confirmation
+  const handleBulkCancelPayment = async (reason?: string) => {
+    if (bulkCancelRecords.length === 0 || !userProfile) {
+      throw new Error("Missing required data for bulk cancellation");
+    }
+
+    setBulkCancelProcessing(true);
+
+    try {
+      // Process each record
+      for (const record of bulkCancelRecords) {
+        if (record.sourceType === "daily") {
+          const { error: dailyError } = await supabase
+            .from("daily_attendance")
+            .update({
+              is_paid: false,
+              payment_date: null,
+              payment_mode: null,
+              paid_via: null,
+              engineer_transaction_id: null,
+              payment_proof_url: null,
+              subcontract_id: null,
+            })
+            .eq("id", record.sourceId);
+
+          if (dailyError) throw dailyError;
+        } else if (record.sourceType === "market") {
+          const { error: marketError } = await supabase
+            .from("market_laborer_attendance")
+            .update({
+              is_paid: false,
+              payment_date: null,
+              payment_mode: null,
+              paid_via: null,
+              engineer_transaction_id: null,
+              payment_proof_url: null,
+            })
+            .eq("id", record.sourceId);
+
+          if (marketError) throw marketError;
+        }
+
+        // Delete the expense record for this payment
+        if (record.expenseId) {
+          // Delete by expense_id (most reliable - direct link)
+          await supabase
+            .from("expenses")
+            .delete()
+            .eq("id", record.expenseId);
+        } else if (record.engineerTransactionId) {
+          // Fallback: For engineer payments - delete by transaction ID
+          await supabase
+            .from("expenses")
+            .delete()
+            .eq("engineer_transaction_id", record.engineerTransactionId);
+        } else if (selectedSite && record.subcontractId) {
+          // Fallback for old direct payments: match by subcontract, date, amount
+          await supabase
+            .from("expenses")
+            .delete()
+            .eq("site_id", selectedSite.id)
+            .eq("contract_id", record.subcontractId)
+            .eq("date", record.date)
+            .eq("amount", record.amount)
+            .eq("module", "labor");
+        }
+
+        // Note: Subcontract paid totals are calculated by summing linked expenses,
+        // so deleting the expense above automatically updates the subcontract's paid amount.
+      }
+
+      // Refresh data
+      fetchData();
+      onDataChange?.();
+    } finally {
+      setBulkCancelProcessing(false);
+      setBulkCancelRecords([]);
+    }
+  };
+
   const handlePaymentSuccess = () => {
     setSelectedRecords(new Set());
     fetchData();
@@ -517,6 +943,10 @@ export default function DailyMarketPaymentsTab({
             onPayAll={(records) => openPaymentDialog(records)}
             onPaySelected={(records) => openPaymentDialog(records)}
             onPaySingle={(record) => openPaymentDialog([record])}
+            onNotifyEngineer={handleNotifyEngineer}
+            onNotifyDate={handleNotifyDate}
+            onCancelPayment={handleOpenCancelDialog}
+            onCancelAllDirect={handleOpenBulkCancelDialog}
             selectedRecords={selectedRecords}
             onToggleSelect={handleToggleSelect}
             onSelectAllDaily={handleSelectAllDaily}
@@ -533,6 +963,20 @@ export default function DailyMarketPaymentsTab({
         dailyRecords={selectedForPayment}
         allowSubcontractLink
         onSuccess={handlePaymentSuccess}
+      />
+
+      {/* Cancel Payment Dialog */}
+      <CancelPaymentDialog
+        open={cancelDialogOpen}
+        onClose={() => {
+          setCancelDialogOpen(false);
+          setRecordToCancel(null);
+          setEngineerNameToCancel("");
+          setBulkCancelRecords([]);
+        }}
+        record={recordToCancel}
+        engineerName={engineerNameToCancel}
+        onConfirm={bulkCancelRecords.length > 0 ? handleBulkCancelPayment : handleCancelPayment}
       />
     </Box>
   );

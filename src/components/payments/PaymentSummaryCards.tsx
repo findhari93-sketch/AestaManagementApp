@@ -86,31 +86,34 @@ export default function PaymentSummaryCards({
           </Card>
         </Grid>
 
-        {/* Sent to Engineer */}
+        {/* In Progress (With Engineer) */}
         <Grid size={{ xs: 12, sm: 6, md: 3 }}>
           <Card
             sx={{
-              bgcolor: "info.50",
+              bgcolor: "warning.50",
               borderLeft: 4,
-              borderColor: "info.main",
+              borderColor: "warning.dark",
             }}
           >
             <CardContent sx={{ py: 2, "&:last-child": { pb: 2 } }}>
               <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
-                <SentIcon color="info" fontSize="small" />
+                <SentIcon sx={{ color: "warning.dark" }} fontSize="small" />
                 <Typography variant="caption" color="text.secondary">
-                  Sent to Engineer
+                  In Progress (With Engineer)
                 </Typography>
               </Box>
-              <Typography variant="h5" fontWeight={600} color="info.dark">
+              <Typography variant="h5" fontWeight={600} sx={{ color: "warning.dark" }}>
                 {formatCurrency(data.dailyMarketSentToEngineer)}
               </Typography>
               <Chip
                 label={`${data.dailyMarketSentToEngineerCount} records`}
                 size="small"
-                color="info"
+                sx={{
+                  mt: 1,
+                  borderColor: "warning.dark",
+                  color: "warning.dark",
+                }}
                 variant="outlined"
-                sx={{ mt: 1 }}
               />
             </CardContent>
           </Card>

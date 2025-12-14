@@ -12,6 +12,7 @@ import dayjs from "dayjs";
 // Storage keys
 const DATE_FROM_KEY = "globalDateFrom";
 const DATE_TO_KEY = "globalDateTo";
+const ALL_TIME_MARKER = "ALL_TIME";
 
 interface DateRangeContextType {
   startDate: Date | null;
@@ -54,15 +55,13 @@ function storeDateRange(
 ): void {
   if (typeof window === "undefined") return;
   try {
-    if (dateFrom) {
+    if (dateFrom && dateTo) {
       localStorage.setItem(DATE_FROM_KEY, dateFrom);
-    } else {
-      localStorage.removeItem(DATE_FROM_KEY);
-    }
-    if (dateTo) {
       localStorage.setItem(DATE_TO_KEY, dateTo);
     } else {
-      localStorage.removeItem(DATE_TO_KEY);
+      // Store marker to indicate "All Time" was explicitly selected
+      localStorage.setItem(DATE_FROM_KEY, ALL_TIME_MARKER);
+      localStorage.setItem(DATE_TO_KEY, ALL_TIME_MARKER);
     }
   } catch {
     // Ignore storage errors
@@ -112,6 +111,12 @@ export function DateRangeProvider({ children }: { children: React.ReactNode }) {
     const storedFrom = getStoredDateFrom();
     const storedTo = getStoredDateTo();
 
+    // Check for ALL_TIME marker - keep null (All Time)
+    if (storedFrom === ALL_TIME_MARKER || storedTo === ALL_TIME_MARKER) {
+      return;
+    }
+
+    // Restore date range if valid dates are stored
     if (storedFrom && storedTo) {
       setStartDate(new Date(storedFrom));
       setEndDate(new Date(storedTo));

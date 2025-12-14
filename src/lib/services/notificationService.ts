@@ -313,6 +313,7 @@ export async function submitSettlement(
 
 /**
  * Confirm settlement - admin action to confirm engineer's settlement
+ * Also marks linked attendance as paid and creates daily expense entry
  */
 export async function confirmSettlement(
   supabase: SupabaseClient<Database>,
@@ -321,6 +322,19 @@ export async function confirmSettlement(
   confirmedByName: string
 ): Promise<{ error: Error | null }> {
   try {
+    // 1. Get transaction details
+    const { data: transaction, error: txError } = await supabase
+      .from("site_engineer_transactions")
+      .select("id, amount, site_id, transaction_date, description, settlement_proof_url, related_subcontract_id")
+      .eq("id", transactionId)
+      .single();
+
+    if (txError) throw txError;
+    if (!transaction) throw new Error("Transaction not found");
+
+    const paymentDate = new Date().toISOString().split("T")[0];
+
+    // 2. Update transaction status
     const { error } = await supabase
       .from("site_engineer_transactions")
       .update({
@@ -335,13 +349,285 @@ export async function confirmSettlement(
 
     if (error) throw error;
 
-    // Optionally: Mark linked attendance as paid
-    // This depends on your business logic
-    // await markLinkedAttendanceAsPaid(supabase, transactionId);
+    // 3. Mark linked daily attendance as paid
+    const { error: dailyError } = await supabase
+      .from("daily_attendance")
+      .update({
+        is_paid: true,
+        payment_date: paymentDate,
+      })
+      .eq("engineer_transaction_id", transactionId);
+
+    if (dailyError) {
+      console.error("Error updating daily attendance:", dailyError);
+    }
+
+    // 4. Mark linked market attendance as paid
+    const { error: marketError } = await supabase
+      .from("market_laborer_attendance")
+      .update({
+        is_paid: true,
+        payment_date: paymentDate,
+      })
+      .eq("engineer_transaction_id", transactionId);
+
+    if (marketError) {
+      console.error("Error updating market attendance:", marketError);
+    }
+
+    // 5. Create daily expense entry for this settlement
+    if (transaction.site_id && transaction.amount > 0) {
+      await createSettlementExpense(
+        supabase,
+        {
+          siteId: transaction.site_id,
+          amount: transaction.amount,
+          date: transaction.transaction_date,
+          description: transaction.description || "Laborer salary settlement",
+          subcontractId: transaction.related_subcontract_id,
+          proofUrl: transaction.settlement_proof_url,
+          paidBy: confirmedByName,
+          paidByUserId: confirmedByUserId,
+        }
+      );
+    }
 
     return { error: null };
   } catch (err) {
     console.error("Error confirming settlement:", err);
+    return { error: err as Error };
+  }
+}
+
+/**
+ * Create a daily expense entry for a confirmed settlement
+ */
+async function createSettlementExpense(
+  supabase: SupabaseClient<Database>,
+  params: {
+    siteId: string;
+    amount: number;
+    date: string;
+    description: string;
+    subcontractId: string | null;
+    proofUrl: string | null;
+    paidBy: string;
+    paidByUserId: string;
+  }
+): Promise<void> {
+  try {
+    // Find or create "Salary Settlement" category
+    const { data: categories } = await supabase
+      .from("expense_categories")
+      .select("id")
+      .eq("name", "Salary Settlement")
+      .limit(1);
+
+    let categoryId = categories?.[0]?.id;
+
+    // If no category exists, try to find "Labor" category
+    if (!categoryId) {
+      const { data: laborCategories } = await supabase
+        .from("expense_categories")
+        .select("id")
+        .ilike("name", "%labor%")
+        .limit(1);
+
+      categoryId = laborCategories?.[0]?.id;
+    }
+
+    // If still no category, skip expense creation
+    if (!categoryId) {
+      console.warn("No suitable expense category found for salary settlement");
+      return;
+    }
+
+    // Build description with "Via Engineer" indicator
+    let fullDescription = params.description;
+    if (!fullDescription.includes("Via Engineer") &&
+        !fullDescription.includes("Direct by Company")) {
+      fullDescription += " - Via Engineer";
+    }
+
+    // Create expense entry
+    const { error: expenseError } = await supabase
+      .from("expenses")
+      .insert({
+        site_id: params.siteId,
+        category_id: categoryId,
+        amount: params.amount,
+        date: params.date,
+        description: fullDescription,
+        contract_id: params.subcontractId,
+        receipt_url: params.proofUrl,
+        module: "labor",
+        paid_by: params.paidBy,
+        entered_by: params.paidBy,
+        entered_by_user_id: params.paidByUserId,
+        is_cleared: true,
+        cleared_date: params.date,
+      });
+
+    if (expenseError) {
+      console.error("Error creating settlement expense:", expenseError);
+    }
+  } catch (err) {
+    console.error("Error in createSettlementExpense:", err);
+  }
+}
+
+/**
+ * Parameters for creating a salary expense entry
+ */
+export interface SalaryExpenseParams {
+  siteId: string;
+  amount: number;
+  date: string;
+  description: string;
+  paymentMode?: string;
+  paidBy: string;
+  paidByUserId: string;
+  proofUrl?: string | null;
+  subcontractId?: string | null;
+  isCleared: boolean; // false = "Pending from Company"
+  engineerTransactionId?: string | null; // Link to engineer transaction for tracking
+  paymentSource: "direct" | "via_engineer" | "engineer_own_money";
+}
+
+/**
+ * Create a salary/labor expense entry in daily expenses
+ * Used for:
+ * 1. Direct payments by company
+ * 2. Engineer settlements (via company money)
+ * 3. Engineer's own money payments (pending reimbursement)
+ */
+export async function createSalaryExpense(
+  supabase: SupabaseClient<Database>,
+  params: SalaryExpenseParams
+): Promise<{ error: Error | null; expenseId: string | null }> {
+  try {
+    // Find "Salary Settlement" or "Labor" category
+    const { data: categories } = await supabase
+      .from("expense_categories")
+      .select("id")
+      .eq("name", "Salary Settlement")
+      .limit(1);
+
+    let categoryId = categories?.[0]?.id;
+
+    // If no category exists, try to find "Labor" category
+    if (!categoryId) {
+      const { data: laborCategories } = await supabase
+        .from("expense_categories")
+        .select("id")
+        .ilike("name", "%labor%")
+        .limit(1);
+
+      categoryId = laborCategories?.[0]?.id;
+    }
+
+    // If still no category, return error
+    if (!categoryId) {
+      console.warn("No suitable expense category found for salary expense");
+      return { error: new Error("No expense category found"), expenseId: null };
+    }
+
+    // Build description with source indicator
+    let fullDescription = params.description;
+    if (!fullDescription.includes("Direct by Company") &&
+        !fullDescription.includes("Via Engineer") &&
+        !fullDescription.includes("Pending from Company")) {
+      switch (params.paymentSource) {
+        case "direct":
+          fullDescription += " - Direct by Company";
+          break;
+        case "via_engineer":
+          fullDescription += " - Via Engineer";
+          break;
+        case "engineer_own_money":
+          fullDescription += " - Pending from Company";
+          break;
+      }
+    }
+
+    // Create expense entry
+    const { data: expense, error: expenseError } = await supabase
+      .from("expenses")
+      .insert({
+        site_id: params.siteId,
+        category_id: categoryId,
+        amount: params.amount,
+        date: params.date,
+        description: fullDescription,
+        contract_id: params.subcontractId || null,
+        receipt_url: params.proofUrl || null,
+        module: "labor",
+        paid_by: params.paidByUserId, // UUID - foreign key to users table
+        entered_by: params.paidBy, // Name string
+        entered_by_user_id: params.paidByUserId,
+        is_cleared: params.isCleared,
+        cleared_date: params.isCleared ? params.date : null,
+        payment_mode: params.paymentMode as any || null,
+        engineer_transaction_id: params.engineerTransactionId || null,
+      })
+      .select("id")
+      .single();
+
+    if (expenseError) {
+      console.error("Error creating salary expense:", expenseError);
+      return { error: expenseError, expenseId: null };
+    }
+
+    return { error: null, expenseId: expense?.id || null };
+  } catch (err) {
+    console.error("Error in createSalaryExpense:", err);
+    return { error: err as Error, expenseId: null };
+  }
+}
+
+/**
+ * Clear a pending salary expense when engineer is reimbursed
+ * Updates is_cleared to true and removes "Pending from Company" indicator
+ */
+export async function clearPendingSalaryExpense(
+  supabase: SupabaseClient<Database>,
+  engineerTransactionId: string
+): Promise<{ error: Error | null }> {
+  try {
+    // First, find the expense by engineer_transaction_id
+    const { data: expense, error: fetchError } = await supabase
+      .from("expenses")
+      .select("id, description")
+      .eq("engineer_transaction_id", engineerTransactionId)
+      .single();
+
+    if (fetchError || !expense) {
+      // No expense found - might not have been created yet
+      return { error: null };
+    }
+
+    // Update the expense to mark as cleared
+    const newDescription = expense.description
+      ?.replace(" - Pending from Company", " - Via Engineer (Reimbursed)")
+      || "Laborer salary - Via Engineer (Reimbursed)";
+
+    const { error: updateError } = await supabase
+      .from("expenses")
+      .update({
+        is_cleared: true,
+        cleared_date: new Date().toISOString().split("T")[0],
+        description: newDescription,
+      })
+      .eq("id", expense.id);
+
+    if (updateError) {
+      console.error("Error clearing pending salary expense:", updateError);
+      return { error: updateError };
+    }
+
+    return { error: null };
+  } catch (err) {
+    console.error("Error in clearPendingSalaryExpense:", err);
     return { error: err as Error };
   }
 }
@@ -368,6 +654,50 @@ export async function disputeSettlement(
     return { error: null };
   } catch (err) {
     console.error("Error disputing settlement:", err);
+    return { error: err as Error };
+  }
+}
+
+/**
+ * Send a reminder notification to engineer about pending settlement
+ * Used when admin clicks "Notify Engineer" button
+ */
+export async function notifyEngineerPaymentReminder(
+  supabase: SupabaseClient<Database>,
+  engineerId: string,
+  transactionId: string,
+  amount: number,
+  laborerCount: number,
+  siteName?: string,
+  paymentDate?: string
+): Promise<{ error: Error | null }> {
+  try {
+    const dateText = paymentDate
+      ? new Date(paymentDate).toLocaleDateString("en-IN", {
+          day: "2-digit",
+          month: "short",
+          year: "numeric",
+        })
+      : "recent";
+
+    const message = siteName
+      ? `Reminder: Please settle ₹${amount.toLocaleString("en-IN")} for ${laborerCount} ${laborerCount === 1 ? "laborer" : "laborers"} at ${siteName} (${dateText}).`
+      : `Reminder: Please settle ₹${amount.toLocaleString("en-IN")} for ${laborerCount} ${laborerCount === 1 ? "laborer" : "laborers"} (${dateText}).`;
+
+    const { error } = await supabase.from("notifications").insert({
+      user_id: engineerId,
+      title: "Payment Settlement Reminder",
+      message,
+      notification_type: "payment_settlement_reminder",
+      related_id: transactionId,
+      related_table: "site_engineer_transactions",
+      is_read: false,
+    });
+
+    if (error) throw error;
+    return { error: null };
+  } catch (err) {
+    console.error("Error creating payment reminder notification:", err);
     return { error: err as Error };
   }
 }

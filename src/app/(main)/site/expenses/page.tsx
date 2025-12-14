@@ -49,11 +49,24 @@ import type {
 } from "@/types/database.types";
 import dayjs from "dayjs";
 import { useRouter } from "next/navigation";
+import {
+  Description as ContractIcon,
+  AccountBalance as BalanceIcon,
+} from "@mui/icons-material";
 
 interface SitePayer {
   id: string;
   name: string;
   is_active: boolean;
+}
+
+interface SubcontractSummary {
+  id: string;
+  title: string;
+  totalValue: number;
+  totalPaid: number;
+  balance: number;
+  status: string;
 }
 
 interface ExpenseWithCategory extends Expense {
@@ -81,6 +94,10 @@ export default function ExpensesPage() {
   const [hasMultiplePayers, setHasMultiplePayers] = useState(false);
   const [sitePayers, setSitePayers] = useState<SitePayer[]>([]);
 
+  // Subcontract summary state
+  const [subcontracts, setSubcontracts] = useState<SubcontractSummary[]>([]);
+  const [subcontractsLoading, setSubcontractsLoading] = useState(false);
+
   const [form, setForm] = useState({
     module: "general" as ExpenseModule,
     category_id: "",
@@ -106,6 +123,78 @@ export default function ExpensesPage() {
     };
     fetchCategories();
   }, []);
+
+  // Fetch subcontracts with payment totals
+  const fetchSubcontracts = async () => {
+    if (!selectedSite?.id) {
+      setSubcontracts([]);
+      return;
+    }
+
+    setSubcontractsLoading(true);
+    try {
+      // Fetch active/on_hold subcontracts
+      const { data: subcontractsData, error: scError } = await supabase
+        .from("subcontracts")
+        .select("id, title, total_value, status")
+        .eq("site_id", selectedSite.id)
+        .in("status", ["active", "on_hold"])
+        .order("title");
+
+      if (scError) throw scError;
+
+      // Calculate paid amounts for each subcontract
+      const summaries: SubcontractSummary[] = await Promise.all(
+        (subcontractsData || []).map(async (sc: any) => {
+          // Get subcontract_payments
+          const { data: paymentsData } = await supabase
+            .from("subcontract_payments")
+            .select("amount")
+            .eq("contract_id", sc.id);
+
+          const directPaid = paymentsData?.reduce((sum, p) => sum + (p.amount || 0), 0) || 0;
+
+          // Get labor_payments linked to this subcontract
+          const { data: laborPaymentsData } = await supabase
+            .from("labor_payments")
+            .select("amount")
+            .eq("subcontract_id", sc.id);
+
+          const laborPaid = laborPaymentsData?.reduce((sum, p) => sum + (p.amount || 0), 0) || 0;
+
+          // Get expenses linked to this subcontract
+          const { data: expensesData } = await supabase
+            .from("expenses")
+            .select("amount")
+            .eq("contract_id", sc.id)
+            .eq("is_deleted", false);
+
+          const expensesPaid = expensesData?.reduce((sum, e) => sum + (e.amount || 0), 0) || 0;
+
+          const totalPaid = directPaid + laborPaid + expensesPaid;
+
+          return {
+            id: sc.id,
+            title: sc.title,
+            totalValue: sc.total_value || 0,
+            totalPaid,
+            balance: (sc.total_value || 0) - totalPaid,
+            status: sc.status,
+          };
+        })
+      );
+
+      setSubcontracts(summaries);
+    } catch (err) {
+      console.error("Error fetching subcontracts:", err);
+    } finally {
+      setSubcontractsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchSubcontracts();
+  }, [selectedSite?.id]);
 
   // Fetch multi-payer settings when site changes
   useEffect(() => {
@@ -175,6 +264,8 @@ export default function ExpensesPage() {
           payer_name: e.site_payers?.name,
         }))
       );
+      // Also refresh subcontracts summary since expenses affect paid totals
+      fetchSubcontracts();
     } catch (error: any) {
       alert("Failed to load expenses: " + error.message);
     } finally {
@@ -331,14 +422,21 @@ export default function ExpensesPage() {
       {
         accessorKey: "is_cleared",
         header: "Status",
-        size: 100,
-        Cell: ({ cell }) => (
-          <Chip
-            label={cell.getValue<boolean>() ? "CLEARED" : "PENDING"}
-            size="small"
-            color={cell.getValue<boolean>() ? "success" : "warning"}
-          />
-        ),
+        size: 150,
+        Cell: ({ cell, row }) => {
+          const isCleared = cell.getValue<boolean>();
+          const description = row.original.description || "";
+          const isPendingFromCompany = !isCleared && description.includes("Pending from Company");
+
+          return (
+            <Chip
+              label={isCleared ? "CLEARED" : isPendingFromCompany ? "PENDING (COMPANY)" : "PENDING"}
+              size="small"
+              color={isCleared ? "success" : isPendingFromCompany ? "error" : "warning"}
+              sx={isPendingFromCompany ? { fontWeight: 600 } : undefined}
+            />
+          );
+        },
       },
       {
         id: "mrt-row-actions",
@@ -437,6 +535,118 @@ export default function ExpensesPage() {
           </Card>
         </Grid>
       </Grid>
+
+      {/* Subcontract Summary Section */}
+      {subcontracts.length > 0 && (
+        <Card sx={{ mb: 3 }}>
+          <CardContent>
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 2 }}>
+              <ContractIcon color="primary" />
+              <Typography variant="h6">Subcontracts Summary</Typography>
+            </Box>
+
+            {subcontractsLoading ? (
+              <Typography color="text.secondary">Loading...</Typography>
+            ) : (
+              <Box sx={{ overflowX: "auto" }}>
+                <Box
+                  component="table"
+                  sx={{
+                    width: "100%",
+                    borderCollapse: "collapse",
+                    "& th, & td": {
+                      px: 2,
+                      py: 1.5,
+                      textAlign: "left",
+                      borderBottom: "1px solid",
+                      borderColor: "divider",
+                    },
+                    "& th": {
+                      bgcolor: "action.hover",
+                      fontWeight: 600,
+                    },
+                    "& tr:hover td": {
+                      bgcolor: "action.hover",
+                    },
+                  }}
+                >
+                  <thead>
+                    <tr>
+                      <th>Subcontract</th>
+                      <th style={{ textAlign: "right" }}>Total Value</th>
+                      <th style={{ textAlign: "right" }}>Paid</th>
+                      <th style={{ textAlign: "right" }}>Balance</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {subcontracts.map((sc) => (
+                      <tr key={sc.id}>
+                        <td>
+                          <Typography variant="body2" fontWeight={500}>
+                            {sc.title}
+                          </Typography>
+                        </td>
+                        <td style={{ textAlign: "right" }}>
+                          <Typography variant="body2">
+                            Rs.{sc.totalValue.toLocaleString()}
+                          </Typography>
+                        </td>
+                        <td style={{ textAlign: "right" }}>
+                          <Typography variant="body2" color="success.main" fontWeight={500}>
+                            Rs.{sc.totalPaid.toLocaleString()}
+                          </Typography>
+                        </td>
+                        <td style={{ textAlign: "right" }}>
+                          <Typography
+                            variant="body2"
+                            color={sc.balance > 0 ? "warning.main" : "success.main"}
+                            fontWeight={600}
+                          >
+                            Rs.{sc.balance.toLocaleString()}
+                          </Typography>
+                        </td>
+                        <td>
+                          <Chip
+                            label={sc.status.toUpperCase()}
+                            size="small"
+                            color={sc.status === "active" ? "success" : "warning"}
+                            variant="outlined"
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                    {/* Total Row */}
+                    <tr>
+                      <td>
+                        <Typography variant="body2" fontWeight={700}>
+                          TOTAL
+                        </Typography>
+                      </td>
+                      <td style={{ textAlign: "right" }}>
+                        <Typography variant="body2" fontWeight={700}>
+                          Rs.{subcontracts.reduce((sum, sc) => sum + sc.totalValue, 0).toLocaleString()}
+                        </Typography>
+                      </td>
+                      <td style={{ textAlign: "right" }}>
+                        <Typography variant="body2" fontWeight={700} color="success.main">
+                          Rs.{subcontracts.reduce((sum, sc) => sum + sc.totalPaid, 0).toLocaleString()}
+                        </Typography>
+                      </td>
+                      <td style={{ textAlign: "right" }}>
+                        <Typography variant="body2" fontWeight={700} color="warning.main">
+                          Rs.{subcontracts.reduce((sum, sc) => sum + sc.balance, 0).toLocaleString()}
+                        </Typography>
+                      </td>
+                      <td></td>
+                    </tr>
+                  </tbody>
+                </Box>
+              </Box>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       <Card sx={{ mb: 3 }}>
         <CardContent>

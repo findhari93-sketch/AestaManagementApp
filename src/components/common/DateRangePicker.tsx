@@ -37,8 +37,8 @@ import "react-date-range/dist/styles.css";
 import "react-date-range/dist/theme/default.css";
 
 interface DateRangePickerProps {
-  startDate: Date;
-  endDate: Date;
+  startDate: Date | null;
+  endDate: Date | null;
   onChange: (startDate: Date, endDate: Date) => void;
   minDate?: Date;
   maxDate?: Date;
@@ -184,37 +184,43 @@ export default function DateRangePicker({
 }: DateRangePickerProps) {
   const isMobile = useIsMobile();
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
+
   const [tempRange, setTempRange] = useState<Range[]>([
     {
-      startDate: startDate,
-      endDate: endDate,
+      startDate: startDate || new Date(),
+      endDate: endDate || new Date(),
       key: "selection",
     },
   ]);
-  const [selectedPreset, setSelectedPreset] = useState<PresetKey | null>(
-    findMatchingPreset(startDate, endDate)
+  const [selectedPreset, setSelectedPreset] = useState<PresetKey | null>(() =>
+    startDate && endDate ? findMatchingPreset(startDate, endDate) : null
   );
 
   const open = Boolean(anchorEl);
 
   // Sync temp range when props change
   useEffect(() => {
-    setTempRange([
-      {
-        startDate: startDate,
-        endDate: endDate,
-        key: "selection",
-      },
-    ]);
-    setSelectedPreset(findMatchingPreset(startDate, endDate));
+    if (startDate && endDate) {
+      setTempRange([
+        {
+          startDate: startDate,
+          endDate: endDate,
+          key: "selection",
+        },
+      ]);
+      setSelectedPreset(findMatchingPreset(startDate, endDate));
+    }
   }, [startDate, endDate]);
 
   const handleOpen = (event: React.MouseEvent<HTMLElement>) => {
     setAnchorEl(event.currentTarget);
+    // Use current dates or default to last 7 days for picker
+    const defaultStart = startDate || subDays(new Date(), 7);
+    const defaultEnd = endDate || new Date();
     setTempRange([
       {
-        startDate: startDate,
-        endDate: endDate,
+        startDate: defaultStart,
+        endDate: defaultEnd,
         key: "selection",
       },
     ]);
@@ -258,11 +264,17 @@ export default function DateRangePicker({
     }
   };
 
-  // Check if it's a single date selection (not a range)
-  const isSingleDate = format(startDate, "yyyy-MM-dd") === format(endDate, "yyyy-MM-dd");
+  // Check if dates are set (not "All Time" mode)
+  const hasDates = startDate && endDate;
 
-  // Navigate dates based on selection type
+  // Check if it's a single date selection (not a range)
+  const isSingleDate = hasDates &&
+    format(startDate, "yyyy-MM-dd") === format(endDate, "yyyy-MM-dd");
+
+  // Navigate dates based on selection type (disabled when no dates set)
   const handleNavigate = (direction: "prev" | "next") => {
+    if (!hasDates) return;
+
     if (isSingleDate) {
       // Single date: move by 1 day in either direction
       if (direction === "prev") {
@@ -284,12 +296,15 @@ export default function DateRangePicker({
     }
   };
 
-  // Disable next button: at today OR when it's a date range (not single date)
-  const isNextDisabled =
+  // Disable buttons when no dates are set (All Time mode)
+  const isNextDisabled = !hasDates ||
     format(endDate, "yyyy-MM-dd") === format(new Date(), "yyyy-MM-dd") ||
     !isSingleDate;
 
-  const currentLabel = getSelectionLabel(startDate, endDate);
+  const isPrevDisabled = !hasDates;
+
+  // Current label - show "All Time" when no dates are set
+  const currentLabel = hasDates ? getSelectionLabel(startDate, endDate) : "All Time";
 
   return (
     <Box sx={{ display: "flex", alignItems: "center", gap: { xs: 0.5, sm: 1 } }}>
@@ -299,6 +314,7 @@ export default function DateRangePicker({
         <IconButton
           size="small"
           onClick={() => handleNavigate("prev")}
+          disabled={isPrevDisabled}
           sx={{ p: { xs: 0.25, sm: 0.5 } }}
         >
           <ChevronLeftIcon fontSize="small" />
@@ -362,7 +378,7 @@ export default function DateRangePicker({
         PaperProps={{
           sx: {
             mt: 1,
-            maxWidth: { xs: "100vw", sm: "auto" },
+            maxWidth: { xs: "95vw", sm: "auto" },
             maxHeight: { xs: "85vh", sm: "auto" },
             overflow: "hidden",
           },
@@ -373,7 +389,6 @@ export default function DateRangePicker({
             display: "flex",
             flexDirection: { xs: "column", sm: "row" },
             minWidth: { xs: "auto", sm: 600 },
-            width: { xs: "100vw", sm: "auto" },
           }}
         >
           {/* Mobile: Horizontal scrollable preset chips */}

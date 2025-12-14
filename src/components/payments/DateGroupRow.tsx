@@ -30,9 +30,12 @@ import {
   Groups as GroupsIcon,
   Receipt as ReceiptIcon,
   Close as CloseIcon,
+  NotificationsActive as NotifyIcon,
+  Cancel as CancelIcon,
 } from "@mui/icons-material";
 import dayjs from "dayjs";
 import type { DateGroup, DailyPaymentRecord } from "@/types/payment.types";
+import SettlementStatusIndicator from "./SettlementStatusIndicator";
 
 interface DateGroupRowProps {
   dateGroup: DateGroup;
@@ -42,6 +45,10 @@ interface DateGroupRowProps {
   onPayAll: (records: DailyPaymentRecord[]) => void;
   onPaySelected: (records: DailyPaymentRecord[]) => void;
   onPaySingle: (record: DailyPaymentRecord) => void;
+  onNotifyEngineer?: (record: DailyPaymentRecord) => void;
+  onNotifyDate?: (date: string, records: DailyPaymentRecord[]) => void;
+  onCancelPayment?: (record: DailyPaymentRecord) => void;
+  onCancelAllDirect?: (records: DailyPaymentRecord[]) => void;
   selectedRecords: Set<string>;
   onToggleSelect: (recordId: string) => void;
   onSelectAllDaily: (date: string, select: boolean) => void;
@@ -57,6 +64,10 @@ export default function DateGroupRow({
   onPayAll,
   onPaySelected,
   onPaySingle,
+  onNotifyEngineer,
+  onNotifyDate,
+  onCancelPayment,
+  onCancelAllDirect,
   selectedRecords,
   onToggleSelect,
   onSelectAllDaily,
@@ -91,6 +102,20 @@ export default function DateGroupRow({
   const pendingMarketRecords = marketRecords.filter((r) => !r.isPaid && !r.paidVia);
   const allPendingRecords = [...pendingDailyRecords, ...pendingMarketRecords];
 
+  // Records sent to engineer (awaiting settlement)
+  const sentToEngineerDaily = dailyRecords.filter(
+    (r) => !r.isPaid && r.paidVia === "engineer_wallet"
+  );
+  const sentToEngineerMarket = marketRecords.filter(
+    (r) => !r.isPaid && r.paidVia === "engineer_wallet"
+  );
+  const allSentToEngineer = [...sentToEngineerDaily, ...sentToEngineerMarket];
+
+  // Paid direct payments (can be cancelled)
+  const paidDirectDaily = dailyRecords.filter((r) => r.isPaid && r.paidVia === "direct");
+  const paidDirectMarket = marketRecords.filter((r) => r.isPaid && r.paidVia === "direct");
+  const allPaidDirect = [...paidDirectDaily, ...paidDirectMarket];
+
   const selectedDailyCount = dailyRecords.filter(
     (r) => selectedRecords.has(r.id) && !r.isPaid
   ).length;
@@ -105,7 +130,19 @@ export default function DateGroupRow({
       return <Chip label="PAID" size="small" color="success" />;
     }
     if (record.paidVia === "engineer_wallet") {
-      return <Chip label="SENT TO ENGINEER" size="small" color="info" />;
+      return (
+        <SettlementStatusIndicator
+          paidVia={record.paidVia}
+          settlementStatus={record.settlementStatus}
+          compact
+          amount={record.amount}
+          companyProofUrl={record.companyProofUrl}
+          engineerProofUrl={record.engineerProofUrl}
+          transactionDate={record.transactionDate}
+          settledDate={record.settledDate}
+          confirmedAt={record.confirmedAt}
+        />
+      );
     }
     return (
       <Chip
@@ -183,6 +220,36 @@ export default function DateGroupRow({
               {formatCurrency(summary.dailyPending + summary.marketPending)}
             </Typography>
           </Box>
+          {(summary.dailySentToEngineer + summary.marketSentToEngineer) > 0 && (
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+              <Box sx={{ textAlign: "right" }}>
+                <Typography variant="caption" color="text.secondary">
+                  With Engineer
+                </Typography>
+                <Typography variant="body2" fontWeight={600} color="warning.dark">
+                  {formatCurrency(summary.dailySentToEngineer + summary.marketSentToEngineer)}
+                </Typography>
+              </Box>
+              {allSentToEngineer.length > 0 && (
+                <Tooltip title={`Send reminder to engineer for all ${allSentToEngineer.length} pending payments on this date`}>
+                  <Button
+                    size="small"
+                    color="warning"
+                    variant="outlined"
+                    startIcon={<NotifyIcon fontSize="small" />}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onNotifyDate?.(date, allSentToEngineer);
+                    }}
+                    disabled={disabled}
+                    sx={{ ml: 0.5, minWidth: "auto", px: 1.5 }}
+                  >
+                    Notify
+                  </Button>
+                </Tooltip>
+              )}
+            </Box>
+          )}
           <Box sx={{ textAlign: "right" }}>
             <Typography variant="caption" color="text.secondary">
               Paid
@@ -228,6 +295,20 @@ export default function DateGroupRow({
             >
               Settle All
             </Button>
+          )}
+          {allPaidDirect.length > 0 && (
+            <Tooltip title={`Cancel all ${allPaidDirect.length} direct payments for this date`}>
+              <Button
+                size="small"
+                variant="outlined"
+                color="error"
+                onClick={() => onCancelAllDirect?.(allPaidDirect)}
+                disabled={disabled}
+                startIcon={<CancelIcon />}
+              >
+                Cancel All ({allPaidDirect.length})
+              </Button>
+            </Tooltip>
           )}
         </Box>
 
@@ -310,7 +391,7 @@ export default function DateGroupRow({
                     <TableCell>Name</TableCell>
                     <TableCell>Role</TableCell>
                     <TableCell align="right">Amount</TableCell>
-                    <TableCell align="center">Status</TableCell>
+                    <TableCell align="center" sx={{ minWidth: 200 }}>Status</TableCell>
                     <TableCell align="center">Proof</TableCell>
                     <TableCell align="center">Action</TableCell>
                   </TableRow>
@@ -364,7 +445,32 @@ export default function DateGroupRow({
                         )}
                       </TableCell>
                       <TableCell align="center">
-                        {!record.isPaid && (
+                        {!record.isPaid && record.paidVia === "engineer_wallet" ? (
+                          <Box sx={{ display: "flex", gap: 0.5, justifyContent: "center" }}>
+                            <Tooltip title="Send reminder to engineer">
+                              <IconButton
+                                size="small"
+                                color="warning"
+                                onClick={() => onNotifyEngineer?.(record)}
+                                disabled={disabled}
+                              >
+                                <NotifyIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                            {record.settlementStatus === "pending_settlement" && (
+                              <Tooltip title="Cancel this payment">
+                                <IconButton
+                                  size="small"
+                                  color="error"
+                                  onClick={() => onCancelPayment?.(record)}
+                                  disabled={disabled}
+                                >
+                                  <CancelIcon fontSize="small" />
+                                </IconButton>
+                              </Tooltip>
+                            )}
+                          </Box>
+                        ) : !record.isPaid ? (
                           <Button
                             size="small"
                             onClick={() => onPaySingle(record)}
@@ -372,7 +478,18 @@ export default function DateGroupRow({
                           >
                             Settle
                           </Button>
-                        )}
+                        ) : record.isPaid && record.paidVia === "direct" ? (
+                          <Tooltip title="Cancel this payment and reset to pending">
+                            <IconButton
+                              size="small"
+                              color="error"
+                              onClick={() => onCancelPayment?.(record)}
+                              disabled={disabled}
+                            >
+                              <CancelIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        ) : null}
                       </TableCell>
                     </TableRow>
                   ))}
@@ -450,7 +567,7 @@ export default function DateGroupRow({
                     <TableCell>Role</TableCell>
                     <TableCell align="center">Count</TableCell>
                     <TableCell align="right">Amount</TableCell>
-                    <TableCell align="center">Status</TableCell>
+                    <TableCell align="center" sx={{ minWidth: 200 }}>Status</TableCell>
                     <TableCell align="center">Proof</TableCell>
                     <TableCell align="center">Action</TableCell>
                   </TableRow>
@@ -503,7 +620,32 @@ export default function DateGroupRow({
                         )}
                       </TableCell>
                       <TableCell align="center">
-                        {!record.isPaid && (
+                        {!record.isPaid && record.paidVia === "engineer_wallet" ? (
+                          <Box sx={{ display: "flex", gap: 0.5, justifyContent: "center" }}>
+                            <Tooltip title="Send reminder to engineer">
+                              <IconButton
+                                size="small"
+                                color="warning"
+                                onClick={() => onNotifyEngineer?.(record)}
+                                disabled={disabled}
+                              >
+                                <NotifyIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                            {record.settlementStatus === "pending_settlement" && (
+                              <Tooltip title="Cancel this payment">
+                                <IconButton
+                                  size="small"
+                                  color="error"
+                                  onClick={() => onCancelPayment?.(record)}
+                                  disabled={disabled}
+                                >
+                                  <CancelIcon fontSize="small" />
+                                </IconButton>
+                              </Tooltip>
+                            )}
+                          </Box>
+                        ) : !record.isPaid ? (
                           <Button
                             size="small"
                             onClick={() => onPaySingle(record)}
@@ -511,7 +653,18 @@ export default function DateGroupRow({
                           >
                             Settle
                           </Button>
-                        )}
+                        ) : record.isPaid && record.paidVia === "direct" ? (
+                          <Tooltip title="Cancel this payment and reset to pending">
+                            <IconButton
+                              size="small"
+                              color="error"
+                              onClick={() => onCancelPayment?.(record)}
+                              disabled={disabled}
+                            >
+                              <CancelIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        ) : null}
                       </TableCell>
                     </TableRow>
                   ))}

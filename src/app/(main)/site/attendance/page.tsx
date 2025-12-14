@@ -60,6 +60,7 @@ import {
   FullscreenExit,
   Close as CloseIcon,
   WbSunny,
+  NightsStay,
   EventNote,
   EventBusy as HolidayIcon,
   BeachAccess as BeachAccessIcon,
@@ -74,6 +75,8 @@ import AuditAvatarGroup from "@/components/common/AuditAvatarGroup";
 import {
   PhotoBadge,
   WorkUpdateViewer,
+  PhotoThumbnailStrip,
+  PhotoFullscreenDialog,
 } from "@/components/attendance/work-updates";
 import type { TeaShopAccount } from "@/types/database.types";
 import type { WorkUpdates } from "@/types/work-updates.types";
@@ -328,6 +331,17 @@ export default function AttendancePage() {
 
   // View attendance summary state (eye icon)
   const [viewSummaryDate, setViewSummaryDate] = useState<string | null>(null);
+
+  // Summary table fullscreen state
+  const [summaryTableFullscreen, setSummaryTableFullscreen] = useState(false);
+
+  // Summary photo fullscreen state
+  const [summaryPhotoFullscreen, setSummaryPhotoFullscreen] = useState(false);
+  const [summaryFullscreenPhotos, setSummaryFullscreenPhotos] = useState<
+    { url: string; id: string; description?: string; uploadedAt: string }[]
+  >([]);
+  const [summaryPhotoIndex, setSummaryPhotoIndex] = useState(0);
+  const [summaryPhotoPeriod, setSummaryPhotoPeriod] = useState<'morning' | 'evening'>('morning');
 
   // Restoration message state
   const [restorationMessage, setRestorationMessage] = useState<string | null>(
@@ -970,6 +984,13 @@ export default function AttendancePage() {
       proofUrl: null,
       subcontractId: null,
       subcontractTitle: record.subcontract_title || null,
+      expenseId: null,
+      settlementStatus: null,
+      companyProofUrl: null,
+      engineerProofUrl: null,
+      transactionDate: null,
+      settledDate: null,
+      confirmedAt: null,
     };
     setPaymentRecords([paymentRecord]);
     setPaymentDialogOpen(true);
@@ -1244,6 +1265,38 @@ export default function AttendancePage() {
   const formatTime = (time: string | null | undefined) => {
     if (!time) return "-";
     return time.substring(0, 5); // HH:MM
+  };
+
+  // Helper function for progress color
+  const getProgressColor = (percent: number): "success" | "warning" | "error" => {
+    if (percent >= 80) return "success";
+    if (percent >= 50) return "warning";
+    return "error";
+  };
+
+  // Summary photo click handlers
+  const handleMorningSummaryPhotoClick = (index: number) => {
+    const summaryEntry = combinedDateEntries.find(
+      (e) => e.type === "attendance" && e.date === viewSummaryDate
+    );
+    if (summaryEntry?.type === "attendance" && summaryEntry.summary.workUpdates?.morning?.photos) {
+      setSummaryFullscreenPhotos(summaryEntry.summary.workUpdates.morning.photos);
+      setSummaryPhotoIndex(index);
+      setSummaryPhotoPeriod('morning');
+      setSummaryPhotoFullscreen(true);
+    }
+  };
+
+  const handleEveningSummaryPhotoClick = (index: number) => {
+    const summaryEntry = combinedDateEntries.find(
+      (e) => e.type === "attendance" && e.date === viewSummaryDate
+    );
+    if (summaryEntry?.type === "attendance" && summaryEntry.summary.workUpdates?.evening?.photos) {
+      setSummaryFullscreenPhotos(summaryEntry.summary.workUpdates.evening.photos);
+      setSummaryPhotoIndex(index);
+      setSummaryPhotoPeriod('evening');
+      setSummaryPhotoFullscreen(true);
+    }
   };
 
   const detailedColumns = useMemo<MRT_ColumnDef<AttendanceRecord>[]>(
@@ -4037,6 +4090,14 @@ export default function AttendancePage() {
         onClose={() => setViewSummaryDate(null)}
         maxWidth="md"
         fullWidth
+        fullScreen={isMobile}
+        PaperProps={{
+          sx: {
+            m: { xs: 0, sm: 2 },
+            maxHeight: { xs: '100%', sm: '90vh' },
+            borderRadius: { xs: 0, sm: 2 },
+          }
+        }}
       >
         {viewSummaryDate &&
           (() => {
@@ -4050,71 +4111,90 @@ export default function AttendancePage() {
 
             return (
               <>
-                <DialogTitle sx={{ bgcolor: "primary.main", color: "white" }}>
-                  <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
-                    <VisibilityIcon />
-                    <Box>
-                      <Typography variant="h6">Attendance Summary</Typography>
-                      <Typography variant="body2" sx={{ opacity: 0.9 }}>
-                        {dayjs(viewSummaryDate).format("dddd, DD MMMM YYYY")}
-                      </Typography>
+                <DialogTitle sx={{ bgcolor: "primary.main", color: "white", pr: 1 }}>
+                  <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <Box sx={{ display: "flex", alignItems: "center", gap: { xs: 1, sm: 2 } }}>
+                      <VisibilityIcon sx={{ fontSize: { xs: 20, sm: 24 } }} />
+                      <Box>
+                        <Typography variant="h6" sx={{ fontSize: { xs: '1rem', sm: '1.25rem' } }}>
+                          Attendance Summary
+                        </Typography>
+                        <Typography variant="body2" sx={{ opacity: 0.9, fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>
+                          {dayjs(viewSummaryDate).format(isMobile ? "ddd, DD MMM YYYY" : "dddd, DD MMMM YYYY")}
+                        </Typography>
+                      </Box>
                     </Box>
+                    <IconButton
+                      onClick={() => setViewSummaryDate(null)}
+                      sx={{ color: 'white' }}
+                      size={isMobile ? "small" : "medium"}
+                    >
+                      <CloseIcon />
+                    </IconButton>
                   </Box>
                 </DialogTitle>
-                <DialogContent sx={{ p: 3 }}>
+                <DialogContent sx={{ p: { xs: 1.5, sm: 3 }, pt: { xs: 2, sm: 3 } }}>
                   {/* Summary Stats */}
                   <Box
-                    sx={{ display: "flex", flexWrap: "wrap", gap: 2, mb: 3 }}
+                    sx={{
+                      display: "grid",
+                      gridTemplateColumns: { xs: "repeat(2, 1fr)", sm: "repeat(4, 1fr)" },
+                      gap: { xs: 1, sm: 2 },
+                      mb: { xs: 2, sm: 3 }
+                    }}
                   >
                     <Paper
-                      sx={{ p: 2, flex: "1 1 150px", textAlign: "center" }}
+                      sx={{ p: { xs: 1, sm: 2 }, textAlign: "center" }}
                     >
-                      <Typography variant="caption" color="text.secondary">
+                      <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.65rem', sm: '0.75rem' } }}>
                         Total Laborers
                       </Typography>
-                      <Typography variant="h4" fontWeight={700}>
+                      <Typography variant="h4" fontWeight={700} sx={{ fontSize: { xs: '1.5rem', sm: '2.125rem' } }}>
                         {summary.totalLaborerCount}
                       </Typography>
                     </Paper>
                     <Paper
-                      sx={{ p: 2, flex: "1 1 150px", textAlign: "center" }}
+                      sx={{ p: { xs: 1, sm: 2 }, textAlign: "center" }}
                     >
-                      <Typography variant="caption" color="text.secondary">
+                      <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.65rem', sm: '0.75rem' } }}>
                         Daily/Contract
                       </Typography>
                       <Typography
                         variant="h4"
                         fontWeight={700}
                         color="info.main"
+                        sx={{ fontSize: { xs: '1.5rem', sm: '2.125rem' } }}
                       >
                         {summary.dailyLaborerCount +
                           summary.contractLaborerCount}
                       </Typography>
                     </Paper>
                     <Paper
-                      sx={{ p: 2, flex: "1 1 150px", textAlign: "center" }}
+                      sx={{ p: { xs: 1, sm: 2 }, textAlign: "center" }}
                     >
-                      <Typography variant="caption" color="text.secondary">
+                      <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.65rem', sm: '0.75rem' } }}>
                         Market
                       </Typography>
                       <Typography
                         variant="h4"
                         fontWeight={700}
                         color="secondary.main"
+                        sx={{ fontSize: { xs: '1.5rem', sm: '2.125rem' } }}
                       >
                         {summary.marketLaborerCount}
                       </Typography>
                     </Paper>
                     <Paper
-                      sx={{ p: 2, flex: "1 1 150px", textAlign: "center" }}
+                      sx={{ p: { xs: 1, sm: 2 }, textAlign: "center" }}
                     >
-                      <Typography variant="caption" color="text.secondary">
+                      <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.65rem', sm: '0.75rem' } }}>
                         Total Expense
                       </Typography>
                       <Typography
                         variant="h4"
                         fontWeight={700}
                         color="success.main"
+                        sx={{ fontSize: { xs: '1.5rem', sm: '2.125rem' } }}
                       >
                         ₹
                         {(
@@ -4165,18 +4245,18 @@ export default function AttendancePage() {
 
                   {/* Work Description */}
                   {(summary.workDescription || summary.comments) && (
-                    <Box sx={{ mb: 3 }}>
+                    <Box sx={{ mb: { xs: 2, sm: 3 } }}>
                       <Typography variant="subtitle2" sx={{ mb: 1 }}>
                         Work Description
                       </Typography>
-                      <Paper sx={{ p: 2, bgcolor: "action.hover" }}>
+                      <Paper sx={{ p: { xs: 1.5, sm: 2 }, bgcolor: "action.hover" }}>
                         {summary.workDescription && (
-                          <Typography variant="body2" sx={{ mb: 0.5 }}>
+                          <Typography variant="body2" sx={{ mb: 0.5, fontSize: { xs: '0.8rem', sm: '0.875rem' } }}>
                             {summary.workDescription}
                           </Typography>
                         )}
                         {summary.comments && (
-                          <Typography variant="body2" color="text.secondary">
+                          <Typography variant="body2" color="text.secondary" sx={{ fontSize: { xs: '0.8rem', sm: '0.875rem' } }}>
                             Comments: {summary.comments}
                           </Typography>
                         )}
@@ -4184,64 +4264,153 @@ export default function AttendancePage() {
                     </Box>
                   )}
 
+                  {/* Work Updates Photos */}
+                  {summary.workUpdates && (
+                    <Box sx={{ mb: { xs: 2, sm: 3 } }}>
+                      <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                        Work Progress Photos
+                      </Typography>
+                      <Box sx={{ display: "flex", gap: { xs: 1, sm: 2 }, flexDirection: { xs: 'column', sm: 'row' } }}>
+                        {/* Morning Photos */}
+                        <Paper
+                          variant="outlined"
+                          sx={{
+                            flex: 1,
+                            p: { xs: 1, sm: 1.5 },
+                            bgcolor: "warning.50",
+                            borderColor: "warning.200"
+                          }}
+                        >
+                          <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
+                            <WbSunny sx={{ color: "warning.main", fontSize: 18 }} />
+                            <Typography variant="caption" fontWeight={600} color="warning.dark">
+                              Morning
+                            </Typography>
+                          </Box>
+                          {summary.workUpdates.morning?.photos && summary.workUpdates.morning.photos.length > 0 ? (
+                            <PhotoThumbnailStrip
+                              photos={summary.workUpdates.morning.photos}
+                              size="small"
+                              maxVisible={3}
+                              onPhotoClick={handleMorningSummaryPhotoClick}
+                            />
+                          ) : (
+                            <Typography variant="caption" color="text.secondary">
+                              No photos
+                            </Typography>
+                          )}
+                        </Paper>
+
+                        {/* Evening Photos */}
+                        <Paper
+                          variant="outlined"
+                          sx={{
+                            flex: 1,
+                            p: { xs: 1, sm: 1.5 },
+                            bgcolor: summary.workUpdates.evening ? "info.50" : "grey.100",
+                            borderColor: summary.workUpdates.evening ? "info.200" : "grey.300"
+                          }}
+                        >
+                          <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
+                            <NightsStay sx={{ color: summary.workUpdates.evening ? "info.main" : "grey.400", fontSize: 18 }} />
+                            <Typography variant="caption" fontWeight={600} color={summary.workUpdates.evening ? "info.dark" : "text.disabled"}>
+                              Evening
+                            </Typography>
+                            {summary.workUpdates.evening && (
+                              <Chip
+                                label={`${summary.workUpdates.evening.completionPercent}%`}
+                                size="small"
+                                color={getProgressColor(summary.workUpdates.evening.completionPercent)}
+                                sx={{ ml: 'auto', height: 20, '& .MuiChip-label': { px: 1 } }}
+                              />
+                            )}
+                          </Box>
+                          {summary.workUpdates.evening?.photos && summary.workUpdates.evening.photos.length > 0 ? (
+                            <PhotoThumbnailStrip
+                              photos={summary.workUpdates.evening.photos}
+                              size="small"
+                              maxVisible={3}
+                              onPhotoClick={handleEveningSummaryPhotoClick}
+                            />
+                          ) : (
+                            <Box sx={{ py: 1, textAlign: 'center' }}>
+                              <Typography variant="caption" color="text.disabled">
+                                {summary.workUpdates.evening ? "No photos" : "In Progress - Not yet updated"}
+                              </Typography>
+                            </Box>
+                          )}
+                        </Paper>
+                      </Box>
+                    </Box>
+                  )}
+
                   {/* Laborers List */}
                   {summary.records.length > 0 && (
-                    <Box sx={{ mb: 3 }}>
-                      <Typography variant="subtitle2" sx={{ mb: 1 }}>
-                        Laborers ({summary.records.length})
-                      </Typography>
-                      <TableContainer component={Paper} variant="outlined">
-                        <Table size="small">
+                    <Box sx={{ mb: { xs: 2, sm: 3 } }}>
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                        <Typography variant="subtitle2">
+                          Laborers ({summary.records.length})
+                        </Typography>
+                        <IconButton
+                          size="small"
+                          onClick={() => setSummaryTableFullscreen(true)}
+                          sx={{ display: { xs: 'flex', sm: 'none' } }}
+                        >
+                          <Fullscreen fontSize="small" />
+                        </IconButton>
+                      </Box>
+                      <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: { xs: 300, sm: 'none' } }}>
+                        <Table size="small" stickyHeader>
                           <TableHead>
                             <TableRow sx={{ bgcolor: "action.selected" }}>
-                              <TableCell sx={{ fontWeight: 700 }}>
+                              <TableCell sx={{ fontWeight: 700, fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>
                                 Name
                               </TableCell>
-                              <TableCell sx={{ fontWeight: 700 }}>
+                              <TableCell sx={{ fontWeight: 700, fontSize: { xs: '0.75rem', sm: '0.875rem' }, display: { xs: 'none', sm: 'table-cell' } }}>
                                 Type
                               </TableCell>
-                              <TableCell sx={{ fontWeight: 700 }}>
+                              <TableCell sx={{ fontWeight: 700, fontSize: { xs: '0.75rem', sm: '0.875rem' }, display: { xs: 'none', sm: 'table-cell' } }}>
                                 Team
                               </TableCell>
                               <TableCell
                                 align="center"
-                                sx={{ fontWeight: 700 }}
+                                sx={{ fontWeight: 700, fontSize: { xs: '0.75rem', sm: '0.875rem' }, display: { xs: 'none', sm: 'table-cell' } }}
                               >
                                 In
                               </TableCell>
                               <TableCell
                                 align="center"
-                                sx={{ fontWeight: 700 }}
+                                sx={{ fontWeight: 700, fontSize: { xs: '0.75rem', sm: '0.875rem' }, display: { xs: 'none', sm: 'table-cell' } }}
                               >
                                 Out
                               </TableCell>
                               <TableCell
                                 align="center"
-                                sx={{ fontWeight: 700 }}
+                                sx={{ fontWeight: 700, fontSize: { xs: '0.75rem', sm: '0.875rem' } }}
                               >
                                 Days
                               </TableCell>
-                              <TableCell align="right" sx={{ fontWeight: 700 }}>
+                              <TableCell align="right" sx={{ fontWeight: 700, fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>
                                 Earnings
                               </TableCell>
                               <TableCell
                                 align="center"
-                                sx={{ fontWeight: 700 }}
+                                sx={{ fontWeight: 700, fontSize: { xs: '0.75rem', sm: '0.875rem' } }}
                               >
-                                Payment
+                                Status
                               </TableCell>
                             </TableRow>
                           </TableHead>
                           <TableBody>
                             {summary.records.map((record) => (
                               <TableRow key={record.id}>
-                                <TableCell>{record.laborer_name}</TableCell>
-                                <TableCell>
+                                <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>{record.laborer_name}</TableCell>
+                                <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>
                                   <Chip
                                     label={
                                       record.laborer_type === "contract"
-                                        ? "Contract"
-                                        : "Daily"
+                                        ? "C"
+                                        : "D"
                                     }
                                     size="small"
                                     color={
@@ -4252,17 +4421,17 @@ export default function AttendancePage() {
                                     variant="outlined"
                                   />
                                 </TableCell>
-                                <TableCell>{record.team_name || "-"}</TableCell>
-                                <TableCell align="center">
+                                <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' }, display: { xs: 'none', sm: 'table-cell' } }}>{record.team_name || "-"}</TableCell>
+                                <TableCell align="center" sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' }, display: { xs: 'none', sm: 'table-cell' } }}>
                                   {formatTime(record.in_time) || "-"}
                                 </TableCell>
-                                <TableCell align="center">
+                                <TableCell align="center" sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' }, display: { xs: 'none', sm: 'table-cell' } }}>
                                   {formatTime(record.out_time) || "-"}
                                 </TableCell>
-                                <TableCell align="center">
+                                <TableCell align="center" sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>
                                   {record.work_days}
                                 </TableCell>
-                                <TableCell align="right">
+                                <TableCell align="right" sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>
                                   ₹{record.daily_earnings.toLocaleString()}
                                 </TableCell>
                                 <TableCell align="center">
@@ -4275,6 +4444,7 @@ export default function AttendancePage() {
                                     variant={
                                       record.is_paid ? "filled" : "outlined"
                                     }
+                                    sx={{ fontSize: { xs: '0.65rem', sm: '0.75rem' }, height: { xs: 20, sm: 24 } }}
                                   />
                                 </TableCell>
                               </TableRow>
@@ -4397,6 +4567,98 @@ export default function AttendancePage() {
             );
           })()}
       </Dialog>
+
+      {/* Full-screen Table Dialog for Mobile */}
+      <Dialog
+        open={summaryTableFullscreen}
+        onClose={() => setSummaryTableFullscreen(false)}
+        fullScreen
+        PaperProps={{
+          sx: {
+            '@media (max-width: 600px) and (orientation: portrait)': {
+              transform: 'rotate(90deg)',
+              transformOrigin: 'center center',
+              width: '100vh',
+              height: '100vw',
+              maxWidth: 'none',
+              maxHeight: 'none',
+            }
+          }
+        }}
+      >
+        <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', py: 1, px: 2 }}>
+          <Typography variant="subtitle1" fontWeight={600}>
+            Laborers - {viewSummaryDate ? dayjs(viewSummaryDate).format("DD MMM YYYY") : ''}
+          </Typography>
+          <IconButton onClick={() => setSummaryTableFullscreen(false)} size="small">
+            <CloseIcon />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent sx={{ p: 0 }}>
+          {viewSummaryDate && (() => {
+            const summaryEntry = combinedDateEntries.find(
+              (e) => e.type === "attendance" && e.date === viewSummaryDate
+            );
+            const summary = summaryEntry?.type === "attendance" ? summaryEntry.summary : null;
+            if (!summary) return null;
+            return (
+              <TableContainer sx={{ height: '100%' }}>
+                <Table size="small" stickyHeader>
+                  <TableHead>
+                    <TableRow>
+                      <TableCell sx={{ fontWeight: 700, fontSize: '0.8rem' }}>Name</TableCell>
+                      <TableCell sx={{ fontWeight: 700, fontSize: '0.8rem' }}>Type</TableCell>
+                      <TableCell sx={{ fontWeight: 700, fontSize: '0.8rem' }}>Team</TableCell>
+                      <TableCell align="center" sx={{ fontWeight: 700, fontSize: '0.8rem' }}>In</TableCell>
+                      <TableCell align="center" sx={{ fontWeight: 700, fontSize: '0.8rem' }}>Out</TableCell>
+                      <TableCell align="center" sx={{ fontWeight: 700, fontSize: '0.8rem' }}>Days</TableCell>
+                      <TableCell align="right" sx={{ fontWeight: 700, fontSize: '0.8rem' }}>Earnings</TableCell>
+                      <TableCell align="center" sx={{ fontWeight: 700, fontSize: '0.8rem' }}>Status</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {summary.records.map((record) => (
+                      <TableRow key={record.id}>
+                        <TableCell sx={{ fontSize: '0.8rem' }}>{record.laborer_name}</TableCell>
+                        <TableCell>
+                          <Chip
+                            label={record.laborer_type === "contract" ? "C" : "D"}
+                            size="small"
+                            color={record.laborer_type === "contract" ? "info" : "warning"}
+                            variant="outlined"
+                          />
+                        </TableCell>
+                        <TableCell sx={{ fontSize: '0.8rem' }}>{record.team_name || "-"}</TableCell>
+                        <TableCell align="center" sx={{ fontSize: '0.8rem' }}>{formatTime(record.in_time) || "-"}</TableCell>
+                        <TableCell align="center" sx={{ fontSize: '0.8rem' }}>{formatTime(record.out_time) || "-"}</TableCell>
+                        <TableCell align="center" sx={{ fontSize: '0.8rem' }}>{record.work_days}</TableCell>
+                        <TableCell align="right" sx={{ fontSize: '0.8rem' }}>₹{record.daily_earnings.toLocaleString()}</TableCell>
+                        <TableCell align="center">
+                          <Chip
+                            label={record.is_paid ? "Paid" : "Pending"}
+                            size="small"
+                            color={record.is_paid ? "success" : "warning"}
+                            variant={record.is_paid ? "filled" : "outlined"}
+                          />
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
+
+      {/* Photo Fullscreen Dialog for Summary */}
+      <PhotoFullscreenDialog
+        open={summaryPhotoFullscreen}
+        onClose={() => setSummaryPhotoFullscreen(false)}
+        photos={summaryFullscreenPhotos}
+        initialIndex={summaryPhotoIndex}
+        period={summaryPhotoPeriod}
+      />
 
       {/* SpeedDial for Add Attendance - Click-only (not hover) */}
       {canEdit && (

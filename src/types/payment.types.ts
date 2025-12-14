@@ -42,10 +42,21 @@ export interface DailyPaymentRecord {
   paymentMode: PaymentMode | null;
   engineerTransactionId: string | null;
   proofUrl: string | null;
+  settlementStatus: "pending_settlement" | "pending_confirmation" | "confirmed" | "disputed" | null;
+
+  // Settlement tracking (from engineer transaction)
+  companyProofUrl: string | null; // proof_url - Company sent to engineer
+  engineerProofUrl: string | null; // settlement_proof_url - Engineer settled with laborer
+  transactionDate: string | null; // When company sent money
+  settledDate: string | null; // When engineer settled
+  confirmedAt: string | null; // When admin confirmed
 
   // Subcontract linking (optional)
   subcontractId: string | null;
   subcontractTitle: string | null;
+
+  // Expense linking (for cancellation)
+  expenseId: string | null;
 
   // Audit
   recordedBy?: string | null;

@@ -185,3 +185,66 @@ export function formatQuantity(
     maximumFractionDigits: 2,
   })} ${unit}`;
 }
+
+/**
+ * Clean phone number to digits only (for WhatsApp URL)
+ */
+export function cleanPhoneNumber(phone: string | null | undefined): string {
+  if (!phone) return "";
+
+  // Remove all non-digits
+  const digits = phone.replace(/\D/g, "");
+
+  // If 10 digits, add India country code
+  if (digits.length === 10) {
+    return `91${digits}`;
+  }
+
+  // If already has country code
+  if (digits.length === 12 && digits.startsWith("91")) {
+    return digits;
+  }
+
+  return digits;
+}
+
+/**
+ * Generate WhatsApp URL with pre-filled message
+ * Opens WhatsApp with the specified phone number and message
+ */
+export function generateWhatsAppUrl(
+  phone: string | null | undefined,
+  message: string
+): string {
+  const cleanedPhone = cleanPhoneNumber(phone);
+  if (!cleanedPhone) return "";
+
+  const encodedMessage = encodeURIComponent(message);
+  return `https://wa.me/${cleanedPhone}?text=${encodedMessage}`;
+}
+
+/**
+ * Generate payment reminder message for engineer
+ */
+export function generatePaymentReminderMessage(params: {
+  engineerName: string;
+  paymentDate: string;
+  amount: number;
+  laborerCount: number;
+  siteName: string;
+}): string {
+  const { engineerName, paymentDate, amount, laborerCount, siteName } = params;
+
+  return `Hi ${engineerName},
+
+This is a reminder to complete the following payment:
+
+📅 Date: ${paymentDate}
+💰 Amount: Rs.${amount.toLocaleString("en-IN")}
+👷 Laborers: ${laborerCount} ${laborerCount === 1 ? "laborer" : "laborers"}
+📍 Site: ${siteName}
+
+Please settle this payment and upload proof.
+
+Thank you!`;
+}

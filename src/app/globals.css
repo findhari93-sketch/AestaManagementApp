@@ -22,38 +22,8 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* ===== react-date-range Calendar Fixes ===== */
-/* Fix calendar gaps and make it responsive */
-.rdrCalendarWrapper {
-  width: 100% !important;
-  font-size: 14px !important;
-}
-
-.rdrMonth {
-  width: 100% !important;
-  padding: 0 0.5em 1em 0.5em !important;
-}
-
-.rdrMonthAndYearWrapper {
-  padding: 0 0.5em !important;
-  height: 40px !important;
-}
-
-.rdrDateDisplayWrapper {
-  background-color: transparent !important;
-}
-
-.rdrDateDisplay {
-  margin: 0.5em !important;
-}
-
-.rdrDateDisplayItem {
-  border-radius: 6px !important;
-  box-shadow: none !important;
-  border: 1px solid #e0e0e0 !important;
-}
-
-/* Dark mode support for react-date-range */
+/* ===== react-date-range Dark Mode Support ===== */
+/* Only color fixes for dark mode - using native calendar styles */
 [data-mui-color-scheme="dark"] .rdrCalendarWrapper,
 [data-mui-color-scheme="dark"] .rdrDateRangePickerWrapper {
   background-color: #1e1e1e;
@@ -110,50 +80,9 @@ body {
   border-color: transparent transparent transparent rgba(255, 255, 255, 0.6) !important;
 }
 
-.rdrDateDisplayItem input {
-  height: 2em !important;
-  font-size: 13px !important;
-}
-
-.rdrDayNumber span {
-  font-weight: 500 !important;
-}
-
+/* Text contrast for selected dates */
 .rdrDay:not(.rdrDayPassive) .rdrInRange ~ .rdrDayNumber span,
 .rdrDay:not(.rdrDayPassive) .rdrStartEdge ~ .rdrDayNumber span,
 .rdrDay:not(.rdrDayPassive) .rdrEndEdge ~ .rdrDayNumber span {
   color: white !important;
-}
-
-/* Mobile optimizations for calendar */
-@media (max-width: 599px) {
-  .rdrCalendarWrapper {
-    font-size: 12px !important;
-  }
-
-  .rdrMonth {
-    padding: 0 0.25em 0.5em 0.25em !important;
-  }
-
-  .rdrMonthAndYearWrapper {
-    height: 36px !important;
-  }
-
-  .rdrMonthAndYearPickers select {
-    font-size: 12px !important;
-    padding: 4px !important;
-  }
-
-  .rdrDayNumber span {
-    font-size: 12px !important;
-  }
-
-  .rdrDateDisplayItem input {
-    font-size: 11px !important;
-  }
-
-  .rdrNextPrevButton {
-    width: 20px !important;
-    height: 20px !important;
-  }
 }

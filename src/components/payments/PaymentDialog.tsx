@@ -36,6 +36,7 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSite } from "@/contexts/SiteContext";
+import { createSalaryExpense } from "@/lib/services/notificationService";
 import FileUploader, { UploadedFile } from "@/components/common/FileUploader";
 import SubcontractLinkSelector from "./SubcontractLinkSelector";
 import dayjs from "dayjs";
@@ -239,7 +240,8 @@ export default function PaymentDialog({
           .insert({
             user_id: selectedEngineerId,
             site_id: selectedSite.id,
-            transaction_type: "spent_on_behalf",
+            transaction_type: "received_from_company",
+            settlement_status: "pending_settlement",
             amount: paymentAmount,
             description: engineerReference,
             payment_mode: paymentMode,
@@ -272,6 +274,66 @@ export default function PaymentDialog({
           paymentDate,
           engineerTransactionId
         );
+      }
+
+      // 3. Create salary expense for direct payments only
+      // (Via engineer expenses are created when engineer settles)
+      if (paymentChannel === "direct") {
+        const laborerCount = isWeeklyPayment
+          ? 1
+          : dailyRecords.reduce((sum, r) => sum + (r.count || 1), 0);
+        const laborerType = isWeeklyPayment
+          ? "contract"
+          : dailyRecords.length > 0
+            ? dailyRecords[0].laborerType
+            : "daily";
+        const recordDate = isWeeklyPayment
+          ? weeklyPayment!.weekStart
+          : dailyRecords[0]?.date || paymentDate;
+
+        const expenseResult = await createSalaryExpense(supabase, {
+          siteId: selectedSite.id,
+          amount: paymentAmount,
+          date: recordDate,
+          description: `Laborer salary (${laborerCount} ${laborerType})`,
+          paymentMode,
+          paidBy: userProfile.name || "Unknown",
+          paidByUserId: userProfile.id,
+          proofUrl,
+          subcontractId,
+          isCleared: true, // Direct payments are immediately cleared
+          paymentSource: "direct",
+        });
+
+        // Log warning if expense creation failed (payment still succeeds)
+        if (expenseResult.error) {
+          console.warn("Failed to create salary expense:", expenseResult.error.message);
+        }
+
+        // Link expense to attendance records for easy cancellation
+        if (expenseResult.expenseId && dailyRecords.length > 0) {
+          // Update daily attendance records
+          const dailyIds = dailyRecords
+            .filter(r => r.sourceType === "daily")
+            .map(r => r.sourceId);
+          if (dailyIds.length > 0) {
+            await supabase
+              .from("daily_attendance")
+              .update({ expense_id: expenseResult.expenseId })
+              .in("id", dailyIds);
+          }
+
+          // Update market attendance records
+          const marketIds = dailyRecords
+            .filter(r => r.sourceType === "market")
+            .map(r => r.sourceId);
+          if (marketIds.length > 0) {
+            await supabase
+              .from("market_laborer_attendance")
+              .update({ expense_id: expenseResult.expenseId })
+              .in("id", marketIds);
+          }
+        }
       }
 
       onSuccess?.();

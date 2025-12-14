@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import {
   Box,
   FormControl,
@@ -88,6 +88,12 @@ export default function ContractWeeklyPaymentsTab({
 
   // Expanded state
   const [expandedWeeks, setExpandedWeeks] = useState<Set<string>>(new Set());
+  const expandedWeeksRef = useRef<Set<string>>(new Set());
+
+  // Keep ref in sync with state
+  useEffect(() => {
+    expandedWeeksRef.current = expandedWeeks;
+  }, [expandedWeeks]);
 
   const canEdit = hasEditPermission(userProfile?.role);
 
@@ -337,7 +343,7 @@ export default function ContractWeeklyPaymentsTab({
             paymentProgress,
             status: summaryStatus,
           },
-          isExpanded: expandedWeeks.has(weekStart),
+          isExpanded: expandedWeeksRef.current.has(weekStart),
         };
       });
 
@@ -366,7 +372,8 @@ export default function ContractWeeklyPaymentsTab({
     } finally {
       setLoading(false);
     }
-  }, [selectedSite?.id, dateRange, expandedWeeks, supabase]);
+  // Note: expandedWeeks removed from deps to prevent refetch on expand/collapse
+  }, [selectedSite?.id, dateRange, supabase]);
 
   useEffect(() => {
     fetchData();

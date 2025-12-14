@@ -57,7 +57,7 @@ import type {
   RecipientType,
 } from "@/types/database.types";
 import dayjs from "dayjs";
-import { createPaymentSettlementNotification } from "@/lib/services/notificationService";
+import { createPaymentSettlementNotification, createSalaryExpense, clearPendingSalaryExpense } from "@/lib/services/notificationService";
 
 interface User {
   id: string;
@@ -481,6 +481,32 @@ export default function EngineerWalletPage() {
         ).catch((err) => console.error("Failed to create notification:", err));
       }
 
+      // Create expense for "used_own_money" transactions (Pending from Company)
+      if (
+        transactionForm.transaction_type === "used_own_money" &&
+        transactionForm.site_id &&
+        insertedData?.id
+      ) {
+        // Get engineer name
+        const engineerName = engineers.find((e) => e.id === transactionForm.user_id)?.name || "Engineer";
+
+        // Create expense with "Pending from Company" indicator
+        await createSalaryExpense(supabase, {
+          siteId: transactionForm.site_id,
+          amount: transactionForm.amount,
+          date: transactionForm.transaction_date,
+          description: transactionForm.description || `Payment by ${engineerName}`,
+          paymentMode: transactionForm.payment_mode,
+          paidBy: engineerName,
+          paidByUserId: transactionForm.user_id,
+          proofUrl: null,
+          subcontractId: null,
+          isCleared: false, // Pending from company
+          engineerTransactionId: insertedData.id,
+          paymentSource: "engineer_own_money",
+        });
+      }
+
       setSuccess("Transaction recorded successfully");
       await fetchData();
       setOpenTransactionDialog(false);
@@ -665,6 +691,11 @@ export default function EngineerWalletPage() {
                 settled_by: userProfile?.id,
               })
               .in("id", idsToSettle);
+
+            // Clear pending expenses for settled transactions
+            for (const txId of idsToSettle) {
+              await clearPendingSalaryExpense(supabase, txId);
+            }
           }
         }
       }

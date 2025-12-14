@@ -538,6 +538,7 @@ export type Database = {
           end_time: string | null
           engineer_transaction_id: string | null
           entered_by: string | null
+          expense_id: string | null
           hours_worked: number | null
           id: string
           in_time: string | null
@@ -590,6 +591,7 @@ export type Database = {
           end_time?: string | null
           engineer_transaction_id?: string | null
           entered_by?: string | null
+          expense_id?: string | null
           hours_worked?: number | null
           id?: string
           in_time?: string | null
@@ -642,6 +644,7 @@ export type Database = {
           end_time?: string | null
           engineer_transaction_id?: string | null
           entered_by?: string | null
+          expense_id?: string | null
           hours_worked?: number | null
           id?: string
           in_time?: string | null
@@ -2100,6 +2103,7 @@ export type Database = {
           engineer_transaction_id: string | null
           entered_by: string
           entered_by_user_id: string | null
+          expense_id: string | null
           id: string
           in_time: string | null
           is_paid: boolean | null
@@ -2137,6 +2141,7 @@ export type Database = {
           engineer_transaction_id?: string | null
           entered_by: string
           entered_by_user_id?: string | null
+          expense_id?: string | null
           id?: string
           in_time?: string | null
           is_paid?: boolean | null
@@ -2173,6 +2178,7 @@ export type Database = {
           day_units?: number | null
           engineer_transaction_id?: string | null
           entered_by?: string
+          expense_id?: string | null
           entered_by_user_id?: string | null
           id?: string
           in_time?: string | null

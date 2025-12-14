@@ -63,6 +63,7 @@ import {
   SyncDisabled as SyncDisabledIcon,
   CheckCircle as CheckCircleIcon,
   Error as ErrorIcon,
+  CalendarMonth as CalendarIcon,
 } from "@mui/icons-material";
 import { useRouter, usePathname } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
@@ -135,6 +136,11 @@ const siteNavCategories: NavCategory[] = [
         text: "Daily Expenses",
         icon: <AccountBalanceWalletIcon />,
         path: "/site/expenses",
+      },
+      {
+        text: "My Wallet",
+        icon: <AccountBalanceWalletIcon />,
+        path: "/site/my-wallet",
       },
       {
         text: "Tea Shop",
@@ -914,32 +920,12 @@ export default function MainLayout({
               mr: { xs: 0.5, sm: 1 },
             }}
           >
-            {/* Date Range Picker or All Time display */}
-            {isAllTime ? (
-              <Chip
-                label="All Time"
-                size="small"
-                variant="outlined"
-                onClick={() => {
-                  // Open picker with default dates
-                  const today = new Date();
-                  const weekAgo = new Date();
-                  weekAgo.setDate(today.getDate() - 7);
-                  setDateRange(weekAgo, today);
-                }}
-                sx={{
-                  cursor: "pointer",
-                  fontWeight: 600,
-                  minWidth: { xs: 70, sm: 100 },
-                }}
-              />
-            ) : (
-              <DateRangePicker
-                startDate={startDate!}
-                endDate={endDate!}
-                onChange={(start, end) => setDateRange(start, end)}
-              />
-            )}
+            {/* Date Range Picker */}
+            <DateRangePicker
+              startDate={startDate}
+              endDate={endDate}
+              onChange={(start, end) => setDateRange(start, end)}
+            />
 
             {/* Quick Filter Chips */}
             <Chip
@@ -966,19 +952,6 @@ export default function MainLayout({
                 fontWeight: dateRangeLabel === "This Month" ? 600 : 400,
               }}
             />
-            {!isAllTime && (
-              <Chip
-                label={isMobile ? "All" : "All Time"}
-                size="small"
-                variant="outlined"
-                onClick={setAllTime}
-                sx={{
-                  cursor: "pointer",
-                  minWidth: { xs: 32, sm: 72 },
-                  display: { xs: "none", sm: "flex" },
-                }}
-              />
-            )}
           </Box>
 
           {/* Sync Status Indicator */}

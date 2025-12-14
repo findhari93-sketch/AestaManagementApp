@@ -316,6 +316,11 @@ export default function PaymentsPage() {
     fetchSummaryData();
   };
 
+  // Calculate effective date range for tab components
+  // When "All Time" is selected, use a far-back date instead of today
+  const effectiveDateFrom = isAllTime ? "2000-01-01" : (dateFrom || dayjs().format("YYYY-MM-DD"));
+  const effectiveDateTo = dateTo || dayjs().format("YYYY-MM-DD");
+
   return (
     <Box>
       <PageHeader
@@ -352,8 +357,8 @@ export default function PaymentsPage() {
         <Box sx={{ p: 2 }}>
           <TabPanel value={activeTab} index={0}>
             <DailyMarketPaymentsTab
-              dateFrom={dateFrom || dayjs().format("YYYY-MM-DD")}
-              dateTo={dateTo || dayjs().format("YYYY-MM-DD")}
+              dateFrom={effectiveDateFrom}
+              dateTo={effectiveDateTo}
               onFilterChange={() => {}} // No-op since dates are managed globally
               onDataChange={handleDataChange}
             />
