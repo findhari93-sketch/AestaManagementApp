@@ -224,6 +224,8 @@ interface WeeklySummary {
   totalPending: number;
   // Contract laborers for weekly settlement
   contractLaborerIds: string[];
+  // Flag for current/ongoing week
+  isCurrentWeek: boolean;
 }
 
 export default function AttendancePage() {
@@ -495,152 +497,113 @@ export default function AttendancePage() {
       (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
     );
 
-    // Insert weekly separators after each Sunday (when viewing dates in descending order)
-    // A weekly separator appears before a Sunday entry (since we're descending)
+    // Insert weekly separators BETWEEN different weeks (after Saturday, before next week's Sunday)
+    // A week runs Sunday to Saturday. When viewing descending (newest first), we show
+    // separator AFTER all entries of one week, BEFORE entries of the previous week.
     type CombinedEntry =
       | { type: "attendance"; date: string; summary: DateSummary; holiday: typeof recentHolidays[0] | null }
       | { type: "holiday"; date: string; holiday: typeof recentHolidays[0] }
       | { type: "weekly_separator"; date: string; weeklySummary: WeeklySummary };
 
     const withWeeklySeparators: CombinedEntry[] = [];
-    let currentWeekEntries: (typeof combined)[0][] = [];
-    let currentWeekEnd: string | null = null;
 
-    combined.forEach((entry, index) => {
-      const entryDate = dayjs(entry.date);
-      const dayOfWeek = entryDate.day(); // 0 = Sunday
+    // Group entries by their week (week starts on Sunday)
+    const entriesByWeek = new Map<string, (typeof combined)[0][]>();
 
-      // If this is a Sunday and we have accumulated entries, add a weekly separator
-      if (dayOfWeek === 0 && currentWeekEntries.length > 0) {
-        // Calculate weekly summary from accumulated entries
-        const weekStart = entryDate.format("YYYY-MM-DD");
-        const weekEnd = currentWeekEnd || entryDate.add(6, "day").format("YYYY-MM-DD");
+    combined.forEach((entry) => {
+      const weekStart = dayjs(entry.date).startOf("week").format("YYYY-MM-DD");
+      if (!entriesByWeek.has(weekStart)) {
+        entriesByWeek.set(weekStart, []);
+      }
+      entriesByWeek.get(weekStart)!.push(entry);
+    });
 
-        let pendingDailySalary = 0;
-        let pendingContractSalary = 0;
-        let pendingMarketSalary = 0;
-        let teaShopExpenses = 0;
-        let totalLaborers = 0;
-        const contractLaborerIds: string[] = [];
+    // Sort weeks descending (newest first)
+    const sortedWeeks = Array.from(entriesByWeek.keys()).sort(
+      (a, b) => new Date(b).getTime() - new Date(a).getTime()
+    );
 
-        currentWeekEntries.forEach((e) => {
-          if (e.type === "attendance") {
-            // Calculate pending amounts by type
-            e.summary.records.forEach((r) => {
-              if (!r.is_paid) {
-                if (r.laborer_type === "contract") {
-                  pendingContractSalary += r.daily_earnings;
-                  if (!contractLaborerIds.includes(r.laborer_id)) {
-                    contractLaborerIds.push(r.laborer_id);
-                  }
-                } else {
-                  pendingDailySalary += r.daily_earnings;
+    // Helper to calculate weekly summary
+    const today = dayjs().startOf("day");
+    const currentWeekStart = today.startOf("week").format("YYYY-MM-DD");
+
+    const calculateWeeklySummary = (
+      weekStart: string,
+      entries: (typeof combined)[0][]
+    ): WeeklySummary => {
+      let pendingDailySalary = 0;
+      let pendingContractSalary = 0;
+      let pendingMarketSalary = 0;
+      let teaShopExpenses = 0;
+      let totalLaborers = 0;
+      const contractLaborerIds: string[] = [];
+      let weekEnd = weekStart;
+
+      entries.forEach((e) => {
+        if (e.date > weekEnd) weekEnd = e.date;
+        if (e.type === "attendance") {
+          e.summary.records.forEach((r) => {
+            if (!r.is_paid) {
+              if (r.laborer_type === "contract") {
+                pendingContractSalary += r.daily_earnings;
+                if (!contractLaborerIds.includes(r.laborer_id)) {
+                  contractLaborerIds.push(r.laborer_id);
                 }
+              } else {
+                pendingDailySalary += r.daily_earnings;
               }
-            });
-            e.summary.marketLaborers.forEach((m) => {
-              if (!m.isPaid) {
-                pendingMarketSalary += m.dailyEarnings;
-              }
-            });
-            teaShopExpenses += e.summary.teaShop?.total || 0;
-            totalLaborers += e.summary.totalLaborerCount;
-          }
-        });
+            }
+          });
+          e.summary.marketLaborers.forEach((m) => {
+            if (!m.isPaid) {
+              pendingMarketSalary += m.dailyEarnings;
+            }
+          });
+          teaShopExpenses += e.summary.teaShop?.total || 0;
+          totalLaborers += e.summary.totalLaborerCount;
+        }
+      });
 
-        const weeklySummary: WeeklySummary = {
-          weekStart,
-          weekEnd,
-          weekLabel: `${dayjs(weekStart).format("MMM D")} - ${dayjs(weekEnd).format("MMM D, YYYY")}`,
-          totalLaborers,
-          totalWorkDays: currentWeekEntries.filter((e) => e.type === "attendance").length,
-          pendingDailySalary,
-          pendingContractSalary,
-          pendingMarketSalary,
-          teaShopExpenses,
-          totalPending: pendingDailySalary + pendingContractSalary + pendingMarketSalary,
-          contractLaborerIds,
-        };
+      const isCurrentWeek = weekStart === currentWeekStart;
 
-        // Add the weekly separator before the Sunday
+      return {
+        weekStart,
+        weekEnd,
+        weekLabel: isCurrentWeek
+          ? `This Week: ${dayjs(weekStart).format("MMM D")} - ${dayjs(weekEnd).format("MMM D, YYYY")}`
+          : `${dayjs(weekStart).format("MMM D")} - ${dayjs(weekEnd).format("MMM D, YYYY")}`,
+        totalLaborers,
+        totalWorkDays: entries.filter((e) => e.type === "attendance").length,
+        pendingDailySalary,
+        pendingContractSalary,
+        pendingMarketSalary,
+        teaShopExpenses,
+        totalPending: pendingDailySalary + pendingContractSalary + pendingMarketSalary,
+        contractLaborerIds,
+        isCurrentWeek,
+      };
+    };
+
+    // Build the final list with separators ABOVE each week's entries
+    sortedWeeks.forEach((weekStart) => {
+      const entries = entriesByWeek.get(weekStart)!;
+
+      // Calculate weekly summary
+      const weeklySummary = calculateWeeklySummary(weekStart, entries);
+
+      // Add separator ABOVE this week's entries (if there are any attendance entries)
+      if (weeklySummary.totalLaborers > 0) {
         withWeeklySeparators.push({
           type: "weekly_separator",
           date: `week-${weekStart}`,
           weeklySummary,
         });
-
-        // Reset for next week
-        currentWeekEntries = [];
-        currentWeekEnd = null;
       }
 
-      // Track the week end (first entry we see for this week, which is the latest date)
-      if (currentWeekEnd === null || entry.date > currentWeekEnd) {
-        currentWeekEnd = entry.date;
-      }
-
-      // Add the entry
-      withWeeklySeparators.push(entry as CombinedEntry);
-      currentWeekEntries.push(entry);
-
-      // If this is the last entry and we have accumulated entries, add final separator
-      if (index === combined.length - 1 && currentWeekEntries.length > 0) {
-        const lastEntryDate = dayjs(entry.date);
-        const weekStart = lastEntryDate.startOf("week").format("YYYY-MM-DD");
-        const weekEnd = currentWeekEnd || lastEntryDate.endOf("week").format("YYYY-MM-DD");
-
-        let pendingDailySalary = 0;
-        let pendingContractSalary = 0;
-        let pendingMarketSalary = 0;
-        let teaShopExpenses = 0;
-        let totalLaborers = 0;
-        const contractLaborerIds: string[] = [];
-
-        currentWeekEntries.forEach((e) => {
-          if (e.type === "attendance") {
-            e.summary.records.forEach((r) => {
-              if (!r.is_paid) {
-                if (r.laborer_type === "contract") {
-                  pendingContractSalary += r.daily_earnings;
-                  if (!contractLaborerIds.includes(r.laborer_id)) {
-                    contractLaborerIds.push(r.laborer_id);
-                  }
-                } else {
-                  pendingDailySalary += r.daily_earnings;
-                }
-              }
-            });
-            e.summary.marketLaborers.forEach((m) => {
-              if (!m.isPaid) {
-                pendingMarketSalary += m.dailyEarnings;
-              }
-            });
-            teaShopExpenses += e.summary.teaShop?.total || 0;
-            totalLaborers += e.summary.totalLaborerCount;
-          }
-        });
-
-        // Only add if there's any data
-        if (totalLaborers > 0) {
-          withWeeklySeparators.push({
-            type: "weekly_separator",
-            date: `week-${weekStart}`,
-            weeklySummary: {
-              weekStart,
-              weekEnd,
-              weekLabel: `${dayjs(weekStart).format("MMM D")} - ${dayjs(weekEnd).format("MMM D, YYYY")}`,
-              totalLaborers,
-              totalWorkDays: currentWeekEntries.filter((e) => e.type === "attendance").length,
-              pendingDailySalary,
-              pendingContractSalary,
-              pendingMarketSalary,
-              teaShopExpenses,
-              totalPending: pendingDailySalary + pendingContractSalary + pendingMarketSalary,
-              contractLaborerIds,
-            },
-          });
-        }
-      }
+      // Add all entries for this week (they're already sorted descending)
+      entries.forEach((entry) => {
+        withWeeklySeparators.push(entry as CombinedEntry);
+      });
     });
 
     return withWeeklySeparators;
@@ -2211,7 +2174,7 @@ export default function AttendancePage() {
                 flex: 1,
                 maxHeight: isFullscreen
                   ? "calc(100vh - 56px)"
-                  : { xs: "calc(100vh - 320px)", sm: "calc(100vh - 300px)" },
+                  : { xs: "calc(100vh - 180px)", sm: "calc(100vh - 300px)" },
                 overflowX: "auto",
                 overflowY: "auto",
                 WebkitOverflowScrolling: "touch",
@@ -2502,10 +2465,10 @@ export default function AttendancePage() {
                       {entry.type === "weekly_separator" && (
                         <TableRow
                           sx={{
-                            bgcolor: "grey.100",
+                            bgcolor: entry.weeklySummary.isCurrentWeek ? "info.50" : "grey.100",
                             borderTop: 2,
                             borderBottom: 2,
-                            borderColor: "primary.main",
+                            borderColor: entry.weeklySummary.isCurrentWeek ? "info.main" : "primary.main",
                           }}
                         >
                           <TableCell
@@ -2523,13 +2486,23 @@ export default function AttendancePage() {
                             >
                               {/* Week Info */}
                               <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
-                                <CalendarMonth sx={{ color: "primary.main", fontSize: 24 }} />
+                                <CalendarMonth sx={{ color: entry.weeklySummary.isCurrentWeek ? "info.main" : "primary.main", fontSize: 24 }} />
                                 <Box>
-                                  <Typography variant="subtitle2" fontWeight={700} color="primary.main">
-                                    Week: {entry.weeklySummary.weekLabel}
-                                  </Typography>
+                                  <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                                    <Typography variant="subtitle2" fontWeight={700} color={entry.weeklySummary.isCurrentWeek ? "info.main" : "primary.main"}>
+                                      {entry.weeklySummary.isCurrentWeek ? entry.weeklySummary.weekLabel : `Week: ${entry.weeklySummary.weekLabel}`}
+                                    </Typography>
+                                    {entry.weeklySummary.isCurrentWeek && (
+                                      <Chip
+                                        size="small"
+                                        label="In Progress"
+                                        color="info"
+                                        sx={{ height: 20, fontSize: "0.65rem" }}
+                                      />
+                                    )}
+                                  </Box>
                                   <Typography variant="caption" color="text.secondary">
-                                    {entry.weeklySummary.totalWorkDays} work days • {entry.weeklySummary.totalLaborers} laborers worked
+                                    {entry.weeklySummary.totalWorkDays} work day{entry.weeklySummary.totalWorkDays !== 1 ? "s" : ""} • {entry.weeklySummary.totalLaborers} laborers worked
                                   </Typography>
                                 </Box>
                               </Box>
@@ -2576,8 +2549,8 @@ export default function AttendancePage() {
                                 )}
                               </Box>
 
-                              {/* Weekly Settlement Button */}
-                              {canEdit && entry.weeklySummary.totalPending > 0 && (
+                              {/* Weekly Settlement Button - only show for completed weeks */}
+                              {canEdit && entry.weeklySummary.totalPending > 0 && !entry.weeklySummary.isCurrentWeek && (
                                 <Button
                                   variant="contained"
                                   color="success"

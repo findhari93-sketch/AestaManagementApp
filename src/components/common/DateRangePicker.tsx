@@ -160,15 +160,36 @@ const findMatchingPreset = (start: Date, end: Date): PresetKey | null => {
 };
 
 // Get label for current selection
-const getSelectionLabel = (start: Date, end: Date): string => {
+const getSelectionLabel = (start: Date, end: Date, compact = false): string => {
   const matchingPreset = findMatchingPreset(start, end);
   if (matchingPreset) {
     const preset = presets.find((p) => p.key === matchingPreset);
     if (preset && preset.key !== "allTime") {
+      // Compact labels for mobile
+      if (compact) {
+        const shortLabels: Record<string, string> = {
+          today: "Today",
+          yesterday: "Yesterday",
+          thisWeek: "This Week",
+          last7days: "7 Days",
+          lastWeek: "Last Week",
+          last14days: "14 Days",
+          thisMonth: "This Month",
+          last30days: "30 Days",
+          lastMonth: "Last Month",
+        };
+        return shortLabels[preset.key] || preset.label;
+      }
       return preset.label;
     }
   }
   // Custom range - show dates
+  if (compact) {
+    const startStr = format(start, "d/M");
+    const endStr = format(end, "d/M");
+    if (startStr === endStr) return format(start, "d MMM");
+    return `${startStr} - ${endStr}`;
+  }
   const startStr = format(start, "MMM d, yyyy");
   const endStr = format(end, "MMM d, yyyy");
   if (startStr === endStr) return startStr;
@@ -304,18 +325,18 @@ export default function DateRangePicker({
   const isPrevDisabled = !hasDates;
 
   // Current label - show "All Time" when no dates are set
-  const currentLabel = hasDates ? getSelectionLabel(startDate, endDate) : "All Time";
+  const currentLabel = hasDates ? getSelectionLabel(startDate, endDate, isMobile) : "All Time";
 
   return (
-    <Box sx={{ display: "flex", alignItems: "center", gap: { xs: 0.5, sm: 1 } }}>
+    <Box sx={{ display: "flex", alignItems: "center", gap: { xs: 0, sm: 1 } }}>
       {/* Main dropdown trigger */}
       <Box sx={{ display: "flex", alignItems: "center" }}>
-        {/* Prev arrow */}
+        {/* Prev arrow - Hidden on mobile */}
         <IconButton
           size="small"
           onClick={() => handleNavigate("prev")}
           disabled={isPrevDisabled}
-          sx={{ p: { xs: 0.25, sm: 0.5 } }}
+          sx={{ p: 0.5, display: { xs: "none", sm: "flex" } }}
         >
           <ChevronLeftIcon fontSize="small" />
         </IconButton>
@@ -325,17 +346,20 @@ export default function DateRangePicker({
           variant="outlined"
           size="small"
           onClick={handleOpen}
-          endIcon={<ArrowDownIcon />}
+          endIcon={<ArrowDownIcon sx={{ fontSize: { xs: 16, sm: 20 } }} />}
           sx={{
             textTransform: "none",
-            minWidth: { xs: 120, sm: 180 },
+            minWidth: { xs: 80, sm: 180 },
             justifyContent: "space-between",
-            px: { xs: 1, sm: 1.5 },
-            py: 0.5,
+            px: { xs: 0.75, sm: 1.5 },
+            py: { xs: 0.25, sm: 0.5 },
             bgcolor: "background.paper",
             borderColor: "divider",
             color: "text.primary",
-            fontSize: { xs: "0.75rem", sm: "0.875rem" },
+            fontSize: { xs: "0.7rem", sm: "0.875rem" },
+            "& .MuiButton-endIcon": {
+              ml: { xs: 0.25, sm: 1 },
+            },
             "&:hover": {
               bgcolor: "action.hover",
               borderColor: "divider",
@@ -345,18 +369,18 @@ export default function DateRangePicker({
           <Typography
             variant="body2"
             noWrap
-            sx={{ fontSize: { xs: "0.75rem", sm: "0.875rem" } }}
+            sx={{ fontSize: { xs: "0.7rem", sm: "0.875rem" } }}
           >
             {currentLabel}
           </Typography>
         </Button>
 
-        {/* Next arrow - disabled for date ranges, only works for single date */}
+        {/* Next arrow - Hidden on mobile, disabled for date ranges */}
         <IconButton
           size="small"
           onClick={() => handleNavigate("next")}
           disabled={isNextDisabled}
-          sx={{ p: { xs: 0.25, sm: 0.5 } }}
+          sx={{ p: 0.5, display: { xs: "none", sm: "flex" } }}
         >
           <ChevronRightIcon fontSize="small" />
         </IconButton>

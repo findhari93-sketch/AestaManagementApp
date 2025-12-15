@@ -920,35 +920,37 @@ export default function MainLayout({
               mr: { xs: 0.5, sm: 1 },
             }}
           >
-            {/* Date Range Picker */}
+            {/* Date Range Picker - Always visible */}
             <DateRangePicker
               startDate={startDate}
               endDate={endDate}
               onChange={(start, end) => setDateRange(start, end)}
             />
 
-            {/* Quick Filter Chips */}
+            {/* Quick Filter Chips - Hidden on mobile */}
             <Chip
-              label={isMobile ? "W" : "Week"}
+              label="Week"
               size="small"
               variant={dateRangeLabel === "This Week" ? "filled" : "outlined"}
               color={dateRangeLabel === "This Week" ? "primary" : "default"}
               onClick={setLastWeek}
               sx={{
+                display: { xs: "none", sm: "flex" },
                 cursor: "pointer",
-                minWidth: { xs: 28, sm: 56 },
+                minWidth: 56,
                 fontWeight: dateRangeLabel === "This Week" ? 600 : 400,
               }}
             />
             <Chip
-              label={isMobile ? "M" : "Month"}
+              label="Month"
               size="small"
               variant={dateRangeLabel === "This Month" ? "filled" : "outlined"}
               color={dateRangeLabel === "This Month" ? "primary" : "default"}
               onClick={setLastMonth}
               sx={{
+                display: { xs: "none", sm: "flex" },
                 cursor: "pointer",
-                minWidth: { xs: 28, sm: 64 },
+                minWidth: 64,
                 fontWeight: dateRangeLabel === "This Month" ? 600 : 400,
               }}
             />
