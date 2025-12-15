@@ -90,12 +90,12 @@ const FILE_TYPE_CONFIG: Record<FileType, { accept: string; label: string }> = {
     label: "PDF files only",
   },
   image: {
-    accept: "image/png,image/jpeg,image/jpg",
-    label: "PNG, JPG files",
+    accept: "image/png,image/jpeg,image/jpg,image/webp,image/heic,image/heif",
+    label: "PNG, JPG, WEBP files",
   },
   all: {
-    accept: "application/pdf,image/png,image/jpeg,image/jpg",
-    label: "PDF, PNG, JPG files",
+    accept: "application/pdf,image/png,image/jpeg,image/jpg,image/webp,image/heic,image/heif",
+    label: "PDF, PNG, JPG, WEBP files",
   },
 };
 
