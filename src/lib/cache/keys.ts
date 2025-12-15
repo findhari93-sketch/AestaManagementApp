@@ -207,6 +207,7 @@ export const cacheTTL = {
 
 /**
  * Helper to determine cache TTL based on query key
+ * Handles complex query keys like ['attendance', 'site', siteId, 'today']
  */
 export function getCacheTTL(queryKey: readonly unknown[]): number {
   if (!Array.isArray(queryKey) || queryKey.length === 0) {
@@ -215,7 +216,7 @@ export function getCacheTTL(queryKey: readonly unknown[]): number {
 
   const entity = queryKey[0] as string;
 
-  // Reference data entities
+  // Reference data entities - 24 hour cache
   const referenceEntities = [
     'sites',
     'teams',
@@ -228,11 +229,11 @@ export function getCacheTTL(queryKey: readonly unknown[]): number {
     'subcontracts',
   ];
 
-  // Dashboard/stats entities
+  // Dashboard/stats entities - 2 minute cache
   const dashboardEntities = ['dashboard', 'reports', 'stats'];
 
-  // Real-time critical entities
-  const realtimeEntities = ['attendance-today', 'active-attendance'];
+  // Real-time critical entities (checked by prefix) - 30 second cache
+  const realtimeEntities = ['attendance', 'market-attendance'];
 
   if (referenceEntities.includes(entity)) {
     return cacheTTL.reference;
@@ -242,8 +243,16 @@ export function getCacheTTL(queryKey: readonly unknown[]): number {
     return cacheTTL.dashboard;
   }
 
+  // For attendance queries, check if it's a "today" or "active" query
+  // These need shorter TTL for real-time updates
   if (realtimeEntities.includes(entity)) {
-    return cacheTTL.realtime;
+    // Check the last element of the query key for real-time indicators
+    const lastElement = queryKey[queryKey.length - 1];
+    if (lastElement === 'today' || lastElement === 'active') {
+      return cacheTTL.realtime;
+    }
+    // Regular attendance queries get transactional TTL
+    return cacheTTL.transactional;
   }
 
   // Default to transactional TTL

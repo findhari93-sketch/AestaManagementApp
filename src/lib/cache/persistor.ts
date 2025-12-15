@@ -54,47 +54,77 @@ export function createIDBPersister(): Persister {
     },
 
     restoreClient: async () => {
-      try {
-        const client = await get<PersistedClient>(CACHE_KEY);
+      // Add timeout to prevent hanging if IndexedDB is slow/locked
+      const RESTORE_TIMEOUT = 3000; // 3 seconds max
 
-        if (!client) {
+      const restorePromise = (async () => {
+        try {
+          const client = await get<PersistedClient>(CACHE_KEY);
+
+          if (!client) {
+            return undefined;
+          }
+
+          // Validate cache structure - prevent corrupted cache from crashing app
+          if (
+            !client.clientState ||
+            !Array.isArray(client.clientState.queries)
+          ) {
+            console.warn("Invalid cache structure, clearing...");
+            await clear();
+            return undefined;
+          }
+
+          // Validate cache version and age
+          const cacheAge = Date.now() - (client.timestamp || 0);
+
+          if (cacheAge > MAX_AGE) {
+            console.log("Cache too old, clearing...");
+            await clear();
+            return undefined;
+          }
+
+          // Filter out stale queries
+          const now = Date.now();
+          const filteredClient: PersistedClient = {
+            ...client,
+            clientState: {
+              ...client.clientState,
+              queries: client.clientState.queries.filter((query) => {
+                // Skip queries with missing or invalid dataUpdatedAt
+                if (!query.state || typeof query.state.dataUpdatedAt !== "number") {
+                  return false;
+                }
+
+                const ttl = getCacheTTL(query.queryKey);
+                const age = now - query.state.dataUpdatedAt;
+
+                // Keep query if it's still fresh
+                return age < ttl;
+              }),
+            },
+          };
+
+          console.log(
+            `Restored ${filteredClient.clientState.queries.length} cached queries from IndexedDB`
+          );
+
+          return filteredClient;
+        } catch (error) {
+          console.error("Failed to restore query cache:", error);
           return undefined;
         }
+      })();
 
-        // Validate cache version and age
-        const cacheAge = Date.now() - (client.timestamp || 0);
+      // Race between restore and timeout
+      const timeoutPromise = new Promise<undefined>((resolve) => {
+        setTimeout(() => {
+          console.warn("Cache restoration timed out, starting fresh");
+          resolve(undefined);
+        }, RESTORE_TIMEOUT);
+      });
 
-        if (cacheAge > MAX_AGE) {
-          console.log("Cache too old, clearing...");
-          await clear();
-          return undefined;
-        }
-
-        // Filter out stale queries
-        const now = Date.now();
-        const filteredClient: PersistedClient = {
-          ...client,
-          clientState: {
-            ...client.clientState,
-            queries: client.clientState.queries.filter((query) => {
-              const ttl = getCacheTTL(query.queryKey);
-              const age = now - (query.state.dataUpdatedAt || 0);
-
-              // Keep query if it's still fresh
-              return age < ttl;
-            }),
-          },
-        };
-
-        console.log(
-          `Restored ${filteredClient.clientState.queries.length} cached queries from IndexedDB`
-        );
-
-        return filteredClient;
-      } catch (error) {
-        console.error("Failed to restore query cache:", error);
-        return undefined;
-      }
+      return Promise.race([restorePromise, timeoutPromise]);
     },
 
     removeClient: async () => {

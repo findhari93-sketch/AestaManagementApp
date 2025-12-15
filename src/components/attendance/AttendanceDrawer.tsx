@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import {
   Drawer,
   Box,
@@ -302,6 +302,18 @@ export default function AttendanceDrawer({
   const { userProfile } = useAuth();
   const supabase = createClient();
 
+  // Refs for preventing race conditions
+  const fetchVersionRef = useRef(0);
+  const isMountedRef = useRef(true);
+
+  // Track mounted state
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
   // Form state
   const [selectedDate, setSelectedDate] = useState(
     initialDate || dayjs().format("YYYY-MM-DD")
@@ -342,6 +354,7 @@ export default function AttendanceDrawer({
   // UI state
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [savingDraft, setSavingDraft] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [expandedSection, setExpandedSection] = useState<string | false>(
@@ -420,21 +433,54 @@ export default function AttendanceDrawer({
   }, [initialDate]);
 
   // Fetch data on open and load existing attendance if date provided
+  // Uses version tracking to prevent race conditions when drawer opens/closes rapidly
+  // or when date changes quickly
   useEffect(() => {
     if (open && siteId) {
+      // Increment version to invalidate any in-flight requests
+      const currentVersion = ++fetchVersionRef.current;
+
       const loadAll = async () => {
         setLoading(true);
+        setError(null);
+
         try {
           await fetchData();
+
+          // Check if this request is still valid (drawer not closed, version not stale)
+          if (!isMountedRef.current || currentVersion !== fetchVersionRef.current) {
+            return; // Abort if stale
+          }
+
           // Only load existing attendance after fetchData completes (needs teaShops)
           if (initialDate) {
             await loadExistingAttendanceForDate(initialDate);
           }
+
+          // Final check before updating state
+          if (!isMountedRef.current || currentVersion !== fetchVersionRef.current) {
+            return; // Abort if stale
+          }
+        } catch (err: any) {
+          // Only set error if this request is still valid
+          if (isMountedRef.current && currentVersion === fetchVersionRef.current) {
+            console.error("Error loading attendance data:", err);
+            setError(err.message || "Failed to load data");
+          }
         } finally {
-          setLoading(false);
+          // Only update loading state if this request is still valid
+          if (isMountedRef.current && currentVersion === fetchVersionRef.current) {
+            setLoading(false);
+          }
         }
       };
+
       loadAll();
+
+      // Cleanup function - increment version to invalidate request if drawer closes
+      return () => {
+        fetchVersionRef.current++;
+      };
     }
   }, [open, siteId, initialDate]);
 
@@ -547,8 +593,8 @@ export default function AttendanceDrawer({
       }
     } catch (err: any) {
       console.error("Error fetching data:", err);
-      setError("Failed to load data: " + err.message);
-      throw err; // Re-throw so the wrapper knows about the error
+      // Let the caller handle the error via the catch block in useEffect
+      throw err;
     }
   };
 
@@ -696,8 +742,8 @@ export default function AttendanceDrawer({
       }
     } catch (err: any) {
       console.error("Error loading existing attendance:", err);
-      setError("Failed to load existing attendance");
-      throw err; // Re-throw so the wrapper knows about the error
+      // Let the caller handle the error via the catch block in useEffect
+      throw err;
     }
   };
 
@@ -1114,10 +1160,14 @@ export default function AttendanceDrawer({
   };
 
   // Execute the actual save after confirmation
-  const executeSave = async () => {
-    console.log("[AttendanceDrawer] executeSave called");
+  const executeSave = async (statusOverride?: "draft") => {
+    console.log("[AttendanceDrawer] executeSave called, statusOverride:", statusOverride);
 
-    setSaving(true);
+    if (statusOverride === "draft") {
+      setSavingDraft(true);
+    } else {
+      setSaving(true);
+    }
     setError(null);
     setSuccess(null);
 
@@ -1138,8 +1188,8 @@ export default function AttendanceDrawer({
         originalCreator
       );
 
-      // Determine attendance status based on mode
-      const attendanceStatus = mode === "morning" ? "morning_entry" : "confirmed";
+      // Determine attendance status based on mode or override
+      const attendanceStatus = statusOverride || (mode === "morning" ? "morning_entry" : "confirmed");
       const now = new Date().toISOString();
 
       const namedRecords = Array.from(selectedLaborers.values()).map((s) => {
@@ -1550,9 +1600,35 @@ export default function AttendanceDrawer({
 
       setError(errorMessage);
     } finally {
-      console.log("[AttendanceDrawer] Finally block - setting saving to false");
+      console.log("[AttendanceDrawer] Finally block - resetting saving states");
       setSaving(false);
+      setSavingDraft(false);
     }
+  };
+
+  // Save as draft - skips confirmation dialog
+  const handleSaveDraft = async () => {
+    console.log("[AttendanceDrawer] handleSaveDraft called");
+
+    if (selectedLaborers.size === 0 && marketLaborers.length === 0) {
+      setError("Please select at least one laborer or add market laborers");
+      return;
+    }
+
+    if (!sectionId) {
+      setError("Please select a section");
+      return;
+    }
+
+    // Prevent future date drafts
+    const today = new Date().toISOString().split('T')[0];
+    if (selectedDate > today) {
+      setError("Cannot save draft for future dates");
+      return;
+    }
+
+    // Directly execute save with draft status (no confirmation needed)
+    await executeSave("draft");
   };
 
   const handleClose = () => {
@@ -3274,26 +3350,47 @@ export default function AttendanceDrawer({
             </Typography>
           </Box>
 
-          <Button
-            fullWidth
-            variant="contained"
-            size="large"
-            onClick={handleSaveClick}
-            disabled={
-              saving ||
-              (selectedLaborers.size === 0 && marketLaborers.length === 0)
-            }
-          >
-            {saving ? (
-              <CircularProgress size={24} color="inherit" />
-            ) : mode === "morning" ? (
-              "Save Morning Entry"
-            ) : mode === "evening" ? (
-              "Evening Closing"
-            ) : (
-              "Save Attendance"
-            )}
-          </Button>
+          <Box sx={{ display: 'flex', gap: 1, flexDirection: { xs: 'column', sm: 'row' } }}>
+            <Button
+              variant="outlined"
+              color="warning"
+              size="large"
+              onClick={handleSaveDraft}
+              disabled={
+                saving ||
+                savingDraft ||
+                (selectedLaborers.size === 0 && marketLaborers.length === 0)
+              }
+              sx={{ flex: { xs: 'auto', sm: 1 } }}
+            >
+              {savingDraft ? (
+                <CircularProgress size={24} color="inherit" />
+              ) : (
+                "Save as Draft"
+              )}
+            </Button>
+            <Button
+              variant="contained"
+              size="large"
+              onClick={handleSaveClick}
+              disabled={
+                saving ||
+                savingDraft ||
+                (selectedLaborers.size === 0 && marketLaborers.length === 0)
+              }
+              sx={{ flex: { xs: 'auto', sm: 2 } }}
+            >
+              {saving ? (
+                <CircularProgress size={24} color="inherit" />
+              ) : mode === "morning" ? (
+                "Save Morning Entry"
+              ) : mode === "evening" ? (
+                "Evening Closing"
+              ) : (
+                "Save Attendance"
+              )}
+            </Button>
+          </Box>
           <Typography
             variant="caption"
             color="text.secondary"

@@ -90,13 +90,35 @@ export class BackgroundSyncOrchestrator {
 
   /**
    * Update current site context
+   * Clears queries for old site to prevent stale data
    */
   setSiteContext(siteId: string): void {
     if (this.currentSiteId === siteId) {
       return;
     }
 
-    console.log(`Updating sync context to site: ${siteId}`);
+    const previousSiteId = this.currentSiteId;
+    console.log(`Updating sync context from ${previousSiteId} to site: ${siteId}`);
+
+    // Clear queries that were specific to the previous site
+    // This prevents stale data from appearing when switching sites
+    if (previousSiteId) {
+      const queryCache = this.queryClient.getQueryCache();
+      const allQueries = queryCache.getAll();
+
+      allQueries.forEach((query) => {
+        const queryKey = query.queryKey;
+        // Check if query key contains the previous site ID
+        const keyString = JSON.stringify(queryKey);
+        if (keyString.includes(previousSiteId)) {
+          // Only remove if not currently being actively fetched
+          if (query.state.fetchStatus !== "fetching") {
+            queryCache.remove(query);
+          }
+        }
+      });
+    }
+
     this.currentSiteId = siteId;
 
     // Trigger immediate sync for new site context
@@ -299,16 +321,38 @@ export class BackgroundSyncOrchestrator {
 
   /**
    * Perform cache cleanup
+   * IMPORTANT: Only removes stale/inactive queries, NOT the entire cache
    */
   private async performCleanup(): Promise<void> {
     try {
-      // Clean up React Query cache (garbage collection)
-      this.queryClient.getQueryCache().clear();
+      // Get all queries in the cache
+      const queryCache = this.queryClient.getQueryCache();
+      const allQueries = queryCache.getAll();
+      const now = Date.now();
+      let removedCount = 0;
 
-      // Clean up persisted cache
+      // Only remove queries that are:
+      // 1. Not actively being observed (no components using them)
+      // 2. Have exceeded their garbage collection time
+      allQueries.forEach((query) => {
+        const isActive = query.getObserversCount() > 0;
+        const gcTime = query.options.gcTime ?? 30 * 60 * 1000; // Default 30 min
+        const lastUpdated = query.state.dataUpdatedAt || 0;
+        const age = now - lastUpdated;
+
+        // Only remove if not active AND past garbage collection time
+        if (!isActive && age > gcTime) {
+          queryCache.remove(query);
+          removedCount++;
+        }
+      });
+
+      // Clean up persisted cache (IndexedDB)
       await cleanupPersistedCache();
 
-      console.log("Cache cleanup completed");
+      if (removedCount > 0) {
+        console.log(`Cache cleanup: removed ${removedCount} stale queries`);
+      }
     } catch (error) {
       console.error("Cache cleanup error:", error);
     }

@@ -65,9 +65,13 @@ import {
   EventBusy as HolidayIcon,
   BeachAccess as BeachAccessIcon,
   Visibility as VisibilityIcon,
+  Payment as PaymentIcon,
+  CalendarMonth,
 } from "@mui/icons-material";
 import AttendanceDrawer from "@/components/attendance/AttendanceDrawer";
 import HolidayConfirmDialog from "@/components/attendance/HolidayConfirmDialog";
+import DailySettlementDialog from "@/components/attendance/DailySettlementDialog";
+import WeeklySettlementDialog from "@/components/attendance/WeeklySettlementDialog";
 import TeaShopEntryDialog from "@/components/tea-shop/TeaShopEntryDialog";
 import PaymentDialog from "@/components/payments/PaymentDialog";
 import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
@@ -117,7 +121,7 @@ interface AttendanceRecord {
   day_units?: number;
   snacks_amount?: number;
   // Two-phase attendance fields
-  attendance_status?: "morning_entry" | "confirmed" | null;
+  attendance_status?: "morning_entry" | "confirmed" | "draft" | null;
   work_progress_percent?: number | null;
   // Audit tracking fields
   entered_by?: string | null;
@@ -202,8 +206,24 @@ interface DateSummary {
   // Tea shop data
   teaShop: TeaShopData | null;
   // Two-phase attendance status
-  attendanceStatus: "morning_entry" | "confirmed" | "mixed";
+  attendanceStatus: "morning_entry" | "confirmed" | "mixed" | "draft";
   workProgressPercent: number;
+}
+
+interface WeeklySummary {
+  weekStart: string;
+  weekEnd: string;
+  weekLabel: string; // "Dec 8 - Dec 14, 2024"
+  totalLaborers: number;
+  totalWorkDays: number;
+  // Pending amounts by type
+  pendingDailySalary: number;
+  pendingContractSalary: number;
+  pendingMarketSalary: number;
+  teaShopExpenses: number;
+  totalPending: number;
+  // Contract laborers for weekly settlement
+  contractLaborerIds: string[];
 }
 
 export default function AttendancePage() {
@@ -343,6 +363,14 @@ export default function AttendancePage() {
   const [summaryPhotoIndex, setSummaryPhotoIndex] = useState(0);
   const [summaryPhotoPeriod, setSummaryPhotoPeriod] = useState<'morning' | 'evening'>('morning');
 
+  // Daily settlement dialog state
+  const [dailySettlementOpen, setDailySettlementOpen] = useState(false);
+  const [settlementDateSummary, setSettlementDateSummary] = useState<DateSummary | null>(null);
+
+  // Weekly settlement dialog state
+  const [weeklySettlementOpen, setWeeklySettlementOpen] = useState(false);
+  const [settlementWeekSummary, setSettlementWeekSummary] = useState<WeeklySummary | null>(null);
+
   // Restoration message state
   const [restorationMessage, setRestorationMessage] = useState<string | null>(
     null
@@ -430,8 +458,8 @@ export default function AttendancePage() {
     };
   }, [dateSummaries]);
 
-  // Combined view: dateSummaries + holiday-only dates (holidays without attendance)
-  // This creates a merged list sorted by date descending
+  // Combined view: dateSummaries + holiday-only dates + weekly separators
+  // This creates a merged list sorted by date descending with weekly summary strips
   const combinedDateEntries = useMemo(() => {
     // Get set of dates that have attendance data
     const attendanceDates = new Set(dateSummaries.map((s) => s.date));
@@ -467,7 +495,155 @@ export default function AttendancePage() {
       (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
     );
 
-    return combined;
+    // Insert weekly separators after each Sunday (when viewing dates in descending order)
+    // A weekly separator appears before a Sunday entry (since we're descending)
+    type CombinedEntry =
+      | { type: "attendance"; date: string; summary: DateSummary; holiday: typeof recentHolidays[0] | null }
+      | { type: "holiday"; date: string; holiday: typeof recentHolidays[0] }
+      | { type: "weekly_separator"; date: string; weeklySummary: WeeklySummary };
+
+    const withWeeklySeparators: CombinedEntry[] = [];
+    let currentWeekEntries: (typeof combined)[0][] = [];
+    let currentWeekEnd: string | null = null;
+
+    combined.forEach((entry, index) => {
+      const entryDate = dayjs(entry.date);
+      const dayOfWeek = entryDate.day(); // 0 = Sunday
+
+      // If this is a Sunday and we have accumulated entries, add a weekly separator
+      if (dayOfWeek === 0 && currentWeekEntries.length > 0) {
+        // Calculate weekly summary from accumulated entries
+        const weekStart = entryDate.format("YYYY-MM-DD");
+        const weekEnd = currentWeekEnd || entryDate.add(6, "day").format("YYYY-MM-DD");
+
+        let pendingDailySalary = 0;
+        let pendingContractSalary = 0;
+        let pendingMarketSalary = 0;
+        let teaShopExpenses = 0;
+        let totalLaborers = 0;
+        const contractLaborerIds: string[] = [];
+
+        currentWeekEntries.forEach((e) => {
+          if (e.type === "attendance") {
+            // Calculate pending amounts by type
+            e.summary.records.forEach((r) => {
+              if (!r.is_paid) {
+                if (r.laborer_type === "contract") {
+                  pendingContractSalary += r.daily_earnings;
+                  if (!contractLaborerIds.includes(r.laborer_id)) {
+                    contractLaborerIds.push(r.laborer_id);
+                  }
+                } else {
+                  pendingDailySalary += r.daily_earnings;
+                }
+              }
+            });
+            e.summary.marketLaborers.forEach((m) => {
+              if (!m.isPaid) {
+                pendingMarketSalary += m.dailyEarnings;
+              }
+            });
+            teaShopExpenses += e.summary.teaShop?.total || 0;
+            totalLaborers += e.summary.totalLaborerCount;
+          }
+        });
+
+        const weeklySummary: WeeklySummary = {
+          weekStart,
+          weekEnd,
+          weekLabel: `${dayjs(weekStart).format("MMM D")} - ${dayjs(weekEnd).format("MMM D, YYYY")}`,
+          totalLaborers,
+          totalWorkDays: currentWeekEntries.filter((e) => e.type === "attendance").length,
+          pendingDailySalary,
+          pendingContractSalary,
+          pendingMarketSalary,
+          teaShopExpenses,
+          totalPending: pendingDailySalary + pendingContractSalary + pendingMarketSalary,
+          contractLaborerIds,
+        };
+
+        // Add the weekly separator before the Sunday
+        withWeeklySeparators.push({
+          type: "weekly_separator",
+          date: `week-${weekStart}`,
+          weeklySummary,
+        });
+
+        // Reset for next week
+        currentWeekEntries = [];
+        currentWeekEnd = null;
+      }
+
+      // Track the week end (first entry we see for this week, which is the latest date)
+      if (currentWeekEnd === null || entry.date > currentWeekEnd) {
+        currentWeekEnd = entry.date;
+      }
+
+      // Add the entry
+      withWeeklySeparators.push(entry as CombinedEntry);
+      currentWeekEntries.push(entry);
+
+      // If this is the last entry and we have accumulated entries, add final separator
+      if (index === combined.length - 1 && currentWeekEntries.length > 0) {
+        const lastEntryDate = dayjs(entry.date);
+        const weekStart = lastEntryDate.startOf("week").format("YYYY-MM-DD");
+        const weekEnd = currentWeekEnd || lastEntryDate.endOf("week").format("YYYY-MM-DD");
+
+        let pendingDailySalary = 0;
+        let pendingContractSalary = 0;
+        let pendingMarketSalary = 0;
+        let teaShopExpenses = 0;
+        let totalLaborers = 0;
+        const contractLaborerIds: string[] = [];
+
+        currentWeekEntries.forEach((e) => {
+          if (e.type === "attendance") {
+            e.summary.records.forEach((r) => {
+              if (!r.is_paid) {
+                if (r.laborer_type === "contract") {
+                  pendingContractSalary += r.daily_earnings;
+                  if (!contractLaborerIds.includes(r.laborer_id)) {
+                    contractLaborerIds.push(r.laborer_id);
+                  }
+                } else {
+                  pendingDailySalary += r.daily_earnings;
+                }
+              }
+            });
+            e.summary.marketLaborers.forEach((m) => {
+              if (!m.isPaid) {
+                pendingMarketSalary += m.dailyEarnings;
+              }
+            });
+            teaShopExpenses += e.summary.teaShop?.total || 0;
+            totalLaborers += e.summary.totalLaborerCount;
+          }
+        });
+
+        // Only add if there's any data
+        if (totalLaborers > 0) {
+          withWeeklySeparators.push({
+            type: "weekly_separator",
+            date: `week-${weekStart}`,
+            weeklySummary: {
+              weekStart,
+              weekEnd,
+              weekLabel: `${dayjs(weekStart).format("MMM D")} - ${dayjs(weekEnd).format("MMM D, YYYY")}`,
+              totalLaborers,
+              totalWorkDays: currentWeekEntries.filter((e) => e.type === "attendance").length,
+              pendingDailySalary,
+              pendingContractSalary,
+              pendingMarketSalary,
+              teaShopExpenses,
+              totalPending: pendingDailySalary + pendingContractSalary + pendingMarketSalary,
+              contractLaborerIds,
+            },
+          });
+        }
+      }
+    });
+
+    return withWeeklySeparators;
   }, [dateSummaries, recentHolidays, dateFrom, dateTo]);
 
   const fetchAttendanceHistory = useCallback(async () => {
@@ -517,7 +693,8 @@ export default function AttendancePage() {
         marketQuery = marketQuery.gte("date", dateFrom).lte("date", dateTo);
       }
 
-      const { data: marketData } = await marketQuery;
+      const { data: marketData, error: marketError } = await marketQuery;
+      if (marketError) console.warn("Market laborer query failed:", marketError);
 
       // Build work summaries query
       let summaryQuery = (supabase.from("daily_work_summary") as any)
@@ -528,7 +705,8 @@ export default function AttendancePage() {
         summaryQuery = summaryQuery.gte("date", dateFrom).lte("date", dateTo);
       }
 
-      const { data: summaryData } = await summaryQuery;
+      const { data: summaryData, error: summaryError } = await summaryQuery;
+      if (summaryError) console.warn("Work summary query failed:", summaryError);
 
       // Build tea shop entries query
       let teaShopQuery = (supabase.from("tea_shop_entries") as any)
@@ -539,7 +717,8 @@ export default function AttendancePage() {
         teaShopQuery = teaShopQuery.gte("date", dateFrom).lte("date", dateTo);
       }
 
-      const { data: teaShopData } = await teaShopQuery;
+      const { data: teaShopData, error: teaShopError } = await teaShopQuery;
+      if (teaShopError) console.warn("Tea shop query failed:", teaShopError);
 
       // Build tea shop map (by date, aggregate if multiple entries per day)
       // Note: V2 columns (working_laborer_count, etc.) may not exist yet - using defaults
@@ -1333,8 +1512,9 @@ export default function AttendancePage() {
         header: "Out",
         size: 70,
         Cell: ({ cell, row }) => {
-          // Hide out time for morning entries (not yet confirmed)
-          if (row.original.attendance_status === "morning_entry") {
+          // Hide out time for morning entries and drafts (not yet confirmed)
+          if (row.original.attendance_status === "morning_entry" ||
+              row.original.attendance_status === "draft") {
             return "-";
           }
           return formatTime(cell.getValue<string>());
@@ -2249,16 +2429,11 @@ export default function AttendancePage() {
                         bgcolor: "primary.dark",
                         color: "primary.contrastText",
                         fontWeight: 700,
-                        minWidth: { xs: 50, sm: 90 },
+                        minWidth: { xs: 50, sm: 120 },
                         px: { xs: 0.5, sm: 1 },
                       }}
                     >
-                      <Box sx={{ display: { xs: "none", sm: "inline" } }}>
-                        Status
-                      </Box>
-                      <Box sx={{ display: { xs: "inline", sm: "none" } }}>
-                        St
-                      </Box>
+                      Actions
                     </TableCell>
                   </TableRow>
                 </TableHead>
@@ -2323,6 +2498,105 @@ export default function AttendancePage() {
                         </TableRow>
                       )}
 
+                      {/* Weekly separator strip */}
+                      {entry.type === "weekly_separator" && (
+                        <TableRow
+                          sx={{
+                            bgcolor: "grey.100",
+                            borderTop: 2,
+                            borderBottom: 2,
+                            borderColor: "primary.main",
+                          }}
+                        >
+                          <TableCell
+                            colSpan={13}
+                            sx={{ py: 1.5, px: 2 }}
+                          >
+                            <Box
+                              sx={{
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "space-between",
+                                flexWrap: "wrap",
+                                gap: 2,
+                              }}
+                            >
+                              {/* Week Info */}
+                              <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
+                                <CalendarMonth sx={{ color: "primary.main", fontSize: 24 }} />
+                                <Box>
+                                  <Typography variant="subtitle2" fontWeight={700} color="primary.main">
+                                    Week: {entry.weeklySummary.weekLabel}
+                                  </Typography>
+                                  <Typography variant="caption" color="text.secondary">
+                                    {entry.weeklySummary.totalWorkDays} work days • {entry.weeklySummary.totalLaborers} laborers worked
+                                  </Typography>
+                                </Box>
+                              </Box>
+
+                              {/* Summary Stats */}
+                              <Box
+                                sx={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: { xs: 1, sm: 2 },
+                                  flexWrap: "wrap",
+                                }}
+                              >
+                                {entry.weeklySummary.pendingDailySalary > 0 && (
+                                  <Chip
+                                    size="small"
+                                    label={`Daily: ₹${entry.weeklySummary.pendingDailySalary.toLocaleString()}`}
+                                    color="info"
+                                    variant="outlined"
+                                  />
+                                )}
+                                {entry.weeklySummary.pendingContractSalary > 0 && (
+                                  <Chip
+                                    size="small"
+                                    label={`Contract: ₹${entry.weeklySummary.pendingContractSalary.toLocaleString()}`}
+                                    color="secondary"
+                                    variant="outlined"
+                                  />
+                                )}
+                                {entry.weeklySummary.pendingMarketSalary > 0 && (
+                                  <Chip
+                                    size="small"
+                                    label={`Market: ₹${entry.weeklySummary.pendingMarketSalary.toLocaleString()}`}
+                                    color="warning"
+                                    variant="outlined"
+                                  />
+                                )}
+                                {entry.weeklySummary.teaShopExpenses > 0 && (
+                                  <Chip
+                                    size="small"
+                                    label={`Tea: ₹${entry.weeklySummary.teaShopExpenses.toLocaleString()}`}
+                                    variant="outlined"
+                                  />
+                                )}
+                              </Box>
+
+                              {/* Weekly Settlement Button */}
+                              {canEdit && entry.weeklySummary.totalPending > 0 && (
+                                <Button
+                                  variant="contained"
+                                  color="success"
+                                  size="small"
+                                  startIcon={<PaymentIcon />}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSettlementWeekSummary(entry.weeklySummary);
+                                    setWeeklySettlementOpen(true);
+                                  }}
+                                >
+                                  Weekly Settlement (₹{entry.weeklySummary.totalPending.toLocaleString()})
+                                </Button>
+                              )}
+                            </Box>
+                          </TableCell>
+                        </TableRow>
+                      )}
+
                       {/* Attendance row (with optional holiday indicator) */}
                       {entry.type === "attendance" && (
                         <>
@@ -2334,6 +2608,12 @@ export default function AttendancePage() {
                             sx={{
                               cursor: "pointer",
                               "&:hover": { bgcolor: "action.hover" },
+                              // Draft entry styling - orange/warning border and background
+                              ...(entry.summary.attendanceStatus === "draft" && {
+                                bgcolor: "warning.50",
+                                borderLeft: 4,
+                                borderLeftColor: "warning.dark",
+                              }),
                               // Highlight if this date is also a holiday
                               ...(entry.holiday && {
                                 bgcolor: "warning.50",
@@ -2347,7 +2627,7 @@ export default function AttendancePage() {
                               sx={{
                                 position: "sticky",
                                 left: 0,
-                                bgcolor: entry.holiday
+                                bgcolor: entry.summary.attendanceStatus === "draft" || entry.holiday
                                   ? "warning.50"
                                   : "background.paper",
                                 zIndex: 1,
@@ -2366,7 +2646,7 @@ export default function AttendancePage() {
                               sx={{
                                 position: "sticky",
                                 left: 40,
-                                bgcolor: entry.holiday
+                                bgcolor: entry.summary.attendanceStatus === "draft" || entry.holiday
                                   ? "warning.50"
                                   : "background.paper",
                                 zIndex: 1,
@@ -2389,6 +2669,16 @@ export default function AttendancePage() {
                                   gap: 0.5,
                                 }}
                               >
+                                {entry.summary.attendanceStatus === "draft" && (
+                                  <Tooltip title="Draft - not yet confirmed">
+                                    <EventNote
+                                      sx={{
+                                        color: "warning.dark",
+                                        fontSize: 16,
+                                      }}
+                                    />
+                                  </Tooltip>
+                                )}
                                 {entry.holiday && (
                                   <Tooltip
                                     title={`Holiday: ${
@@ -2473,8 +2763,8 @@ export default function AttendancePage() {
                               sx={{ display: { xs: "none", md: "table-cell" } }}
                             >
                               <Typography variant="caption">
-                                {entry.summary.attendanceStatus ===
-                                "morning_entry"
+                                {entry.summary.attendanceStatus === "morning_entry" ||
+                                entry.summary.attendanceStatus === "draft"
                                   ? "-"
                                   : formatTime(entry.summary.lastOutTime)}
                               </Typography>
@@ -2589,46 +2879,52 @@ export default function AttendancePage() {
                               </Box>
                             </TableCell>
                             <TableCell>
-                              {entry.summary.attendanceStatus ===
-                              "morning_entry" ? (
-                                <Box
-                                  sx={{
-                                    display: "flex",
-                                    alignItems: "center",
-                                    gap: 0.5,
-                                  }}
-                                >
+                              <Box
+                                sx={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: 0.5,
+                                  flexWrap: "wrap",
+                                }}
+                              >
+                                {/* Status Chip */}
+                                {entry.summary.attendanceStatus === "draft" ? (
+                                  <Chip
+                                    label="📝 Draft"
+                                    size="small"
+                                    color="warning"
+                                    variant="filled"
+                                  />
+                                ) : entry.summary.attendanceStatus === "morning_entry" ? (
                                   <Chip
                                     label="🌅 Morning"
                                     size="small"
                                     color="warning"
                                     variant="outlined"
                                   />
-                                  <Tooltip title="Edit morning entry">
-                                    <IconButton
-                                      size="small"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleOpenDrawerForDate(
-                                          entry.summary.date,
-                                          "morning"
-                                        );
-                                      }}
-                                      disabled={!canEdit}
-                                    >
-                                      <Edit sx={{ fontSize: 16 }} />
-                                    </IconButton>
-                                  </Tooltip>
+                                ) : (
+                                  <Chip
+                                    label="✓"
+                                    size="small"
+                                    color="success"
+                                    variant="outlined"
+                                    sx={{ display: { xs: "none", sm: "flex" } }}
+                                  />
+                                )}
+
+                                {/* Confirm button for draft/morning */}
+                                {(entry.summary.attendanceStatus === "draft" ||
+                                  entry.summary.attendanceStatus === "morning_entry") && (
                                   <Tooltip title="Confirm attendance">
                                     <Chip
                                       label="Confirm"
                                       size="small"
-                                      color="info"
+                                      color={entry.summary.attendanceStatus === "draft" ? "success" : "info"}
                                       onClick={(e) => {
                                         e.stopPropagation();
                                         handleOpenDrawerForDate(
                                           entry.summary.date,
-                                          "evening"
+                                          entry.summary.attendanceStatus === "draft" ? "full" : "evening"
                                         );
                                       }}
                                       sx={{
@@ -2637,38 +2933,85 @@ export default function AttendancePage() {
                                       disabled={!canEdit}
                                     />
                                   </Tooltip>
-                                </Box>
-                              ) : (
-                                <Box
-                                  sx={{
-                                    display: "flex",
-                                    alignItems: "center",
-                                    gap: 0.5,
-                                  }}
-                                >
-                                  <Chip
-                                    label="✓ Confirmed"
-                                    size="small"
-                                    color="success"
-                                    variant="outlined"
-                                  />
-                                  <Tooltip title="Edit attendance">
+                                )}
+
+                                {/* Action Icons */}
+                                <Box sx={{ display: "flex", alignItems: "center", ml: "auto" }}>
+                                  {/* Settle - only show if pending laborers */}
+                                  {canEdit && entry.summary.pendingCount > 0 && (
+                                    <Tooltip title={`Settle ₹${entry.summary.pendingAmount.toLocaleString()}`}>
+                                      <IconButton
+                                        size="small"
+                                        color="success"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setSettlementDateSummary(entry.summary);
+                                          setDailySettlementOpen(true);
+                                        }}
+                                      >
+                                        <PaymentIcon sx={{ fontSize: 16 }} />
+                                      </IconButton>
+                                    </Tooltip>
+                                  )}
+
+                                  {/* Edit */}
+                                  {canEdit && (
+                                    <Tooltip
+                                      title={
+                                        entry.summary.attendanceStatus === "morning_entry"
+                                          ? "Edit morning entry"
+                                          : "Edit attendance"
+                                      }
+                                    >
+                                      <IconButton
+                                        size="small"
+                                        color="primary"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleOpenDrawerForDate(
+                                            entry.summary.date,
+                                            entry.summary.attendanceStatus === "morning_entry"
+                                              ? "morning"
+                                              : "full"
+                                          );
+                                        }}
+                                      >
+                                        <Edit sx={{ fontSize: 16 }} />
+                                      </IconButton>
+                                    </Tooltip>
+                                  )}
+
+                                  {/* View */}
+                                  <Tooltip title="View summary">
                                     <IconButton
                                       size="small"
+                                      color="info"
                                       onClick={(e) => {
                                         e.stopPropagation();
-                                        handleOpenDrawerForDate(
-                                          entry.summary.date,
-                                          "full"
-                                        );
+                                        setViewSummaryDate(entry.summary.date);
                                       }}
-                                      disabled={!canEdit}
                                     >
-                                      <Edit sx={{ fontSize: 16 }} />
+                                      <VisibilityIcon sx={{ fontSize: 16 }} />
                                     </IconButton>
                                   </Tooltip>
+
+                                  {/* Delete */}
+                                  {canEdit && (
+                                    <Tooltip title="Delete attendance">
+                                      <IconButton
+                                        size="small"
+                                        color="error"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleDeleteDateAttendance(entry.summary.date);
+                                        }}
+                                      >
+                                        <Delete sx={{ fontSize: 16 }} />
+                                      </IconButton>
+                                    </Tooltip>
+                                  )}
                                 </Box>
-                              )}
+                              </Box>
                             </TableCell>
                           </TableRow>
                           <TableRow>
@@ -2817,8 +3160,8 @@ export default function AttendancePage() {
                                         />
                                       )}
                                       {canEdit &&
-                                        entry.summary.attendanceStatus ===
-                                          "morning_entry" && (
+                                        (entry.summary.attendanceStatus === "morning_entry" ||
+                                          entry.summary.attendanceStatus === "draft") && (
                                           <Button
                                             variant="contained"
                                             color="success"
@@ -2826,61 +3169,13 @@ export default function AttendancePage() {
                                             onClick={() =>
                                               handleOpenDrawerForDate(
                                                 entry.summary.date,
-                                                "evening"
+                                                entry.summary.attendanceStatus === "draft" ? "full" : "evening"
                                               )
                                             }
                                           >
-                                            🌆 Confirm Attendance
+                                            {entry.summary.attendanceStatus === "draft" ? "✓ Confirm Draft" : "🌆 Confirm Attendance"}
                                           </Button>
                                         )}
-                                      {/* View Summary Button */}
-                                      <Tooltip title="View attendance summary">
-                                        <IconButton
-                                          size="small"
-                                          color="info"
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            setViewSummaryDate(
-                                              entry.summary.date
-                                            );
-                                          }}
-                                        >
-                                          <VisibilityIcon fontSize="small" />
-                                        </IconButton>
-                                      </Tooltip>
-                                      {canEdit &&
-                                        entry.summary.attendanceStatus !==
-                                          "morning_entry" && (
-                                          <Button
-                                            variant="contained"
-                                            size="small"
-                                            startIcon={<Edit />}
-                                            onClick={() =>
-                                              handleOpenDrawerForDate(
-                                                entry.summary.date,
-                                                "full"
-                                              )
-                                            }
-                                          >
-                                            Edit Attendance
-                                          </Button>
-                                        )}
-                                      {canEdit && (
-                                        <Tooltip title="Delete all attendance for this day">
-                                          <IconButton
-                                            size="small"
-                                            color="error"
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              handleDeleteDateAttendance(
-                                                entry.summary.date
-                                              );
-                                            }}
-                                          >
-                                            <Delete fontSize="small" />
-                                          </IconButton>
-                                        </Tooltip>
-                                      )}
                                     </Box>
                                   </Box>
 
@@ -3024,8 +3319,8 @@ export default function AttendancePage() {
                                               {formatTime(record.in_time)}
                                             </TableCell>
                                             <TableCell align="center">
-                                              {record.attendance_status ===
-                                              "morning_entry"
+                                              {record.attendance_status === "morning_entry" ||
+                                              record.attendance_status === "draft"
                                                 ? "-"
                                                 : formatTime(record.out_time)}
                                             </TableCell>
@@ -3946,6 +4241,55 @@ export default function AttendancePage() {
         onSuccess={handlePaymentSuccess}
       />
 
+      {/* Daily Settlement Dialog */}
+      <DailySettlementDialog
+        open={dailySettlementOpen}
+        onClose={() => {
+          setDailySettlementOpen(false);
+          setSettlementDateSummary(null);
+        }}
+        dateSummary={settlementDateSummary ? {
+          date: settlementDateSummary.date,
+          records: settlementDateSummary.records.map((r) => ({
+            id: r.id,
+            laborer_id: r.laborer_id,
+            laborer_name: r.laborer_name,
+            laborer_type: r.laborer_type || "daily_wage",
+            daily_earnings: r.daily_earnings,
+            is_paid: r.is_paid,
+          })),
+          marketLaborers: settlementDateSummary.marketLaborers.map((m) => ({
+            id: m.id,
+            originalDbId: m.originalDbId,
+            roleName: m.roleName,
+            dailyEarnings: m.dailyEarnings,
+            isPaid: m.isPaid,
+          })),
+          pendingCount: settlementDateSummary.pendingCount,
+          pendingAmount: settlementDateSummary.pendingAmount,
+        } : null}
+        onSuccess={() => {
+          setDailySettlementOpen(false);
+          setSettlementDateSummary(null);
+          fetchAttendanceHistory();
+        }}
+      />
+
+      {/* Weekly Settlement Dialog */}
+      <WeeklySettlementDialog
+        open={weeklySettlementOpen}
+        onClose={() => {
+          setWeeklySettlementOpen(false);
+          setSettlementWeekSummary(null);
+        }}
+        weeklySummary={settlementWeekSummary}
+        onSuccess={() => {
+          setWeeklySettlementOpen(false);
+          setSettlementWeekSummary(null);
+          fetchAttendanceHistory();
+        }}
+      />
+
       {/* Delete Confirmation Dialog */}
       <Dialog
         open={deleteDialogOpen}
@@ -4211,16 +4555,20 @@ export default function AttendancePage() {
                     </Typography>
                     <Chip
                       label={
-                        summary.attendanceStatus === "morning_entry"
+                        summary.attendanceStatus === "draft"
+                          ? "📝 Draft"
+                          : summary.attendanceStatus === "morning_entry"
                           ? "🌅 Morning Only"
                           : "✓ Confirmed"
                       }
                       color={
-                        summary.attendanceStatus === "morning_entry"
+                        summary.attendanceStatus === "draft"
+                          ? "warning"
+                          : summary.attendanceStatus === "morning_entry"
                           ? "warning"
                           : "success"
                       }
-                      variant="outlined"
+                      variant={summary.attendanceStatus === "draft" ? "filled" : "outlined"}
                     />
                   </Box>
 
@@ -4236,7 +4584,7 @@ export default function AttendancePage() {
                       </Typography>
                       <Typography variant="body2">
                         <strong>Last Out:</strong>{" "}
-                        {summary.attendanceStatus === "morning_entry"
+                        {summary.attendanceStatus === "morning_entry" || summary.attendanceStatus === "draft"
                           ? "Pending"
                           : formatTime(summary.lastOutTime) || "N/A"}
                       </Typography>
