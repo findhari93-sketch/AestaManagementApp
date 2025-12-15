@@ -239,7 +239,7 @@ export default function MaterialDialog({
           alignItems: "center",
         }}
       >
-        <Typography variant="h6">
+        <Typography variant="h6" component="span">
           {isEdit ? "Edit Material" : "Add New Material"}
         </Typography>
         <IconButton onClick={onClose} size="small">
@@ -274,7 +274,8 @@ export default function MaterialDialog({
               onChange={(e) =>
                 handleChange("code", e.target.value.toUpperCase())
               }
-              placeholder="e.g., CEM-PPC-01"
+              placeholder="Auto-generated if empty"
+              helperText="Leave empty to auto-generate"
             />
           </Grid>
 

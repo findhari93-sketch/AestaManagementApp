@@ -111,6 +111,31 @@ const formatFileSize = (bytes: number): string => {
   return `${value.toFixed(value >= 10 ? 0 : 1)} ${sizes[i]}`;
 };
 
+// Get MIME type from file extension (fallback for files with empty/incorrect MIME)
+const getMimeFromExtension = (filename: string): string | null => {
+  const ext = filename.split('.').pop()?.toLowerCase();
+  const mimeMap: Record<string, string> = {
+    'jpg': 'image/jpeg',
+    'jpeg': 'image/jpeg',
+    'png': 'image/png',
+    'webp': 'image/webp',
+    'heic': 'image/heic',
+    'heif': 'image/heif',
+    'gif': 'image/gif',
+    'bmp': 'image/bmp',
+    'pdf': 'application/pdf',
+  };
+  return mimeMap[ext || ''] || null;
+};
+
+// Get effective MIME type (with extension fallback)
+const getEffectiveMimeType = (file: File): string => {
+  if (file.type && file.type !== 'application/octet-stream') {
+    return file.type;
+  }
+  return getMimeFromExtension(file.name) || file.type || '';
+};
+
 // Sanitize filename - remove special characters that can cause issues
 const sanitizeFilename = (filename: string): string => {
   // Get extension
@@ -136,8 +161,18 @@ const compressImage = (
   quality: number = 0.8
 ): Promise<File> => {
   return new Promise((resolve, reject) => {
+    const effectiveMime = getEffectiveMimeType(file);
+
     // Skip compression for non-image files
-    if (!file.type.startsWith("image/")) {
+    if (!effectiveMime.startsWith("image/")) {
+      resolve(file);
+      return;
+    }
+
+    // Skip HEIC/HEIF - browser Canvas API can't process these (except Safari)
+    // These formats will be uploaded as-is
+    if (effectiveMime === 'image/heic' || effectiveMime === 'image/heif') {
+      console.log('Skipping compression for HEIC/HEIF - not supported in browser');
       resolve(file);
       return;
     }
@@ -148,11 +183,11 @@ const compressImage = (
       return;
     }
 
-    // Add timeout to prevent hanging
+    // Add timeout to prevent hanging (reduced to 5 seconds)
     const timeout = setTimeout(() => {
       console.warn("Image compression timed out, using original file");
       resolve(file);
-    }, 10000); // 10 second timeout
+    }, 5000); // 5 second timeout
 
     const reader = new FileReader();
     reader.readAsDataURL(file);
@@ -300,10 +335,13 @@ export default function FileUploader({
 
   const validateFile = useCallback(
     (file: File): string | null => {
+      // Use effective MIME type (with extension fallback for WhatsApp downloads etc.)
+      const effectiveMime = getEffectiveMimeType(file);
       const allowedTypes = acceptMime.split(",").map((t) => t.trim());
+
       if (
         !allowedTypes.some(
-          (t) => file.type === t || file.type.startsWith(t.replace("*", ""))
+          (t) => effectiveMime === t || effectiveMime.startsWith(t.replace("*", ""))
         )
       ) {
         return `Invalid file type. Allowed: ${acceptLabel}`;
@@ -335,7 +373,8 @@ export default function FileUploader({
       try {
         // Compress image if enabled and file is an image
         let fileToUpload = file;
-        if (compressImages && file.type.startsWith("image/")) {
+        const effectiveMime = getEffectiveMimeType(file);
+        if (compressImages && effectiveMime.startsWith("image/")) {
           setUploadProgress(5); // Show early progress for compression
           try {
             fileToUpload = await compressImage(

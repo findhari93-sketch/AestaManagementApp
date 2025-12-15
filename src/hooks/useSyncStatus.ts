@@ -74,11 +74,14 @@ export function useSyncStatus(): SyncStatusInfo {
         // Check if any query is fetching
         const isFetching = queryClient.isFetching() > 0;
 
-        if (isFetching) {
-          setStatus("syncing");
-        } else {
-          setStatus("idle");
-        }
+        // Defer state update to avoid "Cannot update component while rendering" error
+        queueMicrotask(() => {
+          if (isFetching) {
+            setStatus("syncing");
+          } else {
+            setStatus("idle");
+          }
+        });
       }
     });
 

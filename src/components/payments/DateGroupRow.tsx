@@ -691,7 +691,7 @@ export default function DateGroupRow({
             }}
           >
             <Box>
-              <Typography variant="h6">Payment Proof</Typography>
+              <Typography variant="h6" component="span">Payment Proof</Typography>
               {selectedProof && (
                 <Typography variant="body2" color="text.secondary">
                   {selectedProof.laborerName} - {formatCurrency(selectedProof.amount)} ({dayjs(selectedProof.date).format("MMM D, YYYY")})

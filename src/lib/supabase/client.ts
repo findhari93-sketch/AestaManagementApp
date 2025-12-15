@@ -1,7 +1,15 @@
 import { createBrowserClient } from "@supabase/ssr";
 import { Database } from "@/types/database.types";
 
+// Singleton instance for browser client
+let browserClient: ReturnType<typeof createBrowserClient<Database>> | null = null;
+
 export function createClient() {
+  // Return existing singleton if available (browser only)
+  if (typeof window !== 'undefined' && browserClient) {
+    return browserClient;
+  }
+
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
@@ -14,7 +22,7 @@ export function createClient() {
     );
   }
 
-  return createBrowserClient<Database>(supabaseUrl, supabaseKey, {
+  const client = createBrowserClient<Database>(supabaseUrl, supabaseKey, {
     auth: {
       persistSession: true,
       autoRefreshToken: true,
@@ -22,4 +30,11 @@ export function createClient() {
       flowType: "pkce",
     },
   });
+
+  // Store as singleton in browser environment
+  if (typeof window !== 'undefined') {
+    browserClient = client;
+  }
+
+  return client;
 }

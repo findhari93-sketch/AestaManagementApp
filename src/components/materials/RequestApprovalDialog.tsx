@@ -137,7 +137,7 @@ export default function RequestApprovalDialog({
         }}
       >
         <Box>
-          <Typography variant="h6">Approve Request</Typography>
+          <Typography variant="h6" component="span">Approve Request</Typography>
           <Typography variant="body2" color="text.secondary">
             {request.request_number}
           </Typography>

@@ -52,7 +52,8 @@
       "Bash(node scripts/reset-engineer-transactions.mjs:*)",
       "Bash(findstr:*)",
       "Bash(git log:*)",
-      "Bash(git checkout:*)"
+      "Bash(git checkout:*)",
+      "Bash(echo:*)"
     ],
     "deny": [],
     "ask": []

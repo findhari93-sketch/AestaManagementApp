@@ -24,10 +24,19 @@ import {
   MenuItem,
   OutlinedInput,
   Rating,
+  ToggleButton,
+  ToggleButtonGroup,
+  FormControlLabel,
+  Switch,
+  InputAdornment,
 } from "@mui/material";
 import {
   Close as CloseIcon,
   ExpandMore as ExpandMoreIcon,
+  Store as StoreIcon,
+  LocalShipping as DealerIcon,
+  Factory as FactoryIcon,
+  Person as PersonIcon,
 } from "@mui/icons-material";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import {
@@ -38,7 +47,9 @@ import type {
   VendorWithCategories,
   VendorFormData,
   MaterialCategory,
+  VendorType,
 } from "@/types/material.types";
+import { VENDOR_TYPE_LABELS } from "@/types/material.types";
 
 interface VendorDialogProps {
   open: boolean;
@@ -82,6 +93,23 @@ export default function VendorDialog({
     notes: "",
     rating: 0,
     category_ids: [],
+    // New vendor enhancement fields
+    vendor_type: "dealer" as VendorType,
+    shop_name: "",
+    has_physical_store: false,
+    store_address: "",
+    store_city: "",
+    store_pincode: "",
+    provides_transport: false,
+    provides_loading: false,
+    provides_unloading: false,
+    min_order_amount: 0,
+    delivery_radius_km: 0,
+    specializations: [],
+    accepts_upi: true,
+    accepts_cash: true,
+    accepts_credit: false,
+    credit_days: 0,
   });
 
   // Reset form when vendor changes
@@ -109,6 +137,23 @@ export default function VendorDialog({
         notes: vendor.notes || "",
         rating: vendor.rating || 0,
         category_ids: vendor.categories?.map((c) => c?.id).filter(Boolean) as string[] || [],
+        // New vendor enhancement fields
+        vendor_type: vendor.vendor_type || "dealer",
+        shop_name: vendor.shop_name || "",
+        has_physical_store: vendor.has_physical_store || false,
+        store_address: vendor.store_address || "",
+        store_city: vendor.store_city || "",
+        store_pincode: vendor.store_pincode || "",
+        provides_transport: vendor.provides_transport || false,
+        provides_loading: vendor.provides_loading || false,
+        provides_unloading: vendor.provides_unloading || false,
+        min_order_amount: vendor.min_order_amount || 0,
+        delivery_radius_km: vendor.delivery_radius_km || 0,
+        specializations: vendor.specializations || [],
+        accepts_upi: vendor.accepts_upi ?? true,
+        accepts_cash: vendor.accepts_cash ?? true,
+        accepts_credit: vendor.accepts_credit || false,
+        credit_days: vendor.credit_days || 0,
       });
     } else {
       setFormData({
@@ -133,6 +178,23 @@ export default function VendorDialog({
         notes: "",
         rating: 0,
         category_ids: [],
+        // New vendor enhancement fields
+        vendor_type: "dealer",
+        shop_name: "",
+        has_physical_store: false,
+        store_address: "",
+        store_city: "",
+        store_pincode: "",
+        provides_transport: false,
+        provides_loading: false,
+        provides_unloading: false,
+        min_order_amount: 0,
+        delivery_radius_km: 0,
+        specializations: [],
+        accepts_upi: true,
+        accepts_cash: true,
+        accepts_credit: false,
+        credit_days: 0,
       });
     }
     setError("");
@@ -221,7 +283,8 @@ export default function VendorDialog({
               label="Vendor Code"
               value={formData.code}
               onChange={(e) => handleChange("code", e.target.value.toUpperCase())}
-              placeholder="e.g., VEN-001"
+              placeholder="Auto-generated if empty"
+              helperText="Leave empty to auto-generate based on type"
             />
           </Grid>
           <Grid size={{ xs: 12, md: 3 }}>
@@ -236,6 +299,65 @@ export default function VendorDialog({
               />
             </Box>
           </Grid>
+
+          {/* Vendor Type Selector */}
+          <Grid size={12}>
+            <Divider sx={{ my: 1 }}>
+              <Typography variant="caption" color="text.secondary">
+                Vendor Type
+              </Typography>
+            </Divider>
+          </Grid>
+
+          <Grid size={12}>
+            <ToggleButtonGroup
+              value={formData.vendor_type}
+              exclusive
+              onChange={(_, value) => {
+                if (value) {
+                  handleChange("vendor_type", value);
+                  // Auto-set has_physical_store for shop type
+                  if (value === "shop") {
+                    handleChange("has_physical_store", true);
+                  }
+                }
+              }}
+              aria-label="vendor type"
+              fullWidth
+              sx={{ mb: 1 }}
+            >
+              <ToggleButton value="shop" aria-label="shop">
+                <StoreIcon sx={{ mr: 1 }} />
+                {VENDOR_TYPE_LABELS.shop}
+              </ToggleButton>
+              <ToggleButton value="dealer" aria-label="dealer">
+                <DealerIcon sx={{ mr: 1 }} />
+                {VENDOR_TYPE_LABELS.dealer}
+              </ToggleButton>
+              <ToggleButton value="manufacturer" aria-label="manufacturer">
+                <FactoryIcon sx={{ mr: 1 }} />
+                {VENDOR_TYPE_LABELS.manufacturer}
+              </ToggleButton>
+              <ToggleButton value="individual" aria-label="individual">
+                <PersonIcon sx={{ mr: 1 }} />
+                {VENDOR_TYPE_LABELS.individual}
+              </ToggleButton>
+            </ToggleButtonGroup>
+          </Grid>
+
+          {/* Shop Name - shown for shop type */}
+          {formData.vendor_type === "shop" && (
+            <Grid size={12}>
+              <TextField
+                fullWidth
+                label="Shop/Store Name"
+                value={formData.shop_name}
+                onChange={(e) => handleChange("shop_name", e.target.value)}
+                placeholder="e.g., Sri Lakshmi Hardware"
+                helperText="Display name for the shop"
+              />
+            </Grid>
+          )}
 
           <Grid size={12}>
             <Divider sx={{ my: 1 }}>
@@ -328,6 +450,148 @@ export default function VendorDialog({
               label="Pincode"
               value={formData.pincode}
               onChange={(e) => handleChange("pincode", e.target.value)}
+            />
+          </Grid>
+
+          {/* Store Location - shown for shop and dealer types with physical store */}
+          {(formData.vendor_type === "shop" || formData.has_physical_store) && (
+            <>
+              <Grid size={12}>
+                <Divider sx={{ my: 1 }}>
+                  <Typography variant="caption" color="text.secondary">
+                    Store/Warehouse Location
+                  </Typography>
+                </Divider>
+              </Grid>
+
+              {formData.vendor_type !== "shop" && (
+                <Grid size={12}>
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        checked={formData.has_physical_store || false}
+                        onChange={(e) =>
+                          handleChange("has_physical_store", e.target.checked)
+                        }
+                      />
+                    }
+                    label="Has physical store/warehouse"
+                  />
+                </Grid>
+              )}
+
+              <Grid size={12}>
+                <TextField
+                  fullWidth
+                  label="Store Address"
+                  value={formData.store_address}
+                  onChange={(e) => handleChange("store_address", e.target.value)}
+                  multiline
+                  rows={2}
+                  placeholder="Physical store/warehouse address"
+                />
+              </Grid>
+              <Grid size={{ xs: 6, md: 4 }}>
+                <TextField
+                  fullWidth
+                  label="Store City"
+                  value={formData.store_city}
+                  onChange={(e) => handleChange("store_city", e.target.value)}
+                />
+              </Grid>
+              <Grid size={{ xs: 6, md: 4 }}>
+                <TextField
+                  fullWidth
+                  label="Store Pincode"
+                  value={formData.store_pincode}
+                  onChange={(e) => handleChange("store_pincode", e.target.value)}
+                />
+              </Grid>
+              <Grid size={{ xs: 6, md: 4 }}>
+                <TextField
+                  fullWidth
+                  label="Delivery Radius (km)"
+                  type="number"
+                  value={formData.delivery_radius_km || ""}
+                  onChange={(e) =>
+                    handleChange(
+                      "delivery_radius_km",
+                      parseInt(e.target.value) || 0
+                    )
+                  }
+                  slotProps={{
+                    input: { inputProps: { min: 0 } },
+                  }}
+                />
+              </Grid>
+            </>
+          )}
+
+          {/* Services & Delivery Options */}
+          <Grid size={12}>
+            <Divider sx={{ my: 1 }}>
+              <Typography variant="caption" color="text.secondary">
+                Services & Delivery
+              </Typography>
+            </Divider>
+          </Grid>
+
+          <Grid size={{ xs: 6, md: 4 }}>
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={formData.provides_transport || false}
+                  onChange={(e) =>
+                    handleChange("provides_transport", e.target.checked)
+                  }
+                />
+              }
+              label="Provides Transport"
+            />
+          </Grid>
+          <Grid size={{ xs: 6, md: 4 }}>
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={formData.provides_loading || false}
+                  onChange={(e) =>
+                    handleChange("provides_loading", e.target.checked)
+                  }
+                />
+              }
+              label="Provides Loading"
+            />
+          </Grid>
+          <Grid size={{ xs: 6, md: 4 }}>
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={formData.provides_unloading || false}
+                  onChange={(e) =>
+                    handleChange("provides_unloading", e.target.checked)
+                  }
+                />
+              }
+              label="Provides Unloading"
+            />
+          </Grid>
+          <Grid size={{ xs: 6, md: 4 }}>
+            <TextField
+              fullWidth
+              label="Minimum Order Amount (₹)"
+              type="number"
+              value={formData.min_order_amount || ""}
+              onChange={(e) =>
+                handleChange("min_order_amount", parseFloat(e.target.value) || 0)
+              }
+              slotProps={{
+                input: {
+                  inputProps: { min: 0 },
+                  startAdornment: (
+                    <InputAdornment position="start">₹</InputAdornment>
+                  ),
+                },
+              }}
             />
           </Grid>
 
@@ -432,6 +696,72 @@ export default function VendorDialog({
                       }}
                     />
                   </Grid>
+
+                  {/* Payment Methods Accepted */}
+                  <Grid size={12}>
+                    <Typography variant="subtitle2" sx={{ mt: 2, mb: 1 }}>
+                      Payment Methods Accepted
+                    </Typography>
+                  </Grid>
+                  <Grid size={{ xs: 4, md: 3 }}>
+                    <FormControlLabel
+                      control={
+                        <Switch
+                          checked={formData.accepts_upi || false}
+                          onChange={(e) =>
+                            handleChange("accepts_upi", e.target.checked)
+                          }
+                        />
+                      }
+                      label="UPI"
+                    />
+                  </Grid>
+                  <Grid size={{ xs: 4, md: 3 }}>
+                    <FormControlLabel
+                      control={
+                        <Switch
+                          checked={formData.accepts_cash || false}
+                          onChange={(e) =>
+                            handleChange("accepts_cash", e.target.checked)
+                          }
+                        />
+                      }
+                      label="Cash"
+                    />
+                  </Grid>
+                  <Grid size={{ xs: 4, md: 3 }}>
+                    <FormControlLabel
+                      control={
+                        <Switch
+                          checked={formData.accepts_credit || false}
+                          onChange={(e) =>
+                            handleChange("accepts_credit", e.target.checked)
+                          }
+                        />
+                      }
+                      label="Credit"
+                    />
+                  </Grid>
+                  {formData.accepts_credit && (
+                    <Grid size={{ xs: 6, md: 3 }}>
+                      <TextField
+                        fullWidth
+                        label="Credit Days"
+                        type="number"
+                        value={formData.credit_days || ""}
+                        onChange={(e) =>
+                          handleChange(
+                            "credit_days",
+                            parseInt(e.target.value) || 0
+                          )
+                        }
+                        slotProps={{
+                          input: { inputProps: { min: 0 } },
+                        }}
+                        helperText="Days of credit allowed"
+                      />
+                    </Grid>
+                  )}
                 </Grid>
               </AccordionDetails>
             </Accordion>

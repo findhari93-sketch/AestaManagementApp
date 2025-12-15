@@ -476,7 +476,7 @@ export default function PaymentDialog({
           }}
         >
           <Box>
-            <Typography variant="h6">{dialogTitle}</Typography>
+            <Typography variant="h6" component="span">{dialogTitle}</Typography>
             <Typography variant="body2" color="text.secondary">
               Total: Rs.{totalAmount.toLocaleString()}
             </Typography>

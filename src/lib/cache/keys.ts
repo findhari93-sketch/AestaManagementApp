@@ -157,8 +157,63 @@ export const queryKeys = {
   purchaseOrders: {
     all: ['purchase-orders'] as const,
     bySite: (siteId: string) => ['purchase-orders', 'site', siteId] as const,
-    pending: (siteId: string) => 
+    pending: (siteId: string) =>
       ['purchase-orders', 'site', siteId, 'pending'] as const,
+  },
+
+  // ==================== SITE GROUPS & COMMON STOCK ====================
+
+  siteGroups: {
+    all: ['site-groups'] as const,
+    list: () => ['site-groups', 'list'] as const,
+    byId: (id: string) => ['site-groups', id] as const,
+    sites: (groupId: string) => ['site-groups', groupId, 'sites'] as const,
+  },
+
+  groupStock: {
+    all: ['group-stock'] as const,
+    byGroup: (groupId: string) => ['group-stock', 'group', groupId] as const,
+    summary: (groupId: string) => ['group-stock', 'group', groupId, 'summary'] as const,
+    transactions: (groupId: string) => ['group-stock', 'group', groupId, 'transactions'] as const,
+    usageBySite: (groupId: string) => ['group-stock', 'group', groupId, 'usage-by-site'] as const,
+  },
+
+  // ==================== VENDOR INVENTORY & PRICE HISTORY ====================
+
+  vendorInventory: {
+    all: ['vendor-inventory'] as const,
+    byVendor: (vendorId: string) => ['vendor-inventory', 'vendor', vendorId] as const,
+    byMaterial: (materialId: string) => ['vendor-inventory', 'material', materialId] as const,
+    search: (query: string) => ['vendor-inventory', 'search', query] as const,
+  },
+
+  priceHistory: {
+    all: ['price-history'] as const,
+    byVendorMaterial: (vendorId: string, materialId: string) =>
+      ['price-history', 'vendor', vendorId, 'material', materialId] as const,
+    byMaterial: (materialId: string) => ['price-history', 'material', materialId] as const,
+    byVendor: (vendorId: string) => ['price-history', 'vendor', vendorId] as const,
+  },
+
+  // ==================== LOCAL PURCHASES ====================
+
+  localPurchases: {
+    all: ['local-purchases'] as const,
+    bySite: (siteId: string) => ['local-purchases', 'site', siteId] as const,
+    byEngineer: (engineerId: string) => ['local-purchases', 'engineer', engineerId] as const,
+    byGroup: (groupId: string) => ['local-purchases', 'group', groupId] as const,
+    pendingReimbursement: () => ['local-purchases', 'pending-reimbursement'] as const,
+  },
+
+  // ==================== DELIVERIES & VERIFICATION ====================
+
+  deliveries: {
+    all: ['deliveries'] as const,
+    bySite: (siteId: string) => ['deliveries', 'site', siteId] as const,
+    byId: (id: string) => ['deliveries', id] as const,
+    pendingVerification: (siteId: string) =>
+      ['deliveries', 'site', siteId, 'pending-verification'] as const,
+    byPO: (poId: string) => ['deliveries', 'po', poId] as const,
   },
 
   // ==================== DASHBOARD / AGGREGATED DATA (2min cache) ====================

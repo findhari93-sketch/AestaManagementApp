@@ -249,7 +249,7 @@ export default function SettlementStatusIndicator({
               alignItems: "center",
             }}
           >
-            <Typography variant="h6">{selectedProof?.title}</Typography>
+            <Typography variant="h6" component="span">{selectedProof?.title}</Typography>
             <IconButton onClick={() => setProofDialogOpen(false)} size="small">
               <CloseIcon />
             </IconButton>

@@ -25,6 +25,7 @@ import {
   Chip,
 } from "@mui/material";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { useSessionRefresh } from "@/hooks/useSessionRefresh";
 import {
   Menu as MenuIcon,
   ChevronLeft as ChevronLeftIcon,
@@ -64,6 +65,7 @@ import {
   CheckCircle as CheckCircleIcon,
   Error as ErrorIcon,
   CalendarMonth as CalendarIcon,
+  LocalShipping as DeliveryIcon,
 } from "@mui/icons-material";
 import { useRouter, usePathname } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
@@ -186,6 +188,16 @@ const siteNavCategories: NavCategory[] = [
         icon: <ShoppingCartIcon />,
         path: "/site/purchase-orders",
       },
+      {
+        text: "Delivery Verification",
+        icon: <DeliveryIcon />,
+        path: "/site/delivery-verification",
+      },
+      {
+        text: "Local Purchases",
+        icon: <StoreIcon />,
+        path: "/site/local-purchases",
+      },
     ],
   },
   {
@@ -247,6 +259,11 @@ const companyNavCategories: NavCategory[] = [
         text: "Material Catalog",
         icon: <CategoryIcon />,
         path: "/company/materials",
+      },
+      {
+        text: "Material Search",
+        icon: <ShoppingCartIcon />,
+        path: "/company/material-search",
       },
       {
         text: "Vendors",
@@ -329,6 +346,9 @@ export default function MainLayout({
     isAllTime,
     label: dateRangeLabel,
   } = useDateRange();
+
+  // Refresh session on navigation (since middleware doesn't run on client-side navigation)
+  useSessionRefresh();
 
   // Determine active tab based on current path
   useEffect(() => {

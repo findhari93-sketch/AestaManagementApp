@@ -2352,12 +2352,17 @@ export default function AttendancePage() {
                         bgcolor: "primary.dark",
                         color: "primary.contrastText",
                         fontWeight: 700,
-                        minWidth: 80,
-                        display: { xs: "none", sm: "table-cell" },
+                        minWidth: { xs: 50, sm: 80 },
+                        px: { xs: 0.5, sm: 1 },
                       }}
                       align="center"
                     >
-                      Tea Shop
+                      <Box sx={{ display: { xs: "none", sm: "inline" } }}>
+                        Tea Shop
+                      </Box>
+                      <Box sx={{ display: { xs: "inline", sm: "none" } }}>
+                        Tea
+                      </Box>
                     </TableCell>
                     <TableCell
                       sx={{
@@ -2753,11 +2758,11 @@ export default function AttendancePage() {
                             </TableCell>
                             <TableCell
                               align="center"
-                              sx={{ display: { xs: "none", sm: "table-cell" } }}
+                              sx={{ px: { xs: 0.25, sm: 1 } }}
                             >
                               {entry.summary.teaShop ? (
                                 <Chip
-                                  icon={<TeaIcon fontSize="small" />}
+                                  icon={<TeaIcon sx={{ fontSize: { xs: 14, sm: 20 } }} />}
                                   label={`₹${entry.summary.teaShop.total.toLocaleString()}`}
                                   size="small"
                                   color="secondary"
@@ -2770,11 +2775,21 @@ export default function AttendancePage() {
                                       data: entry.summary.teaShop!,
                                     });
                                   }}
-                                  sx={{ cursor: "pointer" }}
+                                  sx={{
+                                    cursor: "pointer",
+                                    height: { xs: 24, sm: 32 },
+                                    "& .MuiChip-label": {
+                                      px: { xs: 0.5, sm: 1 },
+                                      fontSize: { xs: "0.65rem", sm: "0.8125rem" },
+                                    },
+                                    "& .MuiChip-icon": {
+                                      ml: { xs: 0.25, sm: 0.5 },
+                                    },
+                                  }}
                                 />
                               ) : (
                                 <Chip
-                                  icon={<TeaIcon fontSize="small" />}
+                                  icon={<TeaIcon sx={{ fontSize: { xs: 14, sm: 20 } }} />}
                                   label="Add"
                                   size="small"
                                   variant="outlined"
@@ -2782,7 +2797,18 @@ export default function AttendancePage() {
                                     e.stopPropagation();
                                     handleOpenTeaShopDialog(entry.summary.date);
                                   }}
-                                  sx={{ cursor: "pointer", opacity: 0.6 }}
+                                  sx={{
+                                    cursor: "pointer",
+                                    opacity: 0.6,
+                                    height: { xs: 24, sm: 32 },
+                                    "& .MuiChip-label": {
+                                      px: { xs: 0.5, sm: 1 },
+                                      fontSize: { xs: "0.65rem", sm: "0.8125rem" },
+                                    },
+                                    "& .MuiChip-icon": {
+                                      ml: { xs: 0.25, sm: 0.5 },
+                                    },
+                                  }}
                                 />
                               )}
                             </TableCell>

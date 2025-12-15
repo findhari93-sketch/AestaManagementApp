@@ -3,6 +3,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
 import { useState, useEffect, useRef } from "react";
+import { usePathname } from "next/navigation";
 import { createIDBPersister } from "@/lib/cache/persistor";
 import { initBackgroundSync, stopBackgroundSync } from "@/lib/cache/sync";
 import {
@@ -28,6 +29,7 @@ export default function QueryProvider({
               Math.min(1000 * 2 ** attemptIndex, 30000), // Exponential backoff
             refetchOnWindowFocus: true, // Refetch when tab regains focus
             refetchOnReconnect: true, // Refetch when network reconnects
+            refetchOnMount: "always", // Always refetch stale data when component mounts (fixes navigation issue)
             networkMode: "online", // Only fetch when online
           },
           mutations: {
@@ -48,8 +50,16 @@ export default function QueryProvider({
         maxAge: 24 * 60 * 60 * 1000, // 24 hours max age for persisted data
         buster: "v1", // Change this to invalidate all persisted cache
       }}
+      onSuccess={() => {
+        // After cache restoration, invalidate stale queries to trigger refetch
+        queryClient.invalidateQueries({
+          refetchType: "active",
+          predicate: (query) => query.isStale(),
+        });
+      }}
     >
       <SyncInitializer queryClient={queryClient} />
+      <RouteChangeHandler queryClient={queryClient} />
       {children}
     </PersistQueryClientProvider>
   );
@@ -115,6 +125,34 @@ function SyncInitializer({ queryClient }: { queryClient: QueryClient }) {
       stopRealtimeListeners();
     };
   }, [queryClient, selectedSite?.id]);
+
+  return null;
+}
+
+/**
+ * Component to handle route changes and trigger query refetches
+ * Ensures data is fresh when navigating between pages
+ */
+function RouteChangeHandler({ queryClient }: { queryClient: QueryClient }) {
+  const pathname = usePathname();
+  const previousPathRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    // Only invalidate if route actually changed (not on initial mount)
+    if (previousPathRef.current && previousPathRef.current !== pathname) {
+      // Invalidate queries that are currently being observed (active on the new page)
+      // This triggers refetch for stale data
+      queryClient.invalidateQueries({
+        refetchType: "active", // Only refetch queries that have active observers
+        predicate: (query) => {
+          // Skip if data is still fresh
+          return query.isStale();
+        },
+      });
+    }
+
+    previousPathRef.current = pathname;
+  }, [pathname, queryClient]);
 
   return null;
 }

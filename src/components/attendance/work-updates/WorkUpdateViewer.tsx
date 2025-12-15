@@ -110,7 +110,7 @@ export default function WorkUpdateViewer({
           }}
         >
           <Box>
-            <Typography variant="h6">Work Updates</Typography>
+            <Typography variant="h6" component="span">Work Updates</Typography>
             <Typography variant="body2" color="text.secondary">
               {siteName && `${siteName} - `}
               {formattedDate}

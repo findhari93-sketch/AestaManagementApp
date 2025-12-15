@@ -222,7 +222,7 @@ export default function DeliveryDialog({
         }}
       >
         <Box>
-          <Typography variant="h6">Record Delivery (GRN)</Typography>
+          <Typography variant="h6" component="span">Record Delivery (GRN)</Typography>
           <Typography variant="body2" color="text.secondary">
             PO: {purchaseOrder.po_number} • {purchaseOrder.vendor?.name}
           </Typography>

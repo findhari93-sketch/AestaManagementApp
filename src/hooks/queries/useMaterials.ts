@@ -211,14 +211,56 @@ export function useMaterialSearch(searchTerm: string) {
 /**
  * Create a new material
  */
+/**
+ * Generate a material code from the name
+ * Format: First 3 letters (uppercase) + 4-digit sequence
+ * Example: CEM-0001 for Cement, STL-0001 for Steel
+ */
+async function generateMaterialCode(
+  supabase: ReturnType<typeof createClient>,
+  name: string
+): Promise<string> {
+  // Get prefix from name (first 3 letters, uppercase)
+  const prefix = name
+    .replace(/[^a-zA-Z]/g, "")
+    .substring(0, 3)
+    .toUpperCase()
+    .padEnd(3, "X");
+
+  // Get count of materials with same prefix
+  const { count } = await (supabase as any)
+    .from("materials")
+    .select("*", { count: "exact", head: true })
+    .ilike("code", `${prefix}-%`);
+
+  const sequence = ((count || 0) + 1).toString().padStart(4, "0");
+  return `${prefix}-${sequence}`;
+}
+
 export function useCreateMaterial() {
   const queryClient = useQueryClient();
   const supabase = createClient();
 
   return useMutation({
     mutationFn: async (data: MaterialFormData) => {
+      // Auto-generate code if not provided
+      let code = data.code?.trim() || null;
+      if (!code) {
+        code = await generateMaterialCode(supabase, data.name);
+      }
+
+      // Clean data: convert empty strings to null for UUID fields
+      const cleanData = {
+        ...data,
+        code,
+        local_name: data.local_name?.trim() || null,
+        category_id: data.category_id?.trim() || null,
+        description: data.description?.trim() || null,
+        hsn_code: data.hsn_code?.trim() || null,
+      };
+
       const { data: result, error } = await (supabase.from("materials") as any)
-        .insert(data)
+        .insert(cleanData)
         .select()
         .single();
 
@@ -246,8 +288,21 @@ export function useUpdateMaterial() {
       id: string;
       data: Partial<MaterialFormData>;
     }) => {
+      // Clean data: convert empty strings to null for UUID/optional fields
+      const cleanData: Record<string, unknown> = {
+        ...data,
+        updated_at: new Date().toISOString(),
+      };
+
+      // Only clean fields that are present in the update
+      if ("code" in data) cleanData.code = data.code?.trim() || null;
+      if ("local_name" in data) cleanData.local_name = data.local_name?.trim() || null;
+      if ("category_id" in data) cleanData.category_id = data.category_id?.trim() || null;
+      if ("description" in data) cleanData.description = data.description?.trim() || null;
+      if ("hsn_code" in data) cleanData.hsn_code = data.hsn_code?.trim() || null;
+
       const { data: result, error } = await (supabase.from("materials") as any)
-        .update({ ...data, updated_at: new Date().toISOString() })
+        .update(cleanData)
         .eq("id", id)
         .select()
         .single();

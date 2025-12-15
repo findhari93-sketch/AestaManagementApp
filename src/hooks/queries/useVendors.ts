@@ -96,7 +96,7 @@ export function useVendor(id: string | undefined) {
         ...data,
         categories:
           data.vendor_material_categories?.map((vc: any) => vc.category) || [],
-      } as VendorWithCategories;
+      } as unknown as VendorWithCategories;
     },
     enabled: !!id,
   });
@@ -128,6 +128,34 @@ export function useVendorSearch(searchTerm: string) {
 }
 
 /**
+ * Generate a vendor code based on vendor type
+ * Format: Type prefix + 4-digit sequence
+ * Example: SHP-0001 for Shop, DLR-0001 for Dealer
+ */
+async function generateVendorCode(
+  supabase: ReturnType<typeof createClient>,
+  vendorType?: string
+): Promise<string> {
+  // Get prefix based on vendor type
+  const prefixMap: Record<string, string> = {
+    shop: "SHP",
+    dealer: "DLR",
+    manufacturer: "MFR",
+    individual: "IND",
+  };
+  const prefix = prefixMap[vendorType || ""] || "VEN";
+
+  // Get count of vendors with same prefix
+  const { count } = await supabase
+    .from("vendors")
+    .select("*", { count: "exact", head: true })
+    .ilike("code", `${prefix}-%`);
+
+  const sequence = ((count || 0) + 1).toString().padStart(4, "0");
+  return `${prefix}-${sequence}`;
+}
+
+/**
  * Create a new vendor
  */
 export function useCreateVendor() {
@@ -138,10 +166,16 @@ export function useCreateVendor() {
     mutationFn: async (data: VendorFormData) => {
       const { category_ids, ...vendorData } = data;
 
-      // Create vendor
+      // Auto-generate code if not provided
+      let code = vendorData.code?.trim() || null;
+      if (!code) {
+        code = await generateVendorCode(supabase, vendorData.vendor_type);
+      }
+
+      // Create vendor with auto-generated code
       const { data: vendor, error } = await supabase
         .from("vendors")
-        .insert(vendorData)
+        .insert({ ...vendorData, code })
         .select()
         .single();
 
