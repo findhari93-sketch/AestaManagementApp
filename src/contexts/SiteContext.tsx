@@ -1,9 +1,13 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState, useCallback } from "react";
+import { createContext, useContext, useEffect, useState, useCallback, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Site } from "@/types/database.types";
 import { useAuth } from "./AuthContext";
+import {
+  setSelectedSiteCookie,
+  getSelectedSiteCookie,
+} from "@/lib/cookies/site-cookie.client";
 
 // Storage keys
 const SELECTED_SITE_KEY = "selectedSiteId";
@@ -72,10 +76,15 @@ export function SiteProvider({ children }: { children: React.ReactNode }) {
   const { userProfile, loading: authLoading } = useAuth();
   const [supabase] = useState(() => createClient());
 
-  // Wrapper to set site and persist to localStorage
+  // Ref to prevent duplicate fetches
+  const hasFetchedRef = useRef(false);
+  const lastUserIdRef = useRef<string | null>(null);
+
+  // Wrapper to set site and persist to localStorage AND cookie
   const setSelectedSite = useCallback((site: Site | null) => {
     setSelectedSiteState(site);
     storeSiteId(site?.id || null);
+    setSelectedSiteCookie(site?.id || null); // Also set cookie for server components
   }, []);
 
   // Fetch sites from database
@@ -124,14 +133,21 @@ export function SiteProvider({ children }: { children: React.ReactNode }) {
         // No sites available
         if (sitesData.length === 0) {
           storeSiteId(null);
+          setSelectedSiteCookie(null);
           return null;
         }
 
-        // Try to restore from localStorage
-        const savedSiteId = getStoredSiteId();
+        // Try to restore from cookie first, then localStorage
+        const cookieSiteId = getSelectedSiteCookie();
+        const localStorageSiteId = getStoredSiteId();
+        const savedSiteId = cookieSiteId || localStorageSiteId;
+
         if (savedSiteId) {
           const savedSite = sitesData.find((s) => s.id === savedSiteId);
           if (savedSite) {
+            // Ensure both storage mechanisms are synced
+            storeSiteId(savedSite.id);
+            setSelectedSiteCookie(savedSite.id);
             return savedSite;
           }
         }
@@ -139,6 +155,7 @@ export function SiteProvider({ children }: { children: React.ReactNode }) {
         // Default to first site
         const firstSite = sitesData[0];
         storeSiteId(firstSite.id);
+        setSelectedSiteCookie(firstSite.id);
         return firstSite;
       });
 
@@ -153,10 +170,13 @@ export function SiteProvider({ children }: { children: React.ReactNode }) {
     }
   }, [userProfile, supabase]);
 
-  // Restore from localStorage on mount (client-side only)
+  // Restore from localStorage/cookie on mount (client-side only)
   useEffect(() => {
     const cachedSites = getStoredSites();
-    const savedSiteId = getStoredSiteId();
+    // Check cookie first (for SSR consistency), then localStorage
+    const cookieSiteId = getSelectedSiteCookie();
+    const localStorageSiteId = getStoredSiteId();
+    const savedSiteId = cookieSiteId || localStorageSiteId;
 
     if (cachedSites.length > 0) {
       console.log("[SiteContext] Restoring from cache:", cachedSites.length, "sites");
@@ -164,9 +184,18 @@ export function SiteProvider({ children }: { children: React.ReactNode }) {
 
       if (savedSiteId) {
         const found = cachedSites.find((s) => s.id === savedSiteId);
-        setSelectedSiteState(found || cachedSites[0] || null);
+        const selectedSite = found || cachedSites[0] || null;
+        setSelectedSiteState(selectedSite);
+        // Sync cookie if it was missing but localStorage had value
+        if (!cookieSiteId && localStorageSiteId && selectedSite) {
+          setSelectedSiteCookie(selectedSite.id);
+        }
       } else {
-        setSelectedSiteState(cachedSites[0] || null);
+        const firstSite = cachedSites[0] || null;
+        setSelectedSiteState(firstSite);
+        if (firstSite) {
+          setSelectedSiteCookie(firstSite.id);
+        }
       }
     }
   }, []);
@@ -182,17 +211,26 @@ export function SiteProvider({ children }: { children: React.ReactNode }) {
     }
 
     if (userProfile) {
-      console.log("[SiteContext] User profile available, fetching sites");
-      fetchSites();
+      // Only fetch if user changed or haven't fetched yet
+      const currentUserId = userProfile.id;
+      if (!hasFetchedRef.current || lastUserIdRef.current !== currentUserId) {
+        console.log("[SiteContext] User profile available, fetching sites");
+        hasFetchedRef.current = true;
+        lastUserIdRef.current = currentUserId;
+        fetchSites();
+      }
     } else {
-      // User logged out
+      // User logged out - reset state
       console.log("[SiteContext] No user profile, clearing state");
+      hasFetchedRef.current = false;
+      lastUserIdRef.current = null;
       setSites([]);
       setSelectedSiteState(null);
       setLoading(false);
       setIsInitialized(true);
     }
-  }, [authLoading, userProfile, fetchSites]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authLoading, userProfile?.id]);
 
   const refreshSites = useCallback(async () => {
     await fetchSites();

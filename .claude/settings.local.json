@@ -54,7 +54,9 @@
       "Bash(git log:*)",
       "Bash(git checkout:*)",
       "Bash(echo:*)",
-      "Bash(cd:*)"
+      "Bash(cd:*)",
+      "Bash(cmd /c dir /b \"c:\\Users\\Haribabu\\Documents\\AppsCopilot\\AestaManagementApp\\src\\app\\(main)\\site\\attendance\"\")",
+      "Bash(powershell:*)"
     ],
     "deny": [],
     "ask": []
