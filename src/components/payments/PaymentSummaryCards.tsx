@@ -14,7 +14,7 @@ import {
   ListItem,
   ListItemText,
   Divider,
-  LinearProgress,
+  Skeleton,
 } from "@mui/material";
 import {
   Schedule as PendingIcon,
@@ -48,7 +48,22 @@ export default function PaymentSummaryCards({
   if (loading) {
     return (
       <Box sx={{ mb: 3 }}>
-        <LinearProgress />
+        <Grid container spacing={2}>
+          {[1, 2, 3, 4].map((i) => (
+            <Grid key={i} size={{ xs: 12, sm: 6, md: 3 }}>
+              <Card sx={{ borderLeft: 4, borderColor: "grey.300" }}>
+                <CardContent sx={{ py: 2, "&:last-child": { pb: 2 } }}>
+                  <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
+                    <Skeleton variant="circular" width={20} height={20} />
+                    <Skeleton variant="text" width="60%" height={16} />
+                  </Box>
+                  <Skeleton variant="text" width="80%" height={32} sx={{ mb: 1 }} />
+                  <Skeleton variant="rounded" width={80} height={24} />
+                </CardContent>
+              </Card>
+            </Grid>
+          ))}
+        </Grid>
       </Box>
     );
   }

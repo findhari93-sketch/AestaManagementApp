@@ -1186,7 +1186,7 @@ export default function ClientPaymentTracking() {
               fullWidth
               label="Amount"
               type="number"
-              value={paymentForm.amount}
+              value={paymentForm.amount || ""}
               onChange={(e) =>
                 setPaymentForm({
                   ...paymentForm,
@@ -1217,8 +1217,8 @@ export default function ClientPaymentTracking() {
             />
             <FileUploader
               supabase={supabase}
-              bucketName="client-payment-receipts"
-              folderPath={selectedSiteId || "uploads"}
+              bucketName="payment-proofs"
+              folderPath={`client-payments/${selectedSiteId || "uploads"}`}
               fileNamePrefix="receipt"
               accept="all"
               maxSizeMB={15}

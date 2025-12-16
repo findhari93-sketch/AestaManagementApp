@@ -10,6 +10,7 @@ import {
   SelectChangeEvent,
   IconButton,
   Tooltip,
+  Skeleton,
 } from '@mui/material'
 import { LocationOn, Refresh } from '@mui/icons-material'
 import { useSite } from '@/contexts/SiteContext'
@@ -26,11 +27,12 @@ export default function SiteSelector() {
 
   if (loading) {
     return (
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-        <LocationOn sx={{ color: 'text.secondary' }} />
-        <Typography variant="body2" color="text.secondary">
-          Loading sites...
-        </Typography>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: { xs: 100, sm: 250 } }}>
+        <Skeleton variant="circular" width={24} height={24} />
+        <Box sx={{ flex: 1 }}>
+          <Skeleton variant="text" width="80%" height={24} />
+          <Skeleton variant="text" width="50%" height={16} sx={{ display: { xs: 'none', sm: 'block' } }} />
+        </Box>
       </Box>
     )
   }

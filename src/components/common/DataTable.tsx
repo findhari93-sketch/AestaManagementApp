@@ -351,7 +351,7 @@ export default function DataTable<TData extends MRT_RowData>({
   // Pagination props - simplified for mobile
   const muiPaginationProps = useMemo(
     () => ({
-      rowsPerPageOptions: useCompact ? [10, 15, 25] : [10, 20, 50, 100],
+      rowsPerPageOptions: useCompact ? [10, 15, 25] : [10, 30, 50, 100],
       showFirstButton: !useCompact,
       showLastButton: !useCompact,
       size: useCompact ? 'small' as const : 'medium' as const,

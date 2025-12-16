@@ -119,39 +119,31 @@ export default function SiteDashboardPage() {
       setProjectCostsLoading(true);
 
       try {
-        // Fetch tea shop accounts for this site
-        const { data: teaShops } = await supabase
-          .from("tea_shop_accounts")
-          .select("id")
-          .eq("site_id", siteId);
+        // Fetch tea shop accounts and expenses in parallel
+        const [teaShopsResult, expensesResult] = await Promise.all([
+          supabase.from("tea_shop_accounts").select("id").eq("site_id", siteId),
+          supabase.from("expenses").select("amount").eq("site_id", siteId),
+        ]);
 
-        const teaShopIds = (teaShops || []).map((t: any) => t.id);
+        const teaShopIds = (teaShopsResult.data || []).map((t: any) => t.id);
 
-        // Fetch unlinked tea shop settlements
+        // Fetch tea shop settlements if there are any tea shops
         let teaSettlements: any[] = [];
         if (teaShopIds.length > 0) {
           const { data } = await supabase
             .from("tea_shop_settlements")
             .select("amount_paid")
-            .in("tea_shop_id", teaShopIds)
-            .is("subcontract_id", null);
+            .in("tea_shop_id", teaShopIds);
           teaSettlements = data || [];
         }
 
-        // Fetch unlinked expenses
-        const { data: expenses } = await supabase
-          .from("expenses")
-          .select("amount")
-          .eq("site_id", siteId)
-          .is("subcontract_id", null);
-
         const teaTotal = teaSettlements.reduce((sum: number, t: any) => sum + (t.amount_paid || 0), 0);
-        const expenseTotal = (expenses || []).reduce((sum: number, e: any) => sum + (e.amount || 0), 0);
+        const expenseTotal = (expensesResult.data || []).reduce((sum: number, e: any) => sum + (e.amount || 0), 0);
 
         setProjectCosts({
           teaShopCount: teaSettlements.length,
           teaShopTotal: teaTotal,
-          expensesCount: (expenses || []).length,
+          expensesCount: (expensesResult.data || []).length,
           expensesTotal: expenseTotal,
           totalUnlinked: teaTotal + expenseTotal,
         });
@@ -177,7 +169,7 @@ export default function SiteDashboardPage() {
   const statsCards = [
     {
       title: "Today's Laborers",
-      value: loading ? "..." : (stats?.todayLaborers || 0).toString(),
+      value: (stats?.todayLaborers || 0).toString(),
       subtitle: `${stats?.activeLaborers || 0} total active`,
       icon: <People sx={{ fontSize: 40 }} />,
       color: "#1976d2",
@@ -185,7 +177,7 @@ export default function SiteDashboardPage() {
     },
     {
       title: "Today's Cost",
-      value: loading ? "..." : `₹${(stats?.todayCost || 0).toLocaleString()}`,
+      value: `₹${(stats?.todayCost || 0).toLocaleString()}`,
       subtitle: "Labor expenses",
       icon: <AccountBalanceWallet sx={{ fontSize: 40 }} />,
       color: "#2e7d32",
@@ -193,7 +185,7 @@ export default function SiteDashboardPage() {
     },
     {
       title: "Week Total",
-      value: loading ? "..." : `₹${(stats?.weekTotal || 0).toLocaleString()}`,
+      value: `₹${(stats?.weekTotal || 0).toLocaleString()}`,
       subtitle: "Last 7 days",
       icon: <TrendingUp sx={{ fontSize: 40 }} />,
       color: "#9c27b0",
@@ -201,9 +193,7 @@ export default function SiteDashboardPage() {
     },
     {
       title: "Pending Payments",
-      value: loading
-        ? "..."
-        : `₹${(stats?.pendingPaymentAmount || 0).toLocaleString()}`,
+      value: `₹${(stats?.pendingPaymentAmount || 0).toLocaleString()}`,
       subtitle: `${stats?.pendingSalaries || 0} salary periods`,
       icon: <Payment sx={{ fontSize: 40 }} />,
       color: "#d32f2f",
@@ -273,9 +263,13 @@ export default function SiteDashboardPage() {
                     >
                       {stat.title}
                     </Typography>
-                    <Typography variant="h4" fontWeight={600} sx={{ mb: 0.5 }}>
-                      {stat.value}
-                    </Typography>
+                    {statsLoading ? (
+                      <Skeleton variant="text" width="60%" height={40} sx={{ mb: 0.5 }} />
+                    ) : (
+                      <Typography variant="h4" fontWeight={600} sx={{ mb: 0.5 }}>
+                        {stat.value}
+                      </Typography>
+                    )}
                     <Typography variant="caption" color="text.secondary">
                       {stat.subtitle}
                     </Typography>

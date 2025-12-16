@@ -709,24 +709,40 @@ export default function PaymentDialog({
                 value={selectedEngineerId}
                 onChange={(e) => setSelectedEngineerId(e.target.value)}
                 label="Select Site Engineer"
+                disabled={loading}
               >
-                {engineers.map((eng) => (
-                  <MenuItem key={eng.id} value={eng.id}>
-                    <Box
-                      sx={{ display: "flex", alignItems: "center", gap: 1.5 }}
-                    >
-                      <Avatar src={eng.avatar_url || undefined} sx={{ width: 28, height: 28 }}>
-                        {eng.name?.[0]}
-                      </Avatar>
-                      <Box>
-                        <Typography variant="body2">{eng.name}</Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          Balance: Rs.{(eng.wallet_balance || 0).toLocaleString()}
-                        </Typography>
-                      </Box>
+                {loading ? (
+                  <MenuItem disabled>
+                    <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                      <CircularProgress size={18} />
+                      <Typography variant="body2">Loading engineers...</Typography>
                     </Box>
                   </MenuItem>
-                ))}
+                ) : engineers.length === 0 ? (
+                  <MenuItem disabled>
+                    <Typography variant="body2" color="text.secondary">
+                      No site engineers found
+                    </Typography>
+                  </MenuItem>
+                ) : (
+                  engineers.map((eng) => (
+                    <MenuItem key={eng.id} value={eng.id}>
+                      <Box
+                        sx={{ display: "flex", alignItems: "center", gap: 1.5 }}
+                      >
+                        <Avatar src={eng.avatar_url || undefined} sx={{ width: 28, height: 28 }}>
+                          {eng.name?.[0]}
+                        </Avatar>
+                        <Box>
+                          <Typography variant="body2">{eng.name}</Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            Balance: Rs.{(eng.wallet_balance || 0).toLocaleString()}
+                          </Typography>
+                        </Box>
+                      </Box>
+                    </MenuItem>
+                  ))
+                )}
               </Select>
             </FormControl>
 

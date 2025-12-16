@@ -392,6 +392,7 @@ export default function DateGroupRow({
                     <TableCell>Role</TableCell>
                     <TableCell align="right">Amount</TableCell>
                     <TableCell align="center" sx={{ minWidth: 200 }}>Status</TableCell>
+                    <TableCell>Notes</TableCell>
                     <TableCell align="center">Proof</TableCell>
                     <TableCell align="center">Action</TableCell>
                   </TableRow>
@@ -426,6 +427,31 @@ export default function DateGroupRow({
                       </TableCell>
                       <TableCell align="center">
                         {getPaymentStatusChip(record)}
+                      </TableCell>
+                      <TableCell>
+                        {record.paymentNotes ? (
+                          <Tooltip title={record.paymentNotes} arrow>
+                            <Typography
+                              variant="caption"
+                              sx={{
+                                maxWidth: 100,
+                                display: "block",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                                cursor: "pointer",
+                              }}
+                            >
+                              {record.paymentNotes.length > 20
+                                ? `${record.paymentNotes.substring(0, 20)}...`
+                                : record.paymentNotes}
+                            </Typography>
+                          </Tooltip>
+                        ) : (
+                          <Typography variant="caption" color="text.disabled">
+                            -
+                          </Typography>
+                        )}
                       </TableCell>
                       <TableCell align="center">
                         {record.proofUrl ? (
@@ -568,6 +594,7 @@ export default function DateGroupRow({
                     <TableCell align="center">Count</TableCell>
                     <TableCell align="right">Amount</TableCell>
                     <TableCell align="center" sx={{ minWidth: 200 }}>Status</TableCell>
+                    <TableCell>Notes</TableCell>
                     <TableCell align="center">Proof</TableCell>
                     <TableCell align="center">Action</TableCell>
                   </TableRow>
@@ -601,6 +628,31 @@ export default function DateGroupRow({
                       </TableCell>
                       <TableCell align="center">
                         {getPaymentStatusChip(record)}
+                      </TableCell>
+                      <TableCell>
+                        {record.paymentNotes ? (
+                          <Tooltip title={record.paymentNotes} arrow>
+                            <Typography
+                              variant="caption"
+                              sx={{
+                                maxWidth: 100,
+                                display: "block",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                                cursor: "pointer",
+                              }}
+                            >
+                              {record.paymentNotes.length > 20
+                                ? `${record.paymentNotes.substring(0, 20)}...`
+                                : record.paymentNotes}
+                            </Typography>
+                          </Tooltip>
+                        ) : (
+                          <Typography variant="caption" color="text.disabled">
+                            -
+                          </Typography>
+                        )}
                       </TableCell>
                       <TableCell align="center">
                         {record.proofUrl ? (

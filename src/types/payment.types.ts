@@ -42,6 +42,7 @@ export interface DailyPaymentRecord {
   paymentMode: PaymentMode | null;
   engineerTransactionId: string | null;
   proofUrl: string | null;
+  paymentNotes: string | null;
   settlementStatus: "pending_settlement" | "pending_confirmation" | "confirmed" | "disputed" | null;
 
   // Settlement tracking (from engineer transaction)

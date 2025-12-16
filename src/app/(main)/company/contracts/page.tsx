@@ -168,17 +168,27 @@ export default function CompanyContractsPage() {
 
       if (error) throw error;
 
-      // Fetch payments for each subcontract
-      const subcontractsWithDetails: SubcontractWithDetails[] = await Promise.all(
-        (data || []).map(async (subcontract: any) => {
-          const { data: payments } = await supabase
-            .from("subcontract_payments")
-            .select("amount")
-            .eq("subcontract_id", subcontract.id);
+      // Get all subcontract IDs for batch payment fetch
+      const subcontractIds = (data || []).map((s: any) => s.id);
 
-          const paymentsList = payments as { amount: number }[] | null;
-          const totalPaid =
-            paymentsList?.reduce((sum, p) => sum + p.amount, 0) || 0;
+      // Fetch ALL payments in a single query (fixes N+1 problem)
+      let paymentsMap: Record<string, number> = {};
+      if (subcontractIds.length > 0) {
+        const { data: allPayments } = await supabase
+          .from("subcontract_payments")
+          .select("subcontract_id, amount")
+          .in("subcontract_id", subcontractIds);
+
+        // Aggregate payments by subcontract_id
+        (allPayments || []).forEach((p: any) => {
+          paymentsMap[p.subcontract_id] = (paymentsMap[p.subcontract_id] || 0) + p.amount;
+        });
+      }
+
+      // Map subcontracts with their payment totals
+      const subcontractsWithDetails: SubcontractWithDetails[] = (data || []).map(
+        (subcontract: any) => {
+          const totalPaid = paymentsMap[subcontract.id] || 0;
           const balanceDue = subcontract.total_value - totalPaid;
           const completionPercentage =
             subcontract.total_value > 0
@@ -194,7 +204,7 @@ export default function CompanyContractsPage() {
             balance_due: balanceDue,
             completion_percentage: completionPercentage,
           };
-        })
+        }
       );
 
       setSubcontracts(subcontractsWithDetails);

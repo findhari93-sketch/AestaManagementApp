@@ -277,8 +277,12 @@ export default function EngineerWalletPage() {
   };
 
   useEffect(() => {
+    if (!userProfile) {
+      setLoading(false);
+      return;
+    }
     fetchData();
-  }, []);
+  }, [userProfile]);
 
   // Calculate wallet summary per engineer
   const walletSummary = useMemo(() => {

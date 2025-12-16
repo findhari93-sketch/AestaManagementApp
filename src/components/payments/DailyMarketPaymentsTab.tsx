@@ -94,7 +94,10 @@ export default function DailyMarketPaymentsTab({
 
   // Fetch data
   const fetchData = useCallback(async () => {
-    if (!selectedSite?.id) return;
+    if (!selectedSite?.id) {
+      setLoading(false);
+      return;
+    }
 
     setLoading(true);
     setError(null);
@@ -115,6 +118,7 @@ export default function DailyMarketPaymentsTab({
           paid_via,
           engineer_transaction_id,
           payment_proof_url,
+          payment_notes,
           subcontract_id,
           expense_id,
           laborers!inner(name, laborer_type, labor_categories(name), labor_roles(name)),
@@ -152,6 +156,7 @@ export default function DailyMarketPaymentsTab({
           paid_via,
           engineer_transaction_id,
           payment_proof_url,
+          payment_notes,
           expense_id,
           labor_roles(name),
           site_engineer_transactions!engineer_transaction_id(
@@ -190,6 +195,7 @@ export default function DailyMarketPaymentsTab({
           paymentMode: r.payment_mode,
           engineerTransactionId: r.engineer_transaction_id,
           proofUrl: r.payment_proof_url,
+          paymentNotes: r.payment_notes || null,
           subcontractId: r.subcontract_id,
           subcontractTitle: r.subcontracts?.title,
           expenseId: r.expense_id || null,
@@ -221,6 +227,7 @@ export default function DailyMarketPaymentsTab({
           paymentMode: r.payment_mode,
           engineerTransactionId: r.engineer_transaction_id,
           proofUrl: r.payment_proof_url,
+          paymentNotes: r.payment_notes || null,
           subcontractId: null,
           subcontractTitle: null,
           expenseId: r.expense_id || null,

@@ -53,7 +53,8 @@
       "Bash(findstr:*)",
       "Bash(git log:*)",
       "Bash(git checkout:*)",
-      "Bash(echo:*)"
+      "Bash(echo:*)",
+      "Bash(cd:*)"
     ],
     "deny": [],
     "ask": []

@@ -107,7 +107,11 @@ export default function ContractWeeklyPaymentsTab({
 
   // Fetch data
   const fetchData = useCallback(async () => {
-    if (!selectedSite?.id) return;
+    if (!selectedSite?.id) {
+      setLoading(false);
+      setError("Please select a site to view contract payments");
+      return;
+    }
 
     setLoading(true);
     setError(null);
@@ -116,6 +120,7 @@ export default function ContractWeeklyPaymentsTab({
       const { fromDate, toDate } = dateRange;
 
       // Fetch contract laborers' attendance
+      console.log("Fetching contract attendance for site:", selectedSite.id, "from:", fromDate, "to:", toDate);
       const { data: attendanceData, error: attendanceError } = await supabase
         .from("daily_attendance")
         .select(
@@ -128,13 +133,14 @@ export default function ContractWeeklyPaymentsTab({
           is_paid,
           payment_id,
           subcontract_id,
+          payment_notes,
           laborers!inner(
             id,
             name,
             laborer_type,
             team_id,
             labor_roles(name),
-            teams(id, name)
+            teams!laborers_team_id_fkey(id, name)
           ),
           subcontracts(id, title)
         `
@@ -145,6 +151,7 @@ export default function ContractWeeklyPaymentsTab({
         .lte("date", toDate)
         .order("date", { ascending: true });
 
+      console.log("Contract attendance result:", attendanceData?.length || 0, "records", attendanceError ? `Error: ${attendanceError.message}` : "");
       if (attendanceError) throw attendanceError;
 
       // Fetch labor payments for contract laborers
@@ -591,7 +598,7 @@ export default function ContractWeeklyPaymentsTab({
       {/* Week Groups */}
       {filteredWeekGroups.length === 0 ? (
         <Alert severity="info">
-          No contract laborer attendance found for the selected period.
+          No contract laborer attendance found for the selected period. This tab shows only laborers with type &quot;contract&quot;. Daily and market laborers are shown in the first tab.
         </Alert>
       ) : (
         filteredWeekGroups.map((group) => (

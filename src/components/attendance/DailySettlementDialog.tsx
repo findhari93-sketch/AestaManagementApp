@@ -203,6 +203,7 @@ export default function DailySettlementDialog({
             is_paid: true,
             payment_mode: paymentMode === "bank" ? "bank_transfer" : paymentMode,
             payment_proof_url: proofFile?.url || null,
+            payment_notes: notes || null,
           })
           .in("id", laborerIds);
         if (laborerUpdateError) throw laborerUpdateError;
@@ -219,6 +220,7 @@ export default function DailySettlementDialog({
             is_paid: true,
             payment_mode: paymentMode === "bank" ? "bank_transfer" : paymentMode,
             payment_proof_url: proofFile?.url || null,
+            payment_notes: notes || null,
           })
           .in("id", marketIds);
         if (marketUpdateError) throw marketUpdateError;

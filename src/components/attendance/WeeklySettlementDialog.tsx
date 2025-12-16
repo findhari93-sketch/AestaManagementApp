@@ -146,6 +146,7 @@ export default function WeeklySettlementDialog({
         is_paid: true,
         payment_mode: paymentMode === "bank" ? "bank_transfer" : paymentMode,
         payment_proof_url: proofFile?.url || null,
+        payment_notes: notes || null,
       };
 
       // Settle daily laborers

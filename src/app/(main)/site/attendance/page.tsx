@@ -109,6 +109,7 @@ interface AttendanceRecord {
   daily_rate_applied: number;
   daily_earnings: number;
   is_paid: boolean;
+  payment_notes?: string | null;
   subcontract_title?: string | null;
   // Time tracking fields
   in_time?: string | null;
@@ -167,6 +168,7 @@ interface MarketLaborerRecord {
   paidAmount: number;
   pendingAmount: number;
   groupCount: number; // Total count in this group (for edit reference)
+  paymentNotes: string | null;
 }
 
 interface DateSummary {
@@ -610,7 +612,10 @@ export default function AttendancePage() {
   }, [dateSummaries, recentHolidays, dateFrom, dateTo]);
 
   const fetchAttendanceHistory = useCallback(async () => {
-    if (!selectedSite) return;
+    if (!selectedSite) {
+      setLoading(false);
+      return;
+    }
 
     // Increment version and capture current version for this fetch
     const currentVersion = ++fetchVersionRef.current;
@@ -622,7 +627,7 @@ export default function AttendancePage() {
         .from("daily_attendance")
         .select(
           `
-          id, date, laborer_id, work_days, hours_worked, daily_rate_applied, daily_earnings, is_paid, subcontract_id,
+          id, date, laborer_id, work_days, hours_worked, daily_rate_applied, daily_earnings, is_paid, payment_notes, subcontract_id,
           in_time, lunch_out, lunch_in, out_time, work_hours, break_hours, total_hours, day_units, snacks_amount,
           attendance_status, work_progress_percent,
           entered_by, recorded_by, recorded_by_user_id, updated_by, updated_by_user_id, created_at, updated_at,
@@ -648,7 +653,7 @@ export default function AttendancePage() {
       // Build market laborer attendance query
       let marketQuery = (supabase.from("market_laborer_attendance") as any)
         .select(
-          "id, role_id, date, count, work_days, rate_per_person, total_cost, day_units, snacks_per_person, total_snacks, in_time, out_time, is_paid, labor_roles(name)"
+          "id, role_id, date, count, work_days, rate_per_person, total_cost, day_units, snacks_per_person, total_snacks, in_time, out_time, is_paid, payment_notes, labor_roles(name)"
         )
         .eq("site_id", selectedSite.id);
 
@@ -776,6 +781,7 @@ export default function AttendancePage() {
             paidAmount: m.is_paid ? perPersonEarnings : 0,
             pendingAmount: m.is_paid ? 0 : perPersonEarnings,
             groupCount: m.count,
+            paymentNotes: m.payment_notes || null,
           });
         }
 
@@ -811,6 +817,7 @@ export default function AttendancePage() {
           daily_rate_applied: record.daily_rate_applied,
           daily_earnings: record.daily_earnings,
           is_paid: record.is_paid || false,
+          payment_notes: record.payment_notes || null,
           subcontract_title: record.subcontracts?.title || null,
           in_time: record.in_time,
           lunch_out: record.lunch_out,
@@ -1124,6 +1131,7 @@ export default function AttendancePage() {
       paymentMode: null,
       engineerTransactionId: null,
       proofUrl: null,
+      paymentNotes: record.payment_notes || null,
       subcontractId: null,
       subcontractTitle: record.subcontract_title || null,
       expenseId: null,
@@ -1258,6 +1266,58 @@ export default function AttendancePage() {
         fetchAttendanceHistory();
       } catch (error: any) {
         alert("Failed to delete: " + error.message);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [fetchAttendanceHistory, supabase]
+  );
+
+  // Cancel payment handler - reset payment status
+  const handleCancelPayment = useCallback(
+    async (record: AttendanceRecord) => {
+      if (!confirm(`Cancel payment for ${record.laborer_name}? This will mark the attendance as unpaid.`))
+        return;
+
+      setLoading(true);
+      try {
+        const { error } = await supabase
+          .from("daily_attendance")
+          .update({
+            is_paid: false,
+            payment_notes: null,
+          })
+          .eq("id", record.id);
+        if (error) throw error;
+        fetchAttendanceHistory();
+      } catch (error: any) {
+        alert("Failed to cancel payment: " + error.message);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [fetchAttendanceHistory, supabase]
+  );
+
+  // Cancel market laborer payment handler
+  const handleCancelMarketPayment = useCallback(
+    async (record: MarketLaborerRecord) => {
+      if (!confirm(`Cancel payment for ${record.tempName}? This will mark all ${record.groupCount} ${record.roleName}(s) as unpaid.`))
+        return;
+
+      setLoading(true);
+      try {
+        const { error } = await supabase
+          .from("market_laborer_attendance")
+          .update({
+            is_paid: false,
+            payment_notes: null,
+          })
+          .eq("id", record.originalDbId);
+        if (error) throw error;
+        fetchAttendanceHistory();
+      } catch (error: any) {
+        alert("Failed to cancel payment: " + error.message);
       } finally {
         setLoading(false);
       }
@@ -3358,12 +3418,18 @@ export default function AttendancePage() {
                                                   variant="outlined"
                                                 />
                                               ) : record.is_paid ? (
-                                                <Chip
-                                                  label="PAID"
-                                                  size="small"
-                                                  color="success"
-                                                  variant="filled"
-                                                />
+                                                <Tooltip
+                                                  title={record.payment_notes || "No notes"}
+                                                  arrow
+                                                >
+                                                  <Chip
+                                                    label="PAID"
+                                                    size="small"
+                                                    color="success"
+                                                    variant="filled"
+                                                    sx={{ cursor: "help" }}
+                                                  />
+                                                </Tooltip>
                                               ) : (
                                                 <Chip
                                                   label="PENDING"
@@ -3416,6 +3482,30 @@ export default function AttendancePage() {
                                                     >
                                                       Pay
                                                     </Button>
+                                                  )}
+                                                {/* Cancel Payment button for paid daily laborers */}
+                                                {record.laborer_type !==
+                                                  "contract" &&
+                                                  record.is_paid &&
+                                                  canEdit && (
+                                                    <Tooltip title="Cancel Payment">
+                                                      <Button
+                                                        size="small"
+                                                        variant="outlined"
+                                                        color="warning"
+                                                        onClick={(e) => {
+                                                          e.stopPropagation();
+                                                          handleCancelPayment(record);
+                                                        }}
+                                                        sx={{
+                                                          minWidth: 50,
+                                                          px: 1,
+                                                          fontSize: 11,
+                                                        }}
+                                                      >
+                                                        Undo
+                                                      </Button>
+                                                    </Tooltip>
                                                   )}
                                                 <IconButton
                                                   size="small"
@@ -3637,27 +3727,41 @@ export default function AttendancePage() {
                                                     </Typography>
                                                   </TableCell>
                                                   <TableCell align="center">
-                                                    <Chip
-                                                      label={
-                                                        ml.isPaid
-                                                          ? "Paid"
-                                                          : "Pending"
+                                                    <Tooltip
+                                                      title={
+                                                        ml.isPaid && ml.paymentNotes
+                                                          ? ml.paymentNotes
+                                                          : ml.isPaid
+                                                          ? "No notes"
+                                                          : ""
                                                       }
-                                                      size="small"
-                                                      color={
-                                                        ml.isPaid
-                                                          ? "success"
-                                                          : "warning"
-                                                      }
-                                                      variant={
-                                                        ml.isPaid
-                                                          ? "filled"
-                                                          : "outlined"
-                                                      }
-                                                      sx={{
-                                                        fontSize: "0.65rem",
-                                                      }}
-                                                    />
+                                                      arrow
+                                                    >
+                                                      <Chip
+                                                        label={
+                                                          ml.isPaid
+                                                            ? "Paid"
+                                                            : "Pending"
+                                                        }
+                                                        size="small"
+                                                        color={
+                                                          ml.isPaid
+                                                            ? "success"
+                                                            : "warning"
+                                                        }
+                                                        variant={
+                                                          ml.isPaid
+                                                            ? "filled"
+                                                            : "outlined"
+                                                        }
+                                                        sx={{
+                                                          fontSize: "0.65rem",
+                                                          cursor: ml.isPaid
+                                                            ? "help"
+                                                            : "default",
+                                                        }}
+                                                      />
+                                                    </Tooltip>
                                                   </TableCell>
                                                   <TableCell align="center">
                                                     <Box
@@ -3668,6 +3772,26 @@ export default function AttendancePage() {
                                                           "center",
                                                       }}
                                                     >
+                                                      {ml.isPaid && canEdit && (
+                                                        <Tooltip title="Cancel Payment">
+                                                          <Button
+                                                            size="small"
+                                                            variant="outlined"
+                                                            color="warning"
+                                                            onClick={(e) => {
+                                                              e.stopPropagation();
+                                                              handleCancelMarketPayment(ml);
+                                                            }}
+                                                            sx={{
+                                                              minWidth: 50,
+                                                              px: 1,
+                                                              fontSize: 11,
+                                                            }}
+                                                          >
+                                                            Undo
+                                                          </Button>
+                                                        </Tooltip>
+                                                      )}
                                                       <Tooltip
                                                         title={
                                                           ml.groupCount > 1

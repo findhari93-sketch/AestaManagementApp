@@ -77,7 +77,10 @@ export default function PaymentsPage() {
 
   // Fetch summary data
   const fetchSummaryData = useCallback(async () => {
-    if (!selectedSite?.id) return;
+    if (!selectedSite?.id) {
+      setSummaryLoading(false);
+      return;
+    }
 
     setSummaryLoading(true);
 
