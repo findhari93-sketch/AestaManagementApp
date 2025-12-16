@@ -27,7 +27,7 @@ export interface DailyPaymentRecord {
   // Laborer info
   laborerId: string | null;
   laborerName: string;
-  laborerType: "daily" | "market";
+  laborerType: "daily" | "contract" | "market";
   category?: string;
   role?: string;
   count?: number; // For market laborers

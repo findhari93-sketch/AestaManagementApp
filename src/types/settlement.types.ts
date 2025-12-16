@@ -8,6 +8,57 @@ export type SettlementStatus =
 
 export type SettlementMode = "upi" | "cash";
 
+// Payer source - tracks whose money was used for settlement
+export type PayerSource = "own_money" | "client_money" | "mothers_money" | "custom";
+
+export interface PayerInfo {
+  source: PayerSource;
+  customName?: string;
+}
+
+// Settlement context for unified dialog
+export type SettlementContext = "daily_single" | "weekly";
+
+// Settlement type selection (for weekly settlement)
+export type SettlementTypeSelection = "all" | "daily" | "contract" | "market";
+
+// Record to be settled
+export interface SettlementRecord {
+  id: string;
+  sourceType: "daily" | "market";
+  sourceId: string;
+  laborerName: string;
+  laborerType: "daily" | "market" | "contract";
+  amount: number;
+  date: string;
+  isPaid: boolean;
+  role?: string;
+  category?: string;
+  count?: number; // For market laborers
+}
+
+// Configuration for unified settlement dialog
+export interface UnifiedSettlementConfig {
+  context: SettlementContext;
+  // Date info
+  date?: string; // For single date
+  dateRange?: { from: string; to: string }; // For weekly
+  weekLabel?: string;
+  // Records to settle
+  records: SettlementRecord[];
+  // Pre-computed totals
+  totalAmount: number;
+  pendingAmount: number;
+  // By type breakdowns (pending amounts)
+  dailyLaborPending: number;
+  contractLaborPending: number;
+  marketLaborPending: number;
+  // Allow partial type settlement (for weekly)
+  allowTypeSelection: boolean;
+  // Optional subcontract linking
+  defaultSubcontractId?: string;
+}
+
 export type PaymentSettlementNotificationType =
   | "payment_settlement_pending"
   | "payment_settlement_completed";

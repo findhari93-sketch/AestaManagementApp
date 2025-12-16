@@ -12,8 +12,18 @@ import {
   Button,
   CircularProgress,
   Alert,
+  IconButton,
+  Tooltip,
+  useTheme,
+  useMediaQuery,
 } from "@mui/material";
-import { Refresh as RefreshIcon } from "@mui/icons-material";
+import {
+  Refresh as RefreshIcon,
+  Fullscreen as FullscreenIcon,
+  FullscreenExit as FullscreenExitIcon,
+  Close as CloseIcon,
+} from "@mui/icons-material";
+import { useFullscreen } from "@/hooks/useFullscreen";
 import { createClient } from "@/lib/supabase/client";
 import { useSite } from "@/contexts/SiteContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -43,9 +53,18 @@ export default function DailyMarketPaymentsTab({
   onFilterChange,
   onDataChange,
 }: DailyMarketPaymentsTabProps) {
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
   const { selectedSite } = useSite();
   const { userProfile } = useAuth();
   const supabase = createClient();
+
+  // Fullscreen support
+  const tableContainerRef = useRef<HTMLDivElement>(null);
+  const { isFullscreen, enterFullscreen, exitFullscreen } = useFullscreen(
+    tableContainerRef,
+    { orientation: "landscape" }
+  );
 
   // Data state
   const [dateGroups, setDateGroups] = useState<DateGroup[]>([]);
@@ -877,18 +896,69 @@ export default function DailyMarketPaymentsTab({
   }
 
   return (
-    <Box>
+    <Box
+      ref={tableContainerRef}
+      sx={{
+        bgcolor: isFullscreen ? "background.paper" : "transparent",
+        p: isFullscreen ? 2 : 0,
+        height: isFullscreen ? "100vh" : "auto",
+        overflow: isFullscreen ? "auto" : "visible",
+        position: "relative",
+      }}
+    >
+      {/* Fullscreen Header */}
+      {isFullscreen && (
+        <Box
+          sx={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            mb: 2,
+            pb: 1,
+            borderBottom: 1,
+            borderColor: "divider",
+          }}
+        >
+          <Typography variant="h6" fontWeight={600}>
+            Daily & Market Settlements
+          </Typography>
+          <IconButton onClick={exitFullscreen} size="small">
+            <CloseIcon />
+          </IconButton>
+        </Box>
+      )}
+
+      {/* Fullscreen Toggle (Mobile only, when not fullscreen) */}
+      {!isFullscreen && isMobile && (
+        <Tooltip title="View fullscreen (rotate)">
+          <IconButton
+            onClick={enterFullscreen}
+            sx={{
+              position: "absolute",
+              top: 8,
+              right: 8,
+              zIndex: 10,
+              bgcolor: "rgba(255,255,255,0.95)",
+              boxShadow: 2,
+              "&:hover": { bgcolor: "rgba(255,255,255,1)" },
+            }}
+          >
+            <FullscreenIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
+      )}
+
       {/* Filters */}
       <Box
         sx={{
           display: "flex",
-          gap: 2,
-          mb: 3,
+          gap: { xs: 1, sm: 2 },
+          mb: 2,
           flexWrap: "wrap",
           alignItems: "center",
         }}
       >
-        <FormControl size="small" sx={{ minWidth: 150 }}>
+        <FormControl size="small" sx={{ minWidth: { xs: 100, sm: 150 } }}>
           <InputLabel>Status</InputLabel>
           <Select
             value={filterStatus}
@@ -901,19 +971,19 @@ export default function DailyMarketPaymentsTab({
           >
             <MenuItem value="all">All</MenuItem>
             <MenuItem value="pending">Pending</MenuItem>
-            <MenuItem value="sent_to_engineer">Sent to Engineer</MenuItem>
+            <MenuItem value="sent_to_engineer">With Engineer</MenuItem>
             <MenuItem value="paid">Paid</MenuItem>
           </Select>
         </FormControl>
 
-        <FormControl size="small" sx={{ minWidth: 200 }}>
+        <FormControl size="small" sx={{ minWidth: { xs: 120, sm: 200 } }}>
           <InputLabel>Subcontract</InputLabel>
           <Select
             value={filterSubcontract}
             onChange={(e) => setFilterSubcontract(e.target.value)}
             label="Subcontract"
           >
-            <MenuItem value="all">All Subcontracts</MenuItem>
+            <MenuItem value="all">All</MenuItem>
             {subcontracts.map((sc) => (
               <MenuItem key={sc.id} value={sc.id}>
                 {sc.title}
@@ -923,6 +993,15 @@ export default function DailyMarketPaymentsTab({
         </FormControl>
 
         <Box sx={{ flexGrow: 1 }} />
+
+        {/* Fullscreen toggle button (desktop) */}
+        {!isFullscreen && !isMobile && (
+          <Tooltip title="View fullscreen">
+            <IconButton onClick={enterFullscreen} size="small">
+              <FullscreenIcon />
+            </IconButton>
+          </Tooltip>
+        )}
 
         <Button
           startIcon={<RefreshIcon />}

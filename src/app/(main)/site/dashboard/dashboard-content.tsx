@@ -241,12 +241,18 @@ export default function DashboardContent({
     },
   ];
 
-  // Show skeleton while site context is still loading
-  if (siteLoading || authLoading) {
+  // Trust server data when available - skip waiting for contexts
+  const hasServerData = initialData !== null;
+
+  // Only show skeleton when we have NO data AND contexts are initializing
+  if (!hasServerData && (siteLoading || authLoading)) {
     return <DashboardSkeleton />;
   }
 
-  if (!selectedSite) {
+  // Use server-provided siteId as fallback while context loads
+  const effectiveSiteId = selectedSite?.id ?? serverSiteId;
+
+  if (!effectiveSiteId) {
     return (
       <Box>
         <PageHeader
@@ -267,7 +273,7 @@ export default function DashboardContent({
     <Box>
       <PageHeader
         title="Site Dashboard"
-        subtitle={`${selectedSite.name} • Welcome back, ${userProfile?.name || "User"}`}
+        subtitle={`${selectedSite?.name || "Loading..."} • Welcome back, ${userProfile?.name || "User"}`}
         showBack={false}
       />
 

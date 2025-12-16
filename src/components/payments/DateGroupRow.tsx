@@ -158,163 +158,142 @@ export default function DateGroupRow({
 
   return (
     <Paper sx={{ mb: 1.5, overflow: "hidden" }}>
-      {/* Collapsed Header Row */}
+      {/* Collapsed Header Row - Compact Design */}
       <Box
         sx={{
-          p: 2,
+          p: { xs: 1, sm: 1.5 },
           display: "flex",
           alignItems: "center",
-          justifyContent: "space-between",
+          gap: { xs: 1, sm: 2 },
           cursor: "pointer",
           bgcolor: isExpanded ? "action.selected" : "background.paper",
           "&:hover": { bgcolor: "action.hover" },
+          flexWrap: { xs: "wrap", md: "nowrap" },
         }}
         onClick={onToggleExpand}
       >
-        {/* Date Info */}
-        <Box sx={{ display: "flex", alignItems: "center", gap: 2, minWidth: 200 }}>
+        {/* Date Info - Compact */}
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1, minWidth: { xs: "auto", sm: 120 } }}>
           <Box>
-            <Typography variant="subtitle1" fontWeight={600}>
+            <Typography variant="body2" fontWeight={600} sx={{ fontSize: { xs: "0.8rem", sm: "0.875rem" } }}>
               {dateLabel}
             </Typography>
-            <Typography variant="caption" color="text.secondary">
+            <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: "0.65rem", sm: "0.75rem" } }}>
               {dayName}
             </Typography>
           </Box>
         </Box>
 
-        {/* Counts */}
-        <Box sx={{ display: "flex", gap: 3, alignItems: "center" }}>
-          <Box sx={{ textAlign: "center" }}>
-            <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-              <PersonIcon fontSize="small" color="action" />
-              <Typography variant="body2" fontWeight={500}>
-                {summary.dailyCount} Daily
-              </Typography>
-            </Box>
-            <Typography variant="caption" color="text.secondary">
-              {formatCurrency(summary.dailyTotal)}
-            </Typography>
-          </Box>
-
-          <Box sx={{ textAlign: "center" }}>
-            <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-              <GroupsIcon fontSize="small" color="action" />
-              <Typography variant="body2" fontWeight={500}>
-                {summary.marketCount} Market
-              </Typography>
-            </Box>
-            <Typography variant="caption" color="text.secondary">
-              {formatCurrency(summary.marketTotal)}
-            </Typography>
-          </Box>
+        {/* Counts - Compact Chips */}
+        <Box sx={{ display: "flex", gap: 0.5, alignItems: "center" }}>
+          <Chip
+            icon={<PersonIcon sx={{ fontSize: 14 }} />}
+            label={`${summary.dailyCount}D`}
+            size="small"
+            variant="outlined"
+            sx={{ height: 22, "& .MuiChip-label": { px: 0.5, fontSize: "0.7rem" } }}
+          />
+          <Chip
+            icon={<GroupsIcon sx={{ fontSize: 14 }} />}
+            label={`${summary.marketCount}M`}
+            size="small"
+            variant="outlined"
+            sx={{ height: 22, "& .MuiChip-label": { px: 0.5, fontSize: "0.7rem" } }}
+          />
         </Box>
 
-        {/* Status Summary */}
-        <Box sx={{ display: "flex", gap: 2, alignItems: "center" }}>
-          <Box sx={{ textAlign: "right" }}>
-            <Typography variant="caption" color="text.secondary">
-              Pending
-            </Typography>
-            <Typography variant="body2" fontWeight={600} color="warning.main">
-              {formatCurrency(summary.dailyPending + summary.marketPending)}
-            </Typography>
-          </Box>
+        {/* Status Summary - Compact */}
+        <Box sx={{ display: "flex", gap: { xs: 1, sm: 2 }, alignItems: "center", ml: { xs: 0, md: "auto" } }}>
+          {(summary.dailyPending + summary.marketPending) > 0 && (
+            <Chip
+              label={`Pending: ${formatCurrency(summary.dailyPending + summary.marketPending)}`}
+              size="small"
+              color="warning"
+              variant="outlined"
+              sx={{ height: 24, fontWeight: 600, fontSize: "0.7rem" }}
+            />
+          )}
           {(summary.dailySentToEngineer + summary.marketSentToEngineer) > 0 && (
-            <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-              <Box sx={{ textAlign: "right" }}>
-                <Typography variant="caption" color="text.secondary">
-                  With Engineer
-                </Typography>
-                <Typography variant="body2" fontWeight={600} color="warning.dark">
-                  {formatCurrency(summary.dailySentToEngineer + summary.marketSentToEngineer)}
-                </Typography>
-              </Box>
+            <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+              <Chip
+                label={`Engineer: ${formatCurrency(summary.dailySentToEngineer + summary.marketSentToEngineer)}`}
+                size="small"
+                color="info"
+                variant="outlined"
+                sx={{ height: 24, fontWeight: 500, fontSize: "0.7rem" }}
+              />
               {allSentToEngineer.length > 0 && (
-                <Tooltip title={`Send reminder to engineer for all ${allSentToEngineer.length} pending payments on this date`}>
-                  <Button
+                <Tooltip title="Send reminder to engineer">
+                  <IconButton
                     size="small"
                     color="warning"
-                    variant="outlined"
-                    startIcon={<NotifyIcon fontSize="small" />}
                     onClick={(e) => {
                       e.stopPropagation();
                       onNotifyDate?.(date, allSentToEngineer);
                     }}
                     disabled={disabled}
-                    sx={{ ml: 0.5, minWidth: "auto", px: 1.5 }}
+                    sx={{ p: 0.5 }}
                   >
-                    Notify
-                  </Button>
+                    <NotifyIcon sx={{ fontSize: 16 }} />
+                  </IconButton>
                 </Tooltip>
               )}
             </Box>
           )}
-          <Box sx={{ textAlign: "right" }}>
-            <Typography variant="caption" color="text.secondary">
-              Paid
-            </Typography>
-            <Typography variant="body2" fontWeight={600} color="success.main">
-              {formatCurrency(summary.dailyPaid + summary.marketPaid)}
-            </Typography>
-          </Box>
+          {(summary.dailyPaid + summary.marketPaid) > 0 && (
+            <Chip
+              label={`Paid: ${formatCurrency(summary.dailyPaid + summary.marketPaid)}`}
+              size="small"
+              color="success"
+              sx={{ height: 24, fontWeight: 600, fontSize: "0.7rem" }}
+            />
+          )}
         </Box>
 
-        {/* Quick Pay Buttons (in collapsed view) */}
+        {/* Quick Pay Buttons - Compact Icon Buttons */}
         <Box
-          sx={{ display: "flex", gap: 1, alignItems: "center" }}
+          sx={{ display: "flex", gap: 0.5, alignItems: "center" }}
           onClick={(e) => e.stopPropagation()}
         >
-          {pendingDailyRecords.length > 0 && (
-            <Button
-              size="small"
-              variant="outlined"
-              onClick={() => onPayAllDaily(pendingDailyRecords)}
-              disabled={disabled}
-            >
-              Settle Daily ({pendingDailyRecords.length})
-            </Button>
-          )}
-          {pendingMarketRecords.length > 0 && (
-            <Button
-              size="small"
-              variant="outlined"
-              onClick={() => onPayAllMarket(pendingMarketRecords)}
-              disabled={disabled}
-            >
-              Settle Market ({pendingMarketRecords.length})
-            </Button>
-          )}
           {allPendingRecords.length > 0 && (
-            <Button
-              size="small"
-              variant="contained"
-              onClick={() => onPayAll(allPendingRecords)}
-              disabled={disabled}
-              startIcon={<PaymentIcon />}
-            >
-              Settle All
-            </Button>
-          )}
-          {allPaidDirect.length > 0 && (
-            <Tooltip title={`Cancel all ${allPaidDirect.length} direct payments for this date`}>
+            <Tooltip title={`Settle all ${allPendingRecords.length} pending (${formatCurrency(summary.dailyPending + summary.marketPending)})`}>
               <Button
                 size="small"
-                variant="outlined"
+                variant="contained"
+                onClick={() => onPayAll(allPendingRecords)}
+                disabled={disabled}
+                sx={{
+                  minWidth: "auto",
+                  px: { xs: 1, sm: 1.5 },
+                  py: 0.5,
+                  fontSize: "0.75rem",
+                }}
+              >
+                <PaymentIcon sx={{ fontSize: 16, mr: { xs: 0, sm: 0.5 } }} />
+                <Box component="span" sx={{ display: { xs: "none", sm: "inline" } }}>
+                  Settle All
+                </Box>
+              </Button>
+            </Tooltip>
+          )}
+          {allPaidDirect.length > 0 && (
+            <Tooltip title={`Cancel ${allPaidDirect.length} direct payments`}>
+              <IconButton
+                size="small"
                 color="error"
                 onClick={() => onCancelAllDirect?.(allPaidDirect)}
                 disabled={disabled}
-                startIcon={<CancelIcon />}
+                sx={{ p: 0.5 }}
               >
-                Cancel All ({allPaidDirect.length})
-              </Button>
+                <CancelIcon sx={{ fontSize: 18 }} />
+              </IconButton>
             </Tooltip>
           )}
         </Box>
 
         {/* Expand Icon */}
-        <IconButton size="small">
-          {isExpanded ? <ExpandLess /> : <ExpandMore />}
+        <IconButton size="small" sx={{ p: 0.5 }}>
+          {isExpanded ? <ExpandLess fontSize="small" /> : <ExpandMore fontSize="small" />}
         </IconButton>
       </Box>
 
