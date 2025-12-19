@@ -40,6 +40,8 @@ import {
   SpeedDialAction,
   SpeedDialIcon,
   Snackbar,
+  alpha,
+  useTheme,
 } from "@mui/material";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useFullscreen } from "@/hooks/useFullscreen";
@@ -67,6 +69,9 @@ import {
   Visibility as VisibilityIcon,
   Payment as PaymentIcon,
   CalendarMonth,
+  Lock as LockIcon,
+  Warning as WarningIcon,
+  ArrowForward as ArrowForwardIcon,
 } from "@mui/icons-material";
 import AttendanceDrawer from "@/components/attendance/AttendanceDrawer";
 import HolidayConfirmDialog from "@/components/attendance/HolidayConfirmDialog";
@@ -92,6 +97,7 @@ import { useDateRange } from "@/contexts/DateRangeContext";
 import PageHeader from "@/components/layout/PageHeader";
 import AttendanceSkeleton from "./attendance-skeleton";
 import { hasEditPermission } from "@/lib/permissions";
+import { useSearchParams, useRouter } from "next/navigation";
 import type { LaborerType, DailyWorkSummary } from "@/types/database.types";
 import type { AttendancePageData } from "@/lib/data/attendance";
 import dayjs from "dayjs";
@@ -242,8 +248,18 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
   const { formatForApi, isAllTime } = useDateRange();
   const supabase = createClient();
   const isMobile = useIsMobile();
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const theme = useTheme();
 
   const { dateFrom, dateTo } = formatForApi();
+
+  // URL params for highlighting (from redirect)
+  const highlightDate = searchParams.get("date");
+  const highlightAction = searchParams.get("action");
+
+  // State for highlighted date row
+  const [highlightedDate, setHighlightedDate] = useState<string | null>(null);
 
   // Track if we've processed initial data
   const initialDataProcessedRef = useRef(false);
@@ -380,10 +396,45 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
   const [settlementDialogOpen, setSettlementDialogOpen] = useState(false);
   const [settlementConfig, setSettlementConfig] = useState<UnifiedSettlementConfig | null>(null);
 
-  // Restoration message state
+  // Restoration/notification message state
   const [restorationMessage, setRestorationMessage] = useState<string | null>(
     null
   );
+
+  // Handle URL params for highlighting (from redirect)
+  useEffect(() => {
+    if (highlightDate && highlightAction === "edit_or_delete") {
+      setHighlightedDate(highlightDate);
+      setRestorationMessage(
+        "Edit or delete this attendance record to modify the payment"
+      );
+      // Clear highlight after 10 seconds
+      const timer = setTimeout(() => {
+        setHighlightedDate(null);
+      }, 10000);
+      return () => clearTimeout(timer);
+    }
+  }, [highlightDate, highlightAction]);
+
+  // Paid record protection dialog state
+  const [paidRecordDialog, setPaidRecordDialog] = useState<{
+    open: boolean;
+    record: AttendanceRecord | null;
+    action: "edit" | "delete";
+    date?: string;
+    isBulk?: boolean;
+    paidCount?: number;
+  } | null>(null);
+
+  // Redirect to salary settlement page
+  const redirectToSalarySettlement = (date: string) => {
+    const params = new URLSearchParams({
+      date,
+      action: "cancel_payment",
+    });
+    router.push(`/site/payments?${params.toString()}`);
+    setPaidRecordDialog(null);
+  };
 
   // Market laborer edit dialog state
   const [marketLaborerEditOpen, setMarketLaborerEditOpen] = useState(false);
@@ -1322,6 +1373,17 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
   };
 
   const handleOpenEditDialog = useCallback((record: AttendanceRecord) => {
+    // Check if record is paid - prevent editing paid records
+    if (record.is_paid) {
+      setPaidRecordDialog({
+        open: true,
+        record,
+        action: "edit",
+        date: record.date,
+      });
+      return;
+    }
+
     setEditingRecord(record);
     setEditForm({
       work_days: record.work_days,
@@ -1359,6 +1421,8 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
       transactionDate: null,
       settledDate: null,
       confirmedAt: null,
+      settlementMode: null,
+      cashReason: null,
     };
     setPaymentRecords([paymentRecord]);
     setPaymentDialogOpen(true);
@@ -1470,7 +1534,18 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
   };
 
   const handleDelete = useCallback(
-    async (id: string) => {
+    async (record: AttendanceRecord) => {
+      // Check if record is paid - prevent deleting paid records
+      if (record.is_paid) {
+        setPaidRecordDialog({
+          open: true,
+          record,
+          action: "delete",
+          date: record.date,
+        });
+        return;
+      }
+
       if (!confirm("Are you sure you want to delete this attendance record?"))
         return;
 
@@ -1479,7 +1554,7 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
         const { error } = await supabase
           .from("daily_attendance")
           .delete()
-          .eq("id", id);
+          .eq("id", record.id);
         if (error) throw error;
         fetchAttendanceHistory();
       } catch (error: any) {
@@ -1619,6 +1694,24 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
   const handleDeleteDateAttendance = (date: string) => {
     const summary = dateSummaries.find((s) => s.date === date);
     if (!summary || !selectedSite) return;
+
+    // Check if any records for this date are paid
+    const paidDailyRecords = summary.records.filter((r) => r.is_paid);
+    const paidMarketRecords = summary.marketLaborers.filter((r) => r.isPaid);
+    const totalPaidCount = paidDailyRecords.length + paidMarketRecords.length;
+
+    // If there are paid records, show redirect dialog instead
+    if (totalPaidCount > 0) {
+      setPaidRecordDialog({
+        open: true,
+        record: null,
+        action: "delete",
+        date: date,
+        isBulk: true,
+        paidCount: totalPaidCount,
+      });
+      return;
+    }
 
     setDeleteDialogData({
       date,
@@ -1868,15 +1961,27 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
               onClick={() => handleOpenEditDialog(row.original)}
               disabled={!canEdit}
             >
-              <Edit fontSize="small" />
+              {row.original.is_paid ? (
+                <Tooltip title="Paid - Cancel payment first to edit">
+                  <LockIcon fontSize="small" color="disabled" />
+                </Tooltip>
+              ) : (
+                <Edit fontSize="small" />
+              )}
             </IconButton>
             <IconButton
               size="small"
-              color="error"
-              onClick={() => handleDelete(row.original.id)}
+              color={row.original.is_paid ? "default" : "error"}
+              onClick={() => handleDelete(row.original)}
               disabled={!canEdit}
             >
-              <Delete fontSize="small" />
+              {row.original.is_paid ? (
+                <Tooltip title="Paid - Cancel payment first to delete">
+                  <LockIcon fontSize="small" color="disabled" />
+                </Tooltip>
+              ) : (
+                <Delete fontSize="small" />
+              )}
             </IconButton>
           </Box>
         ),
@@ -2887,14 +2992,31 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
                             sx={{
                               cursor: "pointer",
                               "&:hover": { bgcolor: "action.hover" },
+                              // Highlight from redirect (for edit/delete action)
+                              ...(highlightedDate === entry.summary.date && {
+                                bgcolor: alpha(theme.palette.info.main, 0.15),
+                                borderLeft: 4,
+                                borderLeftColor: "info.main",
+                                animation: "pulse 2s ease-in-out 3",
+                                "@keyframes pulse": {
+                                  "0%, 100%": {
+                                    bgcolor: alpha(theme.palette.info.main, 0.15),
+                                  },
+                                  "50%": {
+                                    bgcolor: alpha(theme.palette.info.main, 0.3),
+                                  },
+                                },
+                              }),
                               // Draft entry styling - orange/warning border and background
-                              ...(entry.summary.attendanceStatus === "draft" && {
+                              ...(entry.summary.attendanceStatus === "draft" &&
+                                highlightedDate !== entry.summary.date && {
                                 bgcolor: "warning.50",
                                 borderLeft: 4,
                                 borderLeftColor: "warning.dark",
                               }),
                               // Highlight if this date is also a holiday
-                              ...(entry.holiday && {
+                              ...(entry.holiday &&
+                                highlightedDate !== entry.summary.date && {
                                 bgcolor: "warning.50",
                                 borderLeft: 4,
                                 borderLeftColor: "warning.main",
@@ -2906,7 +3028,9 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
                               sx={{
                                 position: "sticky",
                                 left: 0,
-                                bgcolor: entry.summary.attendanceStatus === "draft" || entry.holiday
+                                bgcolor: highlightedDate === entry.summary.date
+                                  ? alpha(theme.palette.info.main, 0.15)
+                                  : entry.summary.attendanceStatus === "draft" || entry.holiday
                                   ? "warning.50"
                                   : "background.paper",
                                 zIndex: 1,
@@ -2925,7 +3049,9 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
                               sx={{
                                 position: "sticky",
                                 left: 40,
-                                bgcolor: entry.summary.attendanceStatus === "draft" || entry.holiday
+                                bgcolor: highlightedDate === entry.summary.date
+                                  ? alpha(theme.palette.info.main, 0.15)
+                                  : entry.summary.attendanceStatus === "draft" || entry.holiday
                                   ? "warning.50"
                                   : "background.paper",
                                 zIndex: 1,
@@ -3812,18 +3938,30 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
                                                   }}
                                                   disabled={!canEdit}
                                                 >
-                                                  <Edit fontSize="small" />
+                                                  {record.is_paid ? (
+                                                    <Tooltip title="Paid - Cancel payment first to edit">
+                                                      <LockIcon fontSize="small" color="disabled" />
+                                                    </Tooltip>
+                                                  ) : (
+                                                    <Edit fontSize="small" />
+                                                  )}
                                                 </IconButton>
                                                 <IconButton
                                                   size="small"
-                                                  color="error"
+                                                  color={record.is_paid ? "default" : "error"}
                                                   onClick={(e) => {
                                                     e.stopPropagation();
-                                                    handleDelete(record.id);
+                                                    handleDelete(record);
                                                   }}
                                                   disabled={!canEdit}
                                                 >
-                                                  <Delete fontSize="small" />
+                                                  {record.is_paid ? (
+                                                    <Tooltip title="Paid - Cancel payment first to delete">
+                                                      <LockIcon fontSize="small" color="disabled" />
+                                                    </Tooltip>
+                                                  ) : (
+                                                    <Delete fontSize="small" />
+                                                  )}
                                                 </IconButton>
                                               </Box>
                                             </TableCell>
@@ -5482,6 +5620,99 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
           onSuccess={handleHolidaySuccess}
         />
       )}
+
+      {/* Paid Record Protection Dialog */}
+      <Dialog
+        open={!!paidRecordDialog?.open}
+        onClose={() => setPaidRecordDialog(null)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
+          <WarningIcon color="warning" />
+          <Typography variant="h6" component="span">
+            Cannot {paidRecordDialog?.action === "edit" ? "Edit" : "Delete"} Paid{" "}
+            {paidRecordDialog?.isBulk ? "Records" : "Record"}
+          </Typography>
+        </DialogTitle>
+        <DialogContent>
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            {paidRecordDialog?.isBulk ? (
+              <>
+                This date has <strong>{paidRecordDialog?.paidCount}</strong> paid
+                attendance record(s). Paid records cannot be deleted directly.
+              </>
+            ) : (
+              "This attendance record has already been paid and settled."
+            )}
+          </Alert>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            To make changes to paid records:
+          </Typography>
+          <Box component="ol" sx={{ pl: 2, mb: 2, "& li": { mb: 1 } }}>
+            <li>
+              <Typography variant="body2">
+                Go to the <strong>Salary Settlement</strong> page
+              </Typography>
+            </li>
+            <li>
+              <Typography variant="body2">
+                Cancel the payment for this date
+              </Typography>
+            </li>
+            <li>
+              <Typography variant="body2">
+                Return here to make your changes
+              </Typography>
+            </li>
+            <li>
+              <Typography variant="body2">
+                Re-settle the payment when done
+              </Typography>
+            </li>
+          </Box>
+          <Box
+            sx={{
+              p: 2,
+              bgcolor: "action.hover",
+              borderRadius: 1,
+              display: "flex",
+              alignItems: "center",
+              gap: 2,
+            }}
+          >
+            <Box sx={{ color: "primary.main" }}>
+              <PaymentIcon />
+            </Box>
+            <Box sx={{ flex: 1 }}>
+              <Typography variant="subtitle2" fontWeight={600}>
+                Salary Settlement Page
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                Cancel the payment to unlock these records for editing
+              </Typography>
+            </Box>
+            <ArrowForwardIcon color="action" />
+          </Box>
+        </DialogContent>
+        <DialogActions sx={{ p: 2, gap: 1 }}>
+          <Button onClick={() => setPaidRecordDialog(null)} variant="outlined">
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            color="primary"
+            onClick={() =>
+              redirectToSalarySettlement(
+                paidRecordDialog?.date || paidRecordDialog?.record?.date || ""
+              )
+            }
+            endIcon={<ArrowForwardIcon />}
+          >
+            Go to Salary Settlement
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Restoration message snackbar */}
       <Snackbar

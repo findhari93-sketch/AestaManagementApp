@@ -1,25 +1,21 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   Box,
-  Button,
   FormControl,
-  InputLabel,
   Select,
   MenuItem,
   Typography,
   Chip,
   Alert,
   CircularProgress,
-  Collapse,
   IconButton,
+  SelectChangeEvent,
 } from "@mui/material";
 import {
   Link as LinkIcon,
   LinkOff as UnlinkIcon,
-  ExpandMore,
-  ExpandLess,
 } from "@mui/icons-material";
 import { createClient } from "@/lib/supabase/client";
 import { useSite } from "@/contexts/SiteContext";
@@ -45,7 +41,7 @@ export default function SubcontractLinkSelector({
 
   const [subcontracts, setSubcontracts] = useState<SubcontractOption[]>([]);
   const [loading, setLoading] = useState(false);
-  const [isExpanded, setIsExpanded] = useState(!!selectedSubcontractId);
+  const [dropdownOpen, setDropdownOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Fetch active subcontracts for the site
@@ -127,15 +123,14 @@ export default function SubcontractLinkSelector({
     (sc) => sc.id === selectedSubcontractId
   );
 
-  const handleToggleLink = () => {
-    if (selectedSubcontractId) {
-      // Unlink
-      onSelect(null);
-      setIsExpanded(false);
-    } else {
-      // Show dropdown
-      setIsExpanded(true);
-    }
+  const handleUnlink = () => {
+    onSelect(null);
+  };
+
+  const handleChange = (event: SelectChangeEvent<string>) => {
+    const value = event.target.value;
+    onSelect(value || null);
+    setDropdownOpen(false);
   };
 
   const formatCurrency = (amount: number) => {
@@ -145,24 +140,31 @@ export default function SubcontractLinkSelector({
     return `Rs.${amount.toLocaleString()}`;
   };
 
+  // Show loading state
+  if (loading) {
+    return (
+      <Box sx={{ display: "flex", alignItems: "center", gap: 1, py: 1 }}>
+        <CircularProgress size={16} />
+        <Typography variant="body2" color="text.secondary">
+          Loading subcontracts...
+        </Typography>
+      </Box>
+    );
+  }
+
+  // Show error state
+  if (error) {
+    return (
+      <Alert severity="error" sx={{ py: 0.5 }}>
+        {error}
+      </Alert>
+    );
+  }
+
   return (
     <Box>
-      {/* Link/Unlink Button */}
-      {!isExpanded && !selectedSubcontractId && (
-        <Button
-          startIcon={<LinkIcon />}
-          onClick={() => setIsExpanded(true)}
-          disabled={disabled || loading}
-          variant="outlined"
-          size="small"
-          sx={{ mb: 1 }}
-        >
-          Link to Subcontract
-        </Button>
-      )}
-
       {/* Selected Subcontract Display */}
-      {selectedSubcontract && (
+      {selectedSubcontract ? (
         <Box
           sx={{
             p: 1.5,
@@ -190,7 +192,7 @@ export default function SubcontractLinkSelector({
             </Box>
             <IconButton
               size="small"
-              onClick={handleToggleLink}
+              onClick={handleUnlink}
               disabled={disabled}
               title="Unlink from subcontract"
             >
@@ -246,88 +248,88 @@ export default function SubcontractLinkSelector({
             </Alert>
           )}
         </Box>
-      )}
-
-      {/* Dropdown */}
-      <Collapse in={isExpanded && !selectedSubcontractId}>
-        <Box sx={{ mt: 1 }}>
-          {loading ? (
-            <Box sx={{ display: "flex", alignItems: "center", gap: 1, p: 2 }}>
-              <CircularProgress size={20} />
-              <Typography variant="body2">Loading subcontracts...</Typography>
-            </Box>
-          ) : error ? (
-            <Alert severity="error" sx={{ mb: 1 }}>
-              {error}
-            </Alert>
-          ) : subcontracts.length === 0 ? (
-            <Alert severity="info" sx={{ mb: 1 }}>
+      ) : (
+        /* Dropdown Select - Opens on click */
+        <Box>
+          {subcontracts.length === 0 ? (
+            <Typography variant="caption" color="text.secondary">
               No active subcontracts found for this site
-            </Alert>
+            </Typography>
           ) : (
-            <>
-              <FormControl fullWidth size="small">
-                <InputLabel>Select Subcontract</InputLabel>
-                <Select
-                  value={selectedSubcontractId || ""}
-                  onChange={(e) => onSelect(e.target.value || null)}
-                  label="Select Subcontract"
-                  disabled={disabled}
-                >
-                  <MenuItem value="">
-                    <em>None (Site Expense)</em>
-                  </MenuItem>
-                  {subcontracts.map((sc) => (
-                    <MenuItem key={sc.id} value={sc.id}>
-                      <Box
-                        sx={{
-                          display: "flex",
-                          justifyContent: "space-between",
-                          width: "100%",
-                          alignItems: "center",
-                        }}
-                      >
-                        <Box>
-                          <Typography variant="body2">{sc.title}</Typography>
-                          {sc.teamName && (
-                            <Typography
-                              variant="caption"
-                              color="text.secondary"
-                            >
-                              {sc.teamName}
-                            </Typography>
-                          )}
-                        </Box>
-                        <Chip
-                          label={`Bal: ${formatCurrency(sc.balanceDue)}`}
-                          size="small"
-                          color={sc.balanceDue > 0 ? "warning" : "success"}
-                          variant="outlined"
-                        />
+            <FormControl fullWidth size="small">
+              <Select
+                value={selectedSubcontractId || ""}
+                onChange={handleChange}
+                open={dropdownOpen}
+                onOpen={() => setDropdownOpen(true)}
+                onClose={() => setDropdownOpen(false)}
+                disabled={disabled}
+                displayEmpty
+                renderValue={(selected) => {
+                  if (!selected) {
+                    return (
+                      <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                        <LinkIcon fontSize="small" color="action" />
+                        <Typography color="text.secondary">
+                          Link to Subcontract
+                        </Typography>
                       </Box>
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-
-              <Button
-                size="small"
-                onClick={() => setIsExpanded(false)}
-                sx={{ mt: 1 }}
+                    );
+                  }
+                  const sc = subcontracts.find((s) => s.id === selected);
+                  return sc?.title || selected;
+                }}
+                sx={{
+                  "& .MuiSelect-select": {
+                    display: "flex",
+                    alignItems: "center",
+                  },
+                }}
               >
-                Cancel
-              </Button>
-            </>
+                <MenuItem value="">
+                  <em>None (Site Expense)</em>
+                </MenuItem>
+                {subcontracts.map((sc) => (
+                  <MenuItem key={sc.id} value={sc.id}>
+                    <Box
+                      sx={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        width: "100%",
+                        alignItems: "center",
+                      }}
+                    >
+                      <Box>
+                        <Typography variant="body2">{sc.title}</Typography>
+                        {sc.teamName && (
+                          <Typography
+                            variant="caption"
+                            color="text.secondary"
+                          >
+                            {sc.teamName}
+                          </Typography>
+                        )}
+                      </Box>
+                      <Chip
+                        label={`Bal: ${formatCurrency(sc.balanceDue)}`}
+                        size="small"
+                        color={sc.balanceDue > 0 ? "warning" : "success"}
+                        variant="outlined"
+                      />
+                    </Box>
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          )}
+
+          {/* Info text when no subcontract linked */}
+          {!selectedSubcontractId && subcontracts.length > 0 && (
+            <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: "block" }}>
+              Payment will be recorded as site expense
+            </Typography>
           )}
         </Box>
-      </Collapse>
-
-      {/* Info text when no subcontract linked */}
-      {!selectedSubcontractId && !isExpanded && (
-        <Typography variant="caption" color="text.secondary">
-          Payment will be recorded as site expense (not linked to any
-          subcontract)
-        </Typography>
       )}
     </Box>
   );

@@ -248,3 +248,48 @@ Please settle this payment and upload proof.
 
 Thank you!`;
 }
+
+/**
+ * Generate payment settlement notification message with deep link for engineer
+ */
+export function generateSettlementNotificationMessage(params: {
+  engineerName: string;
+  amount: number;
+  dailyCount: number;
+  marketCount: number;
+  siteName: string;
+  transactionId: string;
+  appBaseUrl?: string;
+}): string {
+  const {
+    engineerName,
+    amount,
+    dailyCount,
+    marketCount,
+    siteName,
+    transactionId,
+    appBaseUrl = "https://aestamanagementapp.vercel.app",
+  } = params;
+
+  const laborerText =
+    dailyCount + marketCount > 0
+      ? `${dailyCount + marketCount} laborers (${dailyCount} daily, ${marketCount} market)`
+      : "laborers";
+
+  const deepLink = `${appBaseUrl}/site/my-wallet?settle=${transactionId}`;
+
+  return `*Aesta: Payment Received*
+
+Hi ${engineerName},
+
+You have received payment for settlement:
+
+💰 Amount: Rs.${amount.toLocaleString("en-IN")}
+👷 Laborers: ${laborerText}
+📍 Site: ${siteName}
+
+Click below to settle:
+${deepLink}
+
+Please complete the settlement by paying the laborers and uploading proof.`;
+}

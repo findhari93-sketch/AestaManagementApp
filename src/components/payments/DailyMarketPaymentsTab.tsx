@@ -28,17 +28,20 @@ import { createClient } from "@/lib/supabase/client";
 import { useSite } from "@/contexts/SiteContext";
 import { useAuth } from "@/contexts/AuthContext";
 import dayjs from "dayjs";
-import DateGroupRow from "./DateGroupRow";
+import SalarySettlementTable from "./SalarySettlementTable";
 import PaymentDialog from "./PaymentDialog";
 import CancelPaymentDialog from "./CancelPaymentDialog";
+import DateEditDialog from "./DateEditDialog";
+import DateCancelDialog from "./DateCancelDialog";
 import type {
   DateGroup,
   DailyPaymentRecord,
   PaymentFilterState,
 } from "@/types/payment.types";
-import { hasEditPermission } from "@/lib/permissions";
+import { hasEditPermission, canPerformMassUpload } from "@/lib/permissions";
 import { notifyEngineerPaymentReminder } from "@/lib/services/notificationService";
 import { generateWhatsAppUrl, generatePaymentReminderMessage } from "@/lib/formatters";
+import SettlementDetailsDialog from "@/components/settlement/SettlementDetailsDialog";
 
 interface DailyMarketPaymentsTabProps {
   dateFrom: string;
@@ -100,6 +103,16 @@ export default function DailyMarketPaymentsTab({
   const [bulkCancelRecords, setBulkCancelRecords] = useState<DailyPaymentRecord[]>([]);
   const [bulkCancelProcessing, setBulkCancelProcessing] = useState(false);
 
+  // Date edit dialog state
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [editDialogDate, setEditDialogDate] = useState<string>("");
+  const [editDialogGroup, setEditDialogGroup] = useState<DateGroup | null>(null);
+
+  // Date cancel dialog state (bulk cancel by date)
+  const [dateCancelDialogOpen, setDateCancelDialogOpen] = useState(false);
+  const [dateCancelDate, setDateCancelDate] = useState<string>("");
+  const [dateCancelRecords, setDateCancelRecords] = useState<DailyPaymentRecord[]>([]);
+
   // Expanded state
   const [expandedDates, setExpandedDates] = useState<Set<string>>(new Set());
   const expandedDatesRef = useRef<Set<string>>(new Set());
@@ -110,6 +123,11 @@ export default function DailyMarketPaymentsTab({
   }, [expandedDates]);
 
   const canEdit = hasEditPermission(userProfile?.role);
+  const isAdmin = canPerformMassUpload(userProfile?.role); // admin or office
+
+  // Settlement details dialog state (for admin confirmation)
+  const [settlementDetailsOpen, setSettlementDetailsOpen] = useState(false);
+  const [selectedTransactionId, setSelectedTransactionId] = useState<string | null>(null);
 
   // Fetch data
   const fetchData = useCallback(async () => {
@@ -144,6 +162,8 @@ export default function DailyMarketPaymentsTab({
           subcontracts(title),
           site_engineer_transactions!engineer_transaction_id(
             settlement_status,
+            settlement_mode,
+            notes,
             proof_url,
             settlement_proof_url,
             transaction_date,
@@ -180,6 +200,8 @@ export default function DailyMarketPaymentsTab({
           labor_roles(name),
           site_engineer_transactions!engineer_transaction_id(
             settlement_status,
+            settlement_mode,
+            notes,
             proof_url,
             settlement_proof_url,
             transaction_date,
@@ -225,6 +247,8 @@ export default function DailyMarketPaymentsTab({
           transactionDate: r.site_engineer_transactions?.transaction_date || null,
           settledDate: r.site_engineer_transactions?.settled_date || null,
           confirmedAt: r.site_engineer_transactions?.confirmed_at || null,
+          settlementMode: r.site_engineer_transactions?.settlement_mode || null,
+          cashReason: r.site_engineer_transactions?.notes || null,
         })
       );
 
@@ -257,6 +281,8 @@ export default function DailyMarketPaymentsTab({
           transactionDate: r.site_engineer_transactions?.transaction_date || null,
           settledDate: r.site_engineer_transactions?.settled_date || null,
           confirmedAt: r.site_engineer_transactions?.confirmed_at || null,
+          settlementMode: r.site_engineer_transactions?.settlement_mode || null,
+          cashReason: r.site_engineer_transactions?.notes || null,
         })
       );
 
@@ -1013,33 +1039,43 @@ export default function DailyMarketPaymentsTab({
         </Button>
       </Box>
 
-      {/* Date Groups */}
+      {/* Salary Settlement Table */}
       {filteredDateGroups.length === 0 ? (
         <Alert severity="info">
           No payment records found for the selected date range and filters.
         </Alert>
       ) : (
-        filteredDateGroups.map((group) => (
-          <DateGroupRow
-            key={group.date}
-            dateGroup={group}
-            onToggleExpand={() => handleToggleExpand(group.date)}
-            onPayAllDaily={(records) => openPaymentDialog(records)}
-            onPayAllMarket={(records) => openPaymentDialog(records)}
-            onPayAll={(records) => openPaymentDialog(records)}
-            onPaySelected={(records) => openPaymentDialog(records)}
-            onPaySingle={(record) => openPaymentDialog([record])}
-            onNotifyEngineer={handleNotifyEngineer}
-            onNotifyDate={handleNotifyDate}
-            onCancelPayment={handleOpenCancelDialog}
-            onCancelAllDirect={handleOpenBulkCancelDialog}
-            selectedRecords={selectedRecords}
-            onToggleSelect={handleToggleSelect}
-            onSelectAllDaily={handleSelectAllDaily}
-            onSelectAllMarket={handleSelectAllMarket}
-            disabled={!canEdit}
-          />
-        ))
+        <SalarySettlementTable
+          dateGroups={filteredDateGroups}
+          loading={loading}
+          disabled={!canEdit}
+          isAdmin={isAdmin}
+          onPayDate={(date, records) => openPaymentDialog(records)}
+          onViewDate={(date, group) => {
+            // View is handled by expanded row in the table
+          }}
+          onEditDate={(date, group) => {
+            setEditDialogDate(date);
+            setEditDialogGroup(group);
+            setEditDialogOpen(true);
+          }}
+          onCancelDate={(date, records) => {
+            setDateCancelDate(date);
+            setDateCancelRecords(records);
+            setDateCancelDialogOpen(true);
+          }}
+          onDeleteDate={(date, records) => {
+            // Delete uses same dialog as cancel
+            setDateCancelDate(date);
+            setDateCancelRecords(records);
+            setDateCancelDialogOpen(true);
+          }}
+          onNotifyDate={(date, records) => handleNotifyDate(date, records)}
+          onConfirmSettlement={(transactionId) => {
+            setSelectedTransactionId(transactionId);
+            setSettlementDetailsOpen(true);
+          }}
+        />
       )}
 
       {/* Payment Dialog */}
@@ -1051,7 +1087,7 @@ export default function DailyMarketPaymentsTab({
         onSuccess={handlePaymentSuccess}
       />
 
-      {/* Cancel Payment Dialog */}
+      {/* Cancel Payment Dialog (single record) */}
       <CancelPaymentDialog
         open={cancelDialogOpen}
         onClose={() => {
@@ -1064,6 +1100,54 @@ export default function DailyMarketPaymentsTab({
         engineerName={engineerNameToCancel}
         onConfirm={bulkCancelRecords.length > 0 ? handleBulkCancelPayment : handleCancelPayment}
       />
+
+      {/* Date Edit Dialog */}
+      <DateEditDialog
+        open={editDialogOpen}
+        onClose={() => {
+          setEditDialogOpen(false);
+          setEditDialogDate("");
+          setEditDialogGroup(null);
+        }}
+        date={editDialogDate}
+        group={editDialogGroup}
+        onSuccess={() => {
+          fetchData();
+          onDataChange?.();
+        }}
+      />
+
+      {/* Date Cancel Dialog (bulk cancel) */}
+      <DateCancelDialog
+        open={dateCancelDialogOpen}
+        onClose={() => {
+          setDateCancelDialogOpen(false);
+          setDateCancelDate("");
+          setDateCancelRecords([]);
+        }}
+        date={dateCancelDate}
+        records={dateCancelRecords}
+        onSuccess={() => {
+          fetchData();
+          onDataChange?.();
+        }}
+      />
+
+      {/* Settlement Details Dialog (for admin to view and confirm engineer settlements) */}
+      {selectedTransactionId && (
+        <SettlementDetailsDialog
+          open={settlementDetailsOpen}
+          onClose={() => {
+            setSettlementDetailsOpen(false);
+            setSelectedTransactionId(null);
+          }}
+          transactionId={selectedTransactionId}
+          onSuccess={() => {
+            fetchData();
+            onDataChange?.();
+          }}
+        />
+      )}
     </Box>
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import {
   Box,
   Typography,
@@ -8,6 +8,7 @@ import {
   Tabs,
   Paper,
   Alert,
+  Snackbar,
 } from "@mui/material";
 import {
   Person as PersonIcon,
@@ -20,6 +21,7 @@ import PaymentSummaryCards from "@/components/payments/PaymentSummaryCards";
 import DailyMarketPaymentsTab from "@/components/payments/DailyMarketPaymentsTab";
 import ContractWeeklyPaymentsTab from "@/components/payments/ContractWeeklyPaymentsTab";
 import dayjs from "dayjs";
+import { useSearchParams } from "next/navigation";
 import type { PaymentPageData } from "@/lib/data/payments";
 import type { PaymentSummaryData } from "@/types/payment.types";
 
@@ -52,8 +54,27 @@ interface PaymentsContentProps {
 export default function PaymentsContent({ initialData }: PaymentsContentProps) {
   const { selectedSite } = useSite();
   const { formatForApi, isAllTime } = useDateRange();
+  const searchParams = useSearchParams();
 
   const { dateFrom, dateTo } = formatForApi();
+
+  // URL params for highlighting (from redirect)
+  const highlightDate = searchParams.get("date");
+  const highlightAction = searchParams.get("action");
+  const highlightTransactionId = searchParams.get("transactionId");
+
+  // Notification snackbar state
+  const [notificationMessage, setNotificationMessage] = useState<string | null>(null);
+
+  // Handle URL params for highlighting (from redirect)
+  useEffect(() => {
+    if (highlightDate && highlightAction === "edit_or_delete") {
+      const formattedDate = dayjs(highlightDate).format("DD MMM YYYY");
+      setNotificationMessage(
+        `Cancel or modify the payment for ${formattedDate} to update the linked expense`
+      );
+    }
+  }, [highlightDate, highlightAction]);
 
   // Tab state
   const [activeTab, setActiveTab] = useState(0);
@@ -156,6 +177,15 @@ export default function PaymentsContent({ initialData }: PaymentsContentProps) {
           </TabPanel>
         </Box>
       </Paper>
+
+      {/* Notification snackbar (from redirect) */}
+      <Snackbar
+        open={!!notificationMessage}
+        autoHideDuration={8000}
+        onClose={() => setNotificationMessage(null)}
+        message={notificationMessage}
+        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+      />
     </Box>
   );
 }

@@ -1,5 +1,3 @@
-"use client";
-
 import { createTheme, PaletteOptions } from "@mui/material/styles";
 import { ThemePreference } from "@/types/database.types";
 

@@ -55,7 +55,7 @@ export function createIDBPersister(): Persister {
 
     restoreClient: async () => {
       // Add timeout to prevent hanging if IndexedDB is slow/locked
-      const RESTORE_TIMEOUT = 3000; // 3 seconds max
+      const RESTORE_TIMEOUT = 5000; // 5 seconds max for slower connections
 
       const restorePromise = (async () => {
         try {

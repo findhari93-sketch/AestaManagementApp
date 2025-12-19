@@ -56,7 +56,19 @@
       "Bash(echo:*)",
       "Bash(cd:*)",
       "Bash(cmd /c dir /b \"c:\\Users\\Haribabu\\Documents\\AppsCopilot\\AestaManagementApp\\src\\app\\(main)\\site\\attendance\"\")",
-      "Bash(powershell:*)"
+      "Bash(powershell:*)",
+      "Bash(node scripts/fix-missing-settlement-expenses.mjs:*)",
+      "Bash(if exist \"c:\\Users\\Haribabu\\Documents\\AppsCopilot\\AestaManagementApp\\.next\" rmdir /s /q \"c:\\Users\\Haribabu\\Documents\\AppsCopilot\\AestaManagementApp\\.next\")",
+      "Bash(rm:*)",
+      "Bash(node scripts/fix-expense-cleared-status.mjs:*)",
+      "Bash(node -e \"\nimport { createClient } from ''@supabase/supabase-js'';\nimport { readFileSync } from ''fs'';\nimport { resolve, dirname } from ''path'';\nimport { fileURLToPath } from ''url'';\n\nconst __dirname = dirname(fileURLToPath(import.meta.url));\nconst envPath = resolve(__dirname, ''.env.local'');\nconst envContent = readFileSync(envPath, ''utf-8'');\nenvContent.split(''\\n'').forEach(line => {\n  const trimmed = line.trim();\n  if (trimmed && !trimmed.startsWith(''#'')) {\n    const [key, ...valueParts] = trimmed.split(''='');\n    if (key && valueParts.length > 0) {\n      process.env[key.trim()] = valueParts.join(''='').trim().replace(/^[\"\"'']|[\"\"'']$/g, '''');\n    }\n  }\n});\n\nconst supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);\n\n// Check expenses with salary settlement in description\nconst { data: salaryExpenses } = await supabase\n  .from(''expenses'')\n  .select(''id, date, amount, description, is_cleared'')\n  .ilike(''description'', ''%Salary%'')\n  .order(''date'', { ascending: false })\n  .limit(10);\n\nconsole.log(''Recent salary-related expenses:'');\nconsole.log(JSON.stringify(salaryExpenses, null, 2));\n\")",
+      "Bash(node -e \"\nconst { readFileSync } = require(''fs'');\nconst { resolve } = require(''path'');\nconst { createClient } = require(''@supabase/supabase-js'');\n\nconst envContent = readFileSync(resolve(''.env.local''), ''utf-8'');\nenvContent.split(''\\n'').forEach(line => {\n  const trimmed = line.trim();\n  if (trimmed && !trimmed.startsWith(''#'')) {\n    const eqIdx = trimmed.indexOf(''='');\n    if (eqIdx > 0) {\n      const key = trimmed.substring(0, eqIdx).trim();\n      const val = trimmed.substring(eqIdx + 1).trim().replace(/^[\"\"'']|[\"\"'']$/g, '''');\n      process.env[key] = val;\n    }\n  }\n});\n\nconst supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);\n\n(async () => {\n  const { data: salaryExpenses } = await supabase\n    .from(''expenses'')\n    .select(''id, date, amount, description, is_cleared'')\n    .ilike(''description'', ''%Salary%'')\n    .order(''date'', { ascending: false })\n    .limit(10);\n\n  console.log(''Recent salary-related expenses:'');\n  console.log(JSON.stringify(salaryExpenses, null, 2));\n})();\n\")",
+      "Bash(node scripts/check-expense-status.mjs:*)",
+      "Bash(node scripts/check-dec16-expense.mjs:*)",
+      "Bash(node scripts/check-data-sync.mjs:*)",
+      "Bash(node scripts/check-specific-dates.mjs:*)",
+      "Bash(node scripts/delete-orphaned-expenses.mjs:*)",
+      "Bash(node:*)"
     ],
     "deny": [],
     "ask": []

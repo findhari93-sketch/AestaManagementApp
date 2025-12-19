@@ -183,18 +183,50 @@ export default function SiteSubcontractsPage() {
 
       if (error) throw error;
 
-      // Fetch payments for each subcontract
+      // Fetch payments for each subcontract (including labor payments and cleared expenses)
       const subcontractsWithDetails: SubcontractWithDetails[] =
         await Promise.all(
           (data || []).map(async (subcontract: any) => {
+            // 1. Get direct subcontract_payments
             const { data: payments } = await supabase
               .from("subcontract_payments")
               .select("amount")
               .eq("subcontract_id", subcontract.id);
 
-            const paymentsList = payments as { amount: number }[] | null;
-            const totalPaid =
-              paymentsList?.reduce((sum, p) => sum + p.amount, 0) || 0;
+            const directPaid =
+              (payments as { amount: number }[] | null)?.reduce(
+                (sum, p) => sum + p.amount,
+                0
+              ) || 0;
+
+            // 2. Get labor_payments linked to this subcontract
+            const { data: laborPaymentsData } = await supabase
+              .from("labor_payments")
+              .select("amount")
+              .eq("subcontract_id", subcontract.id);
+
+            const laborPaid =
+              (laborPaymentsData as { amount: number }[] | null)?.reduce(
+                (sum, p) => sum + p.amount,
+                0
+              ) || 0;
+
+            // 3. Get cleared expenses linked to this subcontract
+            const { data: expensesData } = await supabase
+              .from("expenses")
+              .select("amount")
+              .eq("contract_id", subcontract.id)
+              .eq("is_deleted", false)
+              .eq("is_cleared", true);
+
+            const expensesPaid =
+              (expensesData as { amount: number }[] | null)?.reduce(
+                (sum, e) => sum + e.amount,
+                0
+              ) || 0;
+
+            // Total = all three sources
+            const totalPaid = directPaid + laborPaid + expensesPaid;
             const balanceDue = subcontract.total_value - totalPaid;
             const completionPercentage =
               subcontract.total_value > 0

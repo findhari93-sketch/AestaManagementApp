@@ -35,24 +35,38 @@ import {
   Refresh as RefreshIcon,
   Warning as WarningIcon,
 } from "@mui/icons-material";
+import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSite } from "@/contexts/SiteContext";
 import PageHeader from "@/components/layout/PageHeader";
+import EngineerWalletTable from "@/components/wallet/EngineerWalletTable";
 import SettlementFormDialog from "@/components/settlement/SettlementFormDialog";
 import SettlementStatusIndicator from "@/components/payments/SettlementStatusIndicator";
 import dayjs from "dayjs";
 
+interface LaborerDetail {
+  id: string;
+  name: string;
+  type: "daily" | "market";
+  role?: string;
+  count?: number;
+  amount: number;
+  date: string;
+}
+
 interface PendingSettlement {
   id: string;
   amount: number;
-  transaction_date: string;
+  companySettlementDate: string; // When company sent the money
+  laborSalaryDates: string[]; // Unique dates of labor work
   description: string | null;
-  proof_url: string | null;
-  site_name: string | null;
-  daily_count: number;
-  market_count: number;
-  settlement_status: string | null;
+  proofUrl: string | null;
+  siteName: string | null;
+  dailyCount: number;
+  marketCount: number;
+  settlementStatus: string | null;
+  laborers: LaborerDetail[];
 }
 
 interface Transaction {
@@ -78,6 +92,8 @@ interface WalletSummary {
   returned: number;
   pendingToSettle: number;
   pendingCount: number;
+  pendingApproval: number;    // Amount awaiting admin approval (engineer submitted, not yet confirmed)
+  pendingApprovalCount: number;
   balance: number;
   owedByCompany: number;
 }
@@ -110,6 +126,20 @@ export default function MyWalletPage() {
   const { userProfile } = useAuth();
   const { selectedSite } = useSite();
   const supabase = createClient();
+  const searchParams = useSearchParams();
+
+  // Handle deep link - auto-open settlement dialog if settle param is provided
+  useEffect(() => {
+    const settleId = searchParams.get("settle");
+    if (settleId && !loading && pendingSettlements.length > 0) {
+      // Check if this settlement exists in pending list
+      const settlement = pendingSettlements.find((s) => s.id === settleId);
+      if (settlement) {
+        setSelectedTransactionId(settleId);
+        setSettlementDialogOpen(true);
+      }
+    }
+  }, [searchParams, loading, pendingSettlements]);
 
   const fetchData = async () => {
     if (!userProfile?.id) return;
@@ -143,9 +173,8 @@ export default function MyWalletPage() {
 
       if (txError) throw txError;
 
-      // Filter out cancelled transactions - they shouldn't appear in engineer's wallet
+      // Show ALL transactions including cancelled ones (engineer should see cancelled status)
       const formattedTransactions: Transaction[] = ((txData || []) as any[])
-        .filter(t => t.settlement_status !== "cancelled")
         .map(t => ({
           id: t.id,
           transaction_type: t.transaction_type,
@@ -170,35 +199,98 @@ export default function MyWalletPage() {
              t.settlement_status === "pending_settlement"
       );
 
-      // For each pending transaction, get linked attendance counts
-      const pendingWithCounts: PendingSettlement[] = [];
+      // For each pending transaction, get linked attendance with details
+      const pendingWithDetails: PendingSettlement[] = [];
       for (const tx of pendingTxs) {
-        // Count daily attendance
-        const { count: dailyCount } = await supabase
+        // Fetch daily attendance with laborer names and dates
+        const { data: dailyData } = await supabase
           .from("daily_attendance")
-          .select("*", { count: "exact", head: true })
+          .select(`
+            id,
+            date,
+            daily_earnings,
+            laborers!inner(name, labor_roles(name))
+          `)
           .eq("engineer_transaction_id", tx.id);
 
-        // Count market attendance
-        const { count: marketCount } = await supabase
+        // Fetch market attendance - using separate query to avoid FK cache issues
+        const { data: marketData } = await supabase
           .from("market_laborer_attendance")
-          .select("*", { count: "exact", head: true })
+          .select(`
+            id,
+            date,
+            count,
+            total_cost,
+            role_id
+          `)
           .eq("engineer_transaction_id", tx.id);
 
-        pendingWithCounts.push({
+        // Fetch role names separately to avoid FK schema cache issues
+        const roleIds = (marketData || [])
+          .map((m: any) => m.role_id)
+          .filter((id: string | null): id is string => id != null);
+
+        let rolesMap: Record<string, string> = {};
+        if (roleIds.length > 0) {
+          const { data: roles } = await supabase
+            .from("labor_roles")
+            .select("id, name")
+            .in("id", roleIds);
+
+          rolesMap = (roles || []).reduce((acc: Record<string, string>, role: any) => {
+            acc[role.id] = role.name;
+            return acc;
+          }, {});
+        }
+
+        // Build laborers list
+        const laborers: LaborerDetail[] = [];
+
+        // Add daily laborers
+        (dailyData || []).forEach((d: any) => {
+          laborers.push({
+            id: `daily-${d.id}`,
+            name: d.laborers?.name || "Unknown",
+            type: "daily",
+            role: d.laborers?.labor_roles?.name,
+            amount: d.daily_earnings || 0,
+            date: d.date,
+          });
+        });
+
+        // Add market laborers
+        (marketData || []).forEach((m: any) => {
+          const roleName = m.role_id ? rolesMap[m.role_id] || "Market Labor" : "Market Labor";
+          laborers.push({
+            id: `market-${m.id}`,
+            name: roleName,
+            type: "market",
+            role: roleName,
+            count: m.count,
+            amount: m.total_cost || 0,
+            date: m.date,
+          });
+        });
+
+        // Get unique labor dates
+        const laborDates = [...new Set(laborers.map(l => l.date))];
+
+        pendingWithDetails.push({
           id: tx.id,
           amount: tx.amount,
-          transaction_date: tx.transaction_date,
+          companySettlementDate: tx.transaction_date,
+          laborSalaryDates: laborDates,
           description: tx.description,
-          proof_url: (txData as any[]).find(t => t.id === tx.id)?.proof_url || null,
-          site_name: tx.site_name,
-          daily_count: dailyCount || 0,
-          market_count: marketCount || 0,
-          settlement_status: tx.settlement_status,
+          proofUrl: (txData as any[]).find(t => t.id === tx.id)?.proof_url || null,
+          siteName: tx.site_name,
+          dailyCount: (dailyData || []).length,
+          marketCount: (marketData || []).length,
+          settlementStatus: tx.settlement_status,
+          laborers,
         });
       }
 
-      setPendingSettlements(pendingWithCounts);
+      setPendingSettlements(pendingWithDetails);
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -218,6 +310,8 @@ export default function MyWalletPage() {
     let returned = 0;
     let pendingToSettle = 0;
     let pendingCount = 0;
+    let pendingApproval = 0;       // Amount awaiting admin approval
+    let pendingApprovalCount = 0;
     let owedByCompany = 0;
 
     transactions.forEach(t => {
@@ -225,8 +319,13 @@ export default function MyWalletPage() {
         case "received_from_company":
           received += t.amount;
           if (t.settlement_status === "pending_settlement") {
+            // Engineer hasn't submitted settlement yet
             pendingToSettle += t.amount;
             pendingCount++;
+          } else if (t.settlement_status === "pending_confirmation") {
+            // Engineer submitted, awaiting admin approval
+            pendingApproval += t.amount;
+            pendingApprovalCount++;
           }
           break;
         case "spent_on_behalf":
@@ -244,7 +343,13 @@ export default function MyWalletPage() {
       }
     });
 
-    const balance = received - spent - returned;
+    // Balance available to engineer:
+    // - received: total money received from company
+    // - spent: money spent on behalf of company (direct payments)
+    // - returned: money returned to company
+    // - pendingApproval: money engineer has already paid to laborers (submitted for approval)
+    // Note: pendingApproval is excluded because that money has been spent paying laborers
+    const balance = received - spent - returned - pendingApproval;
 
     return {
       received,
@@ -253,6 +358,8 @@ export default function MyWalletPage() {
       returned,
       pendingToSettle,
       pendingCount,
+      pendingApproval,
+      pendingApprovalCount,
       balance,
       owedByCompany,
     };
@@ -348,7 +455,7 @@ export default function MyWalletPage() {
 
       {/* Wallet Summary Cards */}
       <Grid container spacing={2} sx={{ mb: 3 }}>
-        <Grid size={{ xs: 6, sm: 3 }}>
+        <Grid size={{ xs: 6, sm: 2.4 }}>
           <Card sx={{ bgcolor: "success.light", color: "success.contrastText" }}>
             <CardContent sx={{ py: 2 }}>
               <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
@@ -365,26 +472,45 @@ export default function MyWalletPage() {
           </Card>
         </Grid>
 
-        <Grid size={{ xs: 6, sm: 3 }}>
+        <Grid size={{ xs: 6, sm: 2.4 }}>
           <Card sx={{ bgcolor: "warning.light", color: "warning.contrastText" }}>
             <CardContent sx={{ py: 2 }}>
               <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
                 <PendingIcon fontSize="small" />
                 <Typography variant="caption" fontWeight={500}>
-                  PENDING
+                  TO SETTLE
                 </Typography>
               </Box>
               <Typography variant="h5" fontWeight={700}>
                 Rs.{summary.pendingToSettle.toLocaleString()}
               </Typography>
               <Typography variant="caption">
-                {summary.pendingCount} to settle
+                {summary.pendingCount} pending
               </Typography>
             </CardContent>
           </Card>
         </Grid>
 
-        <Grid size={{ xs: 6, sm: 3 }}>
+        <Grid size={{ xs: 6, sm: 2.4 }}>
+          <Card sx={{ bgcolor: summary.pendingApproval > 0 ? "info.light" : "grey.100" }}>
+            <CardContent sx={{ py: 2 }}>
+              <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
+                <CheckIcon fontSize="small" color={summary.pendingApproval > 0 ? "info" : "disabled"} />
+                <Typography variant="caption" fontWeight={500}>
+                  AWAITING APPROVAL
+                </Typography>
+              </Box>
+              <Typography variant="h5" fontWeight={700}>
+                Rs.{summary.pendingApproval.toLocaleString()}
+              </Typography>
+              <Typography variant="caption">
+                {summary.pendingApprovalCount} submitted
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+
+        <Grid size={{ xs: 6, sm: 2.4 }}>
           <Card>
             <CardContent sx={{ py: 2 }}>
               <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
@@ -397,13 +523,13 @@ export default function MyWalletPage() {
                 Rs.{summary.balance.toLocaleString()}
               </Typography>
               <Typography variant="caption" color="text.secondary">
-                With You
+                Available
               </Typography>
             </CardContent>
           </Card>
         </Grid>
 
-        <Grid size={{ xs: 6, sm: 3 }}>
+        <Grid size={{ xs: 6, sm: 2.4 }}>
           <Card sx={{ bgcolor: summary.owedByCompany > 0 ? "error.light" : "grey.100" }}>
             <CardContent sx={{ py: 2 }}>
               <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
@@ -451,80 +577,12 @@ export default function MyWalletPage() {
                 <Alert severity="info" sx={{ mb: 2 }}>
                   These payments were sent to you for distribution. Please settle them by paying the laborers and uploading proof.
                 </Alert>
-                <TableContainer component={Paper} variant="outlined">
-                  <Table>
-                    <TableHead>
-                      <TableRow>
-                        <TableCell>Date</TableCell>
-                        <TableCell>Site</TableCell>
-                        <TableCell>Laborers</TableCell>
-                        <TableCell align="right">Amount</TableCell>
-                        <TableCell>Company Proof</TableCell>
-                        <TableCell align="center">Action</TableCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {pendingSettlements.map(p => (
-                        <TableRow key={p.id} hover>
-                          <TableCell>
-                            <Typography variant="body2" fontWeight={500}>
-                              {dayjs(p.transaction_date).format("DD MMM YYYY")}
-                            </Typography>
-                          </TableCell>
-                          <TableCell>{p.site_name || "-"}</TableCell>
-                          <TableCell>
-                            <Box sx={{ display: "flex", gap: 1 }}>
-                              {p.daily_count > 0 && (
-                                <Chip
-                                  label={`${p.daily_count} daily`}
-                                  size="small"
-                                  variant="outlined"
-                                />
-                              )}
-                              {p.market_count > 0 && (
-                                <Chip
-                                  label={`${p.market_count} market`}
-                                  size="small"
-                                  variant="outlined"
-                                />
-                              )}
-                              {p.daily_count === 0 && p.market_count === 0 && "-"}
-                            </Box>
-                          </TableCell>
-                          <TableCell align="right">
-                            <Typography fontWeight={600} color="warning.main">
-                              Rs.{p.amount.toLocaleString()}
-                            </Typography>
-                          </TableCell>
-                          <TableCell>
-                            {p.proof_url ? (
-                              <Tooltip title="View payment proof from company">
-                                <IconButton
-                                  size="small"
-                                  color="primary"
-                                  onClick={() => window.open(p.proof_url!, "_blank")}
-                                >
-                                  <ReceiptIcon fontSize="small" />
-                                </IconButton>
-                              </Tooltip>
-                            ) : (
-                              "-"
-                            )}
-                          </TableCell>
-                          <TableCell align="center">
-                            <Button
-                              variant="contained"
-                              size="small"
-                              onClick={() => handleOpenSettlementDialog(p.id)}
-                            >
-                              Settle
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
+
+                <EngineerWalletTable
+                  settlements={pendingSettlements}
+                  loading={loading}
+                  onSettle={handleOpenSettlementDialog}
+                />
 
                 <Box sx={{ mt: 2, p: 2, bgcolor: "background.default", borderRadius: 1 }}>
                   <Typography variant="subtitle2" color="text.secondary">

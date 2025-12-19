@@ -1,9 +1,8 @@
 "use client";
 
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient } from "@tanstack/react-query";
 import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
 import { useState, useEffect, useRef } from "react";
-import { usePathname } from "next/navigation";
 import { createIDBPersister } from "@/lib/cache/persistor";
 import { initBackgroundSync, stopBackgroundSync } from "@/lib/cache/sync";
 import {
@@ -22,15 +21,15 @@ export default function QueryProvider({
       new QueryClient({
         defaultOptions: {
           queries: {
-            staleTime: 1 * 60 * 1000, // 1 minute - data considered fresh
+            staleTime: 5 * 60 * 1000, // 5 minutes - data considered fresh (increased to reduce refetches)
             gcTime: 30 * 60 * 1000, // 30 minutes - cache garbage collection
             retry: 3, // Retry failed requests 3 times for better reliability
             retryDelay: (attemptIndex) =>
               Math.min(1000 * 2 ** attemptIndex, 30000), // Exponential backoff
-            refetchOnWindowFocus: true, // Refetch when tab regains focus
+            refetchOnWindowFocus: false, // Disabled - prevents refetch cascade on tab focus
             refetchOnReconnect: true, // Refetch when network reconnects
-            refetchOnMount: "always", // Always refetch stale data when component mounts (fixes navigation issue)
-            networkMode: "online", // Only fetch when online
+            refetchOnMount: true, // Only refetch if data is stale (not "always")
+            networkMode: "online", // Online mode to prevent showing stale data from wrong site
           },
           mutations: {
             retry: 1,
@@ -50,16 +49,9 @@ export default function QueryProvider({
         maxAge: 24 * 60 * 60 * 1000, // 24 hours max age for persisted data
         buster: "v1", // Change this to invalidate all persisted cache
       }}
-      onSuccess={() => {
-        // After cache restoration, invalidate stale queries to trigger refetch
-        queryClient.invalidateQueries({
-          refetchType: "active",
-          predicate: (query) => query.isStale(),
-        });
-      }}
+      // Removed onSuccess invalidation - it was causing refetch cascade after cache restore
     >
       <SyncInitializer queryClient={queryClient} />
-      <RouteChangeHandler queryClient={queryClient} />
       {children}
     </PersistQueryClientProvider>
   );
@@ -85,8 +77,11 @@ function SyncInitializer({ queryClient }: { queryClient: QueryClient }) {
 
     // Clear old site's cached queries when switching sites
     // This prevents stale data from appearing when navigating
-    if (previousSiteId && currentSiteId && previousSiteId !== currentSiteId) {
-      console.log(`Site changed from ${previousSiteId} to ${currentSiteId}, clearing site-specific cache`);
+    if (currentSiteId && previousSiteId !== currentSiteId) {
+      console.log(`Site changed from ${previousSiteId || 'none'} to ${currentSiteId}, clearing site-specific cache`);
+
+      // Cancel any in-flight queries first
+      queryClient.cancelQueries();
 
       // Remove all queries EXCEPT preserved ones (user, auth, sites, etc.)
       queryClient.removeQueries({
@@ -105,6 +100,18 @@ function SyncInitializer({ queryClient }: { queryClient: QueryClient }) {
 
           // Remove all other queries (they are site-specific)
           return true;
+        },
+      });
+
+      // Reset query cache state for removed queries to ensure fresh fetches
+      queryClient.resetQueries({
+        predicate: (query) => {
+          const queryKey = query.queryKey;
+          if (!Array.isArray(queryKey) || queryKey.length === 0) {
+            return false;
+          }
+          const firstKey = String(queryKey[0]);
+          return !PRESERVED_QUERY_PREFIXES.some(prefix => firstKey.startsWith(prefix));
         },
       });
     }
@@ -129,30 +136,5 @@ function SyncInitializer({ queryClient }: { queryClient: QueryClient }) {
   return null;
 }
 
-/**
- * Component to handle route changes and trigger query refetches
- * Ensures data is fresh when navigating between pages
- */
-function RouteChangeHandler({ queryClient }: { queryClient: QueryClient }) {
-  const pathname = usePathname();
-  const previousPathRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    // Only invalidate if route actually changed (not on initial mount)
-    if (previousPathRef.current && previousPathRef.current !== pathname) {
-      // Invalidate queries that are currently being observed (active on the new page)
-      // This triggers refetch for stale data
-      queryClient.invalidateQueries({
-        refetchType: "active", // Only refetch queries that have active observers
-        predicate: (query) => {
-          // Skip if data is still fresh
-          return query.isStale();
-        },
-      });
-    }
-
-    previousPathRef.current = pathname;
-  }, [pathname, queryClient]);
-
-  return null;
-}
+// RouteChangeHandler REMOVED - was causing refetch cascade on every navigation
+// React Query's built-in staleTime handles data freshness automatically

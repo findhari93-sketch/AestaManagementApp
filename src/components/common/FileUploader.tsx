@@ -369,58 +369,82 @@ export default function FileUploader({
       setError(null);
 
       let progressInterval: NodeJS.Timeout | null = null;
+      let globalTimeout: NodeJS.Timeout | null = null;
+      let isAborted = false;
+
+      // Global timeout to prevent indefinite hanging (20 seconds)
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        globalTimeout = setTimeout(() => {
+          isAborted = true;
+          reject(new Error("Upload timed out. Please try with a smaller file or check your connection."));
+        }, 20000);
+      });
 
       try {
-        // Compress image if enabled and file is an image
-        let fileToUpload = file;
-        const effectiveMime = getEffectiveMimeType(file);
-        if (compressImages && effectiveMime.startsWith("image/")) {
-          setUploadProgress(5); // Show early progress for compression
-          try {
-            fileToUpload = await compressImage(
-              file,
-              maxCompressedSizeKB,
-              maxImageWidth,
-              maxImageHeight
-            );
-            console.log(
-              `Image compressed: ${formatFileSize(file.size)} -> ${formatFileSize(fileToUpload.size)}`
-            );
-          } catch (compressionError) {
-            console.warn("Image compression failed, uploading original:", compressionError);
-            // Continue with original file if compression fails
+        const uploadPromise = (async () => {
+          // Compress image if enabled and file is an image
+          let fileToUpload = file;
+          const effectiveMime = getEffectiveMimeType(file);
+          if (compressImages && effectiveMime.startsWith("image/")) {
+            setUploadProgress(5); // Show early progress for compression
+            try {
+              fileToUpload = await compressImage(
+                file,
+                maxCompressedSizeKB,
+                maxImageWidth,
+                maxImageHeight
+              );
+              if (!isAborted) {
+                console.log(
+                  `Image compressed: ${formatFileSize(file.size)} -> ${formatFileSize(fileToUpload.size)}`
+                );
+              }
+            } catch (compressionError) {
+              console.warn("Image compression failed, uploading original:", compressionError);
+              // Continue with original file if compression fails
+            }
           }
-        }
 
-        // Simulate progress for better UX
-        progressInterval = setInterval(() => {
-          setUploadProgress((prev) => {
-            if (prev < 85) return prev + Math.random() * 15;
-            return prev;
-          });
-        }, 200);
+          if (isAborted) throw new Error("Upload cancelled");
 
-        const ext = file.name.split(".").pop() || "file";
-        const timestamp = Date.now();
-        const fileName = `${fileNamePrefix}_${timestamp}.${ext}`;
-        const filePath = `${folderPath}/${fileName}`;
+          // Simulate progress for better UX
+          progressInterval = setInterval(() => {
+            setUploadProgress((prev) => {
+              if (prev < 85) return prev + Math.random() * 15;
+              return prev;
+            });
+          }, 200);
 
-        const { data, error: uploadError } = await supabase.storage
-          .from(bucketName)
-          .upload(filePath, fileToUpload, {
-            cacheControl: "3600",
-            upsert: true,
-          });
+          const ext = file.name.split(".").pop() || "file";
+          const timestamp = Date.now();
+          const fileName = `${fileNamePrefix}_${timestamp}.${ext}`;
+          const filePath = `${folderPath}/${fileName}`;
+
+          const { data, error: uploadError } = await supabase.storage
+            .from(bucketName)
+            .upload(filePath, fileToUpload, {
+              cacheControl: "3600",
+              upsert: true,
+            });
+
+          if (isAborted) throw new Error("Upload cancelled");
+
+          if (uploadError) {
+            throw new Error(uploadError.message || "Upload failed");
+          }
+
+          if (!data?.path) {
+            throw new Error("Upload completed but no file path returned");
+          }
+
+          return { data, fileToUpload };
+        })();
+
+        // Race between upload and timeout
+        const { data, fileToUpload } = await Promise.race([uploadPromise, timeoutPromise]);
 
         if (progressInterval) clearInterval(progressInterval);
-
-        if (uploadError) {
-          throw new Error(uploadError.message || "Upload failed");
-        }
-
-        if (!data?.path) {
-          throw new Error("Upload completed but no file path returned");
-        }
+        if (globalTimeout) clearTimeout(globalTimeout);
 
         setUploadProgress(100);
         setUploadSuccess(true);
@@ -451,6 +475,7 @@ export default function FileUploader({
         return uploadedFile;
       } catch (err: any) {
         if (progressInterval) clearInterval(progressInterval);
+        if (globalTimeout) clearTimeout(globalTimeout);
         setUploadProgress(0);
         const errorMsg = err.message || "Upload failed";
         setError(errorMsg);
@@ -459,6 +484,7 @@ export default function FileUploader({
       } finally {
         setUploading(false);
         if (progressInterval) clearInterval(progressInterval);
+        if (globalTimeout) clearTimeout(globalTimeout);
       }
     },
     [

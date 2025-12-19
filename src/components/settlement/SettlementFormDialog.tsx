@@ -77,25 +77,58 @@ export default function SettlementFormDialog({
 
   // Fetch transaction details on open
   useEffect(() => {
+    let isMounted = true;
+
+    const fetchTransaction = async () => {
+      if (!transactionId) {
+        setLoading(false);
+        return;
+      }
+
+      setLoading(true);
+      setError(null);
+
+      try {
+        const { data, error } = await getTransactionWithLaborers(
+          supabase,
+          transactionId
+        );
+
+        if (!isMounted) return;
+
+        if (error) {
+          console.error("Error fetching transaction:", error);
+          setError(error.message || "Failed to load transaction details");
+        } else {
+          setTransaction(data);
+        }
+      } catch (err: any) {
+        if (!isMounted) return;
+        console.error("Exception fetching transaction:", err);
+        setError(err.message || "Failed to load transaction details");
+      } finally {
+        if (isMounted) {
+          setLoading(false);
+        }
+      }
+    };
+
     if (open && transactionId) {
       fetchTransaction();
+    } else if (!open) {
+      // Reset state when dialog closes
+      setTransaction(null);
+      setError(null);
+      setLoading(true);
+      setSettlementMode("upi");
+      setProofFile(null);
+      setReason("");
     }
-  }, [open, transactionId]);
 
-  const fetchTransaction = async () => {
-    setLoading(true);
-    setError(null);
-    const { data, error } = await getTransactionWithLaborers(
-      supabase,
-      transactionId
-    );
-    if (error) {
-      setError(error.message || "Failed to load transaction details");
-    } else {
-      setTransaction(data);
-    }
-    setLoading(false);
-  };
+    return () => {
+      isMounted = false;
+    };
+  }, [open, transactionId, supabase]);
 
   const handleSubmit = async () => {
     if (!transaction || !userProfile) return;
@@ -360,8 +393,8 @@ export default function SettlementFormDialog({
               />
             </RadioGroup>
 
-            {/* Conditional Fields */}
-            {settlementMode === "upi" ? (
+            {/* UPI Screenshot */}
+            {settlementMode === "upi" && (
               <Box sx={{ mb: 2 }}>
                 <FileUploader
                   supabase={supabase}
@@ -378,18 +411,23 @@ export default function SettlementFormDialog({
                   compact
                 />
               </Box>
-            ) : (
-              <TextField
-                fullWidth
-                multiline
-                rows={3}
-                label="Reason / Notes (Optional)"
-                placeholder="Enter any notes about the cash payment..."
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-                sx={{ mb: 2 }}
-              />
             )}
+
+            {/* Reason/Notes - show for BOTH UPI and Cash */}
+            <TextField
+              fullWidth
+              multiline
+              rows={2}
+              label="Notes / Comments (Optional)"
+              placeholder={
+                settlementMode === "cash"
+                  ? "Enter reason for cash payment..."
+                  : "Any additional notes about this payment..."
+              }
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              sx={{ mb: 2 }}
+            />
 
             {error && (
               <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>

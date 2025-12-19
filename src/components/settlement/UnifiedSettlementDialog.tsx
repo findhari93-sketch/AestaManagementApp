@@ -56,7 +56,14 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSite } from "@/contexts/SiteContext";
-import { createSalaryExpense } from "@/lib/services/notificationService";
+import {
+  createSalaryExpense,
+  createPaymentSettlementNotification,
+} from "@/lib/services/notificationService";
+import {
+  generateWhatsAppUrl,
+  generateSettlementNotificationMessage,
+} from "@/lib/formatters";
 import FileUploader, { UploadedFile } from "@/components/common/FileUploader";
 import SubcontractLinkSelector from "@/components/payments/SubcontractLinkSelector";
 import PayerSourceSelector from "./PayerSourceSelector";
@@ -342,6 +349,53 @@ export default function UnifiedSettlementDialog({
 
         if (txError) throw txError;
         engineerTransactionId = txData.id;
+
+        // Get engineer details for notification
+        const selectedEngineer = engineers.find((e) => e.id === selectedEngineerId);
+
+        // Send in-app notification to engineer
+        const dailyCount = config.context === "daily_single"
+          ? selectedRecords.size
+          : config.records.filter((r) => r.sourceType === "daily" && !r.isPaid).length;
+        const marketCount = config.context === "daily_single"
+          ? 0
+          : config.records.filter((r) => r.sourceType === "market" && !r.isPaid).length;
+
+        if (engineerTransactionId) {
+          await createPaymentSettlementNotification(
+            supabase,
+            engineerTransactionId,
+            selectedEngineerId,
+            calculatedAmounts.selected,
+            { dailyCount, marketCount, totalAmount: calculatedAmounts.selected },
+            selectedSite.name
+          );
+
+          // Send WhatsApp notification with deep link
+          if (selectedEngineer) {
+            // Fetch engineer's phone number
+            const { data: userData } = await supabase
+              .from("users")
+              .select("phone")
+              .eq("id", selectedEngineerId)
+              .single();
+
+            if (userData?.phone) {
+              const whatsappMessage = generateSettlementNotificationMessage({
+                engineerName: selectedEngineer.name,
+                amount: calculatedAmounts.selected,
+                dailyCount,
+                marketCount,
+                siteName: selectedSite.name || "Site",
+                transactionId: engineerTransactionId,
+              });
+              const whatsappUrl = generateWhatsAppUrl(userData.phone, whatsappMessage);
+              if (whatsappUrl) {
+                window.open(whatsappUrl, "_blank");
+              }
+            }
+          }
+        }
       }
 
       // 2. Process records based on context

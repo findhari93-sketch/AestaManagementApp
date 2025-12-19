@@ -3,6 +3,7 @@
 import { useMemo, useEffect } from "react";
 import { ThemeProvider as MuiThemeProvider } from "@mui/material/styles";
 import CssBaseline from "@mui/material/CssBaseline";
+import { AppRouterCacheProvider } from "@mui/material-nextjs/v15-appRouter";
 import { ThemeContextProvider, useThemeMode } from "@/contexts/ThemeContext";
 import { createAppTheme } from "@/theme/theme";
 
@@ -30,8 +31,10 @@ export default function ThemeProvider({
   children: React.ReactNode;
 }) {
   return (
-    <ThemeContextProvider>
-      <ThemeProviderInner>{children}</ThemeProviderInner>
-    </ThemeContextProvider>
+    <AppRouterCacheProvider>
+      <ThemeContextProvider>
+        <ThemeProviderInner>{children}</ThemeProviderInner>
+      </ThemeContextProvider>
+    </AppRouterCacheProvider>
   );
 }

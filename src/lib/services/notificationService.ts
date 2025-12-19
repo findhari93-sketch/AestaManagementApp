@@ -192,6 +192,7 @@ export async function getTransactionWithLaborers(
     if (dailyError) throw dailyError;
 
     // Fetch market laborer attendance linked to this transaction
+    // Note: Using separate query for role names to avoid FK cache issues
     const { data: marketAttendance, error: marketError } = await supabase
       .from("market_laborer_attendance")
       .select(
@@ -201,12 +202,30 @@ export async function getTransactionWithLaborers(
         rate_per_person,
         total_cost,
         date,
-        laborer_roles!market_laborer_attendance_role_id_fkey (name)
+        role_id
       `
       )
       .eq("engineer_transaction_id", transactionId);
 
     if (marketError) throw marketError;
+
+    // Fetch role names separately to avoid FK schema cache issues
+    const roleIds = marketAttendance
+      ?.map((ma) => ma.role_id)
+      .filter((id): id is string => id != null) || [];
+
+    let rolesMap: Record<string, string> = {};
+    if (roleIds.length > 0) {
+      const { data: roles } = await supabase
+        .from("labor_roles")
+        .select("id, name")
+        .in("id", roleIds);
+
+      rolesMap = (roles || []).reduce((acc, role) => {
+        acc[role.id] = role.name;
+        return acc;
+      }, {} as Record<string, string>);
+    }
 
     const result: TransactionWithLaborers = {
       id: transaction.id,
@@ -235,9 +254,7 @@ export async function getTransactionWithLaborers(
       market_attendance:
         marketAttendance?.map((ma) => ({
           id: ma.id,
-          role_name:
-            (ma.laborer_roles as unknown as { name: string } | null)?.name ||
-            "Unknown",
+          role_name: ma.role_id ? rolesMap[ma.role_id] || "Unknown" : "Unknown",
           count: ma.count || 0,
           rate_per_person: ma.rate_per_person || 0,
           total_cost: ma.total_cost || 0,
@@ -279,7 +296,8 @@ export async function submitSettlement(
       updateData.settlement_proof_url = proofUrl;
     }
 
-    if (settlementMode === "cash" && reason) {
+    // Save notes for BOTH UPI and cash payments
+    if (reason) {
       updateData.notes = reason;
     }
 
@@ -287,22 +305,52 @@ export async function submitSettlement(
       .from("site_engineer_transactions")
       .update(updateData)
       .eq("id", transactionId)
-      .select("amount")
+      .select("amount, site_id, related_subcontract_id, description")
       .single();
 
     if (updateError) throw updateError;
 
-    // Create notifications for admin/office users
-    const { error: notifError } = await createSettlementCompletedNotifications(
-      supabase,
-      transactionId,
-      settledByName,
-      transaction?.amount || 0,
-      settlementMode,
-      siteName
-    );
+    // Create pending expense (will be marked cleared when admin confirms)
+    // This allows the expense to show as "Pending" in daily expenses until approved
+    if (transaction?.site_id && transaction?.amount > 0) {
+      try {
+        await createSettlementExpense(supabase, {
+          siteId: transaction.site_id,
+          amount: transaction.amount,
+          date: new Date().toISOString().split("T")[0],
+          description: transaction.description || "Laborer salary settlement",
+          subcontractId: transaction.related_subcontract_id,
+          proofUrl: proofUrl || null,
+          paidBy: settledByName,
+          paidByUserId: settledByUserId,
+          isCleared: false, // PENDING state - will be marked cleared on admin confirmation
+          engineerTransactionId: transactionId,
+        });
+        console.log("Created pending expense for settlement:", transactionId);
+      } catch (expenseErr) {
+        console.warn("Failed to create pending expense (non-critical):", expenseErr);
+      }
+    }
 
-    if (notifError) throw notifError;
+    // Create notifications for admin/office users (non-blocking)
+    // Note: This may fail due to RLS policies if engineer doesn't have permission
+    // to insert notifications for other users - that's okay, settlement still succeeds
+    try {
+      const { error: notifError } = await createSettlementCompletedNotifications(
+        supabase,
+        transactionId,
+        settledByName,
+        transaction?.amount || 0,
+        settlementMode,
+        siteName
+      );
+
+      if (notifError) {
+        console.warn("Failed to create settlement notifications (non-critical):", notifError);
+      }
+    } catch (notifErr) {
+      console.warn("Exception creating settlement notifications (non-critical):", notifErr);
+    }
 
     return { error: null };
   } catch (err) {
@@ -350,36 +398,65 @@ export async function confirmSettlement(
     if (error) throw error;
 
     // 3. Mark linked daily attendance as paid
-    const { error: dailyError } = await supabase
+    const { data: dailyUpdated, error: dailyError } = await supabase
       .from("daily_attendance")
       .update({
         is_paid: true,
         payment_date: paymentDate,
       })
-      .eq("engineer_transaction_id", transactionId);
+      .eq("engineer_transaction_id", transactionId)
+      .select("id");
 
     if (dailyError) {
       console.error("Error updating daily attendance:", dailyError);
+    } else {
+      console.log(`Updated ${dailyUpdated?.length || 0} daily attendance records to is_paid=true`);
     }
 
     // 4. Mark linked market attendance as paid
-    const { error: marketError } = await supabase
+    const { data: marketUpdated, error: marketError } = await supabase
       .from("market_laborer_attendance")
       .update({
         is_paid: true,
         payment_date: paymentDate,
       })
-      .eq("engineer_transaction_id", transactionId);
+      .eq("engineer_transaction_id", transactionId)
+      .select("id");
 
     if (marketError) {
       console.error("Error updating market attendance:", marketError);
+    } else {
+      console.log(`Updated ${marketUpdated?.length || 0} market attendance records to is_paid=true`);
     }
 
-    // 5. Create daily expense entry for this settlement
+    // 5. Mark linked expense as cleared (or create if not found for old transactions)
     if (transaction.site_id && transaction.amount > 0) {
-      await createSettlementExpense(
-        supabase,
-        {
+      // First, try to find existing pending expense linked to this transaction
+      const { data: existingExpense, error: findError } = await supabase
+        .from("expenses")
+        .select("id")
+        .eq("engineer_transaction_id", transactionId)
+        .single();
+
+      if (existingExpense && !findError) {
+        // Update existing expense to cleared
+        const { error: updateExpenseError } = await supabase
+          .from("expenses")
+          .update({
+            is_cleared: true,
+            cleared_date: paymentDate,
+          })
+          .eq("id", existingExpense.id);
+
+        if (updateExpenseError) {
+          console.error("Error updating expense to cleared:", updateExpenseError);
+        } else {
+          console.log(`Expense ${existingExpense.id} marked as cleared`);
+        }
+      } else {
+        // Fallback: Create expense if not found (for old transactions without pending expense)
+        console.log("No pending expense found, creating new cleared expense");
+        await createSettlementExpense(supabase, {
           siteId: transaction.site_id,
           amount: transaction.amount,
           date: transaction.transaction_date,
@@ -388,8 +465,12 @@ export async function confirmSettlement(
           proofUrl: transaction.settlement_proof_url,
           paidBy: confirmedByName,
           paidByUserId: confirmedByUserId,
-        }
-      );
+          isCleared: true,
+          engineerTransactionId: transactionId,
+        });
+      }
+    } else {
+      console.log(`Skipping expense update: site_id=${transaction.site_id}, amount=${transaction.amount}`);
     }
 
     return { error: null };
@@ -413,6 +494,8 @@ async function createSettlementExpense(
     proofUrl: string | null;
     paidBy: string;
     paidByUserId: string;
+    isCleared?: boolean; // Default true for backward compatibility
+    engineerTransactionId?: string; // Link to engineer transaction
   }
 ): Promise<void> {
   try {
@@ -450,26 +533,44 @@ async function createSettlementExpense(
     }
 
     // Create expense entry
-    const { error: expenseError } = await supabase
+    // Note: paid_by is a FK to users.id, so we use paidByUserId (UUID)
+    // entered_by is a string field for the name
+    const isCleared = params.isCleared ?? true; // Default to cleared for backward compatibility
+    const expenseData = {
+      site_id: params.siteId,
+      category_id: categoryId,
+      amount: params.amount,
+      date: params.date,
+      description: fullDescription,
+      contract_id: params.subcontractId,
+      receipt_url: params.proofUrl,
+      module: "labor" as const,
+      paid_by: params.paidByUserId, // FK to users.id - must be UUID
+      entered_by: params.paidBy, // String field for name
+      entered_by_user_id: params.paidByUserId,
+      is_cleared: isCleared,
+      cleared_date: isCleared ? params.date : null,
+      engineer_transaction_id: params.engineerTransactionId || null,
+    };
+
+    console.log("Creating settlement expense with data:", expenseData);
+
+    const { data: insertedExpense, error: expenseError } = await supabase
       .from("expenses")
-      .insert({
-        site_id: params.siteId,
-        category_id: categoryId,
-        amount: params.amount,
-        date: params.date,
-        description: fullDescription,
-        contract_id: params.subcontractId,
-        receipt_url: params.proofUrl,
-        module: "labor",
-        paid_by: params.paidBy,
-        entered_by: params.paidBy,
-        entered_by_user_id: params.paidByUserId,
-        is_cleared: true,
-        cleared_date: params.date,
-      });
+      .insert(expenseData)
+      .select()
+      .single();
 
     if (expenseError) {
-      console.error("Error creating settlement expense:", expenseError);
+      console.error("Error creating settlement expense:", {
+        error: expenseError,
+        message: expenseError.message,
+        details: expenseError.details,
+        hint: expenseError.hint,
+        code: expenseError.code,
+      });
+    } else {
+      console.log("Settlement expense created successfully:", insertedExpense?.id);
     }
   } catch (err) {
     console.error("Error in createSettlementExpense:", err);

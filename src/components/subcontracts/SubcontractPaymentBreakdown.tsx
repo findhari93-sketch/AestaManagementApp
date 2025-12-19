@@ -72,7 +72,7 @@ export default function SubcontractPaymentBreakdown({
       const { data: payments, error: paymentsError } = await supabase
         .from("subcontract_payments")
         .select("*")
-        .eq("subcontract_id", subcontractId)
+        .eq("contract_id", subcontractId)
         .order("payment_date", { ascending: false });
 
       if (paymentsError) throw paymentsError;
@@ -86,11 +86,12 @@ export default function SubcontractPaymentBreakdown({
 
       if (teaError) throw teaError;
 
-      // Fetch linked expenses
+      // Fetch linked expenses - only count cleared expenses (pending ones don't count toward paid amount)
       const { data: expenses, error: expensesError } = await supabase
         .from("expenses")
         .select("*, expense_categories(name)")
-        .eq("subcontract_id", subcontractId)
+        .eq("contract_id", subcontractId)
+        .eq("is_cleared", true)
         .order("date", { ascending: false });
 
       if (expensesError) throw expensesError;

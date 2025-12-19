@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { usePathname } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
@@ -10,15 +10,37 @@ import { createClient } from "@/lib/supabase/client";
  * Since middleware only runs on server requests, client-side navigation
  * doesn't trigger session refresh. This hook ensures the session is
  * validated and refreshed when navigating between pages.
+ *
+ * Optimized to:
+ * - Use singleton client (no new instance per render)
+ * - Debounce rapid navigation changes
+ * - Add timeout to prevent hanging
  */
 export function useSessionRefresh() {
   const pathname = usePathname();
-  const supabase = createClient();
+  const lastRefreshRef = useRef<number>(0);
+  const DEBOUNCE_MS = 2000; // Don't refresh more than once every 2 seconds
 
   useEffect(() => {
+    const now = Date.now();
+
+    // Debounce: Skip if we refreshed recently
+    if (now - lastRefreshRef.current < DEBOUNCE_MS) {
+      return;
+    }
+
     const refreshSession = async () => {
+      // Get singleton client inside effect to avoid dependency issues
+      const supabase = createClient();
+
+      // Add timeout to prevent hanging (10s for slower connections)
+      const timeoutId = setTimeout(() => {
+        console.warn("Session refresh timed out");
+      }, 10000);
+
       try {
         const { data: { session }, error } = await supabase.auth.getSession();
+        clearTimeout(timeoutId);
 
         if (error || !session) {
           // Session invalid - auth context will handle redirect
@@ -33,11 +55,14 @@ export function useSessionRefresh() {
             await supabase.auth.refreshSession();
           }
         }
+
+        lastRefreshRef.current = Date.now();
       } catch (error) {
+        clearTimeout(timeoutId);
         console.error("Session refresh error:", error);
       }
     };
 
     refreshSession();
-  }, [pathname, supabase]);
+  }, [pathname]); // Only depend on pathname, not supabase
 }

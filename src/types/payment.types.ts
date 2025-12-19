@@ -51,6 +51,8 @@ export interface DailyPaymentRecord {
   transactionDate: string | null; // When company sent money
   settledDate: string | null; // When engineer settled
   confirmedAt: string | null; // When admin confirmed
+  settlementMode: "upi" | "cash" | null; // How engineer settled
+  cashReason: string | null; // Reason for cash payment (notes field)
 
   // Subcontract linking (optional)
   subcontractId: string | null;

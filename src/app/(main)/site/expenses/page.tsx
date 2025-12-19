@@ -36,6 +36,7 @@ import {
   Category as CategoryIcon,
 } from "@mui/icons-material";
 import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
+import RedirectConfirmDialog from "@/components/common/RedirectConfirmDialog";
 import { createClient } from "@/lib/supabase/client";
 import { useSite } from "@/contexts/SiteContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -72,6 +73,7 @@ interface SubcontractSummary {
 interface ExpenseWithCategory extends Expense {
   category_name?: string;
   payer_name?: string;
+  engineer_transaction_id?: string | null;
 }
 
 export default function ExpensesPage() {
@@ -97,6 +99,12 @@ export default function ExpensesPage() {
   // Subcontract summary state
   const [subcontracts, setSubcontracts] = useState<SubcontractSummary[]>([]);
   const [subcontractsLoading, setSubcontractsLoading] = useState(false);
+
+  // Redirect dialog state for salary expenses that can't be deleted directly
+  const [redirectDialog, setRedirectDialog] = useState<{
+    open: boolean;
+    expense: ExpenseWithCategory | null;
+  }>({ open: false, expense: null });
 
   const [form, setForm] = useState({
     module: "general" as ExpenseModule,
@@ -162,12 +170,13 @@ export default function ExpensesPage() {
 
           const laborPaid = laborPaymentsData?.reduce((sum, p) => sum + (p.amount || 0), 0) || 0;
 
-          // Get expenses linked to this subcontract
+          // Get expenses linked to this subcontract (only cleared expenses count toward paid)
           const { data: expensesData } = await supabase
             .from("expenses")
             .select("amount")
             .eq("contract_id", sc.id)
-            .eq("is_deleted", false);
+            .eq("is_deleted", false)
+            .eq("is_cleared", true);
 
           const expensesPaid = expensesData?.reduce((sum, e) => sum + (e.amount || 0), 0) || 0;
 
@@ -244,7 +253,7 @@ export default function ExpensesPage() {
     try {
       let query = supabase
         .from("expenses")
-        .select(`*, expense_categories(name), site_payers(name)`)
+        .select(`*, expense_categories(name), site_payers(name), engineer_transaction_id`)
         .eq("site_id", selectedSite.id)
         .order("date", { ascending: false });
 
@@ -344,11 +353,20 @@ export default function ExpensesPage() {
     }
   };
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = async (expense: ExpenseWithCategory) => {
+    // Check if expense came from salary settlement
+    // Expenses from salary have engineer_transaction_id set
+    if (expense.engineer_transaction_id) {
+      // Show redirect dialog instead of allowing delete
+      setRedirectDialog({ open: true, expense });
+      return;
+    }
+
+    // Regular delete for non-salary expenses
     if (!confirm("Delete this expense?")) return;
     setLoading(true);
     try {
-      await supabase.from("expenses").delete().eq("id", id);
+      await supabase.from("expenses").delete().eq("id", expense.id);
       await fetchExpenses();
     } catch (error: any) {
       alert("Failed: " + error.message);
@@ -454,7 +472,7 @@ export default function ExpensesPage() {
             <IconButton
               size="small"
               color="error"
-              onClick={() => handleDelete(row.original.id)}
+              onClick={() => handleDelete(row.original)}
               disabled={!canEdit}
             >
               <Delete fontSize="small" />
@@ -818,6 +836,20 @@ export default function ExpensesPage() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Redirect dialog for salary expenses */}
+      <RedirectConfirmDialog
+        open={redirectDialog.open}
+        onClose={() => setRedirectDialog({ open: false, expense: null })}
+        title="Cannot Delete Salary Expense"
+        message="This expense was created from a salary settlement. To modify or delete it, please cancel the payment in the Salary Settlement page first."
+        targetPage="payments"
+        targetParams={{
+          date: redirectDialog.expense?.date,
+          highlightType: "salary",
+          transactionId: redirectDialog.expense?.engineer_transaction_id || undefined,
+        }}
+      />
     </Box>
   );
 }
