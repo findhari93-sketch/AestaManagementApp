@@ -123,6 +123,10 @@ interface AttendanceRecord {
   is_paid: boolean;
   payment_notes?: string | null;
   subcontract_title?: string | null;
+  // Payment/settlement fields
+  engineer_transaction_id?: string | null;
+  expense_id?: string | null;
+  paid_via?: string | null;
   // Time tracking fields
   in_time?: string | null;
   lunch_out?: string | null;
@@ -181,6 +185,8 @@ interface MarketLaborerRecord {
   pendingAmount: number;
   groupCount: number; // Total count in this group (for edit reference)
   paymentNotes: string | null;
+  engineerTransactionId: string | null; // For settlement tracking
+  expenseId: string | null; // For direct payment tracking
 }
 
 interface DateSummary {
@@ -686,6 +692,7 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
           id, date, laborer_id, work_days, hours_worked, daily_rate_applied, daily_earnings, is_paid, payment_notes, subcontract_id,
           in_time, lunch_out, lunch_in, out_time, work_hours, break_hours, total_hours, day_units, snacks_amount,
           attendance_status, work_progress_percent,
+          engineer_transaction_id, expense_id, paid_via,
           entered_by, recorded_by, recorded_by_user_id, updated_by, updated_by_user_id, created_at, updated_at,
           laborers!inner(name, team_id, category_id, role_id, laborer_type, team:teams!laborers_team_id_fkey(name), labor_categories(name), labor_roles(name)),
           building_sections!inner(name),
@@ -838,6 +845,8 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
             pendingAmount: m.is_paid ? 0 : perPersonEarnings,
             groupCount: m.count,
             paymentNotes: m.payment_notes || null,
+            engineerTransactionId: m.engineer_transaction_id || null,
+            expenseId: m.expense_id || null,
           });
         }
 
@@ -875,6 +884,10 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
           is_paid: record.is_paid || false,
           payment_notes: record.payment_notes || null,
           subcontract_title: record.subcontracts?.title || null,
+          // Payment/settlement fields
+          engineer_transaction_id: record.engineer_transaction_id || null,
+          expense_id: record.expense_id || null,
+          paid_via: record.paid_via || null,
           in_time: record.in_time,
           lunch_out: record.lunch_out,
           lunch_in: record.lunch_in,
@@ -1153,6 +1166,8 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
           paidAmount: m.is_paid ? perPersonEarnings : 0,
           pendingAmount: m.is_paid ? 0 : perPersonEarnings,
           groupCount: m.count, paymentNotes: m.payment_notes || null,
+          engineerTransactionId: m.engineer_transaction_id || null,
+          expenseId: m.expense_id || null,
         });
       }
       existing.count += m.count;
@@ -1442,21 +1457,87 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
     setLoading(true);
     try {
       const daily_earnings = editForm.work_days * editForm.daily_rate_applied;
+      const hasSettlement = editingRecord.engineer_transaction_id || editingRecord.expense_id;
 
-      const { error } = await (supabase.from("daily_attendance") as any)
+      // Update attendance fields
+      const { error, data } = await supabase
+        .from("daily_attendance")
         .update({
           work_days: editForm.work_days,
           daily_rate_applied: editForm.daily_rate_applied,
           daily_earnings,
           hours_worked: editForm.work_days * 8,
+          updated_at: new Date().toISOString(),
+          updated_by: userProfile?.name || "Unknown",
+          updated_by_user_id: userProfile?.id,
         })
-        .eq("id", editingRecord.id);
+        .eq("id", editingRecord.id)
+        .select();
+
+      if (error) {
+        console.error("Update error:", error);
+        throw error;
+      }
+
+      // If this record was linked to any payment/settlement, reset it
+      if (hasSettlement) {
+        // Reset this attendance record's payment status
+        const { error: resetError } = await supabase
+          .from("daily_attendance")
+          .update({
+            is_paid: false,
+            payment_date: null,
+            payment_mode: null,
+            paid_via: null,
+            engineer_transaction_id: null,
+            payment_proof_url: null,
+            payment_notes: null,
+            payer_source: null,
+            payer_name: null,
+            expense_id: null,
+          })
+          .eq("id", editingRecord.id);
+
+        if (resetError) {
+          console.error("Reset payment error:", resetError);
+        }
+
+        // Reset the engineer transaction settlement status to pending if exists
+        if (editingRecord.engineer_transaction_id) {
+          const { error: txError } = await supabase
+            .from("site_engineer_transactions")
+            .update({
+              settlement_status: "pending_settlement",
+            })
+            .eq("id", editingRecord.engineer_transaction_id);
+
+          if (txError) {
+            console.error("Reset transaction error:", txError);
+          }
+        }
+
+        // Handle expense record if exists (direct payment)
+        if (editingRecord.expense_id) {
+          const { error: expenseError } = await supabase
+            .from("expenses")
+            .update({
+              notes: "Attendance modified - requires re-settlement",
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", editingRecord.expense_id);
+
+          if (expenseError) {
+            console.error("Update expense error:", expenseError);
+          }
+        }
+      }
 
       setEditDialogOpen(false);
       setEditingRecord(null);
       fetchAttendanceHistory();
     } catch (error: any) {
-      alert("Failed to update: " + error.message);
+      console.error("Edit failed:", error);
+      alert("Failed to update: " + (error.message || "Unknown error"));
     } finally {
       setLoading(false);
     }
@@ -1641,9 +1722,19 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
         marketLaborerEditForm.rate_per_person *
         marketLaborerEditForm.day_units;
 
-      const { error } = await (
-        supabase.from("market_laborer_attendance") as any
-      )
+      // First check if record has any payment/settlement
+      const { data: currentRecord } = await supabase
+        .from("market_laborer_attendance")
+        .select("is_paid, engineer_transaction_id, expense_id")
+        .eq("id", editingMarketLaborer.originalDbId)
+        .single();
+
+      const hasSettlement =
+        currentRecord?.engineer_transaction_id || currentRecord?.expense_id;
+
+      // Update the record
+      const { error } = await supabase
+        .from("market_laborer_attendance")
         .update({
           count: marketLaborerEditForm.count,
           day_units: marketLaborerEditForm.day_units,
@@ -1653,15 +1744,71 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
           updated_by: userProfile?.name || "Unknown",
           updated_by_user_id: userProfile?.id,
         })
-        .eq("id", editingMarketLaborer.originalDbId);
+        .eq("id", editingMarketLaborer.originalDbId)
+        .select();
 
-      if (error) throw error;
+      if (error) {
+        console.error("Market laborer update error:", error);
+        throw error;
+      }
+
+      // Reset settlement if record was paid
+      if (hasSettlement) {
+        const { error: resetError } = await supabase
+          .from("market_laborer_attendance")
+          .update({
+            is_paid: false,
+            payment_date: null,
+            payment_mode: null,
+            paid_via: null,
+            engineer_transaction_id: null,
+            payment_proof_url: null,
+            payer_source: null,
+            payer_name: null,
+            expense_id: null,
+          })
+          .eq("id", editingMarketLaborer.originalDbId);
+
+        if (resetError) {
+          console.error("Reset market payment error:", resetError);
+        }
+
+        // Reset engineer transaction if exists
+        if (currentRecord?.engineer_transaction_id) {
+          const { error: txError } = await supabase
+            .from("site_engineer_transactions")
+            .update({
+              settlement_status: "pending_settlement",
+            })
+            .eq("id", currentRecord.engineer_transaction_id);
+
+          if (txError) {
+            console.error("Reset market transaction error:", txError);
+          }
+        }
+
+        // Handle expense record if exists (direct payment)
+        if (currentRecord?.expense_id) {
+          const { error: expenseError } = await supabase
+            .from("expenses")
+            .update({
+              notes: "Market attendance modified - requires re-settlement",
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", currentRecord.expense_id);
+
+          if (expenseError) {
+            console.error("Update market expense error:", expenseError);
+          }
+        }
+      }
 
       setMarketLaborerEditOpen(false);
       setEditingMarketLaborer(null);
       fetchAttendanceHistory();
     } catch (error: any) {
-      alert("Failed to update: " + error.message);
+      console.error("Market laborer edit failed:", error);
+      alert("Failed to update: " + (error.message || "Unknown error"));
     } finally {
       setLoading(false);
     }
