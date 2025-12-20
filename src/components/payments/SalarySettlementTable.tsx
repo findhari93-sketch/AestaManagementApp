@@ -66,7 +66,6 @@ interface SalarySettlementTableProps {
   onDeleteDate: (date: string, records: DailyPaymentRecord[]) => void;
   onNotifyDate: (date: string, records: DailyPaymentRecord[]) => void;
   onConfirmSettlement?: (transactionId: string) => void;
-  onEditRecord?: (record: DailyPaymentRecord) => void;
   onEditSettlements?: (date: string, records: DailyPaymentRecord[]) => void;
 }
 
@@ -110,7 +109,6 @@ export default function SalarySettlementTable({
   onDeleteDate,
   onNotifyDate,
   onConfirmSettlement,
-  onEditRecord,
   onEditSettlements,
 }: SalarySettlementTableProps) {
   const theme = useTheme();
@@ -418,7 +416,6 @@ export default function SalarySettlementTable({
                 <TableCell>Subcontract</TableCell>
                 <TableCell align="center">Status</TableCell>
                 <TableCell align="center">Settlement</TableCell>
-                {onEditRecord && <TableCell align="center">Actions</TableCell>}
               </TableRow>
             </TableHead>
             <TableBody>
@@ -604,22 +601,6 @@ export default function SalarySettlementTable({
                       </Box>
                     )}
                   </TableCell>
-                  {onEditRecord && (
-                    <TableCell align="center">
-                      <Tooltip title="Edit settlement details">
-                        <IconButton
-                          size="small"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onEditRecord(record);
-                          }}
-                          disabled={disabled}
-                        >
-                          <EditIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                    </TableCell>
-                  )}
                 </TableRow>
               ))}
 
@@ -788,22 +769,6 @@ export default function SalarySettlementTable({
                       </Box>
                     )}
                   </TableCell>
-                  {onEditRecord && (
-                    <TableCell align="center">
-                      <Tooltip title="Edit settlement details">
-                        <IconButton
-                          size="small"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onEditRecord(record);
-                          }}
-                          disabled={disabled}
-                        >
-                          <EditIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                    </TableCell>
-                  )}
                 </TableRow>
               ))}
             </TableBody>

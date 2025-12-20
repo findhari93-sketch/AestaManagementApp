@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import {
   Dialog,
   DialogTitle,
@@ -431,6 +431,8 @@ export default function PaymentDialog({
         recorded_by: userProfile!.name,
         recorded_by_user_id: userProfile!.id,
         notes: notes,
+        money_source: moneySource,
+        money_source_name: (moneySource === "other_site_money" || moneySource === "custom") ? moneySourceName : null,
       })
       .select()
       .single();
@@ -460,13 +462,14 @@ export default function PaymentDialog({
     }
   };
 
-  const handleFileUpload = (file: UploadedFile) => {
+  // Wrapped in useCallback to prevent re-renders when file is uploaded
+  const handleFileUpload = useCallback((file: UploadedFile) => {
     setProofUrl(file.url);
-  };
+  }, []);
 
-  const handleFileRemove = () => {
+  const handleFileRemove = useCallback(() => {
     setProofUrl(null);
-  };
+  }, []);
 
   const selectedEngineer = engineers.find((e) => e.id === selectedEngineerId);
 

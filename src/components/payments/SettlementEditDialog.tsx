@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import {
   Dialog,
   DialogTitle,
@@ -51,7 +51,7 @@ export default function SettlementEditDialog({
   onSuccess,
 }: SettlementEditDialogProps) {
   const { selectedSite } = useSite();
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
 
   // Form state
   const [subcontractId, setSubcontractId] = useState<string | null>(null);
@@ -78,10 +78,10 @@ export default function SettlementEditDialog({
     }
   }, [open, record]);
 
-  // Handle file upload
-  const handleFileUploaded = (file: UploadedFile) => {
+  // Handle file upload - wrapped in useCallback to prevent re-renders
+  const handleFileUploaded = useCallback((file: UploadedFile) => {
     setProofUrl(file.url);
-  };
+  }, []);
 
   // Handle save
   const handleSave = async () => {

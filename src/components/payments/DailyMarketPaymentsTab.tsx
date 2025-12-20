@@ -47,7 +47,6 @@ import { notifyEngineerPaymentReminder } from "@/lib/services/notificationServic
 import { generateWhatsAppUrl, generatePaymentReminderMessage } from "@/lib/formatters";
 import SettlementDetailsDialog from "@/components/settlement/SettlementDetailsDialog";
 import DateViewDetailsDialog from "./DateViewDetailsDialog";
-import SettlementEditDialog from "./SettlementEditDialog";
 import DateSettlementsEditDialog from "./DateSettlementsEditDialog";
 
 interface DailyMarketPaymentsTabProps {
@@ -140,10 +139,6 @@ export default function DailyMarketPaymentsTab({
   const [viewDialogOpen, setViewDialogOpen] = useState(false);
   const [viewDialogDate, setViewDialogDate] = useState<string>("");
   const [viewDialogGroup, setViewDialogGroup] = useState<DateGroup | null>(null);
-
-  // Settlement edit dialog state (individual record edit)
-  const [settlementEditOpen, setSettlementEditOpen] = useState(false);
-  const [recordToEdit, setRecordToEdit] = useState<DailyPaymentRecord | null>(null);
 
   // Date settlements edit dialog state (edit all records for a date)
   const [dateSettlementsEditOpen, setDateSettlementsEditOpen] = useState(false);
@@ -1156,10 +1151,6 @@ export default function DailyMarketPaymentsTab({
             setSelectedTransactionId(transactionId);
             setSettlementDetailsOpen(true);
           }}
-          onEditRecord={(record) => {
-            setRecordToEdit(record);
-            setSettlementEditOpen(true);
-          }}
           onEditSettlements={(date, records) => {
             setDateSettlementsEditDate(date);
             setDateSettlementsEditRecords(records);
@@ -1248,20 +1239,6 @@ export default function DailyMarketPaymentsTab({
         }}
         date={viewDialogDate}
         group={viewDialogGroup}
-      />
-
-      {/* Settlement Edit Dialog (individual record edit) */}
-      <SettlementEditDialog
-        open={settlementEditOpen}
-        onClose={() => {
-          setSettlementEditOpen(false);
-          setRecordToEdit(null);
-        }}
-        record={recordToEdit}
-        onSuccess={() => {
-          fetchData();
-          onDataChange?.();
-        }}
       />
 
       {/* Date Settlements Edit Dialog (all records for a date) */}
