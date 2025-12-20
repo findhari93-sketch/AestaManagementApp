@@ -67,6 +67,7 @@ interface SalarySettlementTableProps {
   onNotifyDate: (date: string, records: DailyPaymentRecord[]) => void;
   onConfirmSettlement?: (transactionId: string) => void;
   onEditRecord?: (record: DailyPaymentRecord) => void;
+  onEditSettlements?: (date: string, records: DailyPaymentRecord[]) => void;
 }
 
 // Row data structure for the MRT table
@@ -110,6 +111,7 @@ export default function SalarySettlementTable({
   onNotifyDate,
   onConfirmSettlement,
   onEditRecord,
+  onEditSettlements,
 }: SalarySettlementTableProps) {
   const theme = useTheme();
   const router = useRouter();
@@ -916,6 +918,23 @@ export default function SalarySettlementTable({
               <EditIcon fontSize="small" />
             </ListItemIcon>
             <ListItemText>Edit All</ListItemText>
+          </MenuItem>
+        )}
+
+        {!disabled && onEditSettlements && (
+          <MenuItem
+            onClick={() => {
+              if (selectedRow) {
+                const allRecords = getActionableRecords(selectedRow.group);
+                onEditSettlements(selectedRow.date, allRecords);
+              }
+              handleMenuClose();
+            }}
+          >
+            <ListItemIcon>
+              <LinkIcon fontSize="small" color="info" />
+            </ListItemIcon>
+            <ListItemText>Edit Settlements</ListItemText>
           </MenuItem>
         )}
 

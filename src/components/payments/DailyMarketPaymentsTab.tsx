@@ -48,6 +48,7 @@ import { generateWhatsAppUrl, generatePaymentReminderMessage } from "@/lib/forma
 import SettlementDetailsDialog from "@/components/settlement/SettlementDetailsDialog";
 import DateViewDetailsDialog from "./DateViewDetailsDialog";
 import SettlementEditDialog from "./SettlementEditDialog";
+import DateSettlementsEditDialog from "./DateSettlementsEditDialog";
 
 interface DailyMarketPaymentsTabProps {
   dateFrom: string;
@@ -143,6 +144,11 @@ export default function DailyMarketPaymentsTab({
   // Settlement edit dialog state (individual record edit)
   const [settlementEditOpen, setSettlementEditOpen] = useState(false);
   const [recordToEdit, setRecordToEdit] = useState<DailyPaymentRecord | null>(null);
+
+  // Date settlements edit dialog state (edit all records for a date)
+  const [dateSettlementsEditOpen, setDateSettlementsEditOpen] = useState(false);
+  const [dateSettlementsEditDate, setDateSettlementsEditDate] = useState<string>("");
+  const [dateSettlementsEditRecords, setDateSettlementsEditRecords] = useState<DailyPaymentRecord[]>([]);
 
   // Fetch data
   const fetchData = useCallback(async () => {
@@ -1154,6 +1160,11 @@ export default function DailyMarketPaymentsTab({
             setRecordToEdit(record);
             setSettlementEditOpen(true);
           }}
+          onEditSettlements={(date, records) => {
+            setDateSettlementsEditDate(date);
+            setDateSettlementsEditRecords(records);
+            setDateSettlementsEditOpen(true);
+          }}
         />
       )}
 
@@ -1247,6 +1258,21 @@ export default function DailyMarketPaymentsTab({
           setRecordToEdit(null);
         }}
         record={recordToEdit}
+        onSuccess={() => {
+          fetchData();
+          onDataChange?.();
+        }}
+      />
+
+      {/* Date Settlements Edit Dialog (all records for a date) */}
+      <DateSettlementsEditDialog
+        open={dateSettlementsEditOpen}
+        onClose={() => {
+          setDateSettlementsEditOpen(false);
+          setDateSettlementsEditRecords([]);
+        }}
+        date={dateSettlementsEditDate}
+        records={dateSettlementsEditRecords}
         onSuccess={() => {
           fetchData();
           onDataChange?.();
