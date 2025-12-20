@@ -2090,6 +2090,7 @@ export type Database = {
           id: string
           is_under_contract: boolean | null
           laborer_id: string
+          notes: string | null
           paid_by: string
           paid_by_user_id: string | null
           payment_channel: string
@@ -2110,6 +2111,7 @@ export type Database = {
           id?: string
           is_under_contract?: boolean | null
           laborer_id: string
+          notes?: string | null
           paid_by: string
           paid_by_user_id?: string | null
           payment_channel: string
@@ -2130,6 +2132,7 @@ export type Database = {
           id?: string
           is_under_contract?: boolean | null
           laborer_id?: string
+          notes?: string | null
           paid_by?: string
           paid_by_user_id?: string | null
           payment_channel?: string
@@ -4314,6 +4317,8 @@ export type Database = {
           dispute_notes: string | null
           id: string
           is_settled: boolean | null
+          money_source: string | null
+          money_source_name: string | null
           notes: string | null
           payment_mode: string
           proof_url: string | null
@@ -4349,6 +4354,8 @@ export type Database = {
           dispute_notes?: string | null
           id?: string
           is_settled?: boolean | null
+          money_source?: string | null
+          money_source_name?: string | null
           notes?: string | null
           payment_mode: string
           proof_url?: string | null
@@ -4384,6 +4391,8 @@ export type Database = {
           dispute_notes?: string | null
           id?: string
           is_settled?: boolean | null
+          money_source?: string | null
+          money_source_name?: string | null
           notes?: string | null
           payment_mode?: string
           proof_url?: string | null
@@ -8235,83 +8244,3 @@ export const Constants = {
     },
   },
 } as const
-
-// ============================================
-// Helper Type Exports for convenience
-// ============================================
-
-// Table Row types
-export type Expense = Database["public"]["Tables"]["expenses"]["Row"]
-export type SitePayer = Database["public"]["Tables"]["site_payers"]["Row"]
-export type Site = Database["public"]["Tables"]["sites"]["Row"]
-export type User = Database["public"]["Tables"]["users"]["Row"]
-export type Laborer = Database["public"]["Tables"]["laborers"]["Row"]
-export type Team = Database["public"]["Tables"]["teams"]["Row"]
-export type DailyAttendance = Database["public"]["Tables"]["daily_attendance"]["Row"]
-export type ExpenseCategory = Database["public"]["Tables"]["expense_categories"]["Row"]
-export type BuildingSection = Database["public"]["Tables"]["building_sections"]["Row"]
-export type ConstructionPhase = Database["public"]["Tables"]["construction_phases"]["Row"]
-export type Subcontract = Database["public"]["Tables"]["subcontracts"]["Row"]
-export type LaborPayment = Database["public"]["Tables"]["labor_payments"]["Row"]
-export type Vendor = Database["public"]["Tables"]["vendors"]["Row"]
-export type Material = Database["public"]["Tables"]["materials"]["Row"]
-
-// Enum types
-export type ExpenseModule = Database["public"]["Enums"]["expense_module"]
-export type PaymentMode = Database["public"]["Enums"]["payment_mode"]
-export type SiteStatus = Database["public"]["Enums"]["site_status"]
-export type SiteType = Database["public"]["Enums"]["site_type"]
-export type UserRole = Database["public"]["Enums"]["user_role"]
-export type LaborerStatus = Database["public"]["Enums"]["laborer_status"]
-export type EmploymentType = Database["public"]["Enums"]["employment_type"]
-export type ContractStatus = Database["public"]["Enums"]["contract_status"]
-export type ContractType = Database["public"]["Enums"]["contract_type"]
-export type SectionStatus = Database["public"]["Enums"]["section_status"]
-export type MaterialUnit = Database["public"]["Enums"]["material_unit"]
-export type MeasurementUnit = Database["public"]["Enums"]["measurement_unit"]
-export type POStatus = Database["public"]["Enums"]["po_status"]
-export type MaterialRequestStatus = Database["public"]["Enums"]["material_request_status"]
-export type PaymentType = Database["public"]["Enums"]["contract_payment_type"]
-export type TransactionType = Database["public"]["Enums"]["transaction_type"]
-
-// Site engineer related types
-export type SiteEngineerTransaction = Database["public"]["Tables"]["site_engineer_transactions"]["Row"]
-export type SiteEngineerSettlement = Database["public"]["Tables"]["site_engineer_settlements"]["Row"]
-export type SiteEngineerTransactionType = "received_from_company" | "spent_on_behalf" | "used_own_money" | "returned_to_company"
-export type RecipientType = "laborer" | "mesthri" | "vendor" | "other"
-export type SalaryPeriod = Database["public"]["Tables"]["salary_periods"]["Row"]
-export type ConstructionSubphase = Database["public"]["Tables"]["construction_subphases"]["Row"]
-export type SitePaymentMilestone = Database["public"]["Tables"]["site_payment_milestones"]["Row"]
-export type LaborerType = string | null
-export type TeaShopAccount = Database["public"]["Tables"]["tea_shop_accounts"]["Row"]
-export type DailyWorkSummary = Database["public"]["Tables"]["daily_work_summary"]["Row"]
-export type ClientPaymentPlan = Database["public"]["Tables"]["client_payment_plans"]["Row"]
-export type PaymentPhase = Database["public"]["Tables"]["payment_phases"]["Row"]
-export type ClientPayment = Database["public"]["Tables"]["client_payments"]["Row"]
-export type SiteHoliday = Database["public"]["Tables"]["site_holidays"]["Row"]
-export type PaymentChannel = string | null
-export type TeaShopEntry = Database["public"]["Tables"]["tea_shop_entries"]["Row"]
-export type TeaShopSettlement = Database["public"]["Tables"]["tea_shop_settlements"]["Row"]
-export type TeaShopEntryExtended = TeaShopEntry & {
-  laborer_name?: string;
-  team_name?: string;
-  entry_mode?: string | null;
-}
-export type ThemePreference = "light" | "dark" | "system"
-
-// UI helper types
-export interface LaborGroupPercentageSplit {
-  daily: number;
-  contract: number;
-  market: number;
-}
-
-export interface SnackItem {
-  name: string;
-  quantity: number;
-  rate: number;
-  total: number;
-}
-
-export type TeaShopEntryMode = "simple" | "detailed"
-export type MarketLaborerAttendance = Database["public"]["Tables"]["market_laborer_attendance"]["Row"]

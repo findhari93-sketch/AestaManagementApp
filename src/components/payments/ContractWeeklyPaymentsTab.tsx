@@ -30,6 +30,8 @@ import { hasEditPermission } from "@/lib/permissions";
 
 interface ContractWeeklyPaymentsTabProps {
   weeksToShow?: number;
+  dateFrom?: string;
+  dateTo?: string;
   onDataChange?: () => void;
 }
 
@@ -60,6 +62,8 @@ function getWeeksInRange(fromDate: string, toDate: string): { weekStart: string;
 
 export default function ContractWeeklyPaymentsTab({
   weeksToShow = 4,
+  dateFrom: propDateFrom,
+  dateTo: propDateTo,
   onDataChange,
 }: ContractWeeklyPaymentsTabProps) {
   const { selectedSite } = useSite();
@@ -97,13 +101,18 @@ export default function ContractWeeklyPaymentsTab({
 
   const canEdit = hasEditPermission(userProfile?.role);
 
-  // Calculate date range based on weeksToShow
+  // Calculate date range based on props or weeksToShow fallback
   const dateRange = useMemo(() => {
+    // If date props provided, use them
+    if (propDateFrom && propDateTo) {
+      return { fromDate: propDateFrom, toDate: propDateTo };
+    }
+    // Otherwise fall back to weeksToShow calculation
     const today = dayjs();
     const toDate = today.format("YYYY-MM-DD");
     const fromDate = today.subtract(weeksToShow, "week").day(0).format("YYYY-MM-DD");
     return { fromDate, toDate };
-  }, [weeksToShow]);
+  }, [propDateFrom, propDateTo, weeksToShow]);
 
   // Fetch data
   const fetchData = useCallback(async () => {

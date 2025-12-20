@@ -171,7 +171,8 @@ export default function PaymentsContent({ initialData }: PaymentsContentProps) {
 
           <TabPanel value={activeTab} index={1}>
             <ContractWeeklyPaymentsTab
-              weeksToShow={4}
+              dateFrom={effectiveDateFrom}
+              dateTo={effectiveDateTo}
               onDataChange={handleDataChange}
             />
           </TabPanel>
