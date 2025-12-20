@@ -65,7 +65,7 @@ export function useMaterialUsage(
 
       const { data, error } = await query;
       if (error) throw error;
-      return data as DailyMaterialUsageWithDetails[];
+      return data as unknown as DailyMaterialUsageWithDetails[];
     },
     enabled: !!siteId,
   });

@@ -12,6 +12,31 @@ export type Database = {
   __InternalSupabase: {
     PostgrestVersion: "13.0.5"
   }
+  graphql_public: {
+    Tables: {
+      [_ in never]: never
+    }
+    Views: {
+      [_ in never]: never
+    }
+    Functions: {
+      graphql: {
+        Args: {
+          extensions?: Json
+          operationName?: string
+          query?: string
+          variables?: Json
+        }
+        Returns: Json
+      }
+    }
+    Enums: {
+      [_ in never]: never
+    }
+    CompositeTypes: {
+      [_ in never]: never
+    }
+  }
   public: {
     Tables: {
       advances: {
@@ -551,9 +576,12 @@ export type Database = {
           morning_entry_at: string | null
           out_time: string | null
           paid_via: string | null
+          payer_name: string | null
+          payer_source: string | null
           payment_date: string | null
           payment_id: string | null
           payment_mode: string | null
+          payment_notes: string | null
           payment_proof_url: string | null
           recorded_by: string | null
           recorded_by_user_id: string | null
@@ -604,9 +632,12 @@ export type Database = {
           morning_entry_at?: string | null
           out_time?: string | null
           paid_via?: string | null
+          payer_name?: string | null
+          payer_source?: string | null
           payment_date?: string | null
           payment_id?: string | null
           payment_mode?: string | null
+          payment_notes?: string | null
           payment_proof_url?: string | null
           recorded_by?: string | null
           recorded_by_user_id?: string | null
@@ -657,9 +688,12 @@ export type Database = {
           morning_entry_at?: string | null
           out_time?: string | null
           paid_via?: string | null
+          payer_name?: string | null
+          payer_source?: string | null
           payment_date?: string | null
           payment_id?: string | null
           payment_mode?: string | null
+          payment_notes?: string | null
           payment_proof_url?: string | null
           recorded_by?: string | null
           recorded_by_user_id?: string | null
@@ -716,6 +750,13 @@ export type Database = {
             columns: ["entered_by"]
             isOneToOne: false
             referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "daily_attendance_expense_id_fkey"
+            columns: ["expense_id"]
+            isOneToOne: false
+            referencedRelation: "expenses"
             referencedColumns: ["id"]
           },
           {
@@ -853,11 +894,13 @@ export type Database = {
           created_at: string | null
           created_by: string | null
           id: string
+          is_group_stock: boolean | null
           is_verified: boolean | null
           material_id: string
           notes: string | null
           quantity: number
           section_id: string | null
+          site_group_id: string | null
           site_id: string
           total_cost: number | null
           unit_cost: number | null
@@ -874,11 +917,13 @@ export type Database = {
           created_at?: string | null
           created_by?: string | null
           id?: string
+          is_group_stock?: boolean | null
           is_verified?: boolean | null
           material_id: string
           notes?: string | null
           quantity: number
           section_id?: string | null
+          site_group_id?: string | null
           site_id: string
           total_cost?: number | null
           unit_cost?: number | null
@@ -895,11 +940,13 @@ export type Database = {
           created_at?: string | null
           created_by?: string | null
           id?: string
+          is_group_stock?: boolean | null
           is_verified?: boolean | null
           material_id?: string
           notes?: string | null
           quantity?: number
           section_id?: string | null
+          site_group_id?: string | null
           site_id?: string
           total_cost?: number | null
           unit_cost?: number | null
@@ -937,6 +984,13 @@ export type Database = {
             foreignKeyName: "daily_material_usage_material_id_fkey"
             columns: ["material_id"]
             isOneToOne: false
+            referencedRelation: "v_group_stock_summary"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "daily_material_usage_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
             referencedRelation: "v_low_stock_alerts"
             referencedColumns: ["material_id"]
           },
@@ -960,6 +1014,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "v_section_cost_summary"
             referencedColumns: ["section_id"]
+          },
+          {
+            foreignKeyName: "daily_material_usage_site_group_id_fkey"
+            columns: ["site_group_id"]
+            isOneToOne: false
+            referencedRelation: "site_groups"
+            referencedColumns: ["id"]
           },
           {
             foreignKeyName: "daily_material_usage_site_id_fkey"
@@ -1169,8 +1230,11 @@ export type Database = {
           created_by: string | null
           delivery_date: string
           delivery_status: Database["public"]["Enums"]["delivery_status"] | null
+          discrepancies: Json | null
           driver_name: string | null
           driver_phone: string | null
+          engineer_verified_at: string | null
+          engineer_verified_by: string | null
           grn_number: string
           id: string
           inspection_notes: string | null
@@ -1182,10 +1246,14 @@ export type Database = {
           notes: string | null
           po_id: string | null
           received_by: string | null
+          requires_verification: boolean | null
           site_id: string
           updated_at: string | null
           vehicle_number: string | null
           vendor_id: string
+          verification_notes: string | null
+          verification_photos: string[] | null
+          verification_status: string | null
           verified: boolean | null
           verified_at: string | null
           verified_by: string | null
@@ -1200,8 +1268,11 @@ export type Database = {
           delivery_status?:
             | Database["public"]["Enums"]["delivery_status"]
             | null
+          discrepancies?: Json | null
           driver_name?: string | null
           driver_phone?: string | null
+          engineer_verified_at?: string | null
+          engineer_verified_by?: string | null
           grn_number: string
           id?: string
           inspection_notes?: string | null
@@ -1213,10 +1284,14 @@ export type Database = {
           notes?: string | null
           po_id?: string | null
           received_by?: string | null
+          requires_verification?: boolean | null
           site_id: string
           updated_at?: string | null
           vehicle_number?: string | null
           vendor_id: string
+          verification_notes?: string | null
+          verification_photos?: string[] | null
+          verification_status?: string | null
           verified?: boolean | null
           verified_at?: string | null
           verified_by?: string | null
@@ -1231,8 +1306,11 @@ export type Database = {
           delivery_status?:
             | Database["public"]["Enums"]["delivery_status"]
             | null
+          discrepancies?: Json | null
           driver_name?: string | null
           driver_phone?: string | null
+          engineer_verified_at?: string | null
+          engineer_verified_by?: string | null
           grn_number?: string
           id?: string
           inspection_notes?: string | null
@@ -1244,10 +1322,14 @@ export type Database = {
           notes?: string | null
           po_id?: string | null
           received_by?: string | null
+          requires_verification?: boolean | null
           site_id?: string
           updated_at?: string | null
           vehicle_number?: string | null
           vendor_id?: string
+          verification_notes?: string | null
+          verification_photos?: string[] | null
+          verification_status?: string | null
           verified?: boolean | null
           verified_at?: string | null
           verified_by?: string | null
@@ -1256,6 +1338,13 @@ export type Database = {
           {
             foreignKeyName: "deliveries_created_by_fkey"
             columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "deliveries_engineer_verified_by_fkey"
+            columns: ["engineer_verified_by"]
             isOneToOne: false
             referencedRelation: "users"
             referencedColumns: ["id"]
@@ -1379,11 +1468,32 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "delivery_items_delivery_id_fkey"
+            columns: ["delivery_id"]
+            isOneToOne: false
+            referencedRelation: "v_delivery_verification_details"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "delivery_items_delivery_id_fkey"
+            columns: ["delivery_id"]
+            isOneToOne: false
+            referencedRelation: "v_pending_delivery_verifications"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "delivery_items_material_id_fkey"
             columns: ["material_id"]
             isOneToOne: false
             referencedRelation: "materials"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "delivery_items_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_group_stock_summary"
+            referencedColumns: ["material_id"]
           },
           {
             foreignKeyName: "delivery_items_material_id_fkey"
@@ -1455,6 +1565,7 @@ export type Database = {
           deleted_at: string | null
           deleted_by: string | null
           description: string | null
+          engineer_transaction_id: string | null
           entered_by: string | null
           entered_by_user_id: string | null
           id: string
@@ -1487,6 +1598,7 @@ export type Database = {
           deleted_at?: string | null
           deleted_by?: string | null
           description?: string | null
+          engineer_transaction_id?: string | null
           entered_by?: string | null
           entered_by_user_id?: string | null
           id?: string
@@ -1519,6 +1631,7 @@ export type Database = {
           deleted_at?: string | null
           deleted_by?: string | null
           description?: string | null
+          engineer_transaction_id?: string | null
           entered_by?: string | null
           entered_by_user_id?: string | null
           id?: string
@@ -1561,6 +1674,13 @@ export type Database = {
             columns: ["deleted_by"]
             isOneToOne: false
             referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "expenses_engineer_transaction_id_fkey"
+            columns: ["engineer_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "site_engineer_transactions"
             referencedColumns: ["id"]
           },
           {
@@ -1632,6 +1752,250 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "v_team_weekly_summary"
             referencedColumns: ["team_id"]
+          },
+        ]
+      }
+      group_stock_inventory: {
+        Row: {
+          available_qty: number | null
+          avg_unit_cost: number | null
+          brand_id: string | null
+          created_at: string | null
+          current_qty: number
+          id: string
+          last_received_date: string | null
+          last_used_date: string | null
+          location_id: string | null
+          material_id: string
+          reorder_level: number | null
+          reorder_qty: number | null
+          reserved_qty: number
+          site_group_id: string
+          total_value: number | null
+          updated_at: string | null
+        }
+        Insert: {
+          available_qty?: number | null
+          avg_unit_cost?: number | null
+          brand_id?: string | null
+          created_at?: string | null
+          current_qty?: number
+          id?: string
+          last_received_date?: string | null
+          last_used_date?: string | null
+          location_id?: string | null
+          material_id: string
+          reorder_level?: number | null
+          reorder_qty?: number | null
+          reserved_qty?: number
+          site_group_id: string
+          total_value?: number | null
+          updated_at?: string | null
+        }
+        Update: {
+          available_qty?: number | null
+          avg_unit_cost?: number | null
+          brand_id?: string | null
+          created_at?: string | null
+          current_qty?: number
+          id?: string
+          last_received_date?: string | null
+          last_used_date?: string | null
+          location_id?: string | null
+          material_id?: string
+          reorder_level?: number | null
+          reorder_qty?: number | null
+          reserved_qty?: number
+          site_group_id?: string
+          total_value?: number | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "group_stock_inventory_brand_id_fkey"
+            columns: ["brand_id"]
+            isOneToOne: false
+            referencedRelation: "material_brands"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "group_stock_inventory_location_id_fkey"
+            columns: ["location_id"]
+            isOneToOne: false
+            referencedRelation: "stock_locations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "group_stock_inventory_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "materials"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "group_stock_inventory_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_group_stock_summary"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "group_stock_inventory_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_low_stock_alerts"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "group_stock_inventory_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_stock_summary"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "group_stock_inventory_site_group_id_fkey"
+            columns: ["site_group_id"]
+            isOneToOne: false
+            referencedRelation: "site_groups"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      group_stock_transactions: {
+        Row: {
+          brand_id: string | null
+          created_at: string | null
+          created_by: string | null
+          id: string
+          inventory_id: string
+          material_id: string
+          notes: string | null
+          payment_source: string | null
+          payment_source_site_id: string | null
+          quantity: number
+          reference_id: string | null
+          reference_type: string | null
+          site_group_id: string
+          total_cost: number | null
+          transaction_date: string
+          transaction_type: Database["public"]["Enums"]["stock_transaction_type"]
+          unit_cost: number | null
+          usage_site_id: string | null
+          work_description: string | null
+        }
+        Insert: {
+          brand_id?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          id?: string
+          inventory_id: string
+          material_id: string
+          notes?: string | null
+          payment_source?: string | null
+          payment_source_site_id?: string | null
+          quantity: number
+          reference_id?: string | null
+          reference_type?: string | null
+          site_group_id: string
+          total_cost?: number | null
+          transaction_date?: string
+          transaction_type: Database["public"]["Enums"]["stock_transaction_type"]
+          unit_cost?: number | null
+          usage_site_id?: string | null
+          work_description?: string | null
+        }
+        Update: {
+          brand_id?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          id?: string
+          inventory_id?: string
+          material_id?: string
+          notes?: string | null
+          payment_source?: string | null
+          payment_source_site_id?: string | null
+          quantity?: number
+          reference_id?: string | null
+          reference_type?: string | null
+          site_group_id?: string
+          total_cost?: number | null
+          transaction_date?: string
+          transaction_type?: Database["public"]["Enums"]["stock_transaction_type"]
+          unit_cost?: number | null
+          usage_site_id?: string | null
+          work_description?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "group_stock_transactions_brand_id_fkey"
+            columns: ["brand_id"]
+            isOneToOne: false
+            referencedRelation: "material_brands"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "group_stock_transactions_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "group_stock_transactions_inventory_id_fkey"
+            columns: ["inventory_id"]
+            isOneToOne: false
+            referencedRelation: "group_stock_inventory"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "group_stock_transactions_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "materials"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "group_stock_transactions_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_group_stock_summary"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "group_stock_transactions_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_low_stock_alerts"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "group_stock_transactions_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_stock_summary"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "group_stock_transactions_payment_source_site_id_fkey"
+            columns: ["payment_source_site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "group_stock_transactions_site_group_id_fkey"
+            columns: ["site_group_id"]
+            isOneToOne: false
+            referencedRelation: "site_groups"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "group_stock_transactions_usage_site_id_fkey"
+            columns: ["usage_site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
           },
         ]
       }
@@ -2091,6 +2455,240 @@ export type Database = {
           },
         ]
       }
+      local_purchase_items: {
+        Row: {
+          brand_id: string | null
+          created_at: string | null
+          custom_material_name: string | null
+          id: string
+          local_purchase_id: string
+          material_id: string | null
+          notes: string | null
+          quantity: number
+          save_to_price_history: boolean | null
+          save_to_vendor_inventory: boolean | null
+          total_price: number
+          unit: string
+          unit_price: number
+        }
+        Insert: {
+          brand_id?: string | null
+          created_at?: string | null
+          custom_material_name?: string | null
+          id?: string
+          local_purchase_id: string
+          material_id?: string | null
+          notes?: string | null
+          quantity: number
+          save_to_price_history?: boolean | null
+          save_to_vendor_inventory?: boolean | null
+          total_price: number
+          unit: string
+          unit_price: number
+        }
+        Update: {
+          brand_id?: string | null
+          created_at?: string | null
+          custom_material_name?: string | null
+          id?: string
+          local_purchase_id?: string
+          material_id?: string | null
+          notes?: string | null
+          quantity?: number
+          save_to_price_history?: boolean | null
+          save_to_vendor_inventory?: boolean | null
+          total_price?: number
+          unit?: string
+          unit_price?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "local_purchase_items_brand_id_fkey"
+            columns: ["brand_id"]
+            isOneToOne: false
+            referencedRelation: "material_brands"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "local_purchase_items_local_purchase_id_fkey"
+            columns: ["local_purchase_id"]
+            isOneToOne: false
+            referencedRelation: "local_purchases"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "local_purchase_items_local_purchase_id_fkey"
+            columns: ["local_purchase_id"]
+            isOneToOne: false
+            referencedRelation: "v_local_purchases_details"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "local_purchase_items_local_purchase_id_fkey"
+            columns: ["local_purchase_id"]
+            isOneToOne: false
+            referencedRelation: "v_pending_reimbursements"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "local_purchase_items_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "materials"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "local_purchase_items_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_group_stock_summary"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "local_purchase_items_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_low_stock_alerts"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "local_purchase_items_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_stock_summary"
+            referencedColumns: ["material_id"]
+          },
+        ]
+      }
+      local_purchases: {
+        Row: {
+          add_to_stock: boolean | null
+          created_at: string | null
+          description: string | null
+          engineer_id: string
+          id: string
+          is_group_stock: boolean | null
+          is_new_vendor: boolean | null
+          needs_reimbursement: boolean | null
+          payment_mode: string | null
+          payment_reference: string | null
+          payment_source: string | null
+          purchase_date: string
+          purchase_number: string | null
+          receipt_url: string | null
+          reimbursed_at: string | null
+          reimbursement_amount: number | null
+          reimbursement_status: string | null
+          reimbursement_transaction_id: string | null
+          site_group_id: string | null
+          site_id: string
+          status: string | null
+          stock_added: boolean | null
+          total_amount: number
+          updated_at: string | null
+          vendor_address: string | null
+          vendor_id: string | null
+          vendor_name: string
+          vendor_phone: string | null
+        }
+        Insert: {
+          add_to_stock?: boolean | null
+          created_at?: string | null
+          description?: string | null
+          engineer_id: string
+          id?: string
+          is_group_stock?: boolean | null
+          is_new_vendor?: boolean | null
+          needs_reimbursement?: boolean | null
+          payment_mode?: string | null
+          payment_reference?: string | null
+          payment_source?: string | null
+          purchase_date?: string
+          purchase_number?: string | null
+          receipt_url?: string | null
+          reimbursed_at?: string | null
+          reimbursement_amount?: number | null
+          reimbursement_status?: string | null
+          reimbursement_transaction_id?: string | null
+          site_group_id?: string | null
+          site_id: string
+          status?: string | null
+          stock_added?: boolean | null
+          total_amount: number
+          updated_at?: string | null
+          vendor_address?: string | null
+          vendor_id?: string | null
+          vendor_name: string
+          vendor_phone?: string | null
+        }
+        Update: {
+          add_to_stock?: boolean | null
+          created_at?: string | null
+          description?: string | null
+          engineer_id?: string
+          id?: string
+          is_group_stock?: boolean | null
+          is_new_vendor?: boolean | null
+          needs_reimbursement?: boolean | null
+          payment_mode?: string | null
+          payment_reference?: string | null
+          payment_source?: string | null
+          purchase_date?: string
+          purchase_number?: string | null
+          receipt_url?: string | null
+          reimbursed_at?: string | null
+          reimbursement_amount?: number | null
+          reimbursement_status?: string | null
+          reimbursement_transaction_id?: string | null
+          site_group_id?: string | null
+          site_id?: string
+          status?: string | null
+          stock_added?: boolean | null
+          total_amount?: number
+          updated_at?: string | null
+          vendor_address?: string | null
+          vendor_id?: string | null
+          vendor_name?: string
+          vendor_phone?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "local_purchases_engineer_id_fkey"
+            columns: ["engineer_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "local_purchases_reimbursement_transaction_id_fkey"
+            columns: ["reimbursement_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "site_engineer_transactions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "local_purchases_site_group_id_fkey"
+            columns: ["site_group_id"]
+            isOneToOne: false
+            referencedRelation: "site_groups"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "local_purchases_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "local_purchases_vendor_id_fkey"
+            columns: ["vendor_id"]
+            isOneToOne: false
+            referencedRelation: "vendors"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       market_laborer_attendance: {
         Row: {
           attendance_status: string | null
@@ -2113,8 +2711,11 @@ export type Database = {
           notes: string | null
           out_time: string | null
           paid_via: string | null
+          payer_name: string | null
+          payer_source: string | null
           payment_date: string | null
           payment_mode: string | null
+          payment_notes: string | null
           payment_proof_url: string | null
           rate_per_person: number
           role_id: string
@@ -2151,8 +2752,11 @@ export type Database = {
           notes?: string | null
           out_time?: string | null
           paid_via?: string | null
+          payer_name?: string | null
+          payer_source?: string | null
           payment_date?: string | null
           payment_mode?: string | null
+          payment_notes?: string | null
           payment_proof_url?: string | null
           rate_per_person: number
           role_id: string
@@ -2178,8 +2782,8 @@ export type Database = {
           day_units?: number | null
           engineer_transaction_id?: string | null
           entered_by?: string
-          expense_id?: string | null
           entered_by_user_id?: string | null
+          expense_id?: string | null
           id?: string
           in_time?: string | null
           is_paid?: boolean | null
@@ -2189,8 +2793,11 @@ export type Database = {
           notes?: string | null
           out_time?: string | null
           paid_via?: string | null
+          payer_name?: string | null
+          payer_source?: string | null
           payment_date?: string | null
           payment_mode?: string | null
+          payment_notes?: string | null
           payment_proof_url?: string | null
           rate_per_person?: number
           role_id?: string
@@ -2219,6 +2826,13 @@ export type Database = {
             columns: ["entered_by_user_id"]
             isOneToOne: false
             referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "market_laborer_attendance_expense_id_fkey"
+            columns: ["expense_id"]
+            isOneToOne: false
+            referencedRelation: "expenses"
             referencedColumns: ["id"]
           },
           {
@@ -2310,6 +2924,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "materials"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "material_brands_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_group_stock_summary"
+            referencedColumns: ["material_id"]
           },
           {
             foreignKeyName: "material_brands_material_id_fkey"
@@ -2425,6 +3046,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "materials"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "material_request_items_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_group_stock_summary"
+            referencedColumns: ["material_id"]
           },
           {
             foreignKeyName: "material_request_items_material_id_fkey"
@@ -2616,6 +3244,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "materials"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "material_vendors_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_group_stock_summary"
+            referencedColumns: ["material_id"]
           },
           {
             foreignKeyName: "material_vendors_material_id_fkey"
@@ -2830,6 +3465,122 @@ export type Database = {
           },
         ]
       }
+      price_history: {
+        Row: {
+          brand_id: string | null
+          created_at: string | null
+          gst_rate: number | null
+          id: string
+          loading_cost: number | null
+          material_id: string
+          notes: string | null
+          price: number
+          price_includes_gst: boolean | null
+          quantity: number | null
+          recorded_by: string | null
+          recorded_date: string
+          source: string
+          source_reference: string | null
+          total_landed_cost: number | null
+          transport_cost: number | null
+          unit: string | null
+          unloading_cost: number | null
+          vendor_id: string
+        }
+        Insert: {
+          brand_id?: string | null
+          created_at?: string | null
+          gst_rate?: number | null
+          id?: string
+          loading_cost?: number | null
+          material_id: string
+          notes?: string | null
+          price: number
+          price_includes_gst?: boolean | null
+          quantity?: number | null
+          recorded_by?: string | null
+          recorded_date: string
+          source: string
+          source_reference?: string | null
+          total_landed_cost?: number | null
+          transport_cost?: number | null
+          unit?: string | null
+          unloading_cost?: number | null
+          vendor_id: string
+        }
+        Update: {
+          brand_id?: string | null
+          created_at?: string | null
+          gst_rate?: number | null
+          id?: string
+          loading_cost?: number | null
+          material_id?: string
+          notes?: string | null
+          price?: number
+          price_includes_gst?: boolean | null
+          quantity?: number | null
+          recorded_by?: string | null
+          recorded_date?: string
+          source?: string
+          source_reference?: string | null
+          total_landed_cost?: number | null
+          transport_cost?: number | null
+          unit?: string | null
+          unloading_cost?: number | null
+          vendor_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "price_history_brand_id_fkey"
+            columns: ["brand_id"]
+            isOneToOne: false
+            referencedRelation: "material_brands"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "price_history_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "materials"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "price_history_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_group_stock_summary"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "price_history_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_low_stock_alerts"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "price_history_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_stock_summary"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "price_history_recorded_by_fkey"
+            columns: ["recorded_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "price_history_vendor_id_fkey"
+            columns: ["vendor_id"]
+            isOneToOne: false
+            referencedRelation: "vendors"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       purchase_order_items: {
         Row: {
           brand_id: string | null
@@ -2899,6 +3650,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "materials"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchase_order_items_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_group_stock_summary"
+            referencedColumns: ["material_id"]
           },
           {
             foreignKeyName: "purchase_order_items_material_id_fkey"
@@ -3100,6 +3858,20 @@ export type Database = {
             columns: ["delivery_id"]
             isOneToOne: false
             referencedRelation: "deliveries"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchase_payment_allocations_delivery_id_fkey"
+            columns: ["delivery_id"]
+            isOneToOne: false
+            referencedRelation: "v_delivery_verification_details"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchase_payment_allocations_delivery_id_fkey"
+            columns: ["delivery_id"]
+            isOneToOne: false
+            referencedRelation: "v_pending_delivery_verifications"
             referencedColumns: ["id"]
           },
           {
@@ -3530,6 +4302,10 @@ export type Database = {
       site_engineer_transactions: {
         Row: {
           amount: number
+          cancellation_reason: string | null
+          cancelled_at: string | null
+          cancelled_by: string | null
+          cancelled_by_user_id: string | null
           confirmed_at: string | null
           confirmed_by: string | null
           confirmed_by_user_id: string | null
@@ -3561,6 +4337,10 @@ export type Database = {
         }
         Insert: {
           amount: number
+          cancellation_reason?: string | null
+          cancelled_at?: string | null
+          cancelled_by?: string | null
+          cancelled_by_user_id?: string | null
           confirmed_at?: string | null
           confirmed_by?: string | null
           confirmed_by_user_id?: string | null
@@ -3592,6 +4372,10 @@ export type Database = {
         }
         Update: {
           amount?: number
+          cancellation_reason?: string | null
+          cancelled_at?: string | null
+          cancelled_by?: string | null
+          cancelled_by_user_id?: string | null
           confirmed_at?: string | null
           confirmed_by?: string | null
           confirmed_by_user_id?: string | null
@@ -3622,6 +4406,13 @@ export type Database = {
           user_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "site_engineer_transactions_cancelled_by_user_id_fkey"
+            columns: ["cancelled_by_user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "site_engineer_transactions_confirmed_by_user_id_fkey"
             columns: ["confirmed_by_user_id"]
@@ -3674,6 +4465,44 @@ export type Database = {
           {
             foreignKeyName: "site_engineer_transactions_user_id_fkey"
             columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      site_groups: {
+        Row: {
+          created_at: string | null
+          created_by: string | null
+          description: string | null
+          id: string
+          is_active: boolean | null
+          name: string
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          created_by?: string | null
+          description?: string | null
+          id?: string
+          is_active?: boolean | null
+          name: string
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          created_by?: string | null
+          description?: string | null
+          id?: string
+          is_active?: boolean | null
+          name?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "site_groups_created_by_fkey"
+            columns: ["created_by"]
             isOneToOne: false
             referencedRelation: "users"
             referencedColumns: ["id"]
@@ -3913,6 +4742,7 @@ export type Database = {
           payment_plan_json: Json | null
           payment_segments: number | null
           project_contract_value: number | null
+          site_group_id: string | null
           site_type: Database["public"]["Enums"]["site_type"]
           start_date: string | null
           status: Database["public"]["Enums"]["site_status"]
@@ -3949,6 +4779,7 @@ export type Database = {
           payment_plan_json?: Json | null
           payment_segments?: number | null
           project_contract_value?: number | null
+          site_group_id?: string | null
           site_type?: Database["public"]["Enums"]["site_type"]
           start_date?: string | null
           status?: Database["public"]["Enums"]["site_status"]
@@ -3985,6 +4816,7 @@ export type Database = {
           payment_plan_json?: Json | null
           payment_segments?: number | null
           project_contract_value?: number | null
+          site_group_id?: string | null
           site_type?: Database["public"]["Enums"]["site_type"]
           start_date?: string | null
           status?: Database["public"]["Enums"]["site_status"]
@@ -4020,6 +4852,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "v_section_cost_summary"
             referencedColumns: ["section_id"]
+          },
+          {
+            foreignKeyName: "sites_site_group_id_fkey"
+            columns: ["site_group_id"]
+            isOneToOne: false
+            referencedRelation: "site_groups"
+            referencedColumns: ["id"]
           },
         ]
       }
@@ -4096,6 +4935,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "materials"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_inventory_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_group_stock_summary"
+            referencedColumns: ["material_id"]
           },
           {
             foreignKeyName: "stock_inventory_material_id_fkey"
@@ -4309,6 +5155,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "materials"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_transfer_items_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_group_stock_summary"
+            referencedColumns: ["material_id"]
           },
           {
             foreignKeyName: "stock_transfer_items_material_id_fkey"
@@ -4982,6 +5835,7 @@ export type Database = {
           created_at: string
           date: string
           entered_by: string | null
+          entered_by_user_id: string | null
           entry_mode: string | null
           id: string
           is_split_entry: boolean | null
@@ -5021,6 +5875,7 @@ export type Database = {
           created_at?: string
           date: string
           entered_by?: string | null
+          entered_by_user_id?: string | null
           entry_mode?: string | null
           id?: string
           is_split_entry?: boolean | null
@@ -5060,6 +5915,7 @@ export type Database = {
           created_at?: string
           date?: string
           entered_by?: string | null
+          entered_by_user_id?: string | null
           entry_mode?: string | null
           id?: string
           is_split_entry?: boolean | null
@@ -5095,6 +5951,13 @@ export type Database = {
           working_laborer_total?: number | null
         }
         Relationships: [
+          {
+            foreignKeyName: "tea_shop_entries_entered_by_user_id_fkey"
+            columns: ["entered_by_user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "tea_shop_entries_site_id_fkey"
             columns: ["site_id"]
@@ -5431,6 +6294,121 @@ export type Database = {
         }
         Relationships: []
       }
+      vendor_inventory: {
+        Row: {
+          brand_id: string | null
+          created_at: string | null
+          current_price: number | null
+          custom_material_name: string | null
+          gst_rate: number | null
+          id: string
+          is_available: boolean | null
+          last_price_update: string | null
+          lead_time_days: number | null
+          loading_cost: number | null
+          material_id: string | null
+          min_order_qty: number | null
+          notes: string | null
+          price_includes_gst: boolean | null
+          price_includes_transport: boolean | null
+          price_source: string | null
+          transport_cost: number | null
+          unit: string | null
+          unloading_cost: number | null
+          updated_at: string | null
+          vendor_id: string
+        }
+        Insert: {
+          brand_id?: string | null
+          created_at?: string | null
+          current_price?: number | null
+          custom_material_name?: string | null
+          gst_rate?: number | null
+          id?: string
+          is_available?: boolean | null
+          last_price_update?: string | null
+          lead_time_days?: number | null
+          loading_cost?: number | null
+          material_id?: string | null
+          min_order_qty?: number | null
+          notes?: string | null
+          price_includes_gst?: boolean | null
+          price_includes_transport?: boolean | null
+          price_source?: string | null
+          transport_cost?: number | null
+          unit?: string | null
+          unloading_cost?: number | null
+          updated_at?: string | null
+          vendor_id: string
+        }
+        Update: {
+          brand_id?: string | null
+          created_at?: string | null
+          current_price?: number | null
+          custom_material_name?: string | null
+          gst_rate?: number | null
+          id?: string
+          is_available?: boolean | null
+          last_price_update?: string | null
+          lead_time_days?: number | null
+          loading_cost?: number | null
+          material_id?: string | null
+          min_order_qty?: number | null
+          notes?: string | null
+          price_includes_gst?: boolean | null
+          price_includes_transport?: boolean | null
+          price_source?: string | null
+          transport_cost?: number | null
+          unit?: string | null
+          unloading_cost?: number | null
+          updated_at?: string | null
+          vendor_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vendor_inventory_brand_id_fkey"
+            columns: ["brand_id"]
+            isOneToOne: false
+            referencedRelation: "material_brands"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_inventory_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "materials"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_inventory_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_group_stock_summary"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "vendor_inventory_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_low_stock_alerts"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "vendor_inventory_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_stock_summary"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "vendor_inventory_vendor_id_fkey"
+            columns: ["vendor_id"]
+            isOneToOne: false
+            referencedRelation: "vendors"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       vendor_material_categories: {
         Row: {
           category_id: string
@@ -5520,6 +6498,9 @@ export type Database = {
       }
       vendors: {
         Row: {
+          accepts_cash: boolean | null
+          accepts_credit: boolean | null
+          accepts_upi: boolean | null
           address: string | null
           alternate_phone: string | null
           bank_account_number: string | null
@@ -5530,24 +6511,42 @@ export type Database = {
           contact_person: string | null
           created_at: string | null
           created_by: string | null
+          credit_days: number | null
           credit_limit: number | null
+          delivery_radius_km: number | null
           email: string | null
           gst_number: string | null
+          has_physical_store: boolean | null
           id: string
           is_active: boolean | null
+          latitude: number | null
+          longitude: number | null
+          min_order_amount: number | null
           name: string
           notes: string | null
           pan_number: string | null
           payment_terms_days: number | null
           phone: string | null
           pincode: string | null
+          provides_loading: boolean | null
+          provides_transport: boolean | null
+          provides_unloading: boolean | null
           rating: number | null
+          shop_name: string | null
+          specializations: string[] | null
           state: string | null
+          store_address: string | null
+          store_city: string | null
+          store_pincode: string | null
           updated_at: string | null
           updated_by: string | null
+          vendor_type: Database["public"]["Enums"]["vendor_type"] | null
           whatsapp_number: string | null
         }
         Insert: {
+          accepts_cash?: boolean | null
+          accepts_credit?: boolean | null
+          accepts_upi?: boolean | null
           address?: string | null
           alternate_phone?: string | null
           bank_account_number?: string | null
@@ -5558,24 +6557,42 @@ export type Database = {
           contact_person?: string | null
           created_at?: string | null
           created_by?: string | null
+          credit_days?: number | null
           credit_limit?: number | null
+          delivery_radius_km?: number | null
           email?: string | null
           gst_number?: string | null
+          has_physical_store?: boolean | null
           id?: string
           is_active?: boolean | null
+          latitude?: number | null
+          longitude?: number | null
+          min_order_amount?: number | null
           name: string
           notes?: string | null
           pan_number?: string | null
           payment_terms_days?: number | null
           phone?: string | null
           pincode?: string | null
+          provides_loading?: boolean | null
+          provides_transport?: boolean | null
+          provides_unloading?: boolean | null
           rating?: number | null
+          shop_name?: string | null
+          specializations?: string[] | null
           state?: string | null
+          store_address?: string | null
+          store_city?: string | null
+          store_pincode?: string | null
           updated_at?: string | null
           updated_by?: string | null
+          vendor_type?: Database["public"]["Enums"]["vendor_type"] | null
           whatsapp_number?: string | null
         }
         Update: {
+          accepts_cash?: boolean | null
+          accepts_credit?: boolean | null
+          accepts_upi?: boolean | null
           address?: string | null
           alternate_phone?: string | null
           bank_account_number?: string | null
@@ -5586,21 +6603,36 @@ export type Database = {
           contact_person?: string | null
           created_at?: string | null
           created_by?: string | null
+          credit_days?: number | null
           credit_limit?: number | null
+          delivery_radius_km?: number | null
           email?: string | null
           gst_number?: string | null
+          has_physical_store?: boolean | null
           id?: string
           is_active?: boolean | null
+          latitude?: number | null
+          longitude?: number | null
+          min_order_amount?: number | null
           name?: string
           notes?: string | null
           pan_number?: string | null
           payment_terms_days?: number | null
           phone?: string | null
           pincode?: string | null
+          provides_loading?: boolean | null
+          provides_transport?: boolean | null
+          provides_unloading?: boolean | null
           rating?: number | null
+          shop_name?: string | null
+          specializations?: string[] | null
           state?: string | null
+          store_address?: string | null
+          store_city?: string | null
+          store_pincode?: string | null
           updated_at?: string | null
           updated_by?: string | null
+          vendor_type?: Database["public"]["Enums"]["vendor_type"] | null
           whatsapp_number?: string | null
         }
         Relationships: [
@@ -5760,6 +6792,226 @@ export type Database = {
           },
         ]
       }
+      v_delivery_verification_details: {
+        Row: {
+          challan_number: string | null
+          challan_url: string | null
+          created_at: string | null
+          delivery_date: string | null
+          delivery_status: Database["public"]["Enums"]["delivery_status"] | null
+          discrepancies: Json | null
+          driver_name: string | null
+          driver_phone: string | null
+          engineer_verified_at: string | null
+          engineer_verified_by: string | null
+          grn_number: string | null
+          id: string | null
+          po_id: string | null
+          po_number: string | null
+          requires_verification: boolean | null
+          site_id: string | null
+          site_name: string | null
+          vehicle_number: string | null
+          vendor_id: string | null
+          vendor_name: string | null
+          vendor_phone: string | null
+          verification_notes: string | null
+          verification_photos: string[] | null
+          verification_status: string | null
+          verified_by_name: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "deliveries_engineer_verified_by_fkey"
+            columns: ["engineer_verified_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "deliveries_po_id_fkey"
+            columns: ["po_id"]
+            isOneToOne: false
+            referencedRelation: "purchase_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "deliveries_po_id_fkey"
+            columns: ["po_id"]
+            isOneToOne: false
+            referencedRelation: "v_pending_purchase_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "deliveries_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "deliveries_vendor_id_fkey"
+            columns: ["vendor_id"]
+            isOneToOne: false
+            referencedRelation: "vendors"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      v_group_stock_summary: {
+        Row: {
+          avg_cost: number | null
+          brand_name: string | null
+          category_name: string | null
+          group_name: string | null
+          last_received_date: string | null
+          last_used_date: string | null
+          material_code: string | null
+          material_id: string | null
+          material_name: string | null
+          site_group_id: string | null
+          total_available: number | null
+          total_qty: number | null
+          total_reserved: number | null
+          total_value: number | null
+          unit: Database["public"]["Enums"]["material_unit"] | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "group_stock_inventory_site_group_id_fkey"
+            columns: ["site_group_id"]
+            isOneToOne: false
+            referencedRelation: "site_groups"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      v_group_usage_by_site: {
+        Row: {
+          group_name: string | null
+          material_id: string | null
+          material_name: string | null
+          site_group_id: string | null
+          site_name: string | null
+          total_cost: number | null
+          total_quantity: number | null
+          unit: Database["public"]["Enums"]["material_unit"] | null
+          usage_month: string | null
+          usage_site_id: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "group_stock_transactions_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "materials"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "group_stock_transactions_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_group_stock_summary"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "group_stock_transactions_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_low_stock_alerts"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "group_stock_transactions_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_stock_summary"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "group_stock_transactions_site_group_id_fkey"
+            columns: ["site_group_id"]
+            isOneToOne: false
+            referencedRelation: "site_groups"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "group_stock_transactions_usage_site_id_fkey"
+            columns: ["usage_site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      v_local_purchases_details: {
+        Row: {
+          add_to_stock: boolean | null
+          created_at: string | null
+          description: string | null
+          engineer_id: string | null
+          engineer_name: string | null
+          group_name: string | null
+          id: string | null
+          is_group_stock: boolean | null
+          item_count: number | null
+          needs_reimbursement: boolean | null
+          payment_mode: string | null
+          payment_source: string | null
+          purchase_date: string | null
+          purchase_number: string | null
+          receipt_url: string | null
+          reimbursement_status: string | null
+          reimbursement_transaction_id: string | null
+          site_group_id: string | null
+          site_id: string | null
+          site_name: string | null
+          status: string | null
+          stock_added: boolean | null
+          total_amount: number | null
+          vendor_id: string | null
+          vendor_name: string | null
+          vendor_phone: string | null
+          vendor_type: Database["public"]["Enums"]["vendor_type"] | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "local_purchases_engineer_id_fkey"
+            columns: ["engineer_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "local_purchases_reimbursement_transaction_id_fkey"
+            columns: ["reimbursement_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "site_engineer_transactions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "local_purchases_site_group_id_fkey"
+            columns: ["site_group_id"]
+            isOneToOne: false
+            referencedRelation: "site_groups"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "local_purchases_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "local_purchases_vendor_id_fkey"
+            columns: ["vendor_id"]
+            isOneToOne: false
+            referencedRelation: "vendors"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       v_low_stock_alerts: {
         Row: {
           avg_unit_cost: number | null
@@ -5810,6 +7062,13 @@ export type Database = {
             foreignKeyName: "daily_material_usage_material_id_fkey"
             columns: ["material_id"]
             isOneToOne: false
+            referencedRelation: "v_group_stock_summary"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "daily_material_usage_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
             referencedRelation: "v_low_stock_alerts"
             referencedColumns: ["material_id"]
           },
@@ -5839,6 +7098,80 @@ export type Database = {
             columns: ["site_id"]
             isOneToOne: false
             referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      v_material_vendor_prices: {
+        Row: {
+          brand_id: string | null
+          brand_name: string | null
+          category_name: string | null
+          current_price: number | null
+          is_available: boolean | null
+          last_price_update: string | null
+          lead_time_days: number | null
+          loading_cost: number | null
+          material_code: string | null
+          material_id: string | null
+          material_name: string | null
+          min_order_amount: number | null
+          min_order_qty: number | null
+          previous_price: number | null
+          price_includes_gst: boolean | null
+          provides_loading: boolean | null
+          provides_transport: boolean | null
+          shop_name: string | null
+          store_city: string | null
+          total_landed_cost: number | null
+          transport_cost: number | null
+          unit: Database["public"]["Enums"]["material_unit"] | null
+          unloading_cost: number | null
+          vendor_id: string | null
+          vendor_name: string | null
+          vendor_type: Database["public"]["Enums"]["vendor_type"] | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vendor_inventory_brand_id_fkey"
+            columns: ["brand_id"]
+            isOneToOne: false
+            referencedRelation: "material_brands"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_inventory_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "materials"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_inventory_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_group_stock_summary"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "vendor_inventory_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_low_stock_alerts"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "vendor_inventory_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_stock_summary"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "vendor_inventory_vendor_id_fkey"
+            columns: ["vendor_id"]
+            isOneToOne: false
+            referencedRelation: "vendors"
             referencedColumns: ["id"]
           },
         ]
@@ -5894,6 +7227,58 @@ export type Database = {
           },
         ]
       }
+      v_pending_delivery_verifications: {
+        Row: {
+          challan_number: string | null
+          created_at: string | null
+          delivery_date: string | null
+          delivery_status: Database["public"]["Enums"]["delivery_status"] | null
+          driver_name: string | null
+          driver_phone: string | null
+          grn_number: string | null
+          id: string | null
+          item_count: number | null
+          po_id: string | null
+          po_number: string | null
+          site_id: string | null
+          site_name: string | null
+          total_value: number | null
+          vehicle_number: string | null
+          vendor_id: string | null
+          vendor_name: string | null
+          verification_status: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "deliveries_po_id_fkey"
+            columns: ["po_id"]
+            isOneToOne: false
+            referencedRelation: "purchase_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "deliveries_po_id_fkey"
+            columns: ["po_id"]
+            isOneToOne: false
+            referencedRelation: "v_pending_purchase_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "deliveries_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "deliveries_vendor_id_fkey"
+            columns: ["vendor_id"]
+            isOneToOne: false
+            referencedRelation: "vendors"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       v_pending_purchase_orders: {
         Row: {
           created_by: string | null
@@ -5926,6 +7311,112 @@ export type Database = {
           },
           {
             foreignKeyName: "purchase_orders_vendor_id_fkey"
+            columns: ["vendor_id"]
+            isOneToOne: false
+            referencedRelation: "vendors"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      v_pending_reimbursements: {
+        Row: {
+          created_at: string | null
+          engineer_id: string | null
+          engineer_name: string | null
+          id: string | null
+          purchase_date: string | null
+          purchase_number: string | null
+          receipt_url: string | null
+          reimbursement_amount: number | null
+          reimbursement_status: string | null
+          site_id: string | null
+          site_name: string | null
+          vendor_name: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "local_purchases_engineer_id_fkey"
+            columns: ["engineer_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "local_purchases_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      v_price_history_details: {
+        Row: {
+          brand_id: string | null
+          brand_name: string | null
+          category_name: string | null
+          created_at: string | null
+          gst_rate: number | null
+          id: string | null
+          loading_cost: number | null
+          material_code: string | null
+          material_id: string | null
+          material_name: string | null
+          notes: string | null
+          price: number | null
+          price_includes_gst: boolean | null
+          quantity: number | null
+          recorded_by_name: string | null
+          recorded_date: string | null
+          shop_name: string | null
+          source: string | null
+          source_reference: string | null
+          total_landed_cost: number | null
+          transport_cost: number | null
+          unit: string | null
+          unloading_cost: number | null
+          vendor_id: string | null
+          vendor_name: string | null
+          vendor_type: Database["public"]["Enums"]["vendor_type"] | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "price_history_brand_id_fkey"
+            columns: ["brand_id"]
+            isOneToOne: false
+            referencedRelation: "material_brands"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "price_history_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "materials"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "price_history_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_group_stock_summary"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "price_history_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_low_stock_alerts"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "price_history_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_stock_summary"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "price_history_vendor_id_fkey"
             columns: ["vendor_id"]
             isOneToOne: false
             referencedRelation: "vendors"
@@ -6184,6 +7675,82 @@ export type Database = {
           },
         ]
       }
+      v_vendor_inventory_details: {
+        Row: {
+          brand_id: string | null
+          brand_name: string | null
+          category_name: string | null
+          current_price: number | null
+          gst_rate: number | null
+          id: string | null
+          is_available: boolean | null
+          last_price_update: string | null
+          lead_time_days: number | null
+          loading_cost: number | null
+          material_code: string | null
+          material_id: string | null
+          material_name: string | null
+          min_order_qty: number | null
+          price_includes_gst: boolean | null
+          price_includes_transport: boolean | null
+          price_source: string | null
+          provides_loading: boolean | null
+          provides_transport: boolean | null
+          shop_name: string | null
+          store_city: string | null
+          total_landed_cost: number | null
+          transport_cost: number | null
+          unit: string | null
+          unloading_cost: number | null
+          vendor_id: string | null
+          vendor_name: string | null
+          vendor_type: Database["public"]["Enums"]["vendor_type"] | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vendor_inventory_brand_id_fkey"
+            columns: ["brand_id"]
+            isOneToOne: false
+            referencedRelation: "material_brands"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_inventory_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "materials"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_inventory_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_group_stock_summary"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "vendor_inventory_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_low_stock_alerts"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "vendor_inventory_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_stock_summary"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "vendor_inventory_vendor_id_fkey"
+            columns: ["vendor_id"]
+            isOneToOne: false
+            referencedRelation: "vendors"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Functions: {
       approve_deletion: {
@@ -6219,12 +7786,21 @@ export type Database = {
         }
         Returns: string
       }
+      create_local_purchase_reimbursement: {
+        Args: { p_purchase_id: string; p_user_id: string }
+        Returns: string
+      }
       generate_grn_number: { Args: never; Returns: string }
+      generate_local_purchase_number: { Args: never; Returns: string }
       generate_mr_number: { Args: never; Returns: string }
       generate_po_number: { Args: never; Returns: string }
       generate_transfer_number: { Args: never; Returns: string }
       generate_weekly_notifications: { Args: never; Returns: number }
       get_current_user_id: { Args: never; Returns: string }
+      get_material_count_for_vendor: {
+        Args: { p_vendor_id: string }
+        Returns: number
+      }
       get_monthly_report: {
         Args: { p_month: number; p_site_id: string; p_year: number }
         Returns: Json
@@ -6245,6 +7821,10 @@ export type Database = {
         Args: never
         Returns: Database["public"]["Enums"]["user_role"]
       }
+      get_vendor_count_for_material: {
+        Args: { p_material_id: string }
+        Returns: number
+      }
       get_week_attendance_summary: {
         Args: { p_site_id: string; p_week_ending: string }
         Returns: {
@@ -6263,6 +7843,30 @@ export type Database = {
         }[]
       }
       is_admin: { Args: never; Returns: boolean }
+      process_local_purchase_stock: {
+        Args: { p_purchase_id: string }
+        Returns: boolean
+      }
+      record_price_entry: {
+        Args: {
+          p_brand_id: string
+          p_gst_rate: number
+          p_loading_cost: number
+          p_material_id: string
+          p_notes?: string
+          p_price: number
+          p_price_includes_gst: boolean
+          p_quantity: number
+          p_source: string
+          p_source_reference: string
+          p_transport_cost: number
+          p_unit: string
+          p_unloading_cost: number
+          p_user_id: string
+          p_vendor_id: string
+        }
+        Returns: string
+      }
       reject_deletion: {
         Args: {
           p_request_id: string
@@ -6282,6 +7886,46 @@ export type Database = {
       }
       show_limit: { Args: never; Returns: number }
       show_trgm: { Args: { "": string }; Returns: string[] }
+      update_group_stock_on_purchase: {
+        Args: {
+          p_brand_id: string
+          p_group_id: string
+          p_material_id: string
+          p_payment_site_id: string
+          p_payment_source: string
+          p_quantity: number
+          p_reference_id: string
+          p_reference_type: string
+          p_unit_cost: number
+          p_user_id: string
+        }
+        Returns: string
+      }
+      update_group_stock_on_usage: {
+        Args: {
+          p_brand_id: string
+          p_group_id: string
+          p_material_id: string
+          p_quantity: number
+          p_reference_id: string
+          p_reference_type: string
+          p_usage_site_id: string
+          p_user_id: string
+          p_work_description: string
+        }
+        Returns: string
+      }
+      verify_delivery: {
+        Args: {
+          p_delivery_id: string
+          p_discrepancies?: Json
+          p_user_id: string
+          p_verification_notes: string
+          p_verification_photos: string[]
+          p_verification_status?: string
+        }
+        Returns: boolean
+      }
     }
     Enums: {
       audit_action: "create" | "update" | "delete" | "soft_delete" | "restore"
@@ -6304,6 +7948,11 @@ export type Database = {
         | "in_transit"
         | "partial"
         | "delivered"
+        | "rejected"
+      delivery_verification_status:
+        | "pending"
+        | "verified"
+        | "disputed"
         | "rejected"
       employment_type: "daily_wage" | "contract" | "specialist"
       expense_module: "labor" | "material" | "machinery" | "general"
@@ -6362,6 +8011,7 @@ export type Database = {
       transaction_type: "advance" | "extra"
       user_role: "admin" | "office" | "site_engineer"
       user_status: "active" | "inactive" | "suspended"
+      vendor_type: "shop" | "dealer" | "manufacturer" | "individual"
       work_days_value: "0.5" | "1" | "1.5" | "2"
       work_variance: "overtime" | "standard" | "undertime"
     }
@@ -6489,6 +8139,9 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
+  graphql_public: {
+    Enums: {},
+  },
   public: {
     Enums: {
       audit_action: ["create", "update", "delete", "soft_delete", "restore"],
@@ -6507,6 +8160,12 @@ export const Constants = {
         "in_transit",
         "partial",
         "delivered",
+        "rejected",
+      ],
+      delivery_verification_status: [
+        "pending",
+        "verified",
+        "disputed",
         "rejected",
       ],
       employment_type: ["daily_wage", "contract", "specialist"],
@@ -6570,6 +8229,7 @@ export const Constants = {
       transaction_type: ["advance", "extra"],
       user_role: ["admin", "office", "site_engineer"],
       user_status: ["active", "inactive", "suspended"],
+      vendor_type: ["shop", "dealer", "manufacturer", "individual"],
       work_days_value: ["0.5", "1", "1.5", "2"],
       work_variance: ["overtime", "standard", "undertime"],
     },

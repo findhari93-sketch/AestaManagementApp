@@ -110,7 +110,10 @@ export default function SalarySettlementTable({
   const router = useRouter();
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const [selectedRow, setSelectedRow] = useState<DateRowData | null>(null);
-  const [viewingProofUrl, setViewingProofUrl] = useState<string | null>(null);
+  const [viewingProof, setViewingProof] = useState<{
+    url: string;
+    type: "company" | "engineer";
+  } | null>(null);
 
   // Redirect dialog state for delete prevention
   const [deleteRedirectDialog, setDeleteRedirectDialog] = useState<{
@@ -490,18 +493,33 @@ export default function SalarySettlementTable({
                             sx={{ height: 18, fontSize: "0.6rem" }}
                           />
                         )}
-                        {/* Proof Icon */}
-                        {record.engineerProofUrl && (
-                          <Tooltip title="View settlement proof">
+                        {/* Company Proof Icon */}
+                        {record.companyProofUrl && (
+                          <Tooltip title="View company payment proof">
                             <IconButton
                               size="small"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                setViewingProofUrl(record.engineerProofUrl);
+                                setViewingProof({ url: record.companyProofUrl!, type: "company" });
                               }}
                               sx={{ p: 0.25 }}
                             >
-                              <PhotoIcon fontSize="small" color="primary" />
+                              <PhotoIcon fontSize="small" color="info" />
+                            </IconButton>
+                          </Tooltip>
+                        )}
+                        {/* Engineer Proof Icon */}
+                        {record.engineerProofUrl && (
+                          <Tooltip title="View engineer settlement proof">
+                            <IconButton
+                              size="small"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setViewingProof({ url: record.engineerProofUrl!, type: "engineer" });
+                              }}
+                              sx={{ p: 0.25 }}
+                            >
+                              <PhotoIcon fontSize="small" color="success" />
                             </IconButton>
                           </Tooltip>
                         )}
@@ -611,18 +629,33 @@ export default function SalarySettlementTable({
                             sx={{ height: 18, fontSize: "0.6rem" }}
                           />
                         )}
-                        {/* Proof Icon */}
-                        {record.engineerProofUrl && (
-                          <Tooltip title="View settlement proof">
+                        {/* Company Proof Icon */}
+                        {record.companyProofUrl && (
+                          <Tooltip title="View company payment proof">
                             <IconButton
                               size="small"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                setViewingProofUrl(record.engineerProofUrl);
+                                setViewingProof({ url: record.companyProofUrl!, type: "company" });
                               }}
                               sx={{ p: 0.25 }}
                             >
-                              <PhotoIcon fontSize="small" color="primary" />
+                              <PhotoIcon fontSize="small" color="info" />
+                            </IconButton>
+                          </Tooltip>
+                        )}
+                        {/* Engineer Proof Icon */}
+                        {record.engineerProofUrl && (
+                          <Tooltip title="View engineer settlement proof">
+                            <IconButton
+                              size="small"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setViewingProof({ url: record.engineerProofUrl!, type: "engineer" });
+                              }}
+                              sx={{ p: 0.25 }}
+                            >
+                              <PhotoIcon fontSize="small" color="success" />
                             </IconButton>
                           </Tooltip>
                         )}
@@ -834,30 +867,70 @@ export default function SalarySettlementTable({
         )}
       </Menu>
 
-      {/* Settlement Proof Image Viewer */}
+      {/* Settlement Proof Image Viewer - Full Screen */}
       <Dialog
-        open={!!viewingProofUrl}
-        onClose={() => setViewingProofUrl(null)}
-        maxWidth="md"
-        fullWidth
+        open={!!viewingProof}
+        onClose={() => setViewingProof(null)}
+        maxWidth={false}
+        fullScreen
+        PaperProps={{
+          sx: {
+            bgcolor: "rgba(0, 0, 0, 0.95)",
+          },
+        }}
       >
-        <DialogTitle sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span>Settlement Proof</span>
-          <IconButton onClick={() => setViewingProofUrl(null)} size="small">
+        <Box
+          sx={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            p: 2,
+            zIndex: 1,
+            bgcolor: "rgba(0, 0, 0, 0.5)",
+          }}
+        >
+          <Typography variant="h6" sx={{ color: "white" }}>
+            {viewingProof?.type === "company"
+              ? "Company Payment Proof"
+              : "Engineer Settlement Proof"}
+          </Typography>
+          <IconButton
+            onClick={() => setViewingProof(null)}
+            sx={{
+              color: "white",
+              bgcolor: "rgba(255, 255, 255, 0.1)",
+              "&:hover": { bgcolor: "rgba(255, 255, 255, 0.2)" },
+            }}
+          >
             <CloseIcon />
           </IconButton>
-        </DialogTitle>
-        <DialogContent sx={{ display: "flex", justifyContent: "center", p: 2 }}>
-          {viewingProofUrl && (
+        </Box>
+        <DialogContent
+          sx={{
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            p: 0,
+            height: "100%",
+          }}
+        >
+          {viewingProof && (
             <Box
               component="img"
-              src={viewingProofUrl}
-              alt="Settlement proof"
+              src={viewingProof.url}
+              alt={
+                viewingProof.type === "company"
+                  ? "Company payment proof"
+                  : "Engineer settlement proof"
+              }
               sx={{
                 maxWidth: "100%",
-                maxHeight: "70vh",
+                maxHeight: "100%",
                 objectFit: "contain",
-                borderRadius: 1,
               }}
             />
           )}

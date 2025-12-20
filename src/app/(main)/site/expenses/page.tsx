@@ -73,7 +73,6 @@ interface SubcontractSummary {
 interface ExpenseWithCategory extends Expense {
   category_name?: string;
   payer_name?: string;
-  engineer_transaction_id?: string | null;
 }
 
 export default function ExpensesPage() {

@@ -42,6 +42,7 @@ import { hasEditPermission, canPerformMassUpload } from "@/lib/permissions";
 import { notifyEngineerPaymentReminder } from "@/lib/services/notificationService";
 import { generateWhatsAppUrl, generatePaymentReminderMessage } from "@/lib/formatters";
 import SettlementDetailsDialog from "@/components/settlement/SettlementDetailsDialog";
+import DateViewDetailsDialog from "./DateViewDetailsDialog";
 
 interface DailyMarketPaymentsTabProps {
   dateFrom: string;
@@ -128,6 +129,11 @@ export default function DailyMarketPaymentsTab({
   // Settlement details dialog state (for admin confirmation)
   const [settlementDetailsOpen, setSettlementDetailsOpen] = useState(false);
   const [selectedTransactionId, setSelectedTransactionId] = useState<string | null>(null);
+
+  // View details dialog state
+  const [viewDialogOpen, setViewDialogOpen] = useState(false);
+  const [viewDialogDate, setViewDialogDate] = useState<string>("");
+  const [viewDialogGroup, setViewDialogGroup] = useState<DateGroup | null>(null);
 
   // Fetch data
   const fetchData = useCallback(async () => {
@@ -1052,7 +1058,9 @@ export default function DailyMarketPaymentsTab({
           isAdmin={isAdmin}
           onPayDate={(date, records) => openPaymentDialog(records)}
           onViewDate={(date, group) => {
-            // View is handled by expanded row in the table
+            setViewDialogDate(date);
+            setViewDialogGroup(group);
+            setViewDialogOpen(true);
           }}
           onEditDate={(date, group) => {
             setEditDialogDate(date);
@@ -1148,6 +1156,17 @@ export default function DailyMarketPaymentsTab({
           }}
         />
       )}
+
+      {/* View Details Dialog (shows settlement summary with proofs) */}
+      <DateViewDetailsDialog
+        open={viewDialogOpen}
+        onClose={() => {
+          setViewDialogOpen(false);
+          setViewDialogGroup(null);
+        }}
+        date={viewDialogDate}
+        group={viewDialogGroup}
+      />
     </Box>
   );
 }
