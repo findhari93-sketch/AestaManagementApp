@@ -53,6 +53,7 @@ import { useRouter } from "next/navigation";
 import {
   Description as ContractIcon,
   AccountBalance as BalanceIcon,
+  Link as LinkIcon,
 } from "@mui/icons-material";
 
 interface SitePayer {
@@ -73,6 +74,7 @@ interface SubcontractSummary {
 interface ExpenseWithCategory extends Expense {
   category_name?: string;
   payer_name?: string;
+  subcontract_title?: string;
 }
 
 export default function ExpensesPage() {
@@ -252,7 +254,7 @@ export default function ExpensesPage() {
     try {
       let query = supabase
         .from("expenses")
-        .select(`*, expense_categories(name), site_payers(name), engineer_transaction_id`)
+        .select(`*, expense_categories(name), site_payers(name), subcontracts(title), engineer_transaction_id`)
         .eq("site_id", selectedSite.id)
         .order("date", { ascending: false });
 
@@ -270,6 +272,7 @@ export default function ExpensesPage() {
           ...e,
           category_name: e.expense_categories?.name,
           payer_name: e.site_payers?.name,
+          subcontract_title: e.subcontracts?.title,
         }))
       );
       // Also refresh subcontracts summary since expenses affect paid totals
@@ -416,24 +419,44 @@ export default function ExpensesPage() {
         size: 150,
         Cell: ({ cell }) => cell.getValue<string>() || "-",
       },
-    ];
-
-    // Add Paid By column if multi-payer is enabled
-    if (hasMultiplePayers) {
-      cols.push({
+      {
         accessorKey: "payer_name",
         header: "Paid By",
-        size: 120,
+        size: 130,
         Cell: ({ cell }) => {
           const value = cell.getValue<string>();
           return value ? (
-            <Chip label={value} size="small" variant="outlined" color="primary" />
+            <Chip label={value} size="small" variant="outlined" color="secondary" />
           ) : (
-            <Typography variant="body2" color="text.secondary">-</Typography>
+            <Typography variant="body2" color="text.disabled">—</Typography>
           );
         },
-      });
-    }
+      },
+      {
+        accessorKey: "subcontract_title",
+        header: "Subcontract",
+        size: 160,
+        Cell: ({ cell }) => {
+          const value = cell.getValue<string>();
+          return value ? (
+            <Chip
+              label={value}
+              size="small"
+              color="info"
+              variant="outlined"
+              icon={<LinkIcon fontSize="small" />}
+            />
+          ) : (
+            <Chip
+              label="Unlinked"
+              size="small"
+              variant="outlined"
+              sx={{ color: 'text.disabled', borderColor: 'divider' }}
+            />
+          );
+        },
+      },
+    ];
 
     cols.push(
       {
@@ -482,7 +505,7 @@ export default function ExpensesPage() {
     );
 
     return cols;
-  }, [canEdit, hasMultiplePayers]);
+  }, [canEdit]);
 
   if (!selectedSite)
     return (

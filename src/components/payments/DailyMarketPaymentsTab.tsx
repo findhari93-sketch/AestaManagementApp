@@ -47,6 +47,7 @@ import { notifyEngineerPaymentReminder } from "@/lib/services/notificationServic
 import { generateWhatsAppUrl, generatePaymentReminderMessage } from "@/lib/formatters";
 import SettlementDetailsDialog from "@/components/settlement/SettlementDetailsDialog";
 import DateViewDetailsDialog from "./DateViewDetailsDialog";
+import SettlementEditDialog from "./SettlementEditDialog";
 
 interface DailyMarketPaymentsTabProps {
   dateFrom: string;
@@ -138,6 +139,10 @@ export default function DailyMarketPaymentsTab({
   const [viewDialogOpen, setViewDialogOpen] = useState(false);
   const [viewDialogDate, setViewDialogDate] = useState<string>("");
   const [viewDialogGroup, setViewDialogGroup] = useState<DateGroup | null>(null);
+
+  // Settlement edit dialog state (individual record edit)
+  const [settlementEditOpen, setSettlementEditOpen] = useState(false);
+  const [recordToEdit, setRecordToEdit] = useState<DailyPaymentRecord | null>(null);
 
   // Fetch data
   const fetchData = useCallback(async () => {
@@ -385,11 +390,18 @@ export default function DailyMarketPaymentsTab({
 
         // Filter by subcontract
         if (filterSubcontract !== "all") {
-          dailyRecords = dailyRecords.filter(
-            (r) => r.subcontractId === filterSubcontract
-          );
-          // Market records don't have subcontract, so exclude them if filtering by subcontract
-          marketRecords = [];
+          if (filterSubcontract === "unlinked") {
+            // Filter for records NOT linked to any subcontract
+            dailyRecords = dailyRecords.filter((r) => !r.subcontractId);
+            // Market records are always unlinked, so include them
+          } else {
+            // Filter for a specific subcontract
+            dailyRecords = dailyRecords.filter(
+              (r) => r.subcontractId === filterSubcontract
+            );
+            // Market records don't have subcontract, so exclude them if filtering by specific subcontract
+            marketRecords = [];
+          }
         }
 
         const filteredGroup = {
@@ -1065,6 +1077,7 @@ export default function DailyMarketPaymentsTab({
             label="Subcontract"
           >
             <MenuItem value="all">All</MenuItem>
+            <MenuItem value="unlinked">Unlinked</MenuItem>
             {subcontracts.map((sc) => (
               <MenuItem key={sc.id} value={sc.id}>
                 {sc.title}
@@ -1136,6 +1149,10 @@ export default function DailyMarketPaymentsTab({
           onConfirmSettlement={(transactionId) => {
             setSelectedTransactionId(transactionId);
             setSettlementDetailsOpen(true);
+          }}
+          onEditRecord={(record) => {
+            setRecordToEdit(record);
+            setSettlementEditOpen(true);
           }}
         />
       )}
@@ -1220,6 +1237,20 @@ export default function DailyMarketPaymentsTab({
         }}
         date={viewDialogDate}
         group={viewDialogGroup}
+      />
+
+      {/* Settlement Edit Dialog (individual record edit) */}
+      <SettlementEditDialog
+        open={settlementEditOpen}
+        onClose={() => {
+          setSettlementEditOpen(false);
+          setRecordToEdit(null);
+        }}
+        record={recordToEdit}
+        onSuccess={() => {
+          fetchData();
+          onDataChange?.();
+        }}
       />
     </Box>
   );

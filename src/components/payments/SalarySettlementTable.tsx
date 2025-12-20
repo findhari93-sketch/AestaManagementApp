@@ -45,6 +45,7 @@ import {
   Warning as WarningIcon,
   EventNote as AttendanceIcon,
   ArrowForward as ArrowForwardIcon,
+  Link as LinkIcon,
 } from "@mui/icons-material";
 import { useRouter } from "next/navigation";
 import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
@@ -65,6 +66,7 @@ interface SalarySettlementTableProps {
   onDeleteDate: (date: string, records: DailyPaymentRecord[]) => void;
   onNotifyDate: (date: string, records: DailyPaymentRecord[]) => void;
   onConfirmSettlement?: (transactionId: string) => void;
+  onEditRecord?: (record: DailyPaymentRecord) => void;
 }
 
 // Row data structure for the MRT table
@@ -107,6 +109,7 @@ export default function SalarySettlementTable({
   onDeleteDate,
   onNotifyDate,
   onConfirmSettlement,
+  onEditRecord,
 }: SalarySettlementTableProps) {
   const theme = useTheme();
   const router = useRouter();
@@ -409,8 +412,11 @@ export default function SalarySettlementTable({
                 <TableCell>Name / Role</TableCell>
                 <TableCell align="right">Count</TableCell>
                 <TableCell align="right">Amount</TableCell>
+                <TableCell>Paid By</TableCell>
+                <TableCell>Subcontract</TableCell>
                 <TableCell align="center">Status</TableCell>
                 <TableCell align="center">Settlement</TableCell>
+                {onEditRecord && <TableCell align="center">Actions</TableCell>}
               </TableRow>
             </TableHead>
             <TableBody>
@@ -442,6 +448,38 @@ export default function SalarySettlementTable({
                       {formatCurrency(record.amount)}
                     </Typography>
                   </TableCell>
+                  <TableCell>
+                    {record.moneySource ? (
+                      <Chip
+                        label={getPayerSourceLabel(record.moneySource as PayerSource, record.moneySourceName || undefined)}
+                        size="small"
+                        variant="outlined"
+                        color={getPayerSourceColor(record.moneySource as PayerSource)}
+                        sx={{ height: 20, fontSize: "0.65rem" }}
+                      />
+                    ) : (
+                      <Typography variant="body2" color="text.disabled">—</Typography>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {record.subcontractTitle ? (
+                      <Chip
+                        label={record.subcontractTitle}
+                        size="small"
+                        color="info"
+                        variant="outlined"
+                        icon={<LinkIcon sx={{ fontSize: 14 }} />}
+                        sx={{ height: 20, fontSize: "0.65rem" }}
+                      />
+                    ) : (
+                      <Chip
+                        label="Unlinked"
+                        size="small"
+                        variant="outlined"
+                        sx={{ height: 20, fontSize: "0.65rem", color: 'text.disabled', borderColor: 'divider' }}
+                      />
+                    )}
+                  </TableCell>
                   <TableCell align="center">
                     {record.isPaid ? (
                       <Chip
@@ -564,6 +602,22 @@ export default function SalarySettlementTable({
                       </Box>
                     )}
                   </TableCell>
+                  {onEditRecord && (
+                    <TableCell align="center">
+                      <Tooltip title="Edit settlement details">
+                        <IconButton
+                          size="small"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onEditRecord(record);
+                          }}
+                          disabled={disabled}
+                        >
+                          <EditIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                    </TableCell>
+                  )}
                 </TableRow>
               ))}
 
@@ -588,6 +642,28 @@ export default function SalarySettlementTable({
                       {formatCurrency(record.amount)}
                     </Typography>
                   </TableCell>
+                  <TableCell>
+                    {record.moneySource ? (
+                      <Chip
+                        label={getPayerSourceLabel(record.moneySource as PayerSource, record.moneySourceName || undefined)}
+                        size="small"
+                        variant="outlined"
+                        color={getPayerSourceColor(record.moneySource as PayerSource)}
+                        sx={{ height: 20, fontSize: "0.65rem" }}
+                      />
+                    ) : (
+                      <Typography variant="body2" color="text.disabled">—</Typography>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {/* Market laborers don't have subcontract linking */}
+                    <Chip
+                      label="Unlinked"
+                      size="small"
+                      variant="outlined"
+                      sx={{ height: 20, fontSize: "0.65rem", color: 'text.disabled', borderColor: 'divider' }}
+                    />
+                  </TableCell>
                   <TableCell align="center">
                     {record.isPaid ? (
                       <Chip
@@ -710,6 +786,22 @@ export default function SalarySettlementTable({
                       </Box>
                     )}
                   </TableCell>
+                  {onEditRecord && (
+                    <TableCell align="center">
+                      <Tooltip title="Edit settlement details">
+                        <IconButton
+                          size="small"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onEditRecord(record);
+                          }}
+                          disabled={disabled}
+                        >
+                          <EditIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                    </TableCell>
+                  )}
                 </TableRow>
               ))}
             </TableBody>
