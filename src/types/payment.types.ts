@@ -1,5 +1,7 @@
 // Payment Types for Unified Payment Management System
 
+import type { PayerSource } from "./settlement.types";
+
 // ============ COMMON TYPES ============
 
 export type PaymentMode = "upi" | "cash" | "net_banking" | "other";
@@ -53,6 +55,10 @@ export interface DailyPaymentRecord {
   confirmedAt: string | null; // When admin confirmed
   settlementMode: "upi" | "cash" | null; // How engineer settled
   cashReason: string | null; // Reason for cash payment (notes field)
+
+  // Money source tracking
+  moneySource: PayerSource | null; // Whose money was used
+  moneySourceName: string | null; // Custom name for other_site_money or custom
 
   // Subcontract linking (optional)
   subcontractId: string | null;
@@ -250,6 +256,16 @@ export interface EngineerTransaction {
   createdBy: string;
   createdByUserId: string;
   createdAt: string;
+}
+
+// ============ MONEY SOURCE SUMMARY ============
+
+export interface MoneySourceSummary {
+  source: PayerSource;
+  displayName: string; // "Own Money", "Amma Money", etc.
+  totalAmount: number;
+  transactionCount: number;
+  laborerCount: number;
 }
 
 // ============ SUMMARY CARDS ============

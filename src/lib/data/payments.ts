@@ -265,6 +265,8 @@ export function transformToDailyPaymentRecords(
       subcontractId: r.subcontract_id || null,
       subcontractTitle: r.subcontracts?.title || null,
       expenseId: r.expense_id || null,
+      moneySource: tx?.money_source || null,
+      moneySourceName: tx?.money_source_name || null,
     });
   });
 
@@ -300,6 +302,8 @@ export function transformToDailyPaymentRecords(
       subcontractId: null,
       subcontractTitle: null,
       expenseId: r.expense_id || null,
+      moneySource: tx?.money_source || null,
+      moneySourceName: tx?.money_source_name || null,
     });
   });
 

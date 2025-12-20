@@ -39,6 +39,7 @@ import { useSite } from "@/contexts/SiteContext";
 import { createSalaryExpense } from "@/lib/services/notificationService";
 import FileUploader, { UploadedFile } from "@/components/common/FileUploader";
 import SubcontractLinkSelector from "./SubcontractLinkSelector";
+import PayerSourceSelector from "@/components/settlement/PayerSourceSelector";
 import dayjs from "dayjs";
 import type {
   PaymentDialogProps,
@@ -47,6 +48,7 @@ import type {
   DailyPaymentRecord,
   WeeklyContractLaborer,
 } from "@/types/payment.types";
+import type { PayerSource } from "@/types/settlement.types";
 
 interface Engineer {
   id: string;
@@ -80,6 +82,10 @@ export default function PaymentDialog({
   );
   const [proofUrl, setProofUrl] = useState<string | null>(null);
   const [notes, setNotes] = useState<string>("");
+
+  // Money source tracking
+  const [moneySource, setMoneySource] = useState<PayerSource>("own_money");
+  const [moneySourceName, setMoneySourceName] = useState<string>("");
 
   // For partial payments (weekly)
   const [isPartialPayment, setIsPartialPayment] = useState(false);
@@ -204,6 +210,8 @@ export default function PaymentDialog({
       setIsPartialPayment(false);
       setPartialAmount(0);
       setError(null);
+      setMoneySource("own_money");
+      setMoneySourceName("");
 
       // Set default subcontract for weekly payment
       if (weeklyPayment?.laborer.subcontractId) {
@@ -250,6 +258,8 @@ export default function PaymentDialog({
             recorded_by: userProfile.name,
             recorded_by_user_id: userProfile.id,
             related_subcontract_id: subcontractId,
+            money_source: moneySource,
+            money_source_name: (moneySource === "other_site_money" || moneySource === "custom") ? moneySourceName : null,
           })
           .select()
           .single();
@@ -699,6 +709,15 @@ export default function PaymentDialog({
             </ToggleButton>
           </ToggleButtonGroup>
         </Box>
+
+        {/* Money Source */}
+        <PayerSourceSelector
+          value={moneySource}
+          customName={moneySourceName}
+          onChange={setMoneySource}
+          onCustomNameChange={setMoneySourceName}
+          disabled={processing}
+        />
 
         {/* Engineer Selection */}
         <Collapse in={paymentChannel === "engineer_wallet"}>

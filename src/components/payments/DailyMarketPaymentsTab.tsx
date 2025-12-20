@@ -37,8 +37,12 @@ import type {
   DateGroup,
   DailyPaymentRecord,
   PaymentFilterState,
+  MoneySourceSummary,
 } from "@/types/payment.types";
 import { hasEditPermission, canPerformMassUpload } from "@/lib/permissions";
+import MoneySourceSummaryCard from "./MoneySourceSummaryCard";
+import { getPayerSourceLabel } from "@/components/settlement/PayerSourceSelector";
+import type { PayerSource } from "@/types/settlement.types";
 import { notifyEngineerPaymentReminder } from "@/lib/services/notificationService";
 import { generateWhatsAppUrl, generatePaymentReminderMessage } from "@/lib/formatters";
 import SettlementDetailsDialog from "@/components/settlement/SettlementDetailsDialog";
@@ -174,7 +178,9 @@ export default function DailyMarketPaymentsTab({
             settlement_proof_url,
             transaction_date,
             settled_date,
-            confirmed_at
+            confirmed_at,
+            money_source,
+            money_source_name
           )
         `
         )
@@ -212,7 +218,9 @@ export default function DailyMarketPaymentsTab({
             settlement_proof_url,
             transaction_date,
             settled_date,
-            confirmed_at
+            confirmed_at,
+            money_source,
+            money_source_name
           )
         `
         )
@@ -255,6 +263,9 @@ export default function DailyMarketPaymentsTab({
           confirmedAt: r.site_engineer_transactions?.confirmed_at || null,
           settlementMode: r.site_engineer_transactions?.settlement_mode || null,
           cashReason: r.site_engineer_transactions?.notes || null,
+          // Money source tracking
+          moneySource: r.site_engineer_transactions?.money_source || null,
+          moneySourceName: r.site_engineer_transactions?.money_source_name || null,
         })
       );
 
@@ -289,6 +300,9 @@ export default function DailyMarketPaymentsTab({
           confirmedAt: r.site_engineer_transactions?.confirmed_at || null,
           settlementMode: r.site_engineer_transactions?.settlement_mode || null,
           cashReason: r.site_engineer_transactions?.notes || null,
+          // Money source tracking
+          moneySource: r.site_engineer_transactions?.money_source || null,
+          moneySourceName: r.site_engineer_transactions?.money_source_name || null,
         })
       );
 
@@ -392,6 +406,41 @@ export default function DailyMarketPaymentsTab({
           group.dailyRecords.length > 0 || group.marketRecords.length > 0
       );
   }, [dateGroups, filterStatus, filterSubcontract]);
+
+  // Calculate money source summary from all records with engineer transactions
+  const moneySourceSummaries = useMemo(() => {
+    const summaryMap = new Map<string, MoneySourceSummary>();
+
+    // Collect all records
+    const allRecords = filteredDateGroups.flatMap(g => [...g.dailyRecords, ...g.marketRecords]);
+
+    // Only include records that went via engineer wallet (have money source)
+    allRecords.forEach(record => {
+      if (record.moneySource && record.paidVia === "engineer_wallet") {
+        const key = record.moneySource === "other_site_money" || record.moneySource === "custom"
+          ? `${record.moneySource}:${record.moneySourceName || ""}`
+          : record.moneySource;
+
+        if (!summaryMap.has(key)) {
+          summaryMap.set(key, {
+            source: record.moneySource as PayerSource,
+            displayName: getPayerSourceLabel(record.moneySource as PayerSource, record.moneySourceName || undefined),
+            totalAmount: 0,
+            transactionCount: 0,
+            laborerCount: 0,
+          });
+        }
+
+        const summary = summaryMap.get(key)!;
+        summary.totalAmount += record.amount;
+        summary.transactionCount += 1;
+        summary.laborerCount += record.count || 1;
+      }
+    });
+
+    // Sort by amount descending
+    return Array.from(summaryMap.values()).sort((a, b) => b.totalAmount - a.totalAmount);
+  }, [filteredDateGroups]);
 
   // Helper functions
   function createEmptyDateGroup(date: string): DateGroup {
@@ -1044,6 +1093,11 @@ export default function DailyMarketPaymentsTab({
           Refresh
         </Button>
       </Box>
+
+      {/* Money Source Summary Card */}
+      {moneySourceSummaries.length > 0 && (
+        <MoneySourceSummaryCard summaries={moneySourceSummaries} />
+      )}
 
       {/* Salary Settlement Table */}
       {filteredDateGroups.length === 0 ? (

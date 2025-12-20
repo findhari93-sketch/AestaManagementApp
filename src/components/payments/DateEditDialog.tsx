@@ -74,7 +74,12 @@ export default function DateEditDialog({
   const pendingRecords = allRecords.filter(
     (r) => !r.isPaid && r.paidVia !== "engineer_wallet"
   );
+  // Records that went via engineer wallet (for updating money source on transaction)
+  const engineerWalletRecords = allRecords.filter(
+    (r) => r.paidVia === "engineer_wallet" && r.engineerTransactionId
+  );
   const totalAmount = pendingRecords.reduce((sum, r) => sum + r.amount, 0);
+  const engineerWalletAmount = engineerWalletRecords.reduce((sum, r) => sum + r.amount, 0);
 
   const handleSubmit = async () => {
     if (!selectedSite?.id || !userProfile) return;
@@ -109,6 +114,24 @@ export default function DateEditDialog({
 
       // Note: market_laborer_attendance doesn't have payer_source/payer_name columns
       // Those fields only apply to daily laborers
+
+      // Update money_source on engineer transactions for records that went via engineer wallet
+      const transactionIds = [...new Set(engineerWalletRecords
+        .map(r => r.engineerTransactionId)
+        .filter(Boolean)
+      )] as string[];
+
+      if (transactionIds.length > 0) {
+        const { error: txError } = await (supabase
+          .from("site_engineer_transactions") as any)
+          .update({
+            money_source: payerSource,
+            money_source_name: (payerSource === "custom" || payerSource === "other_site_money") ? customPayerName : null,
+          })
+          .in("id", transactionIds);
+
+        if (txError) throw txError;
+      }
 
       onSuccess();
       onClose();
@@ -147,16 +170,33 @@ export default function DateEditDialog({
 
         <Box sx={{ mb: 3 }}>
           <Typography variant="body2" color="text.secondary" gutterBottom>
-            This will update all pending records for this date:
+            This will update records for this date:
           </Typography>
-          <Box sx={{ display: "flex", gap: 2, mt: 1 }}>
-            <Typography variant="body2">
-              <strong>{pendingRecords.length}</strong> records
+          {pendingRecords.length > 0 && (
+            <Box sx={{ display: "flex", gap: 2, mt: 1 }}>
+              <Typography variant="body2">
+                <strong>{pendingRecords.length}</strong> pending records
+              </Typography>
+              <Typography variant="body2">
+                Rs.<strong>{totalAmount.toLocaleString("en-IN")}</strong>
+              </Typography>
+            </Box>
+          )}
+          {engineerWalletRecords.length > 0 && (
+            <Box sx={{ display: "flex", gap: 2, mt: 1 }}>
+              <Typography variant="body2" color="info.main">
+                <strong>{engineerWalletRecords.length}</strong> via engineer
+              </Typography>
+              <Typography variant="body2" color="info.main">
+                Rs.<strong>{engineerWalletAmount.toLocaleString("en-IN")}</strong>
+              </Typography>
+            </Box>
+          )}
+          {pendingRecords.length === 0 && engineerWalletRecords.length === 0 && (
+            <Typography variant="body2" color="text.secondary">
+              No records to update
             </Typography>
-            <Typography variant="body2">
-              Total: <strong>Rs.{totalAmount.toLocaleString("en-IN")}</strong>
-            </Typography>
-          </Box>
+          )}
         </Box>
 
         <Divider sx={{ my: 2 }} />
@@ -199,7 +239,7 @@ export default function DateEditDialog({
         <Button
           variant="contained"
           onClick={handleSubmit}
-          disabled={processing || pendingRecords.length === 0}
+          disabled={processing || (pendingRecords.length === 0 && engineerWalletRecords.length === 0)}
           startIcon={processing ? <CircularProgress size={20} /> : <EditIcon />}
         >
           {processing ? "Updating..." : "Update All"}

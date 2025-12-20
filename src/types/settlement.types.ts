@@ -9,7 +9,7 @@ export type SettlementStatus =
 export type SettlementMode = "upi" | "cash";
 
 // Payer source - tracks whose money was used for settlement
-export type PayerSource = "own_money" | "client_money" | "mothers_money" | "custom";
+export type PayerSource = "own_money" | "amma_money" | "client_money" | "other_site_money" | "custom" | "mothers_money";
 
 export interface PayerInfo {
   source: PayerSource;

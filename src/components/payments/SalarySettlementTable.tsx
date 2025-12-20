@@ -50,6 +50,8 @@ import { useRouter } from "next/navigation";
 import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
 import dayjs from "dayjs";
 import type { DateGroup, DailyPaymentRecord } from "@/types/payment.types";
+import { getPayerSourceLabel, getPayerSourceColor } from "@/components/settlement/PayerSourceSelector";
+import type { PayerSource } from "@/types/settlement.types";
 
 interface SalarySettlementTableProps {
   dateGroups: DateGroup[];
@@ -493,6 +495,16 @@ export default function SalarySettlementTable({
                             sx={{ height: 18, fontSize: "0.6rem" }}
                           />
                         )}
+                        {/* Money Source Chip */}
+                        {record.moneySource && (
+                          <Chip
+                            size="small"
+                            label={getPayerSourceLabel(record.moneySource as PayerSource, record.moneySourceName || undefined)}
+                            color={getPayerSourceColor(record.moneySource as PayerSource)}
+                            variant="outlined"
+                            sx={{ height: 18, fontSize: "0.6rem" }}
+                          />
+                        )}
                         {/* Company Proof Icon */}
                         {record.companyProofUrl && (
                           <Tooltip title="View company payment proof">
@@ -625,6 +637,16 @@ export default function SalarySettlementTable({
                           <Chip
                             size="small"
                             label={record.settlementMode.toUpperCase()}
+                            variant="outlined"
+                            sx={{ height: 18, fontSize: "0.6rem" }}
+                          />
+                        )}
+                        {/* Money Source Chip */}
+                        {record.moneySource && (
+                          <Chip
+                            size="small"
+                            label={getPayerSourceLabel(record.moneySource as PayerSource, record.moneySourceName || undefined)}
+                            color={getPayerSourceColor(record.moneySource as PayerSource)}
                             variant="outlined"
                             sx={{ height: 18, fontSize: "0.6rem" }}
                           />

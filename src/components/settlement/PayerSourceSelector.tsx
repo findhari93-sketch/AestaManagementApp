@@ -16,6 +16,7 @@ import {
   Business as ClientIcon,
   Person as PersonIcon,
   Edit as CustomIcon,
+  LocationOn as SiteIcon,
 } from "@mui/icons-material";
 import type { PayerSource } from "@/types/settlement.types";
 
@@ -30,9 +31,10 @@ interface PayerSourceSelectorProps {
 
 const PAYER_OPTIONS: { value: PayerSource; label: string; shortLabel: string; icon: React.ReactNode }[] = [
   { value: "own_money", label: "Own Money", shortLabel: "Own", icon: <OwnMoneyIcon fontSize="small" /> },
+  { value: "amma_money", label: "Amma Money", shortLabel: "Amma", icon: <PersonIcon fontSize="small" /> },
   { value: "client_money", label: "Client Money", shortLabel: "Client", icon: <ClientIcon fontSize="small" /> },
-  { value: "mothers_money", label: "Mother's Money", shortLabel: "Mother", icon: <PersonIcon fontSize="small" /> },
-  { value: "custom", label: "Custom", shortLabel: "Other", icon: <CustomIcon fontSize="small" /> },
+  { value: "other_site_money", label: "Other Site", shortLabel: "Site", icon: <SiteIcon fontSize="small" /> },
+  { value: "custom", label: "Other", shortLabel: "Other", icon: <CustomIcon fontSize="small" /> },
 ];
 
 export default function PayerSourceSelector({
@@ -104,16 +106,16 @@ export default function PayerSourceSelector({
         ))}
       </ToggleButtonGroup>
 
-      <Collapse in={value === "custom"}>
+      <Collapse in={value === "custom" || value === "other_site_money"}>
         <TextField
           size="small"
-          placeholder="Enter payer name"
+          placeholder={value === "other_site_money" ? "Enter site name" : "Enter payer name"}
           value={customName}
           onChange={(e) => onCustomNameChange(e.target.value)}
           disabled={disabled}
           fullWidth
           sx={{ mt: 1.5 }}
-          helperText="Specify whose money was used"
+          helperText={value === "other_site_money" ? "Specify which site's money" : "Specify whose money was used"}
         />
       </Collapse>
     </Box>
@@ -127,13 +129,38 @@ export function getPayerSourceLabel(source: PayerSource, customName?: string): s
   switch (source) {
     case "own_money":
       return "Own Money";
+    case "amma_money":
+      return "Amma Money";
     case "client_money":
       return "Client Money";
+    case "other_site_money":
+      return customName ? `Site: ${customName}` : "Other Site";
     case "mothers_money":
-      return "Mother's Money";
+      return "Amma Money"; // Legacy support
     case "custom":
-      return customName || "Custom";
+      return customName || "Other";
     default:
       return source;
+  }
+}
+
+/**
+ * Get color for a payer source chip
+ */
+export function getPayerSourceColor(source: PayerSource): "default" | "primary" | "secondary" | "success" | "warning" | "info" | "error" {
+  switch (source) {
+    case "own_money":
+      return "primary";
+    case "amma_money":
+    case "mothers_money":
+      return "secondary";
+    case "client_money":
+      return "success";
+    case "other_site_money":
+      return "warning";
+    case "custom":
+      return "info";
+    default:
+      return "default";
   }
 }
