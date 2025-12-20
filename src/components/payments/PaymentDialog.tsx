@@ -816,6 +816,20 @@ export default function PaymentDialog({
           />
         </Box>
 
+        {/* Notes */}
+        <Box sx={{ mb: 3 }}>
+          <TextField
+            fullWidth
+            size="small"
+            label="Notes (Optional)"
+            placeholder="Add any notes about this payment..."
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            multiline
+            rows={2}
+          />
+        </Box>
+
         {/* Paid By */}
         <Box
           sx={{
