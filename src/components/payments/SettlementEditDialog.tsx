@@ -244,12 +244,18 @@ export default function SettlementEditDialog({
 
           {/* Subcontract Link - Only for daily laborers */}
           {isDaily && (
-            <SubcontractLinkSelector
-              selectedSubcontractId={subcontractId}
-              onSelect={setSubcontractId}
-              paymentAmount={record.amount}
-              showBalanceAfterPayment
-            />
+            <Box>
+              <Typography variant="subtitle2" sx={{ mb: 1, display: "flex", alignItems: "center", gap: 0.5 }}>
+                <LinkIcon fontSize="small" />
+                Link to Subcontract
+              </Typography>
+              <SubcontractLinkSelector
+                selectedSubcontractId={subcontractId}
+                onSelect={setSubcontractId}
+                paymentAmount={record.amount}
+                showBalanceAfterPayment
+              />
+            </Box>
           )}
 
           {/* Money Source - Only for engineer wallet payments */}
