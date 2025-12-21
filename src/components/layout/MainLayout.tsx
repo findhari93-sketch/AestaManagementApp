@@ -564,7 +564,6 @@ export default function MainLayout({
       {/* User Section - Icons Only */}
       <Divider />
       <Box sx={{ p: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 1 }}>
-        <NotificationBell />
         <Tooltip title="Account settings" placement="right">
           <IconButton onClick={handleUserMenuOpen} sx={{ p: 0.5 }}>
             <Avatar
@@ -826,7 +825,6 @@ export default function MainLayout({
             gap: 1,
           }}
         >
-          <NotificationBell />
           <Tooltip title="Account settings">
             <IconButton
               onClick={handleUserMenuOpen}
@@ -1066,6 +1064,11 @@ export default function MainLayout({
               )}
             </Box>
           </Tooltip>
+
+          {/* Notification Bell */}
+          <Box sx={{ ml: { xs: 0.5, sm: 1 } }}>
+            <NotificationBell />
+          </Box>
 
           <Menu
             anchorEl={anchorEl}

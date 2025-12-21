@@ -41,6 +41,13 @@ export async function processSettlement(
     let engineerTransactionId: string | null = null;
     let expenseId: string | undefined;
 
+    // Get subcontract from config OR from existing attendance records
+    // This handles the case where a settlement was canceled and re-created
+    let effectiveSubcontractId = config.subcontractId;
+    if (!effectiveSubcontractId && config.records.length > 0) {
+      effectiveSubcontractId = await getSubcontractFromAttendanceRecords(supabase, config.records) ?? undefined;
+    }
+
     // 1. If via engineer wallet, create engineer transaction first
     if (config.paymentChannel === "engineer_wallet" && config.engineerId) {
       const { data: txData, error: txError } = await (supabase
@@ -57,7 +64,7 @@ export async function processSettlement(
           is_settled: false,
           recorded_by: config.userName,
           recorded_by_user_id: config.userId,
-          related_subcontract_id: config.subcontractId || null,
+          related_subcontract_id: effectiveSubcontractId || null,
         })
         .select()
         .single();
@@ -93,7 +100,7 @@ export async function processSettlement(
         .from("daily_attendance")
         .update({
           ...updateData,
-          subcontract_id: config.subcontractId || null,
+          subcontract_id: effectiveSubcontractId || null,
         })
         .in("id", dailyIds);
 
@@ -104,7 +111,10 @@ export async function processSettlement(
     if (marketIds.length > 0) {
       const { error: marketError } = await supabase
         .from("market_laborer_attendance")
-        .update(updateData)
+        .update({
+          ...updateData,
+          subcontract_id: effectiveSubcontractId || null,
+        })
         .in("id", marketIds);
 
       if (marketError) throw marketError;
@@ -126,7 +136,7 @@ export async function processSettlement(
         paidBy: config.userName,
         paidByUserId: config.userId,
         proofUrl: config.proofUrl || null,
-        subcontractId: config.subcontractId || null,
+        subcontractId: effectiveSubcontractId || null,
         isCleared: true,
         paymentSource: "direct",
       });
@@ -187,6 +197,7 @@ export async function processWeeklySettlement(
     engineerReference?: string;
     proofUrl?: string;
     notes?: string;
+    subcontractId?: string;
     userId: string;
     userName: string;
   }
@@ -211,6 +222,7 @@ export async function processWeeklySettlement(
           is_settled: false,
           recorded_by: config.userName,
           recorded_by_user_id: config.userId,
+          related_subcontract_id: config.subcontractId || null,
         })
         .select()
         .single();
@@ -281,7 +293,7 @@ export async function processWeeklySettlement(
         paidBy: config.userName,
         paidByUserId: config.userId,
         proofUrl: config.proofUrl || null,
-        subcontractId: null,
+        subcontractId: config.subcontractId || null,
         isCleared: true,
         paymentSource: "direct",
       });
@@ -444,4 +456,45 @@ export async function cancelSettlement(
       error: err.message || "Failed to cancel settlement",
     };
   }
+}
+
+/**
+ * Get subcontract_id from existing attendance records.
+ * This is used when re-settling after a cancel to preserve the subcontract link.
+ */
+async function getSubcontractFromAttendanceRecords(
+  supabase: SupabaseClient,
+  records: { sourceType: "daily" | "market"; sourceId: string }[]
+): Promise<string | null> {
+  // Check daily attendance records first
+  const dailyIds = records.filter((r) => r.sourceType === "daily").map((r) => r.sourceId);
+  if (dailyIds.length > 0) {
+    const { data: dailyData } = await supabase
+      .from("daily_attendance")
+      .select("subcontract_id")
+      .in("id", dailyIds)
+      .not("subcontract_id", "is", null)
+      .limit(1);
+
+    if (dailyData && dailyData.length > 0 && dailyData[0].subcontract_id) {
+      return dailyData[0].subcontract_id;
+    }
+  }
+
+  // Check market attendance records
+  const marketIds = records.filter((r) => r.sourceType === "market").map((r) => r.sourceId);
+  if (marketIds.length > 0) {
+    const { data: marketData } = await (supabase
+      .from("market_laborer_attendance") as any)
+      .select("subcontract_id")
+      .in("id", marketIds)
+      .not("subcontract_id", "is", null)
+      .limit(1);
+
+    if (marketData && marketData.length > 0 && marketData[0].subcontract_id) {
+      return marketData[0].subcontract_id;
+    }
+  }
+
+  return null;
 }
