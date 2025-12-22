@@ -29,6 +29,7 @@ import {
   Link as LinkIcon,
   Save as SaveIcon,
   Payment as PaymentIcon,
+  Edit as EditIcon,
 } from "@mui/icons-material";
 import { createClient } from "@/lib/supabase/client";
 import { useSite } from "@/contexts/SiteContext";
@@ -59,6 +60,7 @@ export default function DateSettlementsEditDialog({
   // Form state for bulk editing - Subcontract
   const [selectedSubcontractId, setSelectedSubcontractId] = useState<string | null>(null);
   const [onlyUpdateUnlinked, setOnlyUpdateUnlinked] = useState(true);
+  const [editingSubcontract, setEditingSubcontract] = useState(false);
 
   // Form state for bulk editing - Payer Source
   const [updatePayerSource, setUpdatePayerSource] = useState(false);
@@ -88,11 +90,30 @@ export default function DateSettlementsEditDialog({
   // Calculate total amount that will be linked
   const totalAmountToLink = recordsToUpdate.reduce((sum, r) => sum + r.amount, 0);
 
+  // Determine current subcontract status from records
+  const currentSubcontract = useMemo(() => {
+    const linkedRecords = records.filter((r) => r.subcontractId);
+    if (linkedRecords.length === 0) {
+      return { status: "unlinked" as const, title: null, id: null };
+    }
+
+    const uniqueSubcontracts = new Set(linkedRecords.map((r) => r.subcontractId));
+    if (uniqueSubcontracts.size === 1) {
+      return {
+        status: "linked" as const,
+        title: linkedRecords[0].subcontractTitle,
+        id: linkedRecords[0].subcontractId,
+      };
+    }
+    return { status: "multiple" as const, title: null, id: null };
+  }, [records]);
+
   // Reset form when dialog opens
   useEffect(() => {
     if (open) {
       setSelectedSubcontractId(null);
       setOnlyUpdateUnlinked(true);
+      setEditingSubcontract(false);
       setUpdatePayerSource(false);
       setSelectedPayerSource("own_money");
       setPayerSourceName("");
@@ -108,11 +129,11 @@ export default function DateSettlementsEditDialog({
     }
 
     // Must have at least one update action selected
-    const hasSubcontractUpdate = selectedSubcontractId !== null;
+    const hasSubcontractUpdate = editingSubcontract && selectedSubcontractId !== null;
     const hasPayerSourceUpdate = updatePayerSource;
 
     if (!hasSubcontractUpdate && !hasPayerSourceUpdate) {
-      setError("Please select a subcontract to link or enable 'Update Paid By'");
+      setError("Please click edit to change subcontract or enable 'Update Paid By'");
       return;
     }
 
@@ -467,37 +488,65 @@ export default function DateSettlementsEditDialog({
               <Box>
                 <Typography variant="subtitle2" gutterBottom sx={{ display: "flex", alignItems: "center", gap: 1 }}>
                   <LinkIcon fontSize="small" color="primary" />
-                  Bulk Link to Subcontract
+                  Link to Subcontract
                 </Typography>
 
                 <Box sx={{ p: 2, bgcolor: "action.hover", borderRadius: 1, mb: 2 }}>
-                  <FormControlLabel
-                    control={
-                      <Checkbox
-                        checked={onlyUpdateUnlinked}
-                        onChange={(e) => setOnlyUpdateUnlinked(e.target.checked)}
+                  {!editingSubcontract ? (
+                    // Read-only display with edit icon
+                    <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                      <Chip
+                        label={
+                          currentSubcontract.status === "unlinked"
+                            ? `Unlinked (${unlinkedCount} of ${records.length})`
+                            : currentSubcontract.status === "multiple"
+                              ? "Multiple subcontracts"
+                              : currentSubcontract.title
+                        }
+                        color={currentSubcontract.status === "unlinked" ? "warning" : "info"}
+                        variant="outlined"
+                        icon={currentSubcontract.status !== "unlinked" ? <LinkIcon /> : undefined}
                       />
-                    }
-                    label={
-                      <Typography variant="body2">
-                        Only update unlinked records ({unlinkedCount} of {records.length})
-                      </Typography>
-                    }
-                  />
+                      <IconButton
+                        size="small"
+                        onClick={() => setEditingSubcontract(true)}
+                        title="Edit subcontract link"
+                      >
+                        <EditIcon fontSize="small" />
+                      </IconButton>
+                    </Box>
+                  ) : (
+                    // Edit mode - show dropdown and "Only update unlinked records" checkbox
+                    <Box>
+                      <FormControlLabel
+                        control={
+                          <Checkbox
+                            checked={onlyUpdateUnlinked}
+                            onChange={(e) => setOnlyUpdateUnlinked(e.target.checked)}
+                          />
+                        }
+                        label={
+                          <Typography variant="body2">
+                            Only update unlinked records ({unlinkedCount} of {records.length})
+                          </Typography>
+                        }
+                      />
 
-                  <Box sx={{ mt: 2 }}>
-                    <SubcontractLinkSelector
-                      selectedSubcontractId={selectedSubcontractId}
-                      onSelect={handleSubcontractSelect}
-                      paymentAmount={totalAmountToLink}
-                      showBalanceAfterPayment
-                    />
-                  </Box>
+                      <Box sx={{ mt: 2 }}>
+                        <SubcontractLinkSelector
+                          selectedSubcontractId={selectedSubcontractId}
+                          onSelect={handleSubcontractSelect}
+                          paymentAmount={totalAmountToLink}
+                          showBalanceAfterPayment
+                        />
+                      </Box>
 
-                  {selectedSubcontractId && recordsToUpdate.length > 0 && (
-                    <Alert severity="success" sx={{ mt: 2 }}>
-                      {recordsToUpdate.length} record(s) totaling {formatCurrency(totalAmountToLink)} will be linked
-                    </Alert>
+                      {selectedSubcontractId && recordsToUpdate.length > 0 && (
+                        <Alert severity="success" sx={{ mt: 2 }}>
+                          {recordsToUpdate.length} record(s) totaling {formatCurrency(totalAmountToLink)} will be linked
+                        </Alert>
+                      )}
+                    </Box>
                   )}
                 </Box>
 
@@ -557,16 +606,16 @@ export default function DateSettlementsEditDialog({
           onClick={handleSave}
           disabled={
             processing ||
-            (!selectedSubcontractId && !updatePayerSource) ||
-            !!(selectedSubcontractId && recordsToUpdate.length === 0)
+            (!(editingSubcontract && selectedSubcontractId) && !updatePayerSource) ||
+            !!(editingSubcontract && selectedSubcontractId && recordsToUpdate.length === 0)
           }
           startIcon={processing ? <CircularProgress size={16} /> : <SaveIcon />}
         >
           {processing
             ? "Saving..."
-            : selectedSubcontractId && updatePayerSource
+            : editingSubcontract && selectedSubcontractId && updatePayerSource
               ? `Update ${records.length} Record(s)`
-              : selectedSubcontractId
+              : editingSubcontract && selectedSubcontractId
                 ? `Link ${recordsToUpdate.length} Record(s)`
                 : updatePayerSource
                   ? `Update Paid By (${records.length})`

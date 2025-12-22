@@ -485,10 +485,7 @@ export default function UnifiedSettlementDialog({
     if (marketIds.length > 0) {
       const { error } = await supabase
         .from("market_laborer_attendance")
-        .update({
-          ...updateData,
-          subcontract_id: undefined, // Market laborers don't have subcontract linking
-        })
+        .update(updateData)
         .in("id", marketIds);
       if (error) throw error;
     }
@@ -511,6 +508,7 @@ export default function UnifiedSettlementDialog({
       payment_notes: notes || null,
       payer_source: payerSource,
       payer_name: payerSource === "custom" ? customPayerName : null,
+      subcontract_id: subcontractId,
     };
 
     // Update daily laborers
