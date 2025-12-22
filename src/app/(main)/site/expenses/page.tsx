@@ -78,6 +78,7 @@ interface ExpenseWithCategory extends Expense {
   settlement_reference?: string | null;
   source_type?: "expense" | "settlement";
   source_id?: string;
+  expense_type?: string;
 }
 
 export default function ExpensesPage() {
@@ -418,6 +419,32 @@ export default function ExpensesPage() {
         Cell: ({ cell }) => (
           <Chip label={cell.getValue<string>().toUpperCase()} size="small" />
         ),
+      },
+      {
+        accessorKey: "expense_type",
+        header: "Type",
+        size: 130,
+        filterVariant: "select",
+        filterSelectOptions: ["Daily Salary", "Contract Salary", "Advance", "Material", "Machinery", "General"],
+        Cell: ({ cell }) => {
+          const type = cell.getValue<string>();
+          const colorMap: Record<string, "primary" | "secondary" | "warning" | "info" | "success" | "default"> = {
+            "Daily Salary": "primary",
+            "Contract Salary": "secondary",
+            "Advance": "warning",
+            "Material": "info",
+            "Machinery": "success",
+            "General": "default",
+          };
+          return (
+            <Chip
+              label={type || "Other"}
+              size="small"
+              color={colorMap[type] || "default"}
+              variant="outlined"
+            />
+          );
+        },
       },
       { accessorKey: "category_name", header: "Category", size: 150 },
       {
