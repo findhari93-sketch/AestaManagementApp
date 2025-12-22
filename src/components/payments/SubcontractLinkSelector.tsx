@@ -54,6 +54,15 @@ export default function SubcontractLinkSelector({
 
       try {
         // Fetch subcontracts with their payment totals
+        // Fetch teams first to avoid FK ambiguity issues with PostgREST
+        const { data: teamsData } = await supabase
+          .from("teams")
+          .select("id, name")
+          .eq("site_id", selectedSite.id);
+
+        const teamsMap = new Map<string, string>();
+        (teamsData || []).forEach((t: any) => teamsMap.set(t.id, t.name));
+
         const { data: subcontractsData, error: fetchError } = await supabase
           .from("subcontracts")
           .select(
@@ -62,7 +71,7 @@ export default function SubcontractLinkSelector({
             title,
             total_value,
             status,
-            teams(name)
+            team_id
           `
           )
           .eq("site_id", selectedSite.id)
@@ -71,7 +80,7 @@ export default function SubcontractLinkSelector({
 
         if (fetchError) throw fetchError;
 
-        // For each subcontract, calculate total paid
+        // For each subcontract, calculate total paid from all sources
         const subcontractsWithPayments: SubcontractOption[] = await Promise.all(
           (subcontractsData || []).map(async (sc: any) => {
             // Get sum of subcontract_payments
@@ -93,7 +102,16 @@ export default function SubcontractLinkSelector({
               laborPaymentsData?.reduce((sum, p) => sum + (p.amount || 0), 0) ||
               0;
 
-            const totalAllPaid = totalPaid + laborPaid;
+            // Also get expenses linked to this subcontract (via contract_id)
+            const { data: expensesData } = await supabase
+              .from("expenses")
+              .select("amount")
+              .eq("contract_id", sc.id);
+
+            const expensesPaid =
+              expensesData?.reduce((sum, e) => sum + (e.amount || 0), 0) || 0;
+
+            const totalAllPaid = totalPaid + laborPaid + expensesPaid;
 
             return {
               id: sc.id,
@@ -102,7 +120,7 @@ export default function SubcontractLinkSelector({
               totalPaid: totalAllPaid,
               balanceDue: (sc.total_value || 0) - totalAllPaid,
               status: sc.status,
-              teamName: sc.teams?.name,
+              teamName: sc.team_id ? teamsMap.get(sc.team_id) : undefined,
             };
           })
         );

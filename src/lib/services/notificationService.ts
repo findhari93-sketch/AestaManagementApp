@@ -689,6 +689,7 @@ export async function createSalaryExpense(
 /**
  * Clear a pending salary expense when engineer is reimbursed
  * Updates is_cleared to true and removes "Pending from Company" indicator
+ * Also propagates contract_id from the engineer transaction's related_subcontract_id
  */
 export async function clearPendingSalaryExpense(
   supabase: SupabaseClient<Database>,
@@ -698,7 +699,7 @@ export async function clearPendingSalaryExpense(
     // First, find the expense by engineer_transaction_id
     const { data: expense, error: fetchError } = await supabase
       .from("expenses")
-      .select("id, description")
+      .select("id, description, contract_id")
       .eq("engineer_transaction_id", engineerTransactionId)
       .single();
 
@@ -707,18 +708,33 @@ export async function clearPendingSalaryExpense(
       return { error: null };
     }
 
+    // Fetch the engineer transaction to get related_subcontract_id
+    const { data: transaction } = await (supabase
+      .from("site_engineer_transactions") as any)
+      .select("related_subcontract_id")
+      .eq("id", engineerTransactionId)
+      .single();
+
     // Update the expense to mark as cleared
     const newDescription = expense.description
       ?.replace(" - Pending from Company", " - Via Engineer (Reimbursed)")
       || "Laborer salary - Via Engineer (Reimbursed)";
 
+    // Build update object - include contract_id if transaction has it and expense doesn't
+    const updateData: any = {
+      is_cleared: true,
+      cleared_date: new Date().toISOString().split("T")[0],
+      description: newDescription,
+    };
+
+    // Propagate contract_id from transaction if expense doesn't have one
+    if (!expense.contract_id && transaction?.related_subcontract_id) {
+      updateData.contract_id = transaction.related_subcontract_id;
+    }
+
     const { error: updateError } = await supabase
       .from("expenses")
-      .update({
-        is_cleared: true,
-        cleared_date: new Date().toISOString().split("T")[0],
-        description: newDescription,
-      })
+      .update(updateData)
       .eq("id", expense.id);
 
     if (updateError) {
@@ -851,5 +867,171 @@ export async function getPendingSettlements(
   } catch (err) {
     console.error("Error fetching pending settlements:", err);
     return { data: [], error: err as Error };
+  }
+}
+
+/**
+ * Data migration: Fix expenses that are missing contract_id
+ * This syncs contract_id from attendance records and engineer transactions
+ *
+ * Run this once to fix existing data after the code bugs are fixed.
+ */
+export async function migrateExpenseSubcontractLinks(
+  supabase: SupabaseClient<Database>,
+  siteId?: string
+): Promise<{
+  updated: number;
+  errors: string[];
+  details: { source: string; expenseId: string; subcontractId: string }[];
+}> {
+  const errors: string[] = [];
+  const details: { source: string; expenseId: string; subcontractId: string }[] = [];
+  let updated = 0;
+
+  try {
+    // 1. Fix expenses linked via daily_attendance
+    // Find attendance records with both expense_id and subcontract_id
+    let dailyQuery = supabase
+      .from("daily_attendance")
+      .select("expense_id, subcontract_id")
+      .not("expense_id", "is", null)
+      .not("subcontract_id", "is", null);
+
+    if (siteId) {
+      dailyQuery = dailyQuery.eq("site_id", siteId);
+    }
+
+    const { data: dailyAttendance, error: dailyError } = await dailyQuery;
+
+    if (dailyError) {
+      errors.push(`Error fetching daily_attendance: ${dailyError.message}`);
+    } else if (dailyAttendance) {
+      for (const record of dailyAttendance) {
+        if (!record.expense_id || !record.subcontract_id) continue;
+
+        // Check if expense already has contract_id
+        const { data: expense } = await supabase
+          .from("expenses")
+          .select("id, contract_id")
+          .eq("id", record.expense_id)
+          .single();
+
+        if (expense && !expense.contract_id) {
+          const { error: updateError } = await supabase
+            .from("expenses")
+            .update({ contract_id: record.subcontract_id })
+            .eq("id", record.expense_id);
+
+          if (updateError) {
+            errors.push(`Error updating expense ${record.expense_id}: ${updateError.message}`);
+          } else {
+            updated++;
+            details.push({
+              source: "daily_attendance",
+              expenseId: record.expense_id,
+              subcontractId: record.subcontract_id,
+            });
+          }
+        }
+      }
+    }
+
+    // 2. Fix expenses linked via market_laborer_attendance
+    let marketQuery = (supabase
+      .from("market_laborer_attendance") as any)
+      .select("expense_id, subcontract_id")
+      .not("expense_id", "is", null)
+      .not("subcontract_id", "is", null);
+
+    if (siteId) {
+      marketQuery = marketQuery.eq("site_id", siteId);
+    }
+
+    const { data: marketAttendance, error: marketError } = await marketQuery;
+
+    if (marketError) {
+      errors.push(`Error fetching market_laborer_attendance: ${marketError.message}`);
+    } else if (marketAttendance) {
+      for (const record of marketAttendance) {
+        if (!record.expense_id || !record.subcontract_id) continue;
+
+        const { data: expense } = await supabase
+          .from("expenses")
+          .select("id, contract_id")
+          .eq("id", record.expense_id)
+          .single();
+
+        if (expense && !expense.contract_id) {
+          const { error: updateError } = await supabase
+            .from("expenses")
+            .update({ contract_id: record.subcontract_id })
+            .eq("id", record.expense_id);
+
+          if (updateError) {
+            errors.push(`Error updating expense ${record.expense_id}: ${updateError.message}`);
+          } else {
+            updated++;
+            details.push({
+              source: "market_laborer_attendance",
+              expenseId: record.expense_id,
+              subcontractId: record.subcontract_id,
+            });
+          }
+        }
+      }
+    }
+
+    // 3. Fix expenses linked via engineer_transaction_id
+    // Find expenses with engineer_transaction_id but no contract_id
+    let expenseQuery = supabase
+      .from("expenses")
+      .select("id, engineer_transaction_id, contract_id")
+      .not("engineer_transaction_id", "is", null)
+      .is("contract_id", null);
+
+    if (siteId) {
+      expenseQuery = expenseQuery.eq("site_id", siteId);
+    }
+
+    const { data: expenses, error: expenseError } = await expenseQuery;
+
+    if (expenseError) {
+      errors.push(`Error fetching expenses: ${expenseError.message}`);
+    } else if (expenses) {
+      for (const expense of expenses) {
+        if (!expense.engineer_transaction_id) continue;
+
+        // Get the transaction's related_subcontract_id
+        const { data: transaction } = await (supabase
+          .from("site_engineer_transactions") as any)
+          .select("related_subcontract_id")
+          .eq("id", expense.engineer_transaction_id)
+          .single();
+
+        if (transaction?.related_subcontract_id) {
+          const { error: updateError } = await supabase
+            .from("expenses")
+            .update({ contract_id: transaction.related_subcontract_id })
+            .eq("id", expense.id);
+
+          if (updateError) {
+            errors.push(`Error updating expense ${expense.id}: ${updateError.message}`);
+          } else {
+            updated++;
+            details.push({
+              source: "engineer_transaction",
+              expenseId: expense.id,
+              subcontractId: transaction.related_subcontract_id,
+            });
+          }
+        }
+      }
+    }
+
+    return { updated, errors, details };
+  } catch (err) {
+    console.error("Error in migrateExpenseSubcontractLinks:", err);
+    errors.push(`Unexpected error: ${(err as Error).message}`);
+    return { updated, errors, details };
   }
 }

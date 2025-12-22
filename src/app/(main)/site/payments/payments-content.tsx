@@ -62,6 +62,8 @@ export default function PaymentsContent({ initialData }: PaymentsContentProps) {
   const highlightDate = searchParams.get("date");
   const highlightAction = searchParams.get("action");
   const highlightTransactionId = searchParams.get("transactionId");
+  const highlightRef = searchParams.get("highlight");
+  const tabParam = searchParams.get("tab");
 
   // Notification snackbar state
   const [notificationMessage, setNotificationMessage] = useState<string | null>(null);
@@ -76,33 +78,57 @@ export default function PaymentsContent({ initialData }: PaymentsContentProps) {
     }
   }, [highlightDate, highlightAction]);
 
-  // Tab state
-  const [activeTab, setActiveTab] = useState(0);
+  // Tab state - initialize based on URL param
+  const [activeTab, setActiveTab] = useState(() => {
+    if (tabParam === "salary" || tabParam === "daily") return 0;
+    if (tabParam === "contract" || tabParam === "weekly") return 1;
+    return 0;
+  });
 
-  // Summary data state - use initialData or empty
-  const [summaryData, setSummaryData] = useState<PaymentSummaryData>(() =>
-    initialData?.summaryData || {
-      dailyMarketPending: 0,
-      dailyMarketPendingCount: 0,
-      dailyMarketSentToEngineer: 0,
-      dailyMarketSentToEngineerCount: 0,
-      dailyMarketPaid: 0,
-      dailyMarketPaidCount: 0,
-      contractWeeklyDue: 0,
-      contractWeeklyDueLaborerCount: 0,
-      contractWeeklyPaid: 0,
-      bySubcontract: [],
-      unlinkedTotal: 0,
-      unlinkedCount: 0,
-    }
+  // Update tab when URL param changes
+  useEffect(() => {
+    if (tabParam === "salary" || tabParam === "daily") setActiveTab(0);
+    if (tabParam === "contract" || tabParam === "weekly") setActiveTab(1);
+  }, [tabParam]);
+
+  // Empty summary for initialization
+  const emptySummary: PaymentSummaryData = {
+    dailyMarketPending: 0,
+    dailyMarketPendingCount: 0,
+    dailyMarketSentToEngineer: 0,
+    dailyMarketSentToEngineerCount: 0,
+    dailyMarketPaid: 0,
+    dailyMarketPaidCount: 0,
+    contractWeeklyDue: 0,
+    contractWeeklyDueLaborerCount: 0,
+    contractWeeklyPaid: 0,
+    bySubcontract: [],
+    unlinkedTotal: 0,
+    unlinkedCount: 0,
+  };
+
+  // Store summary for each tab separately
+  const [dailyMarketSummary, setDailyMarketSummary] = useState<PaymentSummaryData>(
+    initialData?.summaryData || emptySummary
   );
+  const [contractWeeklySummary, setContractWeeklySummary] = useState<PaymentSummaryData>(emptySummary);
   const [summaryLoading, setSummaryLoading] = useState(false);
 
-  // Handle data changes - refresh summary
+  // Display the active tab's summary
+  const summaryData = activeTab === 0 ? dailyMarketSummary : contractWeeklySummary;
+
+  // Callbacks for child components to update their summaries
+  const handleDailyMarketSummaryChange = useCallback((summary: PaymentSummaryData) => {
+    setDailyMarketSummary(summary);
+  }, []);
+
+  const handleContractWeeklySummaryChange = useCallback((summary: PaymentSummaryData) => {
+    setContractWeeklySummary(summary);
+  }, []);
+
+  // Handle data changes - child components handle their own data fetching
   const handleDataChange = useCallback(() => {
-    // The child components handle their own data fetching
-    // We could trigger a full refresh here if needed
-    // For now, just mark that data changed
+    // Summary updates are now handled by onSummaryChange callbacks
   }, []);
 
   // Calculate effective date range for tab components
@@ -166,6 +192,8 @@ export default function PaymentsContent({ initialData }: PaymentsContentProps) {
               dateTo={effectiveDateTo}
               onFilterChange={() => {}}
               onDataChange={handleDataChange}
+              onSummaryChange={handleDailyMarketSummaryChange}
+              highlightRef={highlightRef}
             />
           </TabPanel>
 
@@ -174,6 +202,7 @@ export default function PaymentsContent({ initialData }: PaymentsContentProps) {
               dateFrom={effectiveDateFrom}
               dateTo={effectiveDateTo}
               onDataChange={handleDataChange}
+              onSummaryChange={handleContractWeeklySummaryChange}
             />
           </TabPanel>
         </Box>

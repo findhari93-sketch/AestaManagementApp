@@ -9,7 +9,7 @@ export type SettlementStatus =
 export type SettlementMode = "upi" | "cash";
 
 // Payer source - tracks whose money was used for settlement
-export type PayerSource = "own_money" | "amma_money" | "client_money" | "other_site_money" | "custom" | "mothers_money";
+export type PayerSource = "own_money" | "amma_money" | "client_money" | "other_site_money" | "custom" | "mothers_money" | "trust_account";
 
 export interface PayerInfo {
   source: PayerSource;
@@ -114,4 +114,61 @@ export interface PaymentSettlementNotification {
   related_id: string; // transaction_id
   related_table: "site_engineer_transactions";
   created_at: string;
+}
+
+// Settlement Group - single source of truth for salary settlements
+export interface SettlementGroup {
+  id: string;
+  settlement_reference: string;
+  site_id: string;
+  settlement_date: string;
+  total_amount: number;
+  laborer_count: number;
+  payment_channel: "direct" | "engineer_wallet";
+  payment_mode: string | null;
+  payer_source: PayerSource | null;
+  payer_name: string | null;
+  proof_url: string | null;
+  notes: string | null;
+  subcontract_id: string | null;
+  engineer_transaction_id: string | null;
+  is_cancelled: boolean;
+  cancelled_at: string | null;
+  cancelled_by: string | null;
+  cancelled_by_user_id: string | null;
+  cancellation_reason: string | null;
+  created_at: string;
+  updated_at: string;
+  created_by: string | null;
+  created_by_name: string | null;
+}
+
+// Unified expense record from v_all_expenses view
+export interface UnifiedExpense {
+  id: string;
+  site_id: string;
+  date: string;
+  amount: number;
+  description: string | null;
+  category_id: string | null;
+  category_name: string | null;
+  module: string;
+  is_cleared: boolean;
+  cleared_date: string | null;
+  contract_id: string | null;
+  subcontract_title: string | null;
+  site_payer_id: string | null;
+  payer_name: string | null;
+  payment_mode: string | null;
+  vendor_name: string | null;
+  receipt_url: string | null;
+  paid_by: string | null;
+  entered_by: string | null;
+  entered_by_user_id: string | null;
+  settlement_reference: string | null;
+  settlement_group_id: string | null;
+  source_type: "expense" | "settlement";
+  source_id: string;
+  created_at: string;
+  is_deleted: boolean;
 }

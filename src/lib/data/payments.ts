@@ -49,7 +49,7 @@ export async function getPaymentPageData(
       `
       id, date, laborer_id, daily_earnings, is_paid, paid_via, payment_date, payment_mode,
       engineer_transaction_id, payment_proof_url, payment_notes, subcontract_id, expense_id,
-      payer_source, payer_name,
+      payer_source, payer_name, settlement_group_id,
       laborers!inner(
         id, name, laborer_type,
         labor_categories(name),
@@ -59,7 +59,8 @@ export async function getPaymentPageData(
       site_engineer_transactions(
         id, proof_url, settlement_proof_url, settlement_status,
         transaction_date, confirmed_at
-      )
+      ),
+      settlement_groups(id, settlement_reference)
     `
     )
     .eq("site_id", siteId)
@@ -71,12 +72,16 @@ export async function getPaymentPageData(
       `
       id, date, role_id, count, total_cost, is_paid, paid_via, payment_date, payment_mode,
       engineer_transaction_id, payment_proof_url, payment_notes, expense_id,
-      payer_source, payer_name,
+      payer_source, payer_name, settlement_group_id,
+      subcontract_id,
       labor_roles(name),
       site_engineer_transactions(
         id, proof_url, settlement_proof_url, settlement_status,
         transaction_date, confirmed_at
-      )
+      ),
+      subcontracts(id, title),
+      settlement_groups(id, settlement_reference),
+      expenses(contract_id, subcontracts(id, title))
     `
     )
     .eq("site_id", siteId);
@@ -195,18 +200,18 @@ function calculateSummary(dailyRecords: any[], marketRecords: any[]): PaymentSum
     totalDue: data.due,
   }));
 
-  // Unlinked (no subcontract)
+  // Unlinked (no subcontract) - counts all records without subcontract link
   const unlinkedTotal =
     dailyRecords
-      .filter((r) => !r.subcontract_id && r.is_paid)
+      .filter((r) => !r.subcontract_id)
       .reduce((sum, r) => sum + (r.daily_earnings || 0), 0) +
     marketRecords
-      .filter((r) => r.is_paid)
+      .filter((r) => !r.subcontract_id && !r.expenses?.contract_id)
       .reduce((sum, r) => sum + (r.total_cost || 0), 0);
 
   const unlinkedCount =
-    dailyRecords.filter((r) => !r.subcontract_id && r.is_paid).length +
-    marketRecords.filter((r) => r.is_paid).length;
+    dailyRecords.filter((r) => !r.subcontract_id).length +
+    marketRecords.filter((r) => !r.subcontract_id && !r.expenses?.contract_id).length;
 
   return {
     dailyMarketPending,
@@ -267,6 +272,8 @@ export function transformToDailyPaymentRecords(
       expenseId: r.expense_id || null,
       moneySource: tx?.money_source || null,
       moneySourceName: tx?.money_source_name || null,
+      settlementGroupId: r.settlement_group_id || null,
+      settlementReference: r.settlement_groups?.settlement_reference || null,
     });
   });
 
@@ -299,11 +306,13 @@ export function transformToDailyPaymentRecords(
       confirmedAt: tx?.confirmed_at || null,
       settlementMode: tx?.settlement_mode || null,
       cashReason: tx?.notes || null,
-      subcontractId: null,
-      subcontractTitle: null,
+      subcontractId: r.subcontract_id || r.expenses?.contract_id || null,
+      subcontractTitle: r.subcontracts?.title || r.expenses?.subcontracts?.title || null,
       expenseId: r.expense_id || null,
       moneySource: tx?.money_source || null,
       moneySourceName: tx?.money_source_name || null,
+      settlementGroupId: r.settlement_group_id || null,
+      settlementReference: r.settlement_groups?.settlement_reference || null,
     });
   });
 

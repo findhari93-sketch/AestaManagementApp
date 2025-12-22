@@ -1440,6 +1440,8 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
       cashReason: null,
       moneySource: null,
       moneySourceName: null,
+      settlementGroupId: null,
+      settlementReference: null,
     };
     setPaymentRecords([paymentRecord]);
     setPaymentDialogOpen(true);

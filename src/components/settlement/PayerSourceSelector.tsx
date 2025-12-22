@@ -17,6 +17,7 @@ import {
   Person as PersonIcon,
   Edit as CustomIcon,
   LocationOn as SiteIcon,
+  Savings as TrustIcon,
 } from "@mui/icons-material";
 import type { PayerSource } from "@/types/settlement.types";
 
@@ -33,6 +34,7 @@ const PAYER_OPTIONS: { value: PayerSource; label: string; shortLabel: string; ic
   { value: "own_money", label: "Own Money", shortLabel: "Own", icon: <OwnMoneyIcon fontSize="small" /> },
   { value: "amma_money", label: "Amma Money", shortLabel: "Amma", icon: <PersonIcon fontSize="small" /> },
   { value: "client_money", label: "Client Money", shortLabel: "Client", icon: <ClientIcon fontSize="small" /> },
+  { value: "trust_account", label: "Trust Account", shortLabel: "Trust", icon: <TrustIcon fontSize="small" /> },
   { value: "other_site_money", label: "Other Site", shortLabel: "Site", icon: <SiteIcon fontSize="small" /> },
   { value: "custom", label: "Other", shortLabel: "Other", icon: <CustomIcon fontSize="small" /> },
 ];
@@ -133,6 +135,8 @@ export function getPayerSourceLabel(source: PayerSource, customName?: string): s
       return "Amma Money";
     case "client_money":
       return "Client Money";
+    case "trust_account":
+      return "Trust Account";
     case "other_site_money":
       return customName ? `Site: ${customName}` : "Other Site";
     case "mothers_money":
@@ -156,10 +160,12 @@ export function getPayerSourceColor(source: PayerSource): "default" | "primary" 
       return "secondary";
     case "client_money":
       return "success";
+    case "trust_account":
+      return "info";
     case "other_site_money":
       return "warning";
     case "custom":
-      return "info";
+      return "default";
     default:
       return "default";
   }

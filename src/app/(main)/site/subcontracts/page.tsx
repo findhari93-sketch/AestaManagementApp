@@ -163,15 +163,11 @@ export default function SiteSubcontractsPage() {
 
     setLoading(true);
     try {
+      // Note: We avoid nested joins like teams(name), laborers(name) to prevent FK ambiguity issues
+      // Teams and laborers are already fetched separately in fetchOptions
       let query = supabase
         .from("subcontracts")
-        .select(
-          `
-          *,
-          teams(name),
-          laborers(name)
-        `
-        )
+        .select("*")
         .eq("site_id", selectedSite.id)
         .order("created_at", { ascending: false });
 
@@ -233,10 +229,18 @@ export default function SiteSubcontractsPage() {
                 ? (totalPaid / subcontract.total_value) * 100
                 : 0;
 
+            // Lookup team and laborer names from already-fetched data
+            const teamName = subcontract.team_id
+              ? teams.find((t) => t.id === subcontract.team_id)?.name
+              : undefined;
+            const laborerName = subcontract.laborer_id
+              ? laborers.find((l) => l.id === subcontract.laborer_id)?.name
+              : undefined;
+
             return {
               ...subcontract,
-              team_name: subcontract.teams?.name,
-              laborer_name: subcontract.laborers?.name,
+              team_name: teamName,
+              laborer_name: laborerName,
               total_paid: totalPaid,
               balance_due: balanceDue,
               completion_percentage: completionPercentage,
@@ -254,10 +258,10 @@ export default function SiteSubcontractsPage() {
   };
 
   useEffect(() => {
-    if (selectedSite) {
+    if (selectedSite && teams.length > 0) {
       fetchSubcontracts();
     }
-  }, [activeTab, selectedSite]);
+  }, [activeTab, selectedSite, teams, laborers]);
 
   // Auto-calculate total value for rate-based contracts
   useEffect(() => {

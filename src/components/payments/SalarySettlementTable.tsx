@@ -67,6 +67,7 @@ interface SalarySettlementTableProps {
   onNotifyDate: (date: string, records: DailyPaymentRecord[]) => void;
   onConfirmSettlement?: (transactionId: string) => void;
   onEditSettlements?: (date: string, records: DailyPaymentRecord[]) => void;
+  highlightRef?: string | null;
 }
 
 // Row data structure for the MRT table
@@ -93,6 +94,8 @@ interface DateRowData {
   // For expanded row
   dailyRecords: DailyPaymentRecord[];
   marketRecords: DailyPaymentRecord[];
+  // Settlement references for this date
+  settlementReferences: string[];
   // Original group for actions
   group: DateGroup;
 }
@@ -110,6 +113,7 @@ export default function SalarySettlementTable({
   onNotifyDate,
   onConfirmSettlement,
   onEditSettlements,
+  highlightRef,
 }: SalarySettlementTableProps) {
   const theme = useTheme();
   const router = useRouter();
@@ -219,6 +223,11 @@ export default function SalarySettlementTable({
         awaitingApprovalTransactionId,
         dailyRecords: group.dailyRecords,
         marketRecords: group.marketRecords,
+        // Collect unique settlement references from all records
+        settlementReferences: [...new Set([
+          ...group.dailyRecords.map(r => r.settlementReference),
+          ...group.marketRecords.map(r => r.settlementReference),
+        ].filter((ref): ref is string => ref !== null && ref !== undefined))],
         group,
       };
     });
@@ -275,7 +284,7 @@ export default function SalarySettlementTable({
   const columns = useMemo<MRT_ColumnDef<DateRowData>[]>(
     () => [
       {
-        accessorKey: "dateLabel",
+        accessorKey: "date",
         header: "Date",
         size: 140,
         Cell: ({ row }) => (
@@ -328,6 +337,41 @@ export default function SalarySettlementTable({
             {formatCurrency(row.original.totalAmount)}
           </Typography>
         ),
+      },
+      {
+        accessorKey: "settlementReferences",
+        header: "Ref Code",
+        size: 140,
+        filterVariant: "text",
+        Cell: ({ row }) => {
+          const refs = row.original.settlementReferences;
+          if (refs.length === 0) {
+            return (
+              <Typography variant="body2" color="text.disabled">
+                —
+              </Typography>
+            );
+          }
+          return (
+            <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
+              {refs.map((ref) => (
+                <Chip
+                  key={ref}
+                  label={ref}
+                  size="small"
+                  color="primary"
+                  variant="outlined"
+                  sx={{
+                    fontFamily: "monospace",
+                    fontWeight: 600,
+                    fontSize: "0.7rem",
+                    height: 22,
+                  }}
+                />
+              ))}
+            </Box>
+          );
+        },
       },
       {
         accessorKey: "status",
@@ -639,13 +683,23 @@ export default function SalarySettlementTable({
                     )}
                   </TableCell>
                   <TableCell>
-                    {/* Market laborers don't have subcontract linking */}
-                    <Chip
-                      label="Unlinked"
-                      size="small"
-                      variant="outlined"
-                      sx={{ height: 20, fontSize: "0.65rem", color: 'text.disabled', borderColor: 'divider' }}
-                    />
+                    {record.subcontractTitle ? (
+                      <Chip
+                        label={record.subcontractTitle}
+                        size="small"
+                        color="info"
+                        variant="outlined"
+                        icon={<LinkIcon sx={{ fontSize: 14 }} />}
+                        sx={{ height: 20, fontSize: "0.65rem" }}
+                      />
+                    ) : (
+                      <Chip
+                        label="Unlinked"
+                        size="small"
+                        variant="outlined"
+                        sx={{ height: 20, fontSize: "0.65rem", color: 'text.disabled', borderColor: 'divider' }}
+                      />
+                    )}
                   </TableCell>
                   <TableCell align="center">
                     {record.isPaid ? (
@@ -835,7 +889,7 @@ export default function SalarySettlementTable({
           </Box>
         )}
         initialState={{
-          sorting: [{ id: "dateLabel", desc: true }],
+          sorting: [{ id: "date", desc: true }],
         }}
         enablePagination={tableData.length > 20}
         pageSize={20}
@@ -845,6 +899,16 @@ export default function SalarySettlementTable({
               row.original.dailyRecords.length + row.original.marketRecords.length > 0
                 ? "primary.main"
                 : "text.disabled",
+          },
+        })}
+        muiTableBodyRowProps={({ row }) => ({
+          sx: {
+            // Highlight row if it contains the matching settlement reference
+            backgroundColor: highlightRef && row.original.settlementReferences.includes(highlightRef)
+              ? alpha(theme.palette.primary.main, 0.15)
+              : undefined,
+            // Add a subtle animation for highlighted rows
+            transition: 'background-color 0.3s ease-in-out',
           },
         })}
       />

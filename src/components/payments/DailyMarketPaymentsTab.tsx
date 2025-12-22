@@ -38,6 +38,7 @@ import type {
   DailyPaymentRecord,
   PaymentFilterState,
   MoneySourceSummary,
+  PaymentSummaryData,
 } from "@/types/payment.types";
 import { hasEditPermission, canPerformMassUpload } from "@/lib/permissions";
 import MoneySourceSummaryCard from "./MoneySourceSummaryCard";
@@ -54,6 +55,8 @@ interface DailyMarketPaymentsTabProps {
   dateTo: string;
   onFilterChange: (filters: Partial<PaymentFilterState>) => void;
   onDataChange?: () => void;
+  onSummaryChange?: (summary: PaymentSummaryData) => void;
+  highlightRef?: string | null;
 }
 
 export default function DailyMarketPaymentsTab({
@@ -61,6 +64,8 @@ export default function DailyMarketPaymentsTab({
   dateTo,
   onFilterChange,
   onDataChange,
+  onSummaryChange,
+  highlightRef,
 }: DailyMarketPaymentsTabProps) {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
@@ -174,6 +179,7 @@ export default function DailyMarketPaymentsTab({
           payment_notes,
           subcontract_id,
           expense_id,
+          settlement_group_id,
           laborers!inner(name, laborer_type, labor_categories(name), labor_roles(name)),
           subcontracts(title),
           site_engineer_transactions!engineer_transaction_id(
@@ -187,7 +193,8 @@ export default function DailyMarketPaymentsTab({
             confirmed_at,
             money_source,
             money_source_name
-          )
+          ),
+          settlement_groups(id, settlement_reference)
         `
         )
         .eq("site_id", selectedSite.id)
@@ -215,7 +222,10 @@ export default function DailyMarketPaymentsTab({
           payment_proof_url,
           payment_notes,
           expense_id,
+          subcontract_id,
+          settlement_group_id,
           labor_roles(name),
+          subcontracts(title),
           site_engineer_transactions!engineer_transaction_id(
             settlement_status,
             settlement_mode,
@@ -227,7 +237,8 @@ export default function DailyMarketPaymentsTab({
             confirmed_at,
             money_source,
             money_source_name
-          )
+          ),
+          settlement_groups(id, settlement_reference)
         `
         )
         .eq("site_id", selectedSite.id)
@@ -272,6 +283,9 @@ export default function DailyMarketPaymentsTab({
           // Money source tracking
           moneySource: r.site_engineer_transactions?.money_source || null,
           moneySourceName: r.site_engineer_transactions?.money_source_name || null,
+          // Settlement group tracking (new architecture)
+          settlementGroupId: r.settlement_group_id || null,
+          settlementReference: r.settlement_groups?.settlement_reference || null,
         })
       );
 
@@ -294,8 +308,8 @@ export default function DailyMarketPaymentsTab({
           engineerTransactionId: r.engineer_transaction_id,
           proofUrl: r.payment_proof_url,
           paymentNotes: r.payment_notes || null,
-          subcontractId: null,
-          subcontractTitle: null,
+          subcontractId: r.subcontract_id || null,
+          subcontractTitle: r.subcontracts?.title || null,
           expenseId: r.expense_id || null,
           settlementStatus: r.site_engineer_transactions?.settlement_status || null,
           // Settlement tracking fields from engineer transaction
@@ -309,6 +323,9 @@ export default function DailyMarketPaymentsTab({
           // Money source tracking
           moneySource: r.site_engineer_transactions?.money_source || null,
           moneySourceName: r.site_engineer_transactions?.money_source_name || null,
+          // Settlement group tracking (new architecture)
+          settlementGroupId: r.settlement_group_id || null,
+          settlementReference: r.settlement_groups?.settlement_reference || null,
         })
       );
 
@@ -368,6 +385,66 @@ export default function DailyMarketPaymentsTab({
     fetchData();
   }, [fetchData]);
 
+  // Calculate and emit summary when dateGroups changes
+  useEffect(() => {
+    if (!onSummaryChange) return;
+
+    // Collect all records from all date groups
+    const allRecords = dateGroups.flatMap((g) => [...g.dailyRecords, ...g.marketRecords]);
+
+    // Calculate summary
+    const pendingRecords = allRecords.filter(
+      (r) => !r.isPaid && r.paidVia !== "engineer_wallet"
+    );
+    const sentToEngineerRecords = allRecords.filter(
+      (r) => !r.isPaid && r.paidVia === "engineer_wallet"
+    );
+    const paidRecords = allRecords.filter((r) => r.isPaid);
+    const unlinkedRecords = allRecords.filter((r) => !r.subcontractId);
+
+    // Group by subcontract
+    const subcontractMap = new Map<string, { title: string; paid: number; due: number }>();
+    allRecords.forEach((r) => {
+      if (r.subcontractId) {
+        const existing = subcontractMap.get(r.subcontractId) || {
+          title: r.subcontractTitle || "Unknown",
+          paid: 0,
+          due: 0,
+        };
+        if (r.isPaid) {
+          existing.paid += r.amount;
+        } else {
+          existing.due += r.amount;
+        }
+        subcontractMap.set(r.subcontractId, existing);
+      }
+    });
+
+    const bySubcontract = Array.from(subcontractMap.entries()).map(([id, data]) => ({
+      subcontractId: id,
+      subcontractTitle: data.title,
+      totalPaid: data.paid,
+      totalDue: data.due,
+    }));
+
+    const summary: PaymentSummaryData = {
+      dailyMarketPending: pendingRecords.reduce((sum, r) => sum + r.amount, 0),
+      dailyMarketPendingCount: pendingRecords.length,
+      dailyMarketSentToEngineer: sentToEngineerRecords.reduce((sum, r) => sum + r.amount, 0),
+      dailyMarketSentToEngineerCount: sentToEngineerRecords.length,
+      dailyMarketPaid: paidRecords.reduce((sum, r) => sum + r.amount, 0),
+      dailyMarketPaidCount: paidRecords.length,
+      contractWeeklyDue: 0,
+      contractWeeklyDueLaborerCount: 0,
+      contractWeeklyPaid: 0,
+      bySubcontract,
+      unlinkedTotal: unlinkedRecords.reduce((sum, r) => sum + r.amount, 0),
+      unlinkedCount: unlinkedRecords.length,
+    };
+
+    onSummaryChange(summary);
+  }, [dateGroups, onSummaryChange]);
+
   // Filter records
   const filteredDateGroups = useMemo(() => {
     return dateGroups
@@ -389,19 +466,20 @@ export default function DailyMarketPaymentsTab({
           marketRecords = marketRecords.filter(filterFn);
         }
 
-        // Filter by subcontract
+        // Filter by subcontract (both daily and market can be linked)
         if (filterSubcontract !== "all") {
           if (filterSubcontract === "unlinked") {
             // Filter for records NOT linked to any subcontract
             dailyRecords = dailyRecords.filter((r) => !r.subcontractId);
-            // Market records are always unlinked, so include them
+            marketRecords = marketRecords.filter((r) => !r.subcontractId);
           } else {
             // Filter for a specific subcontract
             dailyRecords = dailyRecords.filter(
               (r) => r.subcontractId === filterSubcontract
             );
-            // Market records don't have subcontract, so exclude them if filtering by specific subcontract
-            marketRecords = [];
+            marketRecords = marketRecords.filter(
+              (r) => r.subcontractId === filterSubcontract
+            );
           }
         }
 
@@ -1156,6 +1234,7 @@ export default function DailyMarketPaymentsTab({
             setDateSettlementsEditRecords(records);
             setDateSettlementsEditOpen(true);
           }}
+          highlightRef={highlightRef}
         />
       )}
 

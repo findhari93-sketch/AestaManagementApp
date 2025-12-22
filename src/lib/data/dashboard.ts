@@ -151,8 +151,8 @@ export async function getDashboardData(siteId: string): Promise<DashboardData> {
     // Tea shop accounts for project costs
     supabase.from("tea_shop_accounts").select("id").eq("site_id", siteId),
 
-    // All expenses for project costs
-    supabase.from("expenses").select("amount").eq("site_id", siteId),
+    // Only unlinked expenses for project costs (contract_id is null)
+    supabase.from("expenses").select("amount").eq("site_id", siteId).is("contract_id", null),
   ]);
 
   // Process stats

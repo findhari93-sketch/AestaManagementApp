@@ -67,6 +67,10 @@ export interface DailyPaymentRecord {
   // Expense linking (for cancellation)
   expenseId: string | null;
 
+  // Settlement group linking (new architecture - single source of truth)
+  settlementGroupId: string | null;
+  settlementReference: string | null;
+
   // Audit
   recordedBy?: string | null;
   recordedByUserId?: string | null;
@@ -314,6 +318,93 @@ export interface WeeklyFilterState {
   status: "all" | "pending" | "completed";
 }
 
+// ============ CONTRACT PAYMENT TYPES (NEW) ============
+
+// Payment type for contract payments
+export type ContractPaymentType = "salary" | "advance" | "other";
+
+// Week allocation record (how salary payments are distributed across weeks)
+export interface PaymentWeekAllocation {
+  id: string;
+  laborPaymentId: string;
+  laborerId: string;
+  siteId: string;
+  weekStart: string;
+  weekEnd: string;
+  allocatedAmount: number;
+  createdAt: string;
+}
+
+// Full payment details for ref code popup
+export interface PaymentDetails {
+  paymentId: string;
+  paymentReference: string;
+  amount: number;
+  paymentType: ContractPaymentType;
+  actualPaymentDate: string;
+  paymentForDate: string; // Week reference (week start)
+  weeksCovered: { weekStart: string; weekEnd: string; allocatedAmount: number }[];
+  laborerId: string;
+  laborerName: string;
+  laborerRole?: string;
+  paidBy: string;
+  paidByUserId: string;
+  paymentMode: PaymentMode;
+  paymentChannel: PaymentChannel;
+  proofUrl: string | null;
+  notes: string | null;
+  subcontractId: string | null;
+  subcontractTitle: string | null;
+  payerSource: string | null;
+  payerName: string | null;
+  settlementGroupId: string | null;
+  settlementReference: string | null;
+  createdAt: string;
+}
+
+// Contract payment creation config
+export interface ContractPaymentConfig {
+  siteId: string;
+  laborerId: string;
+  laborerName: string;
+  amount: number;
+  paymentType: ContractPaymentType;
+  actualPaymentDate: string; // When payment was actually made
+  paymentForDate: string; // Week reference (week start date)
+  paymentMode: PaymentMode;
+  paymentChannel: PaymentChannel;
+  payerSource: string;
+  customPayerName?: string;
+  engineerId?: string;
+  proofUrl?: string;
+  notes?: string;
+  subcontractId?: string;
+  userId: string;
+  userName: string;
+}
+
+// Overview summary with advance tracking
+export interface ContractLaborerOverview {
+  laborerId: string;
+  laborerName: string;
+  totalSalaryEarned: number; // Cumulative salary from attendance
+  totalSalaryPaid: number; // Sum of salary type payments
+  totalAdvanceGiven: number; // Sum of advance type payments
+  totalAdvanceDeducted: number; // Sum of advance deductions
+  pendingAdvance: number; // Advance given minus deducted
+  salaryBalance: number; // Salary earned minus paid (positive = due)
+  netBalance: number; // Overall balance
+  status: "overpaid" | "underpaid" | "settled";
+}
+
+// Laborer payment entry extended with new fields
+export interface LaborerPaymentEntryExtended extends LaborerPaymentEntry {
+  paymentReference: string | null;
+  paymentType: ContractPaymentType;
+  actualPaymentDate: string;
+  settlementReference?: string;
+}
+
 // ============ HELPER TYPES ============
 
 export interface WeekBoundary {
@@ -366,5 +457,33 @@ export function getPaymentModeLabel(mode: PaymentMode): string {
       return "Other";
     default:
       return mode;
+  }
+}
+
+export function getContractPaymentTypeLabel(type: ContractPaymentType): string {
+  switch (type) {
+    case "salary":
+      return "Salary";
+    case "advance":
+      return "Advance";
+    case "other":
+      return "Other";
+    default:
+      return type;
+  }
+}
+
+export function getContractPaymentTypeColor(
+  type: ContractPaymentType
+): "success" | "warning" | "default" {
+  switch (type) {
+    case "salary":
+      return "success";
+    case "advance":
+      return "warning";
+    case "other":
+      return "default";
+    default:
+      return "default";
   }
 }

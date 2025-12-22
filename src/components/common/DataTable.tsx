@@ -50,7 +50,7 @@ export const tableDefaults = {
   // Initial state
   initialState: {
     density: "compact" as const,
-    showColumnFilters: false,
+    showColumnFilters: true,  // Show column filters by default for better filtering UX
     showGlobalFilter: true,
     pagination: {
       pageSize: 30,

@@ -142,16 +142,25 @@ export default function TeaShopSettlementDialog({
     if (!selectedSite) return;
 
     try {
+      // Fetch teams first to avoid FK ambiguity issues
+      const { data: teamsData } = await supabase
+        .from("teams")
+        .select("id, name")
+        .eq("site_id", selectedSite.id);
+
+      const teamsMap = new Map<string, string>();
+      (teamsData || []).forEach((t: any) => teamsMap.set(t.id, t.name));
+
       const { data } = await supabase
         .from("subcontracts")
-        .select("id, title, teams(name)")
+        .select("id, title, team_id")
         .eq("site_id", selectedSite.id)
         .in("status", ["draft", "active"]);
 
       const options: SubcontractOption[] = (data || []).map((sc: any) => ({
         id: sc.id,
         title: sc.title,
-        team_name: sc.teams?.name,
+        team_name: sc.team_id ? teamsMap.get(sc.team_id) : undefined,
       }));
       setSubcontracts(options);
     } catch (err) {

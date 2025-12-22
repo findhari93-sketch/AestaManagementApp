@@ -27,16 +27,21 @@ import {
   LinearProgress,
   Collapse,
 } from "@mui/material";
+import { DatePicker } from "@mui/x-date-pickers/DatePicker";
+import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider";
+import { AdapterDayjs } from "@mui/x-date-pickers/AdapterDayjs";
 import {
   Payment as PaymentIcon,
   AccountBalanceWallet as WalletIcon,
   Person as PersonIcon,
   Close as CloseIcon,
+  Info as InfoIcon,
 } from "@mui/icons-material";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSite } from "@/contexts/SiteContext";
 import { createSalaryExpense } from "@/lib/services/notificationService";
+import { processContractPayment } from "@/lib/services/settlementService";
 import FileUploader, { UploadedFile } from "@/components/common/FileUploader";
 import SubcontractLinkSelector from "./SubcontractLinkSelector";
 import PayerSourceSelector from "@/components/settlement/PayerSourceSelector";
@@ -47,6 +52,7 @@ import type {
   PaymentChannel,
   DailyPaymentRecord,
   WeeklyContractLaborer,
+  ContractPaymentType,
 } from "@/types/payment.types";
 import type { PayerSource } from "@/types/settlement.types";
 
@@ -82,6 +88,10 @@ export default function PaymentDialog({
   );
   const [proofUrl, setProofUrl] = useState<string | null>(null);
   const [notes, setNotes] = useState<string>("");
+
+  // New: Payment date and type (for contract weekly payments)
+  const [actualPaymentDate, setActualPaymentDate] = useState<dayjs.Dayjs>(dayjs());
+  const [paymentType, setPaymentType] = useState<ContractPaymentType>("salary");
 
   // Money source tracking
   const [moneySource, setMoneySource] = useState<PayerSource>("own_money");
@@ -212,6 +222,8 @@ export default function PaymentDialog({
       setError(null);
       setMoneySource("own_money");
       setMoneySourceName("");
+      setActualPaymentDate(dayjs()); // Default to today
+      setPaymentType("salary"); // Default to salary
 
       // Set default subcontract for weekly payment
       if (weeklyPayment?.laborer.subcontractId) {
@@ -241,7 +253,21 @@ export default function PaymentDialog({
       const paymentDate = dayjs().format("YYYY-MM-DD");
       let engineerTransactionId: string | null = null;
 
-      // 1. If via engineer, create engineer transaction first
+      // For weekly payments, the service handles everything including engineer transactions
+      if (isWeeklyPayment && weeklyPayment) {
+        // Weekly contract laborer payment - uses new service
+        await processWeeklyPayment(
+          weeklyPayment.laborer,
+          weeklyPayment.weekStart
+        );
+
+        // Success - close dialog (expense handled by service via settlement_groups)
+        onSuccess?.();
+        onClose();
+        return;
+      }
+
+      // For Daily/Market payments - use original flow with engineer transaction
       if (paymentChannel === "engineer_wallet") {
         const { data: txData, error: txError } = await (supabase
           .from("site_engineer_transactions") as any)
@@ -268,38 +294,20 @@ export default function PaymentDialog({
         engineerTransactionId = txData.id;
       }
 
-      // 2. Process based on payment type
-      if (isWeeklyPayment && weeklyPayment) {
-        // Weekly contract laborer payment
-        await processWeeklyPayment(
-          weeklyPayment.laborer,
-          weeklyPayment.weekStart,
-          paymentDate,
-          engineerTransactionId
-        );
-      } else {
-        // Daily/Market laborer payments
-        await processDailyPayments(
-          dailyRecords,
-          paymentDate,
-          engineerTransactionId
-        );
-      }
+      // Daily/Market laborer payments
+      await processDailyPayments(
+        dailyRecords,
+        paymentDate,
+        engineerTransactionId
+      );
 
-      // 3. Create salary expense for direct payments only
+      // 3. Create salary expense for direct payments only (daily/market)
       // (Via engineer expenses are created when engineer settles)
+      // Note: Weekly contract payments are handled above with return, so this only runs for daily/market
       if (paymentChannel === "direct") {
-        const laborerCount = isWeeklyPayment
-          ? 1
-          : dailyRecords.reduce((sum, r) => sum + (r.count || 1), 0);
-        const laborerType = isWeeklyPayment
-          ? "contract"
-          : dailyRecords.length > 0
-            ? dailyRecords[0].laborerType
-            : "daily";
-        const recordDate = isWeeklyPayment
-          ? weeklyPayment!.weekStart
-          : dailyRecords[0]?.date || paymentDate;
+        const laborerCount = dailyRecords.reduce((sum, r) => sum + (r.count || 1), 0);
+        const laborerType = dailyRecords.length > 0 ? dailyRecords[0].laborerType : "daily";
+        const recordDate = dailyRecords[0]?.date || paymentDate;
 
         const expenseResult = await createSalaryExpense(supabase, {
           siteId: selectedSite.id,
@@ -406,55 +414,50 @@ export default function PaymentDialog({
 
   const processWeeklyPayment = async (
     laborer: WeeklyContractLaborer,
-    weekStart: string,
-    paymentDate: string,
-    engineerTransactionId: string | null
+    weekStart: string
   ) => {
-    // Create labor_payments record for the weekly payment
-    const { data: paymentRecord, error: paymentError } = await supabase
-      .from("labor_payments")
-      .insert({
-        laborer_id: laborer.laborerId,
-        site_id: selectedSite!.id,
-        payment_date: paymentDate,
-        payment_for_date: weekStart, // Week start date
-        amount: paymentAmount,
-        payment_mode: paymentMode,
-        payment_channel:
-          paymentChannel === "direct" ? "company_direct" : "via_site_engineer",
-        site_engineer_transaction_id: engineerTransactionId,
-        subcontract_id: subcontractId,
-        is_under_contract: true,
-        proof_url: proofUrl,
-        paid_by: userProfile!.name,
-        paid_by_user_id: userProfile!.id,
-        recorded_by: userProfile!.name,
-        recorded_by_user_id: userProfile!.id,
-        notes: notes,
-        money_source: moneySource,
-        money_source_name: (moneySource === "other_site_money" || moneySource === "custom") ? moneySourceName : null,
-      })
-      .select()
-      .single();
+    // Use the new processContractPayment service for contract weekly payments
+    const result = await processContractPayment(supabase, {
+      siteId: selectedSite!.id,
+      laborerId: laborer.laborerId,
+      laborerName: laborer.laborerName,
+      amount: paymentAmount,
+      paymentType: paymentType,
+      actualPaymentDate: actualPaymentDate.format("YYYY-MM-DD"),
+      paymentForDate: weekStart,
+      paymentMode: paymentMode,
+      paymentChannel: paymentChannel,
+      payerSource: moneySource,
+      customPayerName: (moneySource === "other_site_money" || moneySource === "custom") ? moneySourceName : undefined,
+      engineerId: paymentChannel === "engineer_wallet" ? selectedEngineerId : undefined,
+      proofUrl: proofUrl || undefined,
+      notes: notes || undefined,
+      subcontractId: subcontractId || undefined,
+      userId: userProfile!.id,
+      userName: userProfile!.name || "Unknown",
+    });
 
-    if (paymentError) throw paymentError;
+    if (!result.success) {
+      throw new Error(result.error || "Failed to process contract payment");
+    }
 
-    // Update daily_attendance records for this week with payment_id
+    // Update daily_attendance records for this week with the payment info
     const attendanceIds = laborer.dailySalary.map((d) => d.attendanceId);
 
-    if (attendanceIds.length > 0) {
-      // Check if fully paid
+    if (attendanceIds.length > 0 && result.paymentId) {
+      // For salary payments, check if fully paid based on allocation
       const newTotalPaid = laborer.cumulativePaid + paymentAmount;
       const isFullyPaid = newTotalPaid >= laborer.cumulativeSalary;
 
       const { error: updateError } = await supabase
         .from("daily_attendance")
         .update({
-          payment_id: paymentRecord.id,
+          payment_id: result.paymentId,
           is_paid: isFullyPaid,
-          payment_date: isFullyPaid ? paymentDate : null,
+          payment_date: isFullyPaid ? actualPaymentDate.format("YYYY-MM-DD") : null,
           paid_via: paymentChannel === "direct" ? "direct" : "engineer_wallet",
           subcontract_id: subcontractId,
+          settlement_group_id: result.settlementGroupId || null,
         })
         .in("id", attendanceIds);
 
@@ -667,6 +670,60 @@ export default function PaymentDialog({
               </Collapse>
             </Box>
           </Box>
+        )}
+
+        {/* Payment Type and Date - Only for weekly payments */}
+        {isWeeklyPayment && (
+          <>
+            {/* Payment Type */}
+            <Box sx={{ mb: 3 }}>
+              <Typography variant="subtitle2" gutterBottom>
+                Payment Type
+              </Typography>
+              <FormControl fullWidth size="small">
+                <Select
+                  value={paymentType}
+                  onChange={(e) => setPaymentType(e.target.value as ContractPaymentType)}
+                >
+                  <MenuItem value="salary">Salary (Reduces weekly due)</MenuItem>
+                  <MenuItem value="advance">Advance (Tracked separately)</MenuItem>
+                  <MenuItem value="other">Other</MenuItem>
+                </Select>
+              </FormControl>
+              {paymentType === "advance" && (
+                <Alert severity="info" sx={{ mt: 1 }} icon={<InfoIcon fontSize="small" />}>
+                  Advance payments reduce subcontract balance but are tracked separately from weekly salary.
+                  They will be deducted from future salary payments.
+                </Alert>
+              )}
+              {paymentType === "salary" && (
+                <Alert severity="success" sx={{ mt: 1 }} icon={<InfoIcon fontSize="small" />}>
+                  This payment will be automatically allocated to the oldest unpaid weeks first.
+                </Alert>
+              )}
+            </Box>
+
+            {/* Actual Payment Date */}
+            <Box sx={{ mb: 3 }}>
+              <Typography variant="subtitle2" gutterBottom>
+                Payment Date
+              </Typography>
+              <LocalizationProvider dateAdapter={AdapterDayjs}>
+                <DatePicker
+                  value={actualPaymentDate}
+                  onChange={(newValue) => newValue && setActualPaymentDate(newValue)}
+                  slotProps={{
+                    textField: {
+                      size: "small",
+                      fullWidth: true,
+                      helperText: "When was the actual payment made?",
+                    },
+                  }}
+                  maxDate={dayjs()} // Can't select future dates
+                />
+              </LocalizationProvider>
+            </Box>
+          </>
         )}
 
         {/* Payment Mode */}

@@ -75,6 +75,9 @@ interface ExpenseWithCategory extends Expense {
   category_name?: string;
   payer_name?: string;
   subcontract_title?: string;
+  settlement_reference?: string | null;
+  source_type?: "expense" | "settlement";
+  source_id?: string;
 }
 
 export default function ExpensesPage() {
@@ -172,14 +175,15 @@ export default function ExpensesPage() {
           const laborPaid = laborPaymentsData?.reduce((sum, p) => sum + (p.amount || 0), 0) || 0;
 
           // Get expenses linked to this subcontract (only cleared expenses count toward paid)
-          const { data: expensesData } = await supabase
-            .from("expenses")
+          // Use v_all_expenses view to include both regular expenses and settlement-derived expenses
+          const { data: expensesData } = await (supabase as any)
+            .from("v_all_expenses")
             .select("amount")
             .eq("contract_id", sc.id)
             .eq("is_deleted", false)
             .eq("is_cleared", true);
 
-          const expensesPaid = expensesData?.reduce((sum, e) => sum + (e.amount || 0), 0) || 0;
+          const expensesPaid = expensesData?.reduce((sum: number, e: any) => sum + (e.amount || 0), 0) || 0;
 
           const totalPaid = directPaid + laborPaid + expensesPaid;
 
@@ -252,10 +256,13 @@ export default function ExpensesPage() {
     if (!selectedSite) return;
     setLoading(true);
     try {
-      let query = supabase
-        .from("expenses")
-        .select(`*, expense_categories(name), site_payers(name), subcontracts(title), engineer_transaction_id`)
+      // Use v_all_expenses view for unified data (regular expenses + derived salary expenses)
+      // Note: Cast to any until Supabase types are regenerated after migrations
+      let query = (supabase as any)
+        .from("v_all_expenses")
+        .select("*")
         .eq("site_id", selectedSite.id)
+        .eq("is_deleted", false)
         .order("date", { ascending: false });
 
       // Only apply date filters if not "All Time"
@@ -270,9 +277,7 @@ export default function ExpensesPage() {
       setExpenses(
         (data || []).map((e: any) => ({
           ...e,
-          category_name: e.expense_categories?.name,
-          payer_name: e.site_payers?.name,
-          subcontract_title: e.subcontracts?.title,
+          // View already has category_name, payer_name, subcontract_title
         }))
       );
       // Also refresh subcontracts summary since expenses affect paid totals
@@ -288,7 +293,13 @@ export default function ExpensesPage() {
     fetchExpenses();
   }, [selectedSite, dateFrom, dateTo, activeTab, isAllTime]);
 
-  const handleOpenDialog = (expense?: Expense) => {
+  const handleOpenDialog = (expense?: ExpenseWithCategory) => {
+    // Prevent editing of settlement-derived expenses
+    if (expense?.source_type === "settlement") {
+      alert("Salary settlement expenses cannot be edited here. Please use the Salary Settlement page to modify.");
+      return;
+    }
+
     if (expense) {
       setEditingExpense(expense);
       setForm({
@@ -356,8 +367,14 @@ export default function ExpensesPage() {
   };
 
   const handleDelete = async (expense: ExpenseWithCategory) => {
-    // Check if expense came from salary settlement
-    // Expenses from salary have engineer_transaction_id set
+    // Check if expense is derived from settlement_groups (source_type='settlement')
+    // These can't be deleted directly - must be cancelled from salary settlement page
+    if (expense.source_type === "settlement") {
+      setRedirectDialog({ open: true, expense });
+      return;
+    }
+
+    // Legacy: Check if expense came from salary settlement via engineer_transaction_id
     if (expense.engineer_transaction_id) {
       // Show redirect dialog instead of allowing delete
       setRedirectDialog({ open: true, expense });
@@ -436,6 +453,7 @@ export default function ExpensesPage() {
         accessorKey: "subcontract_title",
         header: "Subcontract",
         size: 160,
+        filterVariant: "text",
         Cell: ({ cell }) => {
           const value = cell.getValue<string>();
           return value ? (
@@ -453,6 +471,31 @@ export default function ExpensesPage() {
               variant="outlined"
               sx={{ color: 'text.disabled', borderColor: 'divider' }}
             />
+          );
+        },
+      },
+      {
+        accessorKey: "settlement_reference",
+        header: "Ref Code",
+        size: 140,
+        filterVariant: "text",
+        Cell: ({ cell }) => {
+          const ref = cell.getValue<string>();
+          return ref ? (
+            <Chip
+              label={ref}
+              size="small"
+              color="primary"
+              variant="outlined"
+              clickable
+              onClick={() => {
+                // Navigate to salary settlements page with ref code for highlighting
+                router.push(`/site/payments?tab=salary&highlight=${encodeURIComponent(ref)}`);
+              }}
+              sx={{ fontFamily: "monospace", fontWeight: 600, cursor: "pointer" }}
+            />
+          ) : (
+            <Typography variant="body2" color="text.disabled">-</Typography>
           );
         },
       },

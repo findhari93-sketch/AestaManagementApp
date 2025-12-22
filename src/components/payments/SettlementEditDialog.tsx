@@ -99,12 +99,14 @@ export default function SettlementEditDialog({
         payment_mode: paymentMode,
         payment_proof_url: proofUrl,
         payment_notes: notes || null,
+        payer_source: moneySource,
+        payer_name: moneySource === "custom" || moneySource === "other_site_money"
+          ? moneySourceName
+          : null,
       };
 
-      // Only daily attendance has subcontract linking
-      if (record.sourceType === "daily") {
-        attendancePayload.subcontract_id = subcontractId;
-      }
+      // Add subcontract to payload for both daily and market
+      attendancePayload.subcontract_id = subcontractId;
 
       // Update the attendance record
       if (record.sourceType === "daily") {
@@ -138,18 +140,50 @@ export default function SettlementEditDialog({
         if (txError) throw txError;
       }
 
-      // If subcontract changed, update the linked expense
-      if (record.expenseId && record.sourceType === "daily") {
+      // Update settlement_group if exists (new architecture - single source of truth)
+      // Changes here will automatically reflect in v_all_expenses view
+      // Note: Cast to any until Supabase types are regenerated after migrations
+      if ((record as any).settlementGroupId) {
+        const { error: groupError } = await (supabase as any)
+          .from("settlement_groups")
+          .update({
+            subcontract_id: subcontractId,
+            payer_source: moneySource,
+            payer_name: moneySource === "custom" || moneySource === "other_site_money"
+              ? moneySourceName
+              : null,
+            payment_mode: paymentMode,
+            proof_url: proofUrl,
+            notes: notes || null,
+          })
+          .eq("id", (record as any).settlementGroupId);
+
+        if (groupError) {
+          console.error("Error updating settlement_group:", groupError);
+        }
+      }
+
+      // Legacy: Update engineer_transaction.related_subcontract_id for backward compatibility
+      if (record.engineerTransactionId) {
+        const { error: txSubError } = await (supabase
+          .from("site_engineer_transactions") as any)
+          .update({ related_subcontract_id: subcontractId })
+          .eq("id", record.engineerTransactionId);
+
+        if (txSubError) {
+          console.error("Error updating engineer transaction subcontract:", txSubError);
+        }
+      }
+
+      // Legacy: Update old-style expenses if they exist (for data created before migration)
+      if (record.expenseId) {
         const { error: expenseError } = await supabase
           .from("expenses")
-          .update({
-            contract_id: subcontractId,
-          })
+          .update({ contract_id: subcontractId })
           .eq("id", record.expenseId);
 
         if (expenseError) {
           console.error("Error updating expense contract link:", expenseError);
-          // Don't throw - this is non-critical
         }
       }
 
@@ -242,24 +276,22 @@ export default function SettlementEditDialog({
             </Select>
           </FormControl>
 
-          {/* Subcontract Link - Only for daily laborers */}
-          {isDaily && (
-            <Box>
-              <Typography variant="subtitle2" sx={{ mb: 1, display: "flex", alignItems: "center", gap: 0.5 }}>
-                <LinkIcon fontSize="small" />
-                Link to Subcontract
-              </Typography>
-              <SubcontractLinkSelector
-                selectedSubcontractId={subcontractId}
-                onSelect={setSubcontractId}
-                paymentAmount={record.amount}
-                showBalanceAfterPayment
-              />
-            </Box>
-          )}
+          {/* Subcontract Link - Available for both daily and market laborers */}
+          <Box>
+            <Typography variant="subtitle2" sx={{ mb: 1, display: "flex", alignItems: "center", gap: 0.5 }}>
+              <LinkIcon fontSize="small" />
+              Link to Subcontract
+            </Typography>
+            <SubcontractLinkSelector
+              selectedSubcontractId={subcontractId}
+              onSelect={setSubcontractId}
+              paymentAmount={record.amount}
+              showBalanceAfterPayment
+            />
+          </Box>
 
-          {/* Money Source - Only for engineer wallet payments */}
-          {isEngineerWallet && (
+          {/* Money Source - Show for all paid settlements */}
+          {(record.isPaid || isEngineerWallet) && (
             <Box>
               <Typography variant="subtitle2" sx={{ mb: 1 }}>
                 Whose Money

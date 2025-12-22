@@ -166,7 +166,7 @@ export default function DashboardContent({
       try {
         const [teaShopsResult, expensesResult] = await Promise.all([
           supabase.from("tea_shop_accounts").select("id").eq("site_id", siteId),
-          supabase.from("expenses").select("amount").eq("site_id", siteId),
+          supabase.from("expenses").select("amount").eq("site_id", siteId).is("contract_id", null),
         ]);
 
         const teaShopIds = (teaShopsResult.data || []).map((t: any) => t.id);
