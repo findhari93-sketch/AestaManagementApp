@@ -2,6 +2,7 @@
 
 import { useMemo, useState, useCallback } from "react";
 import {
+  Avatar,
   Box,
   Button,
   Chip,
@@ -33,6 +34,7 @@ import PageHeader from "@/components/layout/PageHeader";
 import { hasEditPermission } from "@/lib/permissions";
 import type { Tables } from "@/types/database.types";
 import type { LaborersPageData, LaborerWithDetails } from "@/lib/data/laborers";
+import LaborerPhotoUploader from "@/components/laborers/LaborerPhotoUploader";
 import dayjs from "dayjs";
 
 type LaborCategory = Tables<"labor_categories">;
@@ -76,6 +78,7 @@ export default function LaborersContent({ initialData }: LaborersContentProps) {
     associated_team_id: "",
     status: "active" as "active" | "inactive",
     joining_date: dayjs().format("YYYY-MM-DD"),
+    photo_url: null as string | null,
   });
 
   const fetchLaborers = useCallback(async () => {
@@ -121,6 +124,7 @@ export default function LaborersContent({ initialData }: LaborersContentProps) {
         associated_team_id: laborer.associated_team_id || "",
         status: laborer.status,
         joining_date: laborer.joining_date || dayjs().format("YYYY-MM-DD"),
+        photo_url: laborer.photo_url || null,
       });
     } else {
       setEditingLaborer(null);
@@ -137,6 +141,7 @@ export default function LaborersContent({ initialData }: LaborersContentProps) {
         associated_team_id: "",
         status: "active",
         joining_date: dayjs().format("YYYY-MM-DD"),
+        photo_url: null,
       });
     }
     setOpenDialog(true);
@@ -206,7 +211,33 @@ export default function LaborersContent({ initialData }: LaborersContentProps) {
       {
         accessorKey: "name",
         header: "Name",
-        size: isMobile ? 100 : 180,
+        size: isMobile ? 130 : 200,
+        Cell: ({ row }) => (
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            <Avatar
+              src={row.original.photo_url || undefined}
+              sx={{
+                width: isMobile ? 28 : 32,
+                height: isMobile ? 28 : 32,
+                fontSize: isMobile ? 12 : 14,
+                bgcolor: "primary.light",
+              }}
+            >
+              {row.original.name.charAt(0).toUpperCase()}
+            </Avatar>
+            <Typography
+              variant="body2"
+              fontWeight={500}
+              sx={{
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {row.original.name}
+            </Typography>
+          </Box>
+        ),
       },
       {
         accessorKey: "phone",
@@ -413,6 +444,19 @@ export default function LaborersContent({ initialData }: LaborersContentProps) {
         </DialogTitle>
         <DialogContent>
           <Box sx={{ display: "flex", flexDirection: "column", gap: 2, mt: 2 }}>
+            {/* Photo Uploader - Top of form */}
+            <LaborerPhotoUploader
+              currentPhotoUrl={formData.photo_url}
+              laborerName={formData.name}
+              laborerId={editingLaborer?.id}
+              onPhotoChange={(url) =>
+                setFormData({ ...formData, photo_url: url })
+              }
+              onError={(error) => setError(error)}
+              disabled={!canEdit}
+              supabase={supabase}
+            />
+
             <Grid container spacing={2}>
               <Grid size={{ xs: 12, sm: 6 }}>
                 <TextField

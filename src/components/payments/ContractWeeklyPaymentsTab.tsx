@@ -47,6 +47,7 @@ import PaymentRefDialog from "./PaymentRefDialog";
 import ContractPaymentEditDialog from "./ContractPaymentEditDialog";
 import ContractPaymentDeleteDialog from "./ContractPaymentDeleteDialog";
 import ContractPaymentHistoryDialog from "./ContractPaymentHistoryDialog";
+import SettlementsOverviewDialog from "./SettlementsOverviewDialog";
 import type {
   WeekGroup,
   WeeklyContractLaborer,
@@ -162,6 +163,15 @@ export default function ContractWeeklyPaymentsTab({
 
   // History dialog state
   const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
+
+  // Settlements overview dialog state
+  const [overviewDialogOpen, setOverviewDialogOpen] = useState(false);
+  const [overviewRefs, setOverviewRefs] = useState<string[]>([]);
+  const [overviewContext, setOverviewContext] = useState<{
+    weekStart?: string;
+    weekEnd?: string;
+    laborerName?: string;
+  }>({});
 
   // Expanded state
   const [expandedWeeks, setExpandedWeeks] = useState<Set<string>>(new Set());
@@ -813,38 +823,50 @@ export default function ContractWeeklyPaymentsTab({
             );
           }
 
-          // Multiple refs - show count with tooltip
+          // Multiple refs - show count with tooltip containing clickable chips
           return (
             <Tooltip
               title={
                 <Box sx={{ p: 0.5 }}>
                   <Typography variant="caption" sx={{ fontWeight: 600, mb: 1, display: "block" }}>
-                    Settlement References:
+                    Click chip for details, or click below to view all:
                   </Typography>
-                  <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
+                  <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
                     {refs.map((ref) => (
-                      <Typography
+                      <Chip
                         key={ref}
-                        variant="caption"
-                        sx={{
-                          fontFamily: "monospace",
-                          cursor: "pointer",
-                          "&:hover": { textDecoration: "underline" },
-                        }}
+                        label={ref}
+                        size="small"
+                        variant="outlined"
                         onClick={(e) => {
                           e.stopPropagation();
                           setSelectedPaymentRef(ref);
                           setRefDialogOpen(true);
                         }}
-                      >
-                        {ref}
-                      </Typography>
+                        sx={{
+                          fontFamily: "monospace",
+                          fontSize: "0.65rem",
+                          height: 20,
+                          cursor: "pointer",
+                          color: "white",
+                          borderColor: "rgba(255,255,255,0.5)",
+                          "&:hover": {
+                            bgcolor: "rgba(255,255,255,0.2)",
+                            borderColor: "white",
+                          },
+                        }}
+                      />
                     ))}
                   </Box>
                 </Box>
               }
               arrow
               placement="top"
+              componentsProps={{
+                tooltip: {
+                  sx: { pointerEvents: "auto", maxWidth: 300 },
+                },
+              }}
             >
               <Chip
                 label={`${refs.length} settlements`}
@@ -852,6 +874,15 @@ export default function ContractWeeklyPaymentsTab({
                 color="primary"
                 variant="outlined"
                 clickable
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setOverviewRefs(refs);
+                  setOverviewContext({
+                    weekStart: row.original.weekStart,
+                    weekEnd: row.original.weekEnd,
+                  });
+                  setOverviewDialogOpen(true);
+                }}
                 sx={{
                   fontWeight: 600,
                   fontSize: "0.7rem",
@@ -1373,6 +1404,24 @@ export default function ContractWeeklyPaymentsTab({
         onViewPayment={(reference) => {
           setHistoryDialogOpen(false);
           setSelectedPaymentRef(reference);
+          setRefDialogOpen(true);
+        }}
+      />
+
+      {/* Settlements Overview Dialog */}
+      <SettlementsOverviewDialog
+        open={overviewDialogOpen}
+        onClose={() => {
+          setOverviewDialogOpen(false);
+          setOverviewRefs([]);
+          setOverviewContext({});
+        }}
+        settlementRefs={overviewRefs}
+        weekStart={overviewContext.weekStart}
+        weekEnd={overviewContext.weekEnd}
+        laborerName={overviewContext.laborerName}
+        onViewDetails={(ref) => {
+          setSelectedPaymentRef(ref);
           setRefDialogOpen(true);
         }}
       />
