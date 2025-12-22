@@ -1304,12 +1304,19 @@ export interface ContractPaymentHistoryRecord {
   paymentChannel: PaymentChannel | null;
   actualPaymentDate: string;
   paymentDate: string;
+  // Payment source - who actually paid (company money, own money, trust account, etc.)
+  payerSource: string | null;
+  payerName: string | null;
+  // Audit fields
+  recordedBy: string;
+  recordedByUserId: string | null;
+  createdAt: string;
+  // Legacy field - kept for backward compatibility (same as recordedBy)
   paidBy: string;
   proofUrl: string | null;
   notes: string | null;
   subcontractId: string | null;
   subcontractTitle: string | null;
-  createdAt: string;
 }
 
 /**
@@ -1341,6 +1348,9 @@ export async function getContractPaymentHistory(
         actual_payment_date,
         payment_date,
         paid_by,
+        paid_by_user_id,
+        recorded_by,
+        recorded_by_user_id,
         proof_url,
         notes,
         subcontract_id,
@@ -1348,7 +1358,7 @@ export async function getContractPaymentHistory(
         settlement_group_id,
         laborers(name, labor_roles(name)),
         subcontracts(title),
-        settlement_groups(settlement_reference)
+        settlement_groups(settlement_reference, payer_source, payer_name)
       `, { count: "exact" })
       .eq("site_id", siteId)
       .eq("is_under_contract", true);
@@ -1395,12 +1405,19 @@ export async function getContractPaymentHistory(
       paymentChannel: p.payment_channel,
       actualPaymentDate: p.actual_payment_date || p.payment_date,
       paymentDate: p.payment_date,
+      // Payment source from settlement_groups
+      payerSource: p.settlement_groups?.payer_source || null,
+      payerName: p.settlement_groups?.payer_name || null,
+      // Audit fields
+      recordedBy: p.recorded_by || p.paid_by || "Unknown",
+      recordedByUserId: p.recorded_by_user_id || p.paid_by_user_id || null,
+      createdAt: p.created_at,
+      // Legacy field
       paidBy: p.paid_by || "Unknown",
       proofUrl: p.proof_url,
       notes: p.notes,
       subcontractId: p.subcontract_id,
       subcontractTitle: p.subcontracts?.title || null,
-      createdAt: p.created_at,
     }));
 
     return { payments, total: count || 0 };
