@@ -783,35 +783,87 @@ export default function ContractWeeklyPaymentsTab({
               </Typography>
             );
           }
+
+          // Single ref - show directly
+          if (refs.length === 1) {
+            return (
+              <Chip
+                label={refs[0]}
+                size="small"
+                color="primary"
+                variant="outlined"
+                clickable
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSelectedPaymentRef(refs[0]);
+                  setRefDialogOpen(true);
+                }}
+                sx={{
+                  fontFamily: "monospace",
+                  fontWeight: 600,
+                  fontSize: "0.7rem",
+                  height: 22,
+                  cursor: "pointer",
+                  "&:hover": {
+                    bgcolor: "primary.main",
+                    color: "primary.contrastText",
+                  },
+                }}
+              />
+            );
+          }
+
+          // Multiple refs - show count with tooltip
           return (
-            <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
-              {refs.map((ref) => (
-                <Chip
-                  key={ref}
-                  label={ref}
-                  size="small"
-                  color="primary"
-                  variant="outlined"
-                  clickable
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setSelectedPaymentRef(ref);
-                    setRefDialogOpen(true);
-                  }}
-                  sx={{
-                    fontFamily: "monospace",
-                    fontWeight: 600,
-                    fontSize: "0.7rem",
-                    height: 22,
-                    cursor: "pointer",
-                    "&:hover": {
-                      bgcolor: "primary.main",
-                      color: "primary.contrastText",
-                    },
-                  }}
-                />
-              ))}
-            </Box>
+            <Tooltip
+              title={
+                <Box sx={{ p: 0.5 }}>
+                  <Typography variant="caption" sx={{ fontWeight: 600, mb: 1, display: "block" }}>
+                    Settlement References:
+                  </Typography>
+                  <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
+                    {refs.map((ref) => (
+                      <Typography
+                        key={ref}
+                        variant="caption"
+                        sx={{
+                          fontFamily: "monospace",
+                          cursor: "pointer",
+                          "&:hover": { textDecoration: "underline" },
+                        }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedPaymentRef(ref);
+                          setRefDialogOpen(true);
+                        }}
+                      >
+                        {ref}
+                      </Typography>
+                    ))}
+                  </Box>
+                </Box>
+              }
+              arrow
+              placement="top"
+            >
+              <Chip
+                label={`${refs.length} settlements`}
+                size="small"
+                color="primary"
+                variant="outlined"
+                clickable
+                sx={{
+                  fontWeight: 600,
+                  fontSize: "0.7rem",
+                  height: 22,
+                  cursor: "pointer",
+                  "&:hover": {
+                    bgcolor: "primary.main",
+                    color: "primary.contrastText",
+                  },
+                }}
+              />
+            </Tooltip>
           );
         },
       },
