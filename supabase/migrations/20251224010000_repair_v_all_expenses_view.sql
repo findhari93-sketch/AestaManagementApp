@@ -1,12 +1,9 @@
--- Migration: Fix orphaned labor expenses in v_all_expenses view
--- Purpose: Ensure ALL labor transactions have ref codes by excluding labor from Part 1
--- Background: Old labor expenses in expenses table were showing without settlement_reference
--- because they weren't linked to settlement_groups
--- IMPORTANT: This migration preserves the expense_type column from previous migration
+-- Migration: Repair v_all_expenses view
+-- Purpose: Restore expense_type column and payer_source logic that was lost in previous migration
+-- This fixes the "Other" type display and missing settlements
 
 -- ============================================================================
--- 1. Drop and recreate the unified expenses view to exclude ALL labor from Part 1
---    while preserving expense_type and payer_source logic
+-- 1. Drop and recreate the view with ALL proper columns
 -- ============================================================================
 DROP VIEW IF EXISTS v_all_expenses;
 
@@ -22,7 +19,7 @@ SELECT
   e.category_id,
   ec.name as category_name,
   e.module::TEXT as module,
-  -- expense_type based on module (preserving from previous migration)
+  -- expense_type based on module
   CASE e.module
     WHEN 'material' THEN 'Material'
     WHEN 'machinery' THEN 'Machinery'
@@ -53,7 +50,6 @@ LEFT JOIN subcontracts sc ON e.contract_id = sc.id
 LEFT JOIN site_payers sp ON e.site_payer_id = sp.id
 WHERE e.is_deleted = false
   -- Exclude ALL labor expenses - they should only come from settlement_groups (Part 2)
-  -- This ensures all labor transactions have a settlement_reference
   AND e.module != 'labor'
 
 UNION ALL
@@ -70,11 +66,10 @@ SELECT
     ELSE
       'Salary settlement (' || sg.laborer_count || ' laborers)'
   END as description,
-  -- Get "Salary Settlement" category ID
   (SELECT id FROM expense_categories WHERE name = 'Salary Settlement' LIMIT 1) as category_id,
   'Salary Settlement' as category_name,
   'labor'::TEXT as module,
-  -- expense_type - distinguish daily vs contract vs advance (preserving from previous migration)
+  -- expense_type - distinguish daily vs contract vs advance
   CASE
     WHEN sg.payment_type = 'advance' THEN 'Advance'
     WHEN EXISTS (
@@ -84,7 +79,7 @@ SELECT
     ) THEN 'Contract Salary'
     ELSE 'Daily Salary'
   END::TEXT as expense_type,
-  -- Determine cleared status based on payment channel and engineer settlement
+  -- Determine cleared status
   CASE
     WHEN sg.payment_channel = 'direct' THEN true
     WHEN sg.engineer_transaction_id IS NOT NULL THEN
@@ -104,7 +99,7 @@ SELECT
   sg.subcontract_id as contract_id,
   sc.title as subcontract_title,
   NULL::UUID as site_payer_id,
-  -- Convert payer_source to human-readable label (preserving from previous migration)
+  -- Convert payer_source to human-readable label
   CASE sg.payer_source
     WHEN 'own_money' THEN 'Own Money'
     WHEN 'amma_money' THEN 'Amma Money'
@@ -130,18 +125,8 @@ LEFT JOIN subcontracts sc ON sg.subcontract_id = sc.id
 WHERE sg.is_cancelled = false;
 
 -- Add comment
-COMMENT ON VIEW v_all_expenses IS 'Unified view combining regular expenses with derived salary expenses from settlement_groups. Labor expenses are ONLY from settlement_groups to ensure all have settlement_reference. Includes expense_type column.';
+COMMENT ON VIEW v_all_expenses IS 'Unified view combining regular expenses with derived salary expenses from settlement_groups. Labor expenses are ONLY from settlement_groups to ensure all have settlement_reference. Includes expense_type column for Daily Salary, Contract Salary, Advance, Material, Machinery, General.';
 
 -- Grant permissions
 GRANT SELECT ON v_all_expenses TO authenticated;
 GRANT SELECT ON v_all_expenses TO anon;
-
--- ============================================================================
--- 2. Soft-delete orphaned labor expenses from expenses table
--- These are old labor expenses that are NOT linked to settlement_groups
--- They were creating duplicate/orphaned entries in v_all_expenses
--- ============================================================================
-UPDATE expenses
-SET is_deleted = true
-WHERE module = 'labor'
-  AND is_deleted = false;
