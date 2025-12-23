@@ -22,11 +22,16 @@ import {
   Paper,
   useTheme,
   alpha,
+  ToggleButtonGroup,
+  ToggleButton,
+  Tooltip,
 } from "@mui/material";
 import {
   Refresh as RefreshIcon,
   Payment as PaymentIcon,
   History as HistoryIcon,
+  CalendarMonth as CalendarMonthIcon,
+  Person as PersonIcon,
 } from "@mui/icons-material";
 import { createClient } from "@/lib/supabase/client";
 import { useSite } from "@/contexts/SiteContext";
@@ -56,6 +61,40 @@ interface ContractWeeklyPaymentsTabProps {
   onDataChange?: () => void;
   onSummaryChange?: (summary: PaymentSummaryData) => void;
   highlightRef?: string | null;
+}
+
+// View mode type
+type ViewMode = "weekly" | "laborer";
+
+// Week row data for week-wise view
+interface WeekLaborerData {
+  laborerId: string;
+  laborerName: string;
+  laborerRole: string | null;
+  teamId: string | null;
+  teamName: string | null;
+  subcontractId: string | null;
+  subcontractTitle: string | null;
+  daysWorked: number;
+  earned: number;
+  paid: number;
+  balance: number;
+  progress: number;
+}
+
+interface WeekRowData {
+  id: string;
+  weekStart: string;
+  weekEnd: string;
+  weekLabel: string;
+  laborerCount: number;
+  totalSalary: number;
+  totalPaid: number;
+  totalDue: number;
+  paymentProgress: number;
+  status: PaymentStatus;
+  laborers: WeekLaborerData[];
+  settlementReferences: string[];
 }
 
 // Get week boundaries (Sunday to Saturday)
@@ -92,6 +131,8 @@ export default function ContractWeeklyPaymentsTab({
 
   // State
   const [laborers, setLaborers] = useState<ContractLaborerPaymentView[]>([]);
+  const [weekGroups, setWeekGroups] = useState<WeekRowData[]>([]);
+  const [viewMode, setViewMode] = useState<ViewMode>("weekly");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -343,6 +384,83 @@ export default function ContractWeeklyPaymentsTab({
 
       setLaborers(laborerViews);
 
+      // Build week-wise data from laborer views
+      const weekDataMap = new Map<string, {
+        laborers: WeekLaborerData[];
+        totalSalary: number;
+        totalPaid: number;
+        settlementRefs: Set<string>;
+      }>();
+
+      laborerViews.forEach((laborer) => {
+        laborer.weeklyBreakdown.forEach((week) => {
+          if (!weekDataMap.has(week.weekStart)) {
+            weekDataMap.set(week.weekStart, {
+              laborers: [],
+              totalSalary: 0,
+              totalPaid: 0,
+              settlementRefs: new Set(),
+            });
+          }
+          const weekData = weekDataMap.get(week.weekStart)!;
+
+          weekData.laborers.push({
+            laborerId: laborer.laborerId,
+            laborerName: laborer.laborerName,
+            laborerRole: laborer.laborerRole,
+            teamId: laborer.teamId ?? null,
+            teamName: laborer.teamName,
+            subcontractId: laborer.subcontractId ?? null,
+            subcontractTitle: laborer.subcontractTitle,
+            daysWorked: week.daysWorked,
+            earned: week.earned,
+            paid: week.paid,
+            balance: week.balance,
+            progress: week.earned > 0 ? (week.paid / week.earned) * 100 : 0,
+          });
+
+          weekData.totalSalary += week.earned;
+          weekData.totalPaid += week.paid;
+
+          // Add settlement references
+          laborer.settlementReferences.forEach((ref) => weekData.settlementRefs.add(ref));
+        });
+      });
+
+      // Convert map to array
+      const weekRows: WeekRowData[] = [];
+      weekDataMap.forEach((data, weekStart) => {
+        const weekEnd = dayjs(weekStart).add(6, "day").format("YYYY-MM-DD");
+        const totalDue = data.totalSalary - data.totalPaid;
+        const paymentProgress = data.totalSalary > 0 ? (data.totalPaid / data.totalSalary) * 100 : 0;
+
+        let status: PaymentStatus = "pending";
+        if (totalDue <= 0) {
+          status = totalDue < 0 ? "advance" : "completed";
+        } else if (data.totalPaid > 0) {
+          status = "partial";
+        }
+
+        weekRows.push({
+          id: weekStart,
+          weekStart,
+          weekEnd,
+          weekLabel: `${dayjs(weekStart).format("MMM D")} - ${dayjs(weekEnd).format("MMM D, YYYY")}`,
+          laborerCount: data.laborers.length,
+          totalSalary: data.totalSalary,
+          totalPaid: data.totalPaid,
+          totalDue: Math.max(0, totalDue),
+          paymentProgress,
+          status,
+          laborers: data.laborers,
+          settlementReferences: Array.from(data.settlementRefs),
+        });
+      });
+
+      // Sort by week start date descending (most recent first)
+      weekRows.sort((a, b) => new Date(b.weekStart).getTime() - new Date(a.weekStart).getTime());
+      setWeekGroups(weekRows);
+
       // Fetch filter options
       const { data: subcontractsData } = await supabase
         .from("subcontracts")
@@ -411,15 +529,61 @@ export default function ContractWeeklyPaymentsTab({
     });
   }, [laborers, filterStatus, filterSubcontract, filterTeam]);
 
+  // Filter week groups
+  const filteredWeekGroups = useMemo(() => {
+    return weekGroups.map((week) => {
+      // Filter laborers within each week
+      const filteredWeekLaborers = week.laborers.filter((l) => {
+        if (filterSubcontract !== "all" && l.subcontractId !== filterSubcontract) return false;
+        if (filterTeam !== "all" && l.teamId !== filterTeam) return false;
+        return true;
+      });
+
+      // Recalculate totals for filtered laborers
+      const totalSalary = filteredWeekLaborers.reduce((sum, l) => sum + l.earned, 0);
+      const totalPaid = filteredWeekLaborers.reduce((sum, l) => sum + l.paid, 0);
+      const totalDue = totalSalary - totalPaid;
+      const paymentProgress = totalSalary > 0 ? (totalPaid / totalSalary) * 100 : 0;
+
+      let status: PaymentStatus = "pending";
+      if (totalDue <= 0) {
+        status = totalDue < 0 ? "advance" : "completed";
+      } else if (totalPaid > 0) {
+        status = "partial";
+      }
+
+      return {
+        ...week,
+        laborers: filteredWeekLaborers,
+        laborerCount: filteredWeekLaborers.length,
+        totalSalary,
+        totalPaid,
+        totalDue: Math.max(0, totalDue),
+        paymentProgress,
+        status,
+      };
+    }).filter((week) => {
+      // Status filter
+      if (filterStatus === "pending" && week.status === "completed") return false;
+      if (filterStatus === "completed" && week.status !== "completed" && week.status !== "advance") return false;
+
+      // Only include weeks with laborers after filtering
+      return week.laborerCount > 0;
+    });
+  }, [weekGroups, filterStatus, filterSubcontract, filterTeam]);
+
   // Auto-scroll to highlighted row when data loads
   useEffect(() => {
-    if (!highlightRef || hasScrolledToHighlight || filteredLaborers.length === 0 || loading) {
+    if (!highlightRef || hasScrolledToHighlight || loading) {
       return;
     }
 
+    const dataToSearch = viewMode === "weekly" ? filteredWeekGroups : filteredLaborers;
+    if (dataToSearch.length === 0) return;
+
     // Find the row index that contains the highlighted reference
-    const highlightedRowIndex = filteredLaborers.findIndex(laborer =>
-      laborer.settlementReferences.includes(highlightRef)
+    const highlightedRowIndex = dataToSearch.findIndex((item) =>
+      item.settlementReferences.includes(highlightRef)
     );
 
     if (highlightedRowIndex === -1) {
@@ -446,7 +610,7 @@ export default function ContractWeeklyPaymentsTab({
     }, 300);
 
     return () => clearTimeout(timeout);
-  }, [highlightRef, filteredLaborers, hasScrolledToHighlight, loading]);
+  }, [highlightRef, filteredLaborers, filteredWeekGroups, viewMode, hasScrolledToHighlight, loading]);
 
   // Table columns
   const columns: MRT_ColumnDef<ContractLaborerPaymentView>[] = useMemo(
@@ -538,7 +702,191 @@ export default function ContractWeeklyPaymentsTab({
     []
   );
 
-  // Render week breakdown detail panel
+  // Week columns for week-wise view
+  const weekColumns: MRT_ColumnDef<WeekRowData>[] = useMemo(
+    () => [
+      {
+        accessorKey: "weekLabel",
+        header: "Week",
+        Cell: ({ row }) => (
+          <Box>
+            <Typography variant="body2" fontWeight={500}>
+              {row.original.weekLabel}
+            </Typography>
+          </Box>
+        ),
+      },
+      {
+        accessorKey: "laborerCount",
+        header: "Laborers",
+        Cell: ({ row }) => (
+          <Chip
+            label={row.original.laborerCount}
+            size="small"
+            color="primary"
+            variant="outlined"
+          />
+        ),
+      },
+      {
+        accessorKey: "totalSalary",
+        header: "Salary",
+        Cell: ({ row }) => formatCurrency(row.original.totalSalary),
+      },
+      {
+        accessorKey: "totalPaid",
+        header: "Paid",
+        Cell: ({ row }) => (
+          <Typography variant="body2" color="success.main">
+            {formatCurrency(row.original.totalPaid)}
+          </Typography>
+        ),
+      },
+      {
+        accessorKey: "totalDue",
+        header: "Due",
+        Cell: ({ row }) => (
+          <Typography
+            variant="body2"
+            fontWeight={600}
+            color={row.original.totalDue > 0 ? "error.main" : "success.main"}
+          >
+            {formatCurrency(row.original.totalDue)}
+          </Typography>
+        ),
+      },
+      {
+        accessorKey: "paymentProgress",
+        header: "Progress",
+        Cell: ({ row }) => (
+          <Box sx={{ width: 100 }}>
+            <Box sx={{ display: "flex", justifyContent: "space-between", mb: 0.5 }}>
+              <Typography variant="caption">{row.original.paymentProgress.toFixed(0)}%</Typography>
+            </Box>
+            <LinearProgress
+              variant="determinate"
+              value={Math.min(row.original.paymentProgress, 100)}
+              color={
+                row.original.paymentProgress >= 100
+                  ? "success"
+                  : row.original.paymentProgress > 50
+                    ? "warning"
+                    : "error"
+              }
+              sx={{ height: 6, borderRadius: 1 }}
+            />
+          </Box>
+        ),
+      },
+      {
+        accessorKey: "status",
+        header: "Status",
+        Cell: ({ row }) => (
+          <Chip
+            label={getPaymentStatusLabel(row.original.status)}
+            size="small"
+            color={getPaymentStatusColor(row.original.status)}
+            variant="outlined"
+          />
+        ),
+      },
+    ],
+    []
+  );
+
+  // Render laborers detail panel for week-wise view
+  const renderWeekDetailPanel = ({ row }: { row: { original: WeekRowData } }) => {
+    const week = row.original;
+
+    if (week.laborers.length === 0) {
+      return (
+        <Box sx={{ p: 2 }}>
+          <Typography variant="body2" color="text.secondary">
+            No laborers for this week
+          </Typography>
+        </Box>
+      );
+    }
+
+    return (
+      <Box sx={{ p: 2 }}>
+        <Typography variant="subtitle2" gutterBottom>
+          Laborers ({week.laborerCount})
+        </Typography>
+        <TableContainer component={Paper} variant="outlined">
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>Laborer</TableCell>
+                <TableCell>Team</TableCell>
+                <TableCell>Days</TableCell>
+                <TableCell align="right">Earned</TableCell>
+                <TableCell align="right">Paid</TableCell>
+                <TableCell align="right">Due</TableCell>
+                <TableCell>Progress</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {week.laborers.map((laborer) => (
+                <TableRow
+                  key={laborer.laborerId}
+                  sx={{
+                    bgcolor: laborer.balance <= 0 ? alpha(theme.palette.success.main, 0.05) : undefined,
+                  }}
+                >
+                  <TableCell>
+                    <Box>
+                      <Typography variant="body2" fontWeight={500}>
+                        {laborer.laborerName}
+                      </Typography>
+                      {laborer.laborerRole && (
+                        <Typography variant="caption" color="text.secondary">
+                          {laborer.laborerRole}
+                        </Typography>
+                      )}
+                    </Box>
+                  </TableCell>
+                  <TableCell>{laborer.teamName || "-"}</TableCell>
+                  <TableCell>{laborer.daysWorked}</TableCell>
+                  <TableCell align="right">{formatCurrency(laborer.earned)}</TableCell>
+                  <TableCell align="right" sx={{ color: "success.main" }}>
+                    {formatCurrency(laborer.paid)}
+                  </TableCell>
+                  <TableCell
+                    align="right"
+                    sx={{ color: laborer.balance > 0 ? "error.main" : "success.main" }}
+                  >
+                    {formatCurrency(Math.max(0, laborer.balance))}
+                  </TableCell>
+                  <TableCell>
+                    <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                      <LinearProgress
+                        variant="determinate"
+                        value={Math.min(laborer.progress, 100)}
+                        color={
+                          laborer.progress >= 100
+                            ? "success"
+                            : laborer.progress > 50
+                              ? "warning"
+                              : "error"
+                        }
+                        sx={{ width: 60, height: 6, borderRadius: 1 }}
+                      />
+                      <Typography variant="caption">
+                        {laborer.progress.toFixed(0)}%
+                      </Typography>
+                    </Box>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      </Box>
+    );
+  };
+
+  // Render week breakdown detail panel (for laborer-wise view)
   const renderDetailPanel = ({ row }: { row: { original: ContractLaborerPaymentView } }) => {
     const laborer = row.original;
 
@@ -654,6 +1002,35 @@ export default function ContractWeeklyPaymentsTab({
           </Button>
         )}
 
+        {/* View Mode Toggle */}
+        <ToggleButtonGroup
+          value={viewMode}
+          exclusive
+          onChange={(_, value) => value && setViewMode(value)}
+          size="small"
+        >
+          <ToggleButton value="weekly">
+            <Tooltip title="Week View">
+              <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                <CalendarMonthIcon fontSize="small" />
+                <Typography variant="body2" sx={{ display: { xs: "none", sm: "block" } }}>
+                  Weeks
+                </Typography>
+              </Box>
+            </Tooltip>
+          </ToggleButton>
+          <ToggleButton value="laborer">
+            <Tooltip title="Laborer View">
+              <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                <PersonIcon fontSize="small" />
+                <Typography variant="body2" sx={{ display: { xs: "none", sm: "block" } }}>
+                  Laborers
+                </Typography>
+              </Box>
+            </Tooltip>
+          </ToggleButton>
+        </ToggleButtonGroup>
+
         <Box sx={{ flexGrow: 1 }} />
 
         {/* Filters */}
@@ -721,36 +1098,71 @@ export default function ContractWeeklyPaymentsTab({
         </Button>
       </Box>
 
-      {/* Laborer Table */}
-      {filteredLaborers.length === 0 ? (
-        <Alert severity="info">
-          No contract laborers found for the selected period and filters.
-        </Alert>
+      {/* Data Table - Conditional based on view mode */}
+      {viewMode === "weekly" ? (
+        // Week-wise view
+        filteredWeekGroups.length === 0 ? (
+          <Alert severity="info">
+            No weeks found for the selected period and filters.
+          </Alert>
+        ) : (
+          <Box ref={tableContainerRef}>
+            <DataTable<WeekRowData>
+              columns={weekColumns}
+              data={filteredWeekGroups}
+              isLoading={loading}
+              enableExpanding
+              renderDetailPanel={renderWeekDetailPanel}
+              initialState={{
+                sorting: [{ id: "weekStart", desc: true }],
+              }}
+              muiTableBodyRowProps={({ row }) => ({
+                "data-row-index": row.index,
+                sx: {
+                  // Highlight row if it contains the matching settlement reference
+                  backgroundColor:
+                    highlightRef &&
+                    row.original.settlementReferences.includes(highlightRef)
+                      ? alpha(theme.palette.primary.main, 0.15)
+                      : undefined,
+                  transition: "background-color 0.3s ease-in-out",
+                },
+              })}
+            />
+          </Box>
+        )
       ) : (
-        <Box ref={tableContainerRef}>
-          <DataTable<ContractLaborerPaymentView>
-            columns={columns}
-            data={filteredLaborers}
-            isLoading={loading}
-            enableExpanding
-            renderDetailPanel={renderDetailPanel}
-            initialState={{
-              sorting: [{ id: "outstanding", desc: true }],
-            }}
-            muiTableBodyRowProps={({ row }) => ({
-              "data-row-index": row.index,
-              sx: {
-                // Highlight row if it contains the matching settlement reference
-                backgroundColor:
-                  highlightRef &&
-                  row.original.settlementReferences.includes(highlightRef)
-                    ? alpha(theme.palette.primary.main, 0.15)
-                    : undefined,
-                transition: "background-color 0.3s ease-in-out",
-              },
-            })}
-          />
-        </Box>
+        // Laborer-wise view
+        filteredLaborers.length === 0 ? (
+          <Alert severity="info">
+            No contract laborers found for the selected period and filters.
+          </Alert>
+        ) : (
+          <Box ref={tableContainerRef}>
+            <DataTable<ContractLaborerPaymentView>
+              columns={columns}
+              data={filteredLaborers}
+              isLoading={loading}
+              enableExpanding
+              renderDetailPanel={renderDetailPanel}
+              initialState={{
+                sorting: [{ id: "outstanding", desc: true }],
+              }}
+              muiTableBodyRowProps={({ row }) => ({
+                "data-row-index": row.index,
+                sx: {
+                  // Highlight row if it contains the matching settlement reference
+                  backgroundColor:
+                    highlightRef &&
+                    row.original.settlementReferences.includes(highlightRef)
+                      ? alpha(theme.palette.primary.main, 0.15)
+                      : undefined,
+                  transition: "background-color 0.3s ease-in-out",
+                },
+              })}
+            />
+          </Box>
+        )
       )}
 
       {/* Payment Dialog */}
