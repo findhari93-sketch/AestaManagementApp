@@ -79,6 +79,7 @@ interface ExpenseWithCategory extends Expense {
   source_type?: "expense" | "settlement";
   source_id?: string;
   expense_type?: string;
+  recorded_date?: string;
 }
 
 export default function ExpensesPage() {
@@ -407,10 +408,30 @@ export default function ExpensesPage() {
     const cols: MRT_ColumnDef<ExpenseWithCategory>[] = [
       {
         accessorKey: "date",
-        header: "Date",
-        size: 120,
+        header: "Settlement Date",
+        size: 130,
         Cell: ({ cell }) =>
           dayjs(cell.getValue<string>()).format("DD MMM YYYY"),
+      },
+      {
+        accessorKey: "recorded_date",
+        header: "Recorded Date",
+        size: 130,
+        Cell: ({ cell, row }) => {
+          const recordedDate = cell.getValue<string>();
+          const settlementDate = row.original.date;
+          // Show in different color if dates differ
+          const isDifferent = recordedDate && settlementDate && recordedDate !== settlementDate;
+          return (
+            <Typography
+              variant="body2"
+              color={isDifferent ? "warning.main" : "text.primary"}
+              fontWeight={isDifferent ? 500 : 400}
+            >
+              {recordedDate ? dayjs(recordedDate).format("DD MMM YYYY") : "-"}
+            </Typography>
+          );
+        },
       },
       {
         accessorKey: "module",
