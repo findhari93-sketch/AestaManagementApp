@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import {
   Dialog,
   DialogTitle,
@@ -188,32 +188,111 @@ export default function UnifiedSettlementDialog({
     fetchEngineers();
   }, [selectedSite?.id, open, supabase]);
 
-  // Reset form when dialog opens
+  // Generate a unique storage key for this settlement context
+  const storageKey = useMemo(() => {
+    if (!config || !selectedSite?.id) return null;
+    const contextId = config.context === "weekly"
+      ? `weekly-${config.weekLabel}`
+      : `daily-${config.date}`;
+    return `settlement-form-${selectedSite.id}-${contextId}`;
+  }, [config, selectedSite?.id]);
+
+  // Save form state to sessionStorage
+  const saveFormState = useCallback(() => {
+    if (!storageKey) return;
+    const formState = {
+      paymentMode,
+      paymentChannel,
+      selectedEngineerId,
+      engineerReference,
+      payerSource,
+      customPayerName,
+      subcontractId,
+      notes,
+      settlementType,
+      selectedRecords: Array.from(selectedRecords),
+    };
+    try {
+      sessionStorage.setItem(storageKey, JSON.stringify(formState));
+    } catch (e) {
+      console.warn("Failed to save form state:", e);
+    }
+  }, [storageKey, paymentMode, paymentChannel, selectedEngineerId, engineerReference, payerSource, customPayerName, subcontractId, notes, settlementType, selectedRecords]);
+
+  // Auto-save form state when values change (debounced)
+  useEffect(() => {
+    if (!open || !storageKey) return;
+    const timeout = setTimeout(saveFormState, 300);
+    return () => clearTimeout(timeout);
+  }, [open, saveFormState, storageKey]);
+
+  // Clear form state from sessionStorage
+  const clearFormState = useCallback(() => {
+    if (storageKey) {
+      try {
+        sessionStorage.removeItem(storageKey);
+      } catch (e) {
+        console.warn("Failed to clear form state:", e);
+      }
+    }
+  }, [storageKey]);
+
+  // Reset form when dialog opens - restore from sessionStorage if available
   useEffect(() => {
     if (open && config) {
-      // Pre-select all pending records for daily context
-      if (config.context === "daily_single") {
-        const pendingIds = config.records
-          .filter((r) => !r.isPaid)
-          .map((r) => r.id);
-        setSelectedRecords(new Set(pendingIds));
-      } else {
-        setSelectedRecords(new Set());
+      // Try to restore from sessionStorage first
+      let restored = false;
+      if (storageKey) {
+        try {
+          const saved = sessionStorage.getItem(storageKey);
+          if (saved) {
+            const formState = JSON.parse(saved);
+            setPaymentMode(formState.paymentMode || "cash");
+            setPaymentChannel(formState.paymentChannel || "direct");
+            setSelectedEngineerId(formState.selectedEngineerId || "");
+            setEngineerReference(formState.engineerReference || "");
+            setPayerSource(formState.payerSource || "own_money");
+            setCustomPayerName(formState.customPayerName || "");
+            setSubcontractId(formState.subcontractId ?? config.defaultSubcontractId ?? null);
+            setNotes(formState.notes || "");
+            setSettlementType(formState.settlementType || "all");
+            if (formState.selectedRecords) {
+              setSelectedRecords(new Set(formState.selectedRecords));
+            }
+            restored = true;
+          }
+        } catch (e) {
+          console.warn("Failed to restore form state:", e);
+        }
       }
 
-      setSettlementType("all");
-      setPaymentMode("cash");
-      setPaymentChannel("direct");
-      setSelectedEngineerId("");
-      setEngineerReference("");
-      setPayerSource("own_money");
-      setCustomPayerName("");
-      setSubcontractId(config.defaultSubcontractId || null);
+      // If not restored, use defaults
+      if (!restored) {
+        // Pre-select all pending records for daily context
+        if (config.context === "daily_single") {
+          const pendingIds = config.records
+            .filter((r) => !r.isPaid)
+            .map((r) => r.id);
+          setSelectedRecords(new Set(pendingIds));
+        } else {
+          setSelectedRecords(new Set());
+        }
+
+        setSettlementType("all");
+        setPaymentMode("cash");
+        setPaymentChannel("direct");
+        setSelectedEngineerId("");
+        setEngineerReference("");
+        setPayerSource("own_money");
+        setCustomPayerName("");
+        setSubcontractId(config.defaultSubcontractId || null);
+        setNotes("");
+      }
+
       setProofFile(null);
-      setNotes("");
       setError(null);
     }
-  }, [open, config]);
+  }, [open, config, storageKey]);
 
   // Generate default reference for engineer
   useEffect(() => {
@@ -436,6 +515,8 @@ export default function UnifiedSettlementDialog({
         }
       }
 
+      // Clear saved form state on successful settlement
+      clearFormState();
       onSuccess?.();
       onClose();
     } catch (err: any) {

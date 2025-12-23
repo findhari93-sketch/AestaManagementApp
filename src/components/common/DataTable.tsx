@@ -53,7 +53,7 @@ export const tableDefaults = {
     showColumnFilters: true,  // Show column filters by default for better filtering UX
     showGlobalFilter: true,
     pagination: {
-      pageSize: 30,
+      pageSize: 50,
       pageIndex: 0,
     },
     columnPinning: {
@@ -127,7 +127,7 @@ export default function DataTable<TData extends MRT_RowData>({
       ...tableDefaults.initialState,
       ...(pageSize && {
         pagination: {
-          pageSize: isMobile ? Math.min(pageSize, 15) : pageSize,
+          pageSize: isMobile ? Math.min(pageSize, 50) : pageSize,
           pageIndex: 0,
         },
       }),
@@ -351,7 +351,7 @@ export default function DataTable<TData extends MRT_RowData>({
   // Pagination props - simplified for mobile
   const muiPaginationProps = useMemo(
     () => ({
-      rowsPerPageOptions: useCompact ? [10, 15, 25] : [10, 30, 50, 100],
+      rowsPerPageOptions: useCompact ? [15, 25, 50] : [10, 30, 50, 100],
       showFirstButton: !useCompact,
       showLastButton: !useCompact,
       size: useCompact ? 'small' as const : 'medium' as const,

@@ -85,6 +85,17 @@ export default function DailyMarketPaymentsTab({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Contract-only dates (dates with contract attendance but no daily/market)
+  const [contractOnlyDates, setContractOnlyDates] = useState<string[]>([]);
+
+  // Holidays within the date range
+  const [holidays, setHolidays] = useState<Array<{
+    id: string;
+    date: string;
+    reason: string | null;
+    is_paid_holiday: boolean | null;
+  }>>([]);
+
   // Filter state
   const [filterStatus, setFilterStatus] = useState<
     "all" | "pending" | "sent_to_engineer" | "paid"
@@ -248,6 +259,32 @@ export default function DailyMarketPaymentsTab({
 
       if (marketError) throw marketError;
 
+      // Fetch contract attendance dates (to identify contract-only days)
+      const { data: contractAttendance, error: contractError } = await supabase
+        .from("daily_attendance")
+        .select("date, laborers!inner(laborer_type)")
+        .eq("site_id", selectedSite.id)
+        .eq("laborers.laborer_type", "contract")
+        .gte("date", dateFrom)
+        .lte("date", dateTo);
+
+      if (contractError) {
+        console.error("Error fetching contract attendance:", contractError);
+      }
+
+      // Fetch holidays for the date range
+      const { data: holidayData, error: holidayError } = await supabase
+        .from("site_holidays")
+        .select("id, date, reason, is_paid_holiday")
+        .eq("site_id", selectedSite.id)
+        .gte("date", dateFrom)
+        .lte("date", dateTo)
+        .order("date", { ascending: false });
+
+      if (holidayError) {
+        console.error("Error fetching holidays:", holidayError);
+      }
+
       // Map to DailyPaymentRecord
       const dailyRecords: DailyPaymentRecord[] = (dailyData || []).map(
         (r: any) => ({
@@ -363,6 +400,19 @@ export default function DailyMarketPaymentsTab({
       });
 
       setDateGroups(groups);
+
+      // Process contract-only dates (dates with contract labor but no daily/market)
+      const dailyMarketDates = new Set(dateMap.keys());
+      const contractDates = new Set(
+        (contractAttendance || []).map((r: { date: string }) => r.date)
+      );
+      const contractOnlyDatesList = Array.from(contractDates).filter(
+        (date) => !dailyMarketDates.has(date)
+      );
+      setContractOnlyDates(contractOnlyDatesList);
+
+      // Set holidays
+      setHolidays(holidayData || []);
 
       // Fetch subcontracts for filter
       const { data: subcontractsData } = await supabase
@@ -1199,6 +1249,8 @@ export default function DailyMarketPaymentsTab({
       ) : (
         <SalarySettlementTable
           dateGroups={filteredDateGroups}
+          contractOnlyDates={contractOnlyDates}
+          holidays={holidays}
           loading={loading}
           disabled={!canEdit}
           isAdmin={isAdmin}

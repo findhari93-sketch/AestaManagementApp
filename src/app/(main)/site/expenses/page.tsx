@@ -423,7 +423,9 @@ export default function ExpensesPage() {
               variant="outlined"
               clickable
               onClick={() => {
-                const isContractSettlement = row.original.contract_id !== null;
+                // Use expense_type to determine which tab to navigate to
+                // "Contract Salary" goes to contract tab, all others (Daily Salary, etc) go to salary tab
+                const isContractSettlement = row.original.expense_type === "Contract Salary";
                 const tab = isContractSettlement ? "contract" : "salary";
                 router.push(`/site/payments?tab=${tab}&highlight=${encodeURIComponent(ref)}`);
               }}

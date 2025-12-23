@@ -72,6 +72,7 @@ export default function CompanyContractsPage() {
   const [teams, setTeams] = useState<any[]>([]);
   const [laborers, setLaborers] = useState<any[]>([]);
   const [sites, setSites] = useState<any[]>([]);
+  const [optionsLoaded, setOptionsLoaded] = useState(false);
   const [loading, setLoading] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [viewDialogOpen, setViewDialogOpen] = useState(false);
@@ -139,6 +140,7 @@ export default function CompanyContractsPage() {
       setTeams(teamsRes.data || []);
       setLaborers(laborersRes.data || []);
       setSites(sitesRes.data || []);
+      setOptionsLoaded(true);
     };
 
     fetchOptions();
@@ -148,16 +150,11 @@ export default function CompanyContractsPage() {
   const fetchSubcontracts = async () => {
     setLoading(true);
     try {
+      // Note: We avoid nested joins like teams(name), laborers(name), sites(name) to prevent FK ambiguity issues
+      // Teams, laborers, and sites are already fetched separately in fetchOptions
       let query = supabase
         .from("subcontracts")
-        .select(
-          `
-          *,
-          teams(name),
-          laborers(name),
-          sites(name)
-        `
-        )
+        .select("*")
         .order("created_at", { ascending: false });
 
       if (activeTab !== "all") {
@@ -186,6 +183,7 @@ export default function CompanyContractsPage() {
       }
 
       // Map subcontracts with their payment totals
+      // Use already-fetched teams, laborers, sites arrays to look up names (avoids FK join ambiguity)
       const subcontractsWithDetails: SubcontractWithDetails[] = (data || []).map(
         (subcontract: any) => {
           const totalPaid = paymentsMap[subcontract.id] || 0;
@@ -195,11 +193,16 @@ export default function CompanyContractsPage() {
               ? (totalPaid / subcontract.total_value) * 100
               : 0;
 
+          // Look up names from already-fetched arrays
+          const team = teams.find((t) => t.id === subcontract.team_id);
+          const laborer = laborers.find((l) => l.id === subcontract.laborer_id);
+          const site = sites.find((s) => s.id === subcontract.site_id);
+
           return {
             ...subcontract,
-            team_name: subcontract.teams?.name,
-            laborer_name: subcontract.laborers?.name,
-            site_name: subcontract.sites?.name,
+            team_name: team?.name,
+            laborer_name: laborer?.name,
+            site_name: site?.name,
             total_paid: totalPaid,
             balance_due: balanceDue,
             completion_percentage: completionPercentage,
@@ -217,8 +220,12 @@ export default function CompanyContractsPage() {
   };
 
   useEffect(() => {
-    fetchSubcontracts();
-  }, [activeTab]);
+    // Wait for options to be loaded before fetching subcontracts
+    // since we use teams/laborers/sites arrays for name lookups
+    if (optionsLoaded) {
+      fetchSubcontracts();
+    }
+  }, [activeTab, optionsLoaded]);
 
   // Auto-calculate total value for rate-based contracts
   useEffect(() => {

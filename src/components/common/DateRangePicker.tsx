@@ -39,7 +39,7 @@ import "react-date-range/dist/theme/default.css";
 interface DateRangePickerProps {
   startDate: Date | null;
   endDate: Date | null;
-  onChange: (startDate: Date, endDate: Date) => void;
+  onChange: (startDate: Date | null, endDate: Date | null) => void;
   minDate?: Date;
   maxDate?: Date;
 }
@@ -252,7 +252,10 @@ export default function DateRangePicker({
   };
 
   const handleApply = () => {
-    if (tempRange[0].startDate && tempRange[0].endDate) {
+    // If "All Time" is selected, pass null dates to trigger special handling
+    if (selectedPreset === "allTime") {
+      onChange(null, null);
+    } else if (tempRange[0].startDate && tempRange[0].endDate) {
       onChange(tempRange[0].startDate, tempRange[0].endDate);
     }
     handleClose();
@@ -271,7 +274,12 @@ export default function DateRangePicker({
 
     // Auto-apply on mobile for quick preset selection
     if (isMobile) {
-      onChange(range.start, range.end);
+      // For "All Time", pass null dates to trigger special handling in context
+      if (preset.key === "allTime") {
+        onChange(null, null);
+      } else {
+        onChange(range.start, range.end);
+      }
       handleClose();
     }
   };

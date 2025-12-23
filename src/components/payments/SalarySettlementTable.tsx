@@ -46,6 +46,8 @@ import {
   EventNote as AttendanceIcon,
   ArrowForward as ArrowForwardIcon,
   Link as LinkIcon,
+  BeachAccess as HolidayIcon,
+  Engineering as ContractIcon,
 } from "@mui/icons-material";
 import { useRouter } from "next/navigation";
 import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
@@ -54,8 +56,17 @@ import type { DateGroup, DailyPaymentRecord } from "@/types/payment.types";
 import { getPayerSourceLabel, getPayerSourceColor } from "@/components/settlement/PayerSourceSelector";
 import type { PayerSource } from "@/types/settlement.types";
 
+interface HolidayInfo {
+  id: string;
+  date: string;
+  reason: string | null;
+  is_paid_holiday: boolean | null;
+}
+
 interface SalarySettlementTableProps {
   dateGroups: DateGroup[];
+  contractOnlyDates?: string[];
+  holidays?: HolidayInfo[];
   loading?: boolean;
   disabled?: boolean;
   isAdmin?: boolean;
@@ -85,7 +96,7 @@ interface DateRowData {
   paidAmount: number;
   sentToEngineerAmount: number;
   awaitingApprovalAmount: number;
-  status: "all_paid" | "all_pending" | "partial" | "sent_to_engineer";
+  status: "all_paid" | "all_pending" | "partial" | "sent_to_engineer" | "contract_only" | "holiday";
   hasPendingRecords: boolean;
   hasSentToEngineerRecords: boolean;
   hasPaidRecords: boolean;
@@ -98,10 +109,16 @@ interface DateRowData {
   settlementReferences: string[];
   // Original group for actions
   group: DateGroup;
+  // New fields for indicators
+  isContractOnly?: boolean;
+  isHoliday?: boolean;
+  holidayReason?: string | null;
 }
 
 export default function SalarySettlementTable({
   dateGroups,
+  contractOnlyDates = [],
+  holidays = [],
   loading = false,
   disabled = false,
   isAdmin = false,
@@ -142,9 +159,27 @@ export default function SalarySettlementTable({
     router.push(`/site/attendance?${params.toString()}`);
   };
 
+  // Handle navigation to attendance page from date click (with auto-expand)
+  const handleNavigateToAttendance = (date: string) => {
+    const params = new URLSearchParams({
+      date,
+      source: "settlement",
+    });
+    router.push(`/site/attendance?${params.toString()}`);
+  };
+
   // Transform DateGroup[] to row data
   const tableData: DateRowData[] = useMemo(() => {
-    return dateGroups.map((group) => {
+    // Create a holiday lookup map
+    const holidayMap = new Map(
+      holidays.map(h => [h.date, h])
+    );
+
+    // Get all dates that already have daily/market data
+    const existingDates = new Set(dateGroups.map(g => g.date));
+
+    // Transform existing dateGroups
+    const dateGroupRows: DateRowData[] = dateGroups.map((group) => {
       const allRecords = [...group.dailyRecords, ...group.marketRecords];
       const pendingRecords = allRecords.filter(
         (r) => !r.isPaid && r.paidVia !== "engineer_wallet"
@@ -203,6 +238,9 @@ export default function SalarySettlementTable({
         0
       );
 
+      // Check if this date is a holiday
+      const holiday = holidayMap.get(group.date);
+
       return {
         id: group.date,
         date: group.date,
@@ -231,9 +269,127 @@ export default function SalarySettlementTable({
           ...group.marketRecords.map(r => r.settlementReference),
         ].filter((ref): ref is string => ref !== null && ref !== undefined))],
         group,
+        // Holiday indicator
+        isHoliday: !!holiday,
+        holidayReason: holiday?.reason || null,
       };
     });
-  }, [dateGroups]);
+
+    // Create rows for contract-only dates (no daily/market)
+    const contractOnlyRows: DateRowData[] = contractOnlyDates
+      .filter(date => !existingDates.has(date))
+      .map(date => {
+        const holiday = holidayMap.get(date);
+        return {
+          id: date,
+          date,
+          dateLabel: dayjs(date).format("MMM DD, YYYY"),
+          dayName: dayjs(date).format("dddd"),
+          dailyCount: 0,
+          marketCount: 0,
+          dailyLaborers: 0,
+          marketLaborers: 0,
+          totalAmount: 0,
+          pendingAmount: 0,
+          paidAmount: 0,
+          sentToEngineerAmount: 0,
+          awaitingApprovalAmount: 0,
+          status: "contract_only" as const,
+          hasPendingRecords: false,
+          hasSentToEngineerRecords: false,
+          hasPaidRecords: false,
+          hasAwaitingApprovalRecords: false,
+          awaitingApprovalTransactionId: null,
+          dailyRecords: [],
+          marketRecords: [],
+          settlementReferences: [],
+          group: {
+            date,
+            dateLabel: dayjs(date).format("MMM DD, YYYY"),
+            dayName: dayjs(date).format("dddd"),
+            dailyRecords: [],
+            marketRecords: [],
+            summary: {
+              dailyCount: 0,
+              dailyTotal: 0,
+              dailyPending: 0,
+              dailyPaid: 0,
+              dailySentToEngineer: 0,
+              marketCount: 0,
+              marketTotal: 0,
+              marketPending: 0,
+              marketPaid: 0,
+              marketSentToEngineer: 0,
+            },
+            isExpanded: false,
+          },
+          isContractOnly: true,
+          isHoliday: !!holiday,
+          holidayReason: holiday?.reason || null,
+        };
+      });
+
+    // Create rows for holiday-only dates (no attendance at all)
+    const allDatesWithRows = new Set([
+      ...existingDates,
+      ...contractOnlyDates,
+    ]);
+
+    const holidayOnlyRows: DateRowData[] = holidays
+      .filter(h => !allDatesWithRows.has(h.date))
+      .map(holiday => ({
+        id: holiday.date,
+        date: holiday.date,
+        dateLabel: dayjs(holiday.date).format("MMM DD, YYYY"),
+        dayName: dayjs(holiday.date).format("dddd"),
+        dailyCount: 0,
+        marketCount: 0,
+        dailyLaborers: 0,
+        marketLaborers: 0,
+        totalAmount: 0,
+        pendingAmount: 0,
+        paidAmount: 0,
+        sentToEngineerAmount: 0,
+        awaitingApprovalAmount: 0,
+        status: "holiday" as const,
+        hasPendingRecords: false,
+        hasSentToEngineerRecords: false,
+        hasPaidRecords: false,
+        hasAwaitingApprovalRecords: false,
+        awaitingApprovalTransactionId: null,
+        dailyRecords: [],
+        marketRecords: [],
+        settlementReferences: [],
+        group: {
+          date: holiday.date,
+          dateLabel: dayjs(holiday.date).format("MMM DD, YYYY"),
+          dayName: dayjs(holiday.date).format("dddd"),
+          dailyRecords: [],
+          marketRecords: [],
+          summary: {
+            dailyCount: 0,
+            dailyTotal: 0,
+            dailyPending: 0,
+            dailyPaid: 0,
+            dailySentToEngineer: 0,
+            marketCount: 0,
+            marketTotal: 0,
+            marketPending: 0,
+            marketPaid: 0,
+            marketSentToEngineer: 0,
+          },
+          isExpanded: false,
+        },
+        isContractOnly: false,
+        isHoliday: true,
+        holidayReason: holiday.reason,
+      }));
+
+    // Merge and sort all rows by date descending
+    return [...dateGroupRows, ...contractOnlyRows, ...holidayOnlyRows].sort(
+      (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+    );
+  }, [dateGroups, contractOnlyDates, holidays]);
 
   // Auto-scroll to highlighted row when data loads
   useEffect(() => {
@@ -325,15 +481,60 @@ export default function SalarySettlementTable({
       {
         accessorKey: "date",
         header: "Date",
-        size: 140,
+        size: 180,
         Cell: ({ row }) => (
           <Box>
-            <Typography variant="body2" fontWeight={600}>
-              {row.original.dateLabel}
-            </Typography>
-            <Typography variant="caption" color="text.secondary">
-              {row.original.dayName}
-            </Typography>
+            <Box
+              sx={{
+                display: "flex",
+                alignItems: "center",
+                gap: 0.5,
+                cursor: "pointer",
+                "&:hover": {
+                  color: "primary.main",
+                  "& .date-text": {
+                    textDecoration: "underline",
+                  },
+                },
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                handleNavigateToAttendance(row.original.date);
+              }}
+            >
+              <Typography variant="body2" fontWeight={600} className="date-text">
+                {row.original.dateLabel}
+              </Typography>
+            </Box>
+            <Box sx={{ display: "flex", alignItems: "center", gap: 0.5, flexWrap: "wrap", mt: 0.25 }}>
+              <Typography variant="caption" color="text.secondary">
+                {row.original.dayName}
+              </Typography>
+              {row.original.isContractOnly && (
+                <Tooltip title="Only contract labor worked on this date">
+                  <Chip
+                    icon={<ContractIcon sx={{ fontSize: 10 }} />}
+                    label="Contract Only"
+                    size="small"
+                    color="info"
+                    variant="outlined"
+                    sx={{ height: 18, fontSize: "0.6rem", "& .MuiChip-icon": { ml: 0.5 } }}
+                  />
+                </Tooltip>
+              )}
+              {row.original.isHoliday && (
+                <Tooltip title={row.original.holidayReason || "Holiday"}>
+                  <Chip
+                    icon={<HolidayIcon sx={{ fontSize: 10 }} />}
+                    label="Holiday"
+                    size="small"
+                    color="warning"
+                    variant="outlined"
+                    sx={{ height: 18, fontSize: "0.6rem", "& .MuiChip-icon": { ml: 0.5 } }}
+                  />
+                </Tooltip>
+              )}
+            </Box>
           </Box>
         ),
       },

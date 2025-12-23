@@ -72,6 +72,7 @@ import {
   Lock as LockIcon,
   Warning as WarningIcon,
   ArrowForward as ArrowForwardIcon,
+  ArrowBack as ArrowBackIcon,
 } from "@mui/icons-material";
 import AttendanceDrawer from "@/components/attendance/AttendanceDrawer";
 import HolidayConfirmDialog from "@/components/attendance/HolidayConfirmDialog";
@@ -268,9 +269,13 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
   // URL params for highlighting (from redirect)
   const highlightDate = searchParams.get("date");
   const highlightAction = searchParams.get("action");
+  const sourceParam = searchParams.get("source"); // For settlement page navigation
 
   // State for highlighted date row
   const [highlightedDate, setHighlightedDate] = useState<string | null>(null);
+
+  // State for tracking if user came from settlement page
+  const [cameFromSettlement, setCameFromSettlement] = useState(false);
 
   // Track if we've processed initial data
   const initialDataProcessedRef = useRef(false);
@@ -426,6 +431,38 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
       return () => clearTimeout(timer);
     }
   }, [highlightDate, highlightAction]);
+
+  // Handle navigation from settlement page
+  useEffect(() => {
+    if (highlightDate && sourceParam === "settlement") {
+      setCameFromSettlement(true);
+      setHighlightedDate(highlightDate);
+
+      // Auto-expand the highlighted date row after data loads
+      setDateSummaries((prev) =>
+        prev.map((d) =>
+          d.date === highlightDate ? { ...d, isExpanded: true } : d
+        )
+      );
+
+      // Auto-scroll to the date row
+      const scrollToDate = () => {
+        const dateRow = document.querySelector(`[data-date="${highlightDate}"]`);
+        if (dateRow) {
+          dateRow.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+      };
+
+      // Delay scroll to allow DOM to render
+      setTimeout(scrollToDate, 500);
+
+      // Clear highlight after 10 seconds
+      const timer = setTimeout(() => {
+        setHighlightedDate(null);
+      }, 10000);
+      return () => clearTimeout(timer);
+    }
+  }, [highlightDate, sourceParam]);
 
   // Paid record protection dialog state
   const [paidRecordDialog, setPaidRecordDialog] = useState<{
@@ -2147,6 +2184,23 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
         }
       />
 
+      {/* Back button when coming from settlement page */}
+      {cameFromSettlement && (
+        <Box sx={{ px: { xs: 1, sm: 0 }, mb: 1 }}>
+          <Button
+            variant="outlined"
+            size="small"
+            startIcon={<ArrowBackIcon />}
+            onClick={() => {
+              setCameFromSettlement(false);
+              router.push("/site/payments?tab=salary");
+            }}
+          >
+            Back to Settlement
+          </Button>
+        </Box>
+      )}
+
       {/* ===== HEADER ROW 2: Date Picker + Show Last Quick Filters (Same Row) ===== */}
       {/* Period Summary Bar - Collapsible on Mobile */}
       <Paper
@@ -3069,6 +3123,7 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
                         <>
                           <TableRow
                             hover
+                            data-date={entry.summary.date}
                             onClick={() =>
                               toggleDateExpanded(entry.summary.date)
                             }
