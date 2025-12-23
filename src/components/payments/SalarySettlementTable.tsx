@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect, useRef } from "react";
 import {
   Box,
   Typography,
@@ -118,6 +118,8 @@ export default function SalarySettlementTable({
   const theme = useTheme();
   const router = useRouter();
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+  const tableContainerRef = useRef<HTMLDivElement>(null);
+  const [hasScrolledToHighlight, setHasScrolledToHighlight] = useState(false);
   const [selectedRow, setSelectedRow] = useState<DateRowData | null>(null);
   const [viewingProof, setViewingProof] = useState<{
     url: string;
@@ -232,6 +234,43 @@ export default function SalarySettlementTable({
       };
     });
   }, [dateGroups]);
+
+  // Auto-scroll to highlighted row when data loads
+  useEffect(() => {
+    if (!highlightRef || hasScrolledToHighlight || tableData.length === 0 || loading) {
+      return;
+    }
+
+    // Find the row index that contains the highlighted reference
+    const highlightedRowIndex = tableData.findIndex(row =>
+      row.settlementReferences.includes(highlightRef)
+    );
+
+    if (highlightedRowIndex === -1) {
+      return;
+    }
+
+    // Small delay to ensure DOM is rendered
+    const timeout = setTimeout(() => {
+      const tableContainer = tableContainerRef.current;
+      if (!tableContainer) return;
+
+      // Find the row element by data attribute
+      const highlightedRow = tableContainer.querySelector(
+        `[data-row-index="${highlightedRowIndex}"]`
+      );
+
+      if (highlightedRow) {
+        highlightedRow.scrollIntoView({
+          behavior: "smooth",
+          block: "center",
+        });
+        setHasScrolledToHighlight(true);
+      }
+    }, 300);
+
+    return () => clearTimeout(timeout);
+  }, [highlightRef, tableData, hasScrolledToHighlight, loading]);
 
   // Handle menu open
   const handleMenuOpen = (
@@ -834,6 +873,7 @@ export default function SalarySettlementTable({
 
   return (
     <>
+      <Box ref={tableContainerRef}>
       <DataTable<DateRowData>
         columns={columns}
         data={tableData}
@@ -902,6 +942,7 @@ export default function SalarySettlementTable({
           },
         })}
         muiTableBodyRowProps={({ row }) => ({
+          "data-row-index": row.index,
           sx: {
             // Highlight row if it contains the matching settlement reference
             backgroundColor: highlightRef && row.original.settlementReferences.includes(highlightRef)
@@ -912,6 +953,7 @@ export default function SalarySettlementTable({
           },
         })}
       />
+      </Box>
 
       {/* Actions Menu */}
       <Menu

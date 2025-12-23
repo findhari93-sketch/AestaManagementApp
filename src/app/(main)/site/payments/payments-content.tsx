@@ -9,10 +9,12 @@ import {
   Paper,
   Alert,
   Snackbar,
+  Button,
 } from "@mui/material";
 import {
   Person as PersonIcon,
   Groups as GroupsIcon,
+  ArrowBack as ArrowBackIcon,
 } from "@mui/icons-material";
 import { useSite } from "@/contexts/SiteContext";
 import { useDateRange } from "@/contexts/DateRangeContext";
@@ -21,7 +23,7 @@ import PaymentSummaryCards from "@/components/payments/PaymentSummaryCards";
 import DailyMarketPaymentsTab from "@/components/payments/DailyMarketPaymentsTab";
 import ContractWeeklyPaymentsTab from "@/components/payments/ContractWeeklyPaymentsTab";
 import dayjs from "dayjs";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import type { PaymentPageData } from "@/lib/data/payments";
 import type { PaymentSummaryData } from "@/types/payment.types";
 
@@ -55,6 +57,7 @@ export default function PaymentsContent({ initialData }: PaymentsContentProps) {
   const { selectedSite } = useSite();
   const { formatForApi, isAllTime } = useDateRange();
   const searchParams = useSearchParams();
+  const router = useRouter();
 
   const { dateFrom, dateTo } = formatForApi();
 
@@ -159,6 +162,20 @@ export default function PaymentsContent({ initialData }: PaymentsContentProps) {
         subtitle="Manage daily, market, and contract laborer salary settlements"
       />
 
+      {/* Back button when coming from expenses page via ref code click */}
+      {highlightRef && (
+        <Box sx={{ mb: 2 }}>
+          <Button
+            variant="outlined"
+            size="small"
+            startIcon={<ArrowBackIcon />}
+            onClick={() => router.push("/site/expenses")}
+          >
+            Back to Expenses
+          </Button>
+        </Box>
+      )}
+
       {/* Summary Cards */}
       <PaymentSummaryCards data={summaryData} loading={summaryLoading} />
 
@@ -166,7 +183,14 @@ export default function PaymentsContent({ initialData }: PaymentsContentProps) {
       <Paper sx={{ mb: 3 }}>
         <Tabs
           value={activeTab}
-          onChange={(_, newValue) => setActiveTab(newValue)}
+          onChange={(_, newValue) => {
+            setActiveTab(newValue);
+            // Update URL to preserve tab on refresh
+            const tabName = newValue === 0 ? "salary" : "contract";
+            const params = new URLSearchParams(searchParams.toString());
+            params.set("tab", tabName);
+            router.replace(`/site/payments?${params.toString()}`, { scroll: false });
+          }}
           sx={{ borderBottom: 1, borderColor: "divider" }}
         >
           <Tab

@@ -278,6 +278,30 @@ export default function DateSettlementsEditDialog({
             console.error("Error updating engineer transaction payer source:", txPayerError);
           }
         }
+
+        // Also update settlement_groups for all affected settlement group IDs
+        // This ensures the payer_name shows correctly in the v_all_expenses view (Daily Expenses page)
+        const settlementGroupIds = records
+          .filter((r) => r.settlementGroupId)
+          .map((r) => r.settlementGroupId)
+          .filter((id, i, arr): id is string => !!id && arr.indexOf(id) === i); // unique IDs
+
+        if (settlementGroupIds.length > 0) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const { error: sgError } = await (supabase as any)
+            .from("settlement_groups")
+            .update({
+              payer_source: selectedPayerSource,
+              payer_name: selectedPayerSource === "custom" || selectedPayerSource === "other_site_money"
+                ? payerSourceName
+                : null,
+            })
+            .in("id", settlementGroupIds);
+
+          if (sgError) {
+            console.error("Error updating settlement_groups payer source:", sgError);
+          }
+        }
       }
 
       onSuccess?.();

@@ -13,8 +13,6 @@ import {
   Typography,
   Chip,
   LinearProgress,
-  IconButton,
-  Tooltip,
   Table,
   TableBody,
   TableCell,
@@ -24,17 +22,10 @@ import {
   Paper,
   useTheme,
   alpha,
-  Checkbox,
 } from "@mui/material";
 import {
   Refresh as RefreshIcon,
   Payment as PaymentIcon,
-  CheckCircle as CompletedIcon,
-  Warning as WarningIcon,
-  TrendingUp as AdvanceIcon,
-  Person as PersonIcon,
-  Edit as EditIcon,
-  Delete as DeleteIcon,
   History as HistoryIcon,
 } from "@mui/icons-material";
 import { createClient } from "@/lib/supabase/client";
@@ -42,50 +33,21 @@ import { useSite } from "@/contexts/SiteContext";
 import { useAuth } from "@/contexts/AuthContext";
 import dayjs from "dayjs";
 import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
-import PaymentDialog from "./PaymentDialog";
 import PaymentRefDialog from "./PaymentRefDialog";
-import ContractPaymentEditDialog from "./ContractPaymentEditDialog";
-import ContractPaymentDeleteDialog from "./ContractPaymentDeleteDialog";
 import ContractPaymentHistoryDialog from "./ContractPaymentHistoryDialog";
-import SettlementsOverviewDialog from "./SettlementsOverviewDialog";
+import ContractLaborerSummaryDashboard from "./ContractLaborerSummaryDashboard";
+import ContractPaymentRecordDialog from "./ContractPaymentRecordDialog";
 import type {
-  WeekGroup,
-  WeeklyContractLaborer,
-  WeeklyFilterState,
   PaymentStatus,
-  DailySalaryEntry,
-  LaborerPaymentEntry,
   PaymentSummaryData,
-  PaymentDetails,
+  ContractLaborerPaymentView,
+  WeekBreakdownEntry,
 } from "@/types/payment.types";
 import {
   getPaymentStatusColor,
   getPaymentStatusLabel,
 } from "@/types/payment.types";
 import { hasEditPermission } from "@/lib/permissions";
-
-// Row data structure for the MRT table
-interface WeekRowData {
-  id: string;
-  weekStart: string;
-  weekEnd: string;
-  weekLabel: string;
-  laborerCount: number;
-  totalSalary: number;
-  totalPaid: number;
-  totalDue: number;
-  paymentProgress: number;
-  status: PaymentStatus;
-  laborers: WeeklyContractLaborer[];
-  settlementReferences: string[];
-  // Original group for reference
-  group: WeekGroup;
-}
-
-// Extended laborer type to include settlement reference
-interface WeeklyContractLaborerWithRef extends WeeklyContractLaborer {
-  settlementReference?: string | null;
-}
 
 interface ContractWeeklyPaymentsTabProps {
   weeksToShow?: number;
@@ -99,26 +61,18 @@ interface ContractWeeklyPaymentsTabProps {
 // Get week boundaries (Sunday to Saturday)
 function getWeekBoundaries(date: string): { weekStart: string; weekEnd: string } {
   const d = dayjs(date);
-  const weekStart = d.day(0).format("YYYY-MM-DD"); // Sunday
-  const weekEnd = d.day(6).format("YYYY-MM-DD"); // Saturday
+  const dayOfWeek = d.day();
+  const weekStart = d.subtract(dayOfWeek, "day").format("YYYY-MM-DD");
+  const weekEnd = d.add(6 - dayOfWeek, "day").format("YYYY-MM-DD");
   return { weekStart, weekEnd };
 }
 
-// Get all weeks in a range
-function getWeeksInRange(fromDate: string, toDate: string): { weekStart: string; weekEnd: string; weekLabel: string }[] {
-  const weeks: { weekStart: string; weekEnd: string; weekLabel: string }[] = [];
-  let current = dayjs(fromDate).day(0); // Start from Sunday of first week
-  const end = dayjs(toDate);
-
-  while (current.isBefore(end) || current.isSame(end, "day")) {
-    const weekStart = current.format("YYYY-MM-DD");
-    const weekEnd = current.day(6).format("YYYY-MM-DD");
-    const weekLabel = `${current.format("MMM D")} - ${current.day(6).format("MMM D, YYYY")}`;
-    weeks.push({ weekStart, weekEnd, weekLabel });
-    current = current.add(1, "week");
+// Format currency
+function formatCurrency(amount: number): string {
+  if (amount >= 100000) {
+    return `Rs.${(amount / 100000).toFixed(1)}L`;
   }
-
-  return weeks.reverse(); // Most recent first
+  return `Rs.${amount.toLocaleString()}`;
 }
 
 export default function ContractWeeklyPaymentsTab({
@@ -134,68 +88,38 @@ export default function ContractWeeklyPaymentsTab({
   const supabase = createClient();
   const theme = useTheme();
 
-  // Data state
-  const [weekGroups, setWeekGroups] = useState<WeekGroup[]>([]);
+  const canEdit = hasEditPermission(userProfile?.role);
+
+  // State
+  const [laborers, setLaborers] = useState<ContractLaborerPaymentView[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Filter state
+  // Auto-scroll refs
+  const tableContainerRef = useRef<HTMLDivElement>(null);
+  const [hasScrolledToHighlight, setHasScrolledToHighlight] = useState(false);
+
+  // Filters
+  const [filterStatus, setFilterStatus] = useState<"all" | "pending" | "completed">("all");
   const [filterSubcontract, setFilterSubcontract] = useState<string>("all");
   const [filterTeam, setFilterTeam] = useState<string>("all");
-  const [filterStatus, setFilterStatus] = useState<"all" | "pending" | "completed">("all");
   const [subcontracts, setSubcontracts] = useState<{ id: string; title: string }[]>([]);
   const [teams, setTeams] = useState<{ id: string; name: string }[]>([]);
 
-  // Selection state
-  const [selectedLaborers, setSelectedLaborers] = useState<Set<string>>(new Set());
-
-  // Payment dialog state
+  // Dialog states
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
-  const [selectedLaborer, setSelectedLaborer] = useState<WeeklyContractLaborer | null>(null);
-  const [selectedWeek, setSelectedWeek] = useState<{ weekStart: string; weekEnd: string } | null>(null);
-
-  // Payment ref dialog state (for viewing payment details)
-  const [refDialogOpen, setRefDialogOpen] = useState(false);
-  const [selectedPaymentRef, setSelectedPaymentRef] = useState<string | null>(null);
-
-  // Edit/Delete dialog state
-  const [editDialogOpen, setEditDialogOpen] = useState(false);
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [selectedPaymentDetails, setSelectedPaymentDetails] = useState<PaymentDetails | null>(null);
-
-  // History dialog state
   const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
+  const [refDialogOpen, setRefDialogOpen] = useState(false);
+  const [selectedRef, setSelectedRef] = useState<string | null>(null);
 
-  // Settlements overview dialog state
-  const [overviewDialogOpen, setOverviewDialogOpen] = useState(false);
-  const [overviewRefs, setOverviewRefs] = useState<string[]>([]);
-  const [overviewContext, setOverviewContext] = useState<{
-    weekStart?: string;
-    weekEnd?: string;
-    laborerName?: string;
-  }>({});
-
-  // Expanded state
-  const [expandedWeeks, setExpandedWeeks] = useState<Set<string>>(new Set());
-  const expandedWeeksRef = useRef<Set<string>>(new Set());
-
-  // Keep ref in sync with state
-  useEffect(() => {
-    expandedWeeksRef.current = expandedWeeks;
-  }, [expandedWeeks]);
-
-  const canEdit = hasEditPermission(userProfile?.role);
-
-  // Calculate date range based on props or weeksToShow fallback
+  // Date range
   const dateRange = useMemo(() => {
-    // If date props provided, use them
     if (propDateFrom && propDateTo) {
       return { fromDate: propDateFrom, toDate: propDateTo };
     }
-    // Otherwise fall back to weeksToShow calculation
     const today = dayjs();
     const toDate = today.format("YYYY-MM-DD");
-    const fromDate = today.subtract(weeksToShow, "week").day(0).format("YYYY-MM-DD");
+    const fromDate = today.subtract(weeksToShow, "week").startOf("week").format("YYYY-MM-DD");
     return { fromDate, toDate };
   }, [propDateFrom, propDateTo, weeksToShow]);
 
@@ -213,7 +137,7 @@ export default function ContractWeeklyPaymentsTab({
     try {
       const { fromDate, toDate } = dateRange;
 
-      // Fetch teams first (to avoid complex nested join issues)
+      // Fetch teams first
       const { data: teamsLookup } = await supabase
         .from("teams")
         .select("id, name")
@@ -222,12 +146,10 @@ export default function ContractWeeklyPaymentsTab({
       const teamsMap = new Map<string, string>();
       (teamsLookup || []).forEach((t: any) => teamsMap.set(t.id, t.name));
 
-      // Fetch contract laborers' attendance (simplified query without teams join)
-      console.log("Fetching contract attendance for site:", selectedSite.id, "from:", fromDate, "to:", toDate);
+      // Fetch contract laborers' attendance
       const { data: attendanceData, error: attendanceError } = await supabase
         .from("daily_attendance")
-        .select(
-          `
+        .select(`
           id,
           date,
           laborer_id,
@@ -236,7 +158,6 @@ export default function ContractWeeklyPaymentsTab({
           is_paid,
           payment_id,
           subcontract_id,
-          payment_notes,
           laborers!inner(
             id,
             name,
@@ -245,278 +166,184 @@ export default function ContractWeeklyPaymentsTab({
             labor_roles(name)
           ),
           subcontracts(id, title)
-        `
-        )
+        `)
         .eq("site_id", selectedSite.id)
         .eq("laborers.laborer_type", "contract")
         .gte("date", fromDate)
         .lte("date", toDate)
         .order("date", { ascending: true });
 
-      console.log("Contract attendance result:", attendanceData?.length || 0, "records", attendanceError ? `Error: ${attendanceError.message}` : "");
       if (attendanceError) {
-        console.error("Attendance query error:", attendanceError);
-        throw new Error(attendanceError.message || JSON.stringify(attendanceError));
+        throw new Error(attendanceError.message);
       }
 
-      // Enrich attendance data with team names
-      const enrichedAttendanceData = (attendanceData || []).map((att: any) => ({
-        ...att,
-        laborers: {
-          ...att.laborers,
-          teams: att.laborers?.team_id ? { id: att.laborers.team_id, name: teamsMap.get(att.laborers.team_id) || null } : null,
-        },
-      }));
+      // Fetch labor payments
+      const { data: paymentsData } = await supabase
+        .from("labor_payments")
+        .select("*")
+        .eq("site_id", selectedSite.id)
+        .eq("is_under_contract", true);
 
-      // Fetch labor payments for contract laborers (without join to avoid PostgREST cache issues)
-      let paymentsData: any[] = [];
-      try {
-        const { data, error } = await supabase
-          .from("labor_payments")
-          .select("*")
-          .eq("site_id", selectedSite.id)
-          .eq("is_under_contract", true)
-          .gte("payment_for_date", fromDate)
-          .lte("payment_for_date", toDate);
+      // Fetch payment week allocations
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: allocationsData } = await (supabase as any)
+        .from("payment_week_allocations")
+        .select("*")
+        .eq("site_id", selectedSite.id);
 
-        if (error) {
-          console.error("Error fetching labor payments:", error);
-          paymentsData = [];
-        } else {
-          paymentsData = data || [];
-
-          // Fetch settlement references for payments that have settlement_group_id
-          const settlementGroupIds = paymentsData
-            .map((p: any) => p.settlement_group_id)
-            .filter((id: string | null) => id !== null);
-
-          if (settlementGroupIds.length > 0) {
-            const { data: settlementGroups } = await (supabase as any)
-              .from("settlement_groups")
-              .select("id, settlement_reference")
-              .in("id", settlementGroupIds);
-
-            // Create lookup map
-            const settlementMap = new Map<string, string>();
-            (settlementGroups || []).forEach((sg: any) => {
-              settlementMap.set(sg.id, sg.settlement_reference);
-            });
-
-            // Enrich payments with settlement references
-            paymentsData = paymentsData.map((p: any) => ({
-              ...p,
-              settlement_reference: p.settlement_group_id
-                ? settlementMap.get(p.settlement_group_id) || null
-                : null,
-            }));
-          }
-        }
-      } catch (err: any) {
-        console.error("Error fetching labor payments:", err);
-        // Continue with empty payments data
-        paymentsData = [];
-      }
-
-      // Group attendance by laborer and week
-      const laborerWeekMap = new Map<string, Map<string, {
+      // Group by laborer
+      const laborerMap = new Map<string, {
+        info: any;
         attendance: any[];
         payments: any[];
-      }>>();
+        allocations: any[];
+      }>();
 
-      // Process attendance (using enriched data with team names)
-      enrichedAttendanceData.forEach((att: any) => {
+      // Process attendance
+      (attendanceData || []).forEach((att: any) => {
         const laborerId = att.laborer_id;
-        const { weekStart } = getWeekBoundaries(att.date);
-
-        if (!laborerWeekMap.has(laborerId)) {
-          laborerWeekMap.set(laborerId, new Map());
+        if (!laborerMap.has(laborerId)) {
+          laborerMap.set(laborerId, {
+            info: {
+              ...att.laborers,
+              teamName: att.laborers?.team_id ? teamsMap.get(att.laborers.team_id) : null,
+              subcontractId: att.subcontract_id,
+              subcontractTitle: att.subcontracts?.title,
+            },
+            attendance: [],
+            payments: [],
+            allocations: [],
+          });
         }
-        const laborerMap = laborerWeekMap.get(laborerId)!;
-
-        if (!laborerMap.has(weekStart)) {
-          laborerMap.set(weekStart, { attendance: [], payments: [] });
-        }
-        laborerMap.get(weekStart)!.attendance.push(att);
+        laborerMap.get(laborerId)!.attendance.push(att);
       });
 
       // Process payments
-      (paymentsData || []).forEach((payment: any) => {
-        const laborerId = payment.laborer_id;
-        const { weekStart } = getWeekBoundaries(payment.payment_for_date);
-
-        if (laborerWeekMap.has(laborerId)) {
-          const laborerMap = laborerWeekMap.get(laborerId)!;
-          if (laborerMap.has(weekStart)) {
-            laborerMap.get(weekStart)!.payments.push(payment);
-          }
+      (paymentsData || []).forEach((p: any) => {
+        if (laborerMap.has(p.laborer_id)) {
+          laborerMap.get(p.laborer_id)!.payments.push(p);
         }
       });
 
-      // Get all weeks
-      const weeks = getWeeksInRange(fromDate, toDate);
+      // Process allocations
+      (allocationsData || []).forEach((a: any) => {
+        if (laborerMap.has(a.laborer_id)) {
+          laborerMap.get(a.laborer_id)!.allocations.push(a);
+        }
+      });
 
-      // Build week groups with running balance calculation
-      const groups: WeekGroup[] = weeks.map(({ weekStart, weekEnd, weekLabel }) => {
-        const laborers: WeeklyContractLaborer[] = [];
+      // Build laborer views
+      const laborerViews: ContractLaborerPaymentView[] = [];
 
-        // Calculate cumulative totals for each laborer up to this week
-        laborerWeekMap.forEach((weekMap, laborerId) => {
-          const weekData = weekMap.get(weekStart);
-          if (!weekData || weekData.attendance.length === 0) return;
+      laborerMap.forEach((data, laborerId) => {
+        const totalEarned = data.attendance.reduce(
+          (sum: number, a: any) => sum + (a.daily_earnings || 0),
+          0
+        );
+        const totalPaid = data.payments.reduce(
+          (sum: number, p: any) => sum + (p.amount || 0),
+          0
+        );
+        const outstanding = totalEarned - totalPaid;
+        const paymentProgress = totalEarned > 0 ? (totalPaid / totalEarned) * 100 : 0;
 
-          const firstAtt = weekData.attendance[0];
-          const laborerInfo = firstAtt.laborers;
+        // Calculate status
+        let status: PaymentStatus = "pending";
+        if (outstanding <= 0) {
+          status = outstanding < 0 ? "advance" : "completed";
+        } else if (totalPaid > 0) {
+          status = "partial";
+        }
 
-          // Calculate cumulative salary and paid from start
-          let cumulativeSalary = 0;
-          let cumulativePaid = 0;
+        // Build weekly breakdown
+        const weeklyBreakdown: WeekBreakdownEntry[] = [];
+        const weekMap = new Map<string, {
+          attendance: any[];
+          allocations: any[];
+        }>();
 
-          // Sum up all previous weeks + current week
-          const allWeeks = Array.from(weekMap.entries()).sort(
-            ([a], [b]) => new Date(a).getTime() - new Date(b).getTime()
-          );
-
-          for (const [wk, wkData] of allWeeks) {
-            const wkSalary = wkData.attendance.reduce(
-              (sum: number, a: any) => sum + (a.daily_earnings || 0),
-              0
-            );
-            const wkPaid = wkData.payments.reduce(
-              (sum: number, p: any) => sum + (p.amount || 0),
-              0
-            );
-
-            cumulativeSalary += wkSalary;
-            cumulativePaid += wkPaid;
-
-            // Stop at current week
-            if (wk === weekStart) break;
+        // Group attendance by week
+        data.attendance.forEach((att: any) => {
+          const { weekStart, weekEnd } = getWeekBoundaries(att.date);
+          if (!weekMap.has(weekStart)) {
+            weekMap.set(weekStart, { attendance: [], allocations: [] });
           }
+          weekMap.get(weekStart)!.attendance.push(att);
+        });
 
-          // This week's values
-          const weekSalary = weekData.attendance.reduce(
+        // Group allocations by week
+        data.allocations.forEach((alloc: any) => {
+          if (weekMap.has(alloc.week_start)) {
+            weekMap.get(alloc.week_start)!.allocations.push(alloc);
+          }
+        });
+
+        // Build week entries
+        weekMap.forEach((weekData, weekStart) => {
+          const weekEnd = dayjs(weekStart).add(6, "day").format("YYYY-MM-DD");
+          const earned = weekData.attendance.reduce(
             (sum: number, a: any) => sum + (a.daily_earnings || 0),
             0
           );
-          const weekPaid = weekData.payments.reduce(
-            (sum: number, p: any) => sum + (p.amount || 0),
+          const paid = weekData.allocations.reduce(
+            (sum: number, a: any) => sum + (a.allocated_amount || 0),
             0
           );
 
-          // Calculate previous balance (before this week)
-          const previousBalance = cumulativeSalary - weekSalary - (cumulativePaid - weekPaid);
-
-          // Running balance
-          const runningBalance = cumulativeSalary - cumulativePaid;
-
-          // Payment progress
-          const paymentProgress =
-            cumulativeSalary > 0
-              ? (cumulativePaid / cumulativeSalary) * 100
-              : 0;
-
-          // Status
-          let status: PaymentStatus = "pending";
-          if (runningBalance <= 0) {
-            status = runningBalance < 0 ? "advance" : "completed";
-          } else if (cumulativePaid > 0) {
-            status = "partial";
-          }
-
-          // Daily breakdown
-          const dailySalary: DailySalaryEntry[] = weekData.attendance.map(
-            (a: any) => ({
-              date: a.date,
-              dayName: dayjs(a.date).format("ddd"),
-              attendanceId: a.id,
-              amount: a.daily_earnings || 0,
-              workDays: a.work_days || 0,
-            })
-          );
-
-          // Payment history with settlement references
-          const payments: (LaborerPaymentEntry & { settlementReference?: string })[] = weekData.payments.map(
-            (p: any) => ({
-              paymentId: p.id,
-              amount: p.amount,
-              paymentDate: p.payment_date,
-              paymentMode: p.payment_mode,
-              weekStart: weekStart,
-              paidBy: p.paid_by || "",
-              paidByUserId: p.paid_by_user_id || "",
-              paidByAvatar: null,
-              proofUrl: p.proof_url,
-              subcontractId: p.subcontract_id,
-              settlementReference: p.settlement_reference || undefined,
-            })
-          );
-
-          // Collect settlement references for this laborer
-          const laborerSettlementRefs = payments
-            .map(p => p.settlementReference)
-            .filter((ref): ref is string => ref !== null && ref !== undefined);
-
-          laborers.push({
-            laborerId,
-            laborerName: laborerInfo.name,
-            laborerRole: laborerInfo.labor_roles?.name || null,
-            teamId: laborerInfo.team_id,
-            teamName: laborerInfo.teams?.name || null,
-            subcontractId: firstAtt.subcontract_id,
-            subcontractTitle: firstAtt.subcontracts?.title || null,
-            dailySalary,
+          weeklyBreakdown.push({
+            weekStart,
+            weekEnd,
+            weekLabel: `${dayjs(weekStart).format("MMM D")} - ${dayjs(weekEnd).format("MMM D, YYYY")}`,
+            earned,
+            paid,
+            balance: earned - paid,
             daysWorked: weekData.attendance.length,
-            weekSalary,
-            weekPaid,
-            previousBalance: Math.max(0, previousBalance),
-            cumulativeSalary,
-            cumulativePaid,
-            runningBalance,
-            paymentProgress,
-            status,
-            payments,
+            isPaid: paid >= earned,
+            allocations: weekData.allocations.map((a: any) => ({
+              paymentId: a.labor_payment_id,
+              paymentReference: null,
+              amount: a.allocated_amount,
+              paymentDate: a.created_at,
+            })),
           });
         });
 
-        // Calculate week summary
-        const totalSalary = laborers.reduce((sum, l) => sum + l.weekSalary, 0);
-        const totalPaid = laborers.reduce((sum, l) => sum + l.weekPaid, 0);
-        const totalDue = laborers.reduce(
-          (sum, l) => sum + Math.max(0, l.runningBalance),
-          0
+        // Sort weeks by date
+        weeklyBreakdown.sort(
+          (a, b) => new Date(a.weekStart).getTime() - new Date(b.weekStart).getTime()
         );
-        const paymentProgress =
-          totalSalary > 0 ? (totalPaid / totalSalary) * 100 : 0;
 
-        let summaryStatus: PaymentStatus = "pending";
-        if (totalDue <= 0) {
-          summaryStatus = totalPaid > totalSalary ? "advance" : "completed";
-        } else if (totalPaid > 0) {
-          summaryStatus = "partial";
-        }
+        // Get last payment date
+        const lastPayment = data.payments
+          .sort((a: any, b: any) => new Date(b.actual_payment_date).getTime() - new Date(a.actual_payment_date).getTime())[0];
 
-        return {
-          weekStart,
-          weekEnd,
-          weekLabel,
-          laborers,
-          summary: {
-            laborerCount: laborers.length,
-            totalSalary,
-            totalPaid,
-            totalDue,
-            paymentProgress,
-            status: summaryStatus,
-          },
-          isExpanded: expandedWeeksRef.current.has(weekStart),
-        };
+        // Collect all settlement references from payments for highlighting
+        const settlementReferences = data.payments
+          .map((p: any) => p.settlement_reference)
+          .filter((ref: string | null): ref is string => ref != null && ref !== "");
+
+        laborerViews.push({
+          laborerId,
+          laborerName: data.info.name,
+          laborerRole: data.info.labor_roles?.name || null,
+          teamId: data.info.team_id,
+          teamName: data.info.teamName,
+          subcontractId: data.info.subcontractId,
+          subcontractTitle: data.info.subcontractTitle,
+          totalEarned,
+          totalPaid,
+          outstanding,
+          paymentProgress,
+          status,
+          lastPaymentDate: lastPayment?.actual_payment_date || null,
+          weeklyBreakdown,
+          settlementReferences,
+        });
       });
 
-      // Filter out empty weeks
-      const nonEmptyGroups = groups.filter((g) => g.laborers.length > 0);
-      setWeekGroups(nonEmptyGroups);
+      setLaborers(laborerViews);
 
-      // Fetch subcontracts and teams for filters
+      // Fetch filter options
       const { data: subcontractsData } = await supabase
         .from("subcontracts")
         .select("id, title")
@@ -532,236 +359,164 @@ export default function ContractWeeklyPaymentsTab({
       setSubcontracts(subcontractsData || []);
       setTeams(teamsData || []);
     } catch (err: any) {
-      console.error("Error fetching weekly payment data:", err);
-      const errorMessage = err?.message || err?.error_description || (typeof err === 'string' ? err : JSON.stringify(err));
-      setError(`Failed to load weekly payment data: ${errorMessage}`);
+      console.error("Error fetching data:", err);
+      setError(`Failed to load data: ${err.message}`);
     } finally {
       setLoading(false);
     }
-  // Note: expandedWeeks removed from deps to prevent refetch on expand/collapse
   }, [selectedSite?.id, dateRange, supabase]);
 
   useEffect(() => {
     fetchData();
   }, [fetchData]);
 
-  // Calculate and emit summary when weekGroups changes
+  // Emit summary when laborers change
   useEffect(() => {
     if (!onSummaryChange) return;
 
-    // Aggregate across all weeks and laborers
-    const allLaborers = weekGroups.flatMap((g) => g.laborers);
+    const totalDue = laborers.reduce((sum, l) => sum + Math.max(0, l.outstanding), 0);
+    const totalPaid = laborers.reduce((sum, l) => sum + l.totalPaid, 0);
+    const laborersWithDue = laborers.filter((l) => l.outstanding > 0).length;
 
-    // Calculate totals for the SELECTED PERIOD only (not cumulative)
-    // weekSalary = salary earned in this period
-    // weekPaid = amount paid in this period
-    const totalSalaryInPeriod = allLaborers.reduce((sum, l) => sum + l.weekSalary, 0);
-    const totalPaidInPeriod = allLaborers.reduce((sum, l) => sum + l.weekPaid, 0);
-
-    // Due = salary earned in period minus paid in period (for this period only)
-    const totalDueInPeriod = Math.max(0, totalSalaryInPeriod - totalPaidInPeriod);
-
-    // Count unique laborers
-    const uniqueLaborerIds = new Set(allLaborers.map((l) => l.laborerId));
-
-    // Group by subcontract (using period values, not cumulative)
-    const subcontractMap = new Map<string, { title: string; paid: number; salary: number }>();
-    allLaborers.forEach((l) => {
-      if (l.subcontractId) {
-        const existing = subcontractMap.get(l.subcontractId) || {
-          title: l.subcontractTitle || "Unknown",
-          paid: 0,
-          salary: 0,
-        };
-        existing.paid += l.weekPaid;
-        existing.salary += l.weekSalary;
-        subcontractMap.set(l.subcontractId, existing);
-      }
-    });
-
-    const bySubcontract = Array.from(subcontractMap.entries()).map(([id, data]) => ({
-      subcontractId: id,
-      subcontractTitle: data.title,
-      totalPaid: data.paid,
-      totalDue: Math.max(0, data.salary - data.paid),
-    }));
-
-    const summary: PaymentSummaryData = {
+    onSummaryChange({
       dailyMarketPending: 0,
       dailyMarketPendingCount: 0,
       dailyMarketSentToEngineer: 0,
       dailyMarketSentToEngineerCount: 0,
       dailyMarketPaid: 0,
       dailyMarketPaidCount: 0,
-      contractWeeklyDue: totalDueInPeriod,
-      contractWeeklyDueLaborerCount: uniqueLaborerIds.size,
-      contractWeeklyPaid: totalPaidInPeriod,
-      bySubcontract,
+      contractWeeklyDue: totalDue,
+      contractWeeklyDueLaborerCount: laborersWithDue,
+      contractWeeklyPaid: totalPaid,
+      bySubcontract: [],
       unlinkedTotal: 0,
       unlinkedCount: 0,
-    };
-
-    onSummaryChange(summary);
-  }, [weekGroups, onSummaryChange]);
-
-  // Filter week groups
-  const filteredWeekGroups = useMemo(() => {
-    return weekGroups
-      .map((group) => {
-        let laborers = group.laborers;
-
-        if (filterSubcontract !== "all") {
-          laborers = laborers.filter(
-            (l) => l.subcontractId === filterSubcontract
-          );
-        }
-
-        if (filterTeam !== "all") {
-          laborers = laborers.filter((l) => l.teamId === filterTeam);
-        }
-
-        if (filterStatus !== "all") {
-          laborers = laborers.filter((l) => {
-            if (filterStatus === "pending")
-              return l.status === "pending" || l.status === "partial";
-            if (filterStatus === "completed")
-              return l.status === "completed" || l.status === "advance";
-            return true;
-          });
-        }
-
-        // Recalculate summary
-        const totalSalary = laborers.reduce((sum, l) => sum + l.weekSalary, 0);
-        const totalPaid = laborers.reduce((sum, l) => sum + l.weekPaid, 0);
-        const totalDue = laborers.reduce(
-          (sum, l) => sum + Math.max(0, l.runningBalance),
-          0
-        );
-
-        return {
-          ...group,
-          laborers,
-          summary: {
-            ...group.summary,
-            laborerCount: laborers.length,
-            totalSalary,
-            totalPaid,
-            totalDue,
-          },
-        };
-      })
-      .filter((g) => g.laborers.length > 0);
-  }, [weekGroups, filterSubcontract, filterTeam, filterStatus]);
-
-  // Transform to table data
-  const tableData: WeekRowData[] = useMemo(() => {
-    return filteredWeekGroups.map((group) => {
-      // Collect unique settlement references from all laborers' payments
-      const allRefs = group.laborers.flatMap((laborer) =>
-        laborer.payments
-          .map((p: any) => p.settlementReference)
-          .filter((ref: string | null | undefined): ref is string => ref !== null && ref !== undefined)
-      );
-      const uniqueRefs = [...new Set(allRefs)];
-
-      return {
-        id: group.weekStart,
-        weekStart: group.weekStart,
-        weekEnd: group.weekEnd,
-        weekLabel: group.weekLabel,
-        laborerCount: group.summary.laborerCount,
-        totalSalary: group.summary.totalSalary,
-        totalPaid: group.summary.totalPaid,
-        totalDue: group.summary.totalDue,
-        paymentProgress: group.summary.paymentProgress,
-        status: group.summary.status,
-        laborers: group.laborers,
-        settlementReferences: uniqueRefs,
-        group,
-      };
     });
-  }, [filteredWeekGroups]);
+  }, [laborers, onSummaryChange]);
 
-  // Format currency
-  const formatCurrency = (amount: number) => `Rs.${amount.toLocaleString("en-IN")}`;
+  // Filter laborers
+  const filteredLaborers = useMemo(() => {
+    return laborers.filter((l) => {
+      // Status filter
+      if (filterStatus === "pending" && l.status === "completed") return false;
+      if (filterStatus === "completed" && l.status !== "completed" && l.status !== "advance") return false;
 
-  // Get progress bar color
-  const getProgressColor = (progress: number): "error" | "warning" | "success" | "info" => {
-    if (progress >= 100) return "success";
-    if (progress > 100) return "info";
-    if (progress >= 50) return "warning";
-    return "error";
-  };
+      // Subcontract filter
+      if (filterSubcontract !== "all" && l.subcontractId !== filterSubcontract) return false;
 
-  // Define columns
-  const columns = useMemo<MRT_ColumnDef<WeekRowData>[]>(
+      // Team filter
+      if (filterTeam !== "all" && l.teamId !== filterTeam) return false;
+
+      return true;
+    });
+  }, [laborers, filterStatus, filterSubcontract, filterTeam]);
+
+  // Auto-scroll to highlighted row when data loads
+  useEffect(() => {
+    if (!highlightRef || hasScrolledToHighlight || filteredLaborers.length === 0 || loading) {
+      return;
+    }
+
+    // Find the row index that contains the highlighted reference
+    const highlightedRowIndex = filteredLaborers.findIndex(laborer =>
+      laborer.settlementReferences.includes(highlightRef)
+    );
+
+    if (highlightedRowIndex === -1) {
+      return;
+    }
+
+    // Small delay to ensure DOM is rendered
+    const timeout = setTimeout(() => {
+      const tableContainer = tableContainerRef.current;
+      if (!tableContainer) return;
+
+      // Find the row element by data attribute
+      const highlightedRow = tableContainer.querySelector(
+        `[data-row-index="${highlightedRowIndex}"]`
+      );
+
+      if (highlightedRow) {
+        highlightedRow.scrollIntoView({
+          behavior: "smooth",
+          block: "center",
+        });
+        setHasScrolledToHighlight(true);
+      }
+    }, 300);
+
+    return () => clearTimeout(timeout);
+  }, [highlightRef, filteredLaborers, hasScrolledToHighlight, loading]);
+
+  // Table columns
+  const columns: MRT_ColumnDef<ContractLaborerPaymentView>[] = useMemo(
     () => [
       {
-        accessorKey: "weekStart",
-        header: "Week",
-        size: 200,
-        sortingFn: "datetime",
+        accessorKey: "laborerName",
+        header: "Laborer",
         Cell: ({ row }) => (
           <Box>
-            <Typography variant="body2" fontWeight={600}>
-              {row.original.weekLabel}
+            <Typography variant="body2" fontWeight={500}>
+              {row.original.laborerName}
             </Typography>
-            <Typography variant="caption" color="text.secondary">
-              {row.original.laborerCount} laborers
-            </Typography>
+            {row.original.laborerRole && (
+              <Typography variant="caption" color="text.secondary">
+                {row.original.laborerRole}
+              </Typography>
+            )}
           </Box>
         ),
       },
       {
-        accessorKey: "totalSalary",
-        header: "Salary",
-        size: 110,
-        Cell: ({ row }) => (
-          <Typography variant="body2" fontWeight={500}>
-            {formatCurrency(row.original.totalSalary)}
-          </Typography>
-        ),
+        accessorKey: "teamName",
+        header: "Team",
+        Cell: ({ row }) => row.original.teamName || "-",
+      },
+      {
+        accessorKey: "totalEarned",
+        header: "Earned",
+        Cell: ({ row }) => formatCurrency(row.original.totalEarned),
       },
       {
         accessorKey: "totalPaid",
         header: "Paid",
-        size: 110,
         Cell: ({ row }) => (
-          <Typography variant="body2" fontWeight={500} color="success.main">
+          <Typography variant="body2" color="success.main">
             {formatCurrency(row.original.totalPaid)}
           </Typography>
         ),
       },
       {
-        accessorKey: "totalDue",
-        header: "Due",
-        size: 110,
+        accessorKey: "outstanding",
+        header: "Outstanding",
         Cell: ({ row }) => (
           <Typography
             variant="body2"
             fontWeight={600}
-            color={row.original.totalDue > 0 ? "error.main" : "success.main"}
+            color={row.original.outstanding > 0 ? "error.main" : "success.main"}
           >
-            {formatCurrency(row.original.totalDue)}
+            {formatCurrency(Math.max(0, row.original.outstanding))}
           </Typography>
         ),
       },
       {
         accessorKey: "paymentProgress",
         header: "Progress",
-        size: 120,
         Cell: ({ row }) => (
           <Box sx={{ width: 100 }}>
             <Box sx={{ display: "flex", justifyContent: "space-between", mb: 0.5 }}>
-              <Typography variant="caption" fontWeight={600}>
-                {row.original.paymentProgress.toFixed(0)}%
-                {row.original.paymentProgress > 100 && " (Adv)"}
-              </Typography>
+              <Typography variant="caption">{row.original.paymentProgress.toFixed(0)}%</Typography>
             </Box>
             <LinearProgress
               variant="determinate"
               value={Math.min(row.original.paymentProgress, 100)}
-              color={getProgressColor(row.original.paymentProgress)}
+              color={
+                row.original.paymentProgress >= 100
+                  ? "success"
+                  : row.original.paymentProgress > 50
+                    ? "warning"
+                    : "error"
+              }
               sx={{ height: 6, borderRadius: 1 }}
             />
           </Box>
@@ -770,418 +525,95 @@ export default function ContractWeeklyPaymentsTab({
       {
         accessorKey: "status",
         header: "Status",
-        size: 100,
         Cell: ({ row }) => (
           <Chip
             label={getPaymentStatusLabel(row.original.status)}
             size="small"
             color={getPaymentStatusColor(row.original.status)}
-            variant={row.original.status === "completed" ? "filled" : "outlined"}
-            sx={{ fontWeight: 500 }}
+            variant="outlined"
           />
         ),
-      },
-      {
-        accessorKey: "settlementReferences",
-        header: "Ref Code",
-        size: 140,
-        filterVariant: "text",
-        Cell: ({ row }) => {
-          const refs = row.original.settlementReferences;
-          if (refs.length === 0) {
-            return (
-              <Typography variant="body2" color="text.disabled">
-                —
-              </Typography>
-            );
-          }
-
-          // Single ref - show directly
-          if (refs.length === 1) {
-            return (
-              <Chip
-                label={refs[0]}
-                size="small"
-                color="primary"
-                variant="outlined"
-                clickable
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setSelectedPaymentRef(refs[0]);
-                  setRefDialogOpen(true);
-                }}
-                sx={{
-                  fontFamily: "monospace",
-                  fontWeight: 600,
-                  fontSize: "0.7rem",
-                  height: 22,
-                  cursor: "pointer",
-                  "&:hover": {
-                    bgcolor: "primary.main",
-                    color: "primary.contrastText",
-                  },
-                }}
-              />
-            );
-          }
-
-          // Multiple refs - show count with tooltip containing clickable chips
-          return (
-            <Tooltip
-              title={
-                <Box sx={{ p: 0.5 }}>
-                  <Typography variant="caption" sx={{ fontWeight: 600, mb: 1, display: "block" }}>
-                    Click chip for details, or click below to view all:
-                  </Typography>
-                  <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
-                    {refs.map((ref) => (
-                      <Chip
-                        key={ref}
-                        label={ref}
-                        size="small"
-                        variant="outlined"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedPaymentRef(ref);
-                          setRefDialogOpen(true);
-                        }}
-                        sx={{
-                          fontFamily: "monospace",
-                          fontSize: "0.65rem",
-                          height: 20,
-                          cursor: "pointer",
-                          color: "white",
-                          borderColor: "rgba(255,255,255,0.5)",
-                          "&:hover": {
-                            bgcolor: "rgba(255,255,255,0.2)",
-                            borderColor: "white",
-                          },
-                        }}
-                      />
-                    ))}
-                  </Box>
-                </Box>
-              }
-              arrow
-              placement="top"
-              componentsProps={{
-                tooltip: {
-                  sx: { pointerEvents: "auto", maxWidth: 300 },
-                },
-              }}
-            >
-              <Chip
-                label={`${refs.length} settlements`}
-                size="small"
-                color="primary"
-                variant="outlined"
-                clickable
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setOverviewRefs(refs);
-                  setOverviewContext({
-                    weekStart: row.original.weekStart,
-                    weekEnd: row.original.weekEnd,
-                  });
-                  setOverviewDialogOpen(true);
-                }}
-                sx={{
-                  fontWeight: 600,
-                  fontSize: "0.7rem",
-                  height: 22,
-                  cursor: "pointer",
-                  "&:hover": {
-                    bgcolor: "primary.main",
-                    color: "primary.contrastText",
-                  },
-                }}
-              />
-            </Tooltip>
-          );
-        },
       },
     ],
     []
   );
 
-  // Render expanded detail panel with laborer breakdown
-  const renderDetailPanel = ({ row }: { row: { original: WeekRowData } }) => {
-    const { laborers, weekStart, weekEnd } = row.original;
+  // Render week breakdown detail panel
+  const renderDetailPanel = ({ row }: { row: { original: ContractLaborerPaymentView } }) => {
+    const laborer = row.original;
 
-    if (laborers.length === 0) {
+    if (laborer.weeklyBreakdown.length === 0) {
       return (
         <Box sx={{ p: 2 }}>
           <Typography variant="body2" color="text.secondary">
-            No laborers for this week
+            No weekly data available
           </Typography>
         </Box>
       );
     }
 
     return (
-      <Box sx={{ p: 2, bgcolor: alpha(theme.palette.background.default, 0.5) }}>
+      <Box sx={{ p: 2 }}>
+        <Typography variant="subtitle2" gutterBottom>
+          Weekly Breakdown
+        </Typography>
         <TableContainer component={Paper} variant="outlined">
           <Table size="small">
             <TableHead>
-              <TableRow sx={{ bgcolor: "action.hover" }}>
-                <TableCell padding="checkbox">
-                  <Checkbox
-                    size="small"
-                    checked={laborers.filter(l => l.runningBalance > 0).every(l => selectedLaborers.has(l.laborerId))}
-                    indeterminate={
-                      laborers.filter(l => l.runningBalance > 0).some(l => selectedLaborers.has(l.laborerId)) &&
-                      !laborers.filter(l => l.runningBalance > 0).every(l => selectedLaborers.has(l.laborerId))
-                    }
-                    onChange={(e) => handleSelectAll(weekStart, e.target.checked)}
-                    disabled={laborers.filter(l => l.runningBalance > 0).length === 0}
-                  />
-                </TableCell>
-                <TableCell>Laborer</TableCell>
-                <TableCell>Team / Subcontract</TableCell>
-                <TableCell align="center">Days</TableCell>
-                <TableCell align="right">Salary</TableCell>
+              <TableRow>
+                <TableCell>Week</TableCell>
+                <TableCell>Days</TableCell>
+                <TableCell align="right">Earned</TableCell>
                 <TableCell align="right">Paid</TableCell>
-                <TableCell align="right">Due</TableCell>
-                <TableCell align="center">Progress</TableCell>
-                <TableCell align="center">Action</TableCell>
+                <TableCell align="right">Balance</TableCell>
+                <TableCell>Status</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
-              {laborers.map((laborer) => (
-                <React.Fragment key={laborer.laborerId}>
-                  <TableRow hover>
-                    <TableCell padding="checkbox">
-                      <Checkbox
-                        size="small"
-                        checked={selectedLaborers.has(laborer.laborerId)}
-                        onChange={() => handleToggleSelect(laborer.laborerId)}
-                        disabled={laborer.runningBalance <= 0}
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <Typography variant="body2" fontWeight={500}>
-                        {laborer.laborerName}
-                      </Typography>
-                      {laborer.laborerRole && (
-                        <Typography variant="caption" color="text.secondary">
-                          {laborer.laborerRole}
-                        </Typography>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      {laborer.teamName && (
-                        <Typography variant="body2">{laborer.teamName}</Typography>
-                      )}
-                      {laborer.subcontractTitle && (
-                        <Typography variant="caption" color="text.secondary">
-                          {laborer.subcontractTitle}
-                        </Typography>
-                      )}
-                    </TableCell>
-                    <TableCell align="center">
-                      <Chip label={laborer.daysWorked} size="small" variant="outlined" />
-                    </TableCell>
-                    <TableCell align="right">
-                      <Typography variant="body2" fontWeight={500}>
-                        {formatCurrency(laborer.weekSalary)}
-                      </Typography>
-                    </TableCell>
-                    <TableCell align="right">
-                      <Typography variant="body2" fontWeight={500} color="success.main">
-                        {formatCurrency(laborer.weekPaid)}
-                      </Typography>
-                    </TableCell>
-                    <TableCell align="right">
-                      <Typography
-                        variant="body2"
-                        fontWeight={600}
-                        color={
-                          laborer.runningBalance > 0
-                            ? "error.main"
-                            : laborer.runningBalance < 0
-                              ? "info.main"
-                              : "success.main"
-                        }
-                      >
-                        {laborer.runningBalance < 0
-                          ? `+${formatCurrency(Math.abs(laborer.runningBalance))}`
-                          : formatCurrency(laborer.runningBalance)}
-                      </Typography>
-                    </TableCell>
-                    <TableCell align="center">
-                      <Box sx={{ width: 70 }}>
-                        <LinearProgress
-                          variant="determinate"
-                          value={Math.min(laborer.paymentProgress, 100)}
-                          color={getProgressColor(laborer.paymentProgress)}
-                          sx={{ height: 5, borderRadius: 1 }}
-                        />
-                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10 }}>
-                          {laborer.paymentProgress.toFixed(0)}%
-                        </Typography>
-                      </Box>
-                    </TableCell>
-                    <TableCell align="center">
-                      {laborer.runningBalance > 0 ? (
-                        <Button
-                          size="small"
-                          variant="outlined"
-                          onClick={() => openPaymentDialog(laborer, weekStart, weekEnd)}
-                          disabled={!canEdit}
-                        >
-                          Settle
-                        </Button>
-                      ) : (
-                        <Chip
-                          label={laborer.status === "advance" ? "ADVANCE" : "SETTLED"}
-                          size="small"
-                          color={laborer.status === "advance" ? "info" : "success"}
-                          sx={{ fontSize: "0.65rem" }}
-                        />
-                      )}
-                    </TableCell>
-                  </TableRow>
-
-                  {/* Daily Breakdown Row */}
-                  <TableRow>
-                    <TableCell colSpan={9} sx={{ py: 0.5, px: 2 }}>
-                      <Box sx={{ display: "flex", gap: 1, alignItems: "center", pl: 4 }}>
-                        <Typography variant="caption" color="text.secondary" sx={{ mr: 1 }}>
-                          Daily:
-                        </Typography>
-                        {laborer.dailySalary.map((day) => (
-                          <Tooltip
-                            key={day.date}
-                            title={`${dayjs(day.date).format("ddd MMM D")} - ${day.workDays} day(s)`}
-                          >
-                            <Chip
-                              label={`${day.dayName}:${day.amount}`}
-                              size="small"
-                              variant="outlined"
-                              sx={{ fontSize: 10, height: 20 }}
-                            />
-                          </Tooltip>
-                        ))}
-                        {laborer.previousBalance > 0 && (
-                          <Chip
-                            icon={<WarningIcon sx={{ fontSize: 12 }} />}
-                            label={`Prev: ${formatCurrency(laborer.previousBalance)}`}
-                            size="small"
-                            color="warning"
-                            variant="outlined"
-                            sx={{ fontSize: 10, height: 20, ml: 2 }}
-                          />
-                        )}
-                      </Box>
-                    </TableCell>
-                  </TableRow>
-                </React.Fragment>
+              {laborer.weeklyBreakdown.map((week) => (
+                <TableRow
+                  key={week.weekStart}
+                  sx={{
+                    bgcolor: week.isPaid ? alpha(theme.palette.success.main, 0.05) : undefined,
+                  }}
+                >
+                  <TableCell>{week.weekLabel}</TableCell>
+                  <TableCell>{week.daysWorked}</TableCell>
+                  <TableCell align="right">{formatCurrency(week.earned)}</TableCell>
+                  <TableCell align="right" sx={{ color: "success.main" }}>
+                    {formatCurrency(week.paid)}
+                  </TableCell>
+                  <TableCell
+                    align="right"
+                    sx={{ color: week.balance > 0 ? "error.main" : "success.main" }}
+                  >
+                    {formatCurrency(Math.max(0, week.balance))}
+                  </TableCell>
+                  <TableCell>
+                    <Chip
+                      label={week.isPaid ? "Paid" : "Pending"}
+                      size="small"
+                      color={week.isPaid ? "success" : "warning"}
+                      variant="outlined"
+                    />
+                  </TableCell>
+                </TableRow>
               ))}
             </TableBody>
           </Table>
         </TableContainer>
-
-        {/* Bulk action for selected laborers */}
-        {laborers.filter(l => selectedLaborers.has(l.laborerId) && l.runningBalance > 0).length > 0 && (
-          <Box sx={{ display: "flex", justifyContent: "flex-end", mt: 2 }}>
-            <Button
-              variant="contained"
-              size="small"
-              startIcon={<PaymentIcon />}
-              onClick={() => {
-                const selected = laborers.filter(
-                  l => selectedLaborers.has(l.laborerId) && l.runningBalance > 0
-                );
-                if (selected.length > 0) {
-                  openPaymentDialog(selected[0], weekStart, weekEnd);
-                }
-              }}
-              disabled={!canEdit}
-            >
-              Settle Selected ({laborers.filter(l => selectedLaborers.has(l.laborerId) && l.runningBalance > 0).length})
-            </Button>
-          </Box>
-        )}
       </Box>
     );
   };
 
-  // Handlers
-  const handleToggleExpand = (weekStart: string) => {
-    setExpandedWeeks((prev) => {
-      const next = new Set(prev);
-      if (next.has(weekStart)) {
-        next.delete(weekStart);
-      } else {
-        next.add(weekStart);
-      }
-      return next;
-    });
-
-    setWeekGroups((prev) =>
-      prev.map((g) =>
-        g.weekStart === weekStart ? { ...g, isExpanded: !g.isExpanded } : g
-      )
-    );
-  };
-
-  const handleToggleSelect = (laborerId: string) => {
-    setSelectedLaborers((prev) => {
-      const next = new Set(prev);
-      if (next.has(laborerId)) {
-        next.delete(laborerId);
-      } else {
-        next.add(laborerId);
-      }
-      return next;
-    });
-  };
-
-  const handleSelectAll = (weekStart: string, select: boolean) => {
-    const group = weekGroups.find((g) => g.weekStart === weekStart);
-    if (!group) return;
-
-    setSelectedLaborers((prev) => {
-      const next = new Set(prev);
-      group.laborers.forEach((l) => {
-        if (l.runningBalance > 0) {
-          if (select) {
-            next.add(l.laborerId);
-          } else {
-            next.delete(l.laborerId);
-          }
-        }
-      });
-      return next;
-    });
-  };
-
-  const openPaymentDialog = (
-    laborer: WeeklyContractLaborer,
-    weekStart: string,
-    weekEnd: string
-  ) => {
-    setSelectedLaborer(laborer);
-    setSelectedWeek({ weekStart, weekEnd });
-    setPaymentDialogOpen(true);
-  };
-
   const handlePaymentSuccess = () => {
-    setSelectedLaborers(new Set());
     fetchData();
     onDataChange?.();
   };
 
   if (loading) {
     return (
-      <Box
-        sx={{
-          display: "flex",
-          justifyContent: "center",
-          alignItems: "center",
-          py: 8,
-        }}
-      >
+      <Box sx={{ display: "flex", justifyContent: "center", alignItems: "center", py: 8 }}>
         <CircularProgress />
       </Box>
     );
@@ -1197,7 +629,10 @@ export default function ContractWeeklyPaymentsTab({
 
   return (
     <Box>
-      {/* Filters */}
+      {/* Summary Dashboard */}
+      <ContractLaborerSummaryDashboard laborers={laborers} loading={loading} />
+
+      {/* Action Bar */}
       <Box
         sx={{
           display: "flex",
@@ -1207,29 +642,42 @@ export default function ContractWeeklyPaymentsTab({
           alignItems: "center",
         }}
       >
-        <FormControl size="small" sx={{ minWidth: 150 }}>
+        {/* Record Payment Button */}
+        {canEdit && (
+          <Button
+            variant="contained"
+            startIcon={<PaymentIcon />}
+            onClick={() => setPaymentDialogOpen(true)}
+            disabled={laborers.filter((l) => l.outstanding > 0).length === 0}
+          >
+            Record Payment
+          </Button>
+        )}
+
+        <Box sx={{ flexGrow: 1 }} />
+
+        {/* Filters */}
+        <FormControl size="small" sx={{ minWidth: 120 }}>
           <InputLabel>Status</InputLabel>
           <Select
             value={filterStatus}
-            onChange={(e) =>
-              setFilterStatus(e.target.value as "all" | "pending" | "completed")
-            }
+            onChange={(e) => setFilterStatus(e.target.value as "all" | "pending" | "completed")}
             label="Status"
           >
             <MenuItem value="all">All</MenuItem>
-            <MenuItem value="pending">Pending / Partial</MenuItem>
+            <MenuItem value="pending">Pending</MenuItem>
             <MenuItem value="completed">Completed</MenuItem>
           </Select>
         </FormControl>
 
-        <FormControl size="small" sx={{ minWidth: 200 }}>
+        <FormControl size="small" sx={{ minWidth: 150 }}>
           <InputLabel>Subcontract</InputLabel>
           <Select
             value={filterSubcontract}
             onChange={(e) => setFilterSubcontract(e.target.value)}
             label="Subcontract"
           >
-            <MenuItem value="all">All Subcontracts</MenuItem>
+            <MenuItem value="all">All</MenuItem>
             {subcontracts.map((sc) => (
               <MenuItem key={sc.id} value={sc.id}>
                 {sc.title}
@@ -1238,14 +686,14 @@ export default function ContractWeeklyPaymentsTab({
           </Select>
         </FormControl>
 
-        <FormControl size="small" sx={{ minWidth: 150 }}>
+        <FormControl size="small" sx={{ minWidth: 120 }}>
           <InputLabel>Team</InputLabel>
           <Select
             value={filterTeam}
             onChange={(e) => setFilterTeam(e.target.value)}
             label="Team"
           >
-            <MenuItem value="all">All Teams</MenuItem>
+            <MenuItem value="all">All</MenuItem>
             {teams.map((team) => (
               <MenuItem key={team.id} value={team.id}>
                 {team.name}
@@ -1254,16 +702,13 @@ export default function ContractWeeklyPaymentsTab({
           </Select>
         </FormControl>
 
-        <Box sx={{ flexGrow: 1 }} />
-
         <Button
           startIcon={<HistoryIcon />}
           onClick={() => setHistoryDialogOpen(true)}
           variant="outlined"
           size="small"
-          color="secondary"
         >
-          Payment History
+          History
         </Button>
 
         <Button
@@ -1276,167 +721,64 @@ export default function ContractWeeklyPaymentsTab({
         </Button>
       </Box>
 
-      {/* Week Groups Table */}
-      {tableData.length === 0 ? (
+      {/* Laborer Table */}
+      {filteredLaborers.length === 0 ? (
         <Alert severity="info">
-          No contract laborer attendance found for the selected period. This tab shows only laborers with type &quot;contract&quot;. Daily and market laborers are shown in the first tab.
+          No contract laborers found for the selected period and filters.
         </Alert>
       ) : (
-        <DataTable<WeekRowData>
-          columns={columns}
-          data={tableData}
-          isLoading={loading}
-          enableExpanding
-          renderDetailPanel={renderDetailPanel}
-          enableRowActions
-          positionActionsColumn="last"
-          renderRowActions={({ row }) => (
-            <Box sx={{ display: "flex", gap: 0.5 }}>
-              {row.original.totalDue > 0 && (
-                <Tooltip title={`Settle Due ${formatCurrency(row.original.totalDue)}`}>
-                  <IconButton
-                    size="small"
-                    color="success"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      const pendingLaborers = row.original.laborers.filter(
-                        (l) => l.runningBalance > 0 && l.status !== "completed"
-                      );
-                      if (pendingLaborers.length > 0) {
-                        openPaymentDialog(
-                          pendingLaborers[0],
-                          row.original.weekStart,
-                          row.original.weekEnd
-                        );
-                      }
-                    }}
-                    disabled={!canEdit}
-                  >
-                    <PaymentIcon fontSize="small" />
-                  </IconButton>
-                </Tooltip>
-              )}
-            </Box>
-          )}
-          initialState={{
-            sorting: [{ id: "weekStart", desc: true }],
-          }}
-          enablePagination={tableData.length > 10}
-          pageSize={10}
-          muiExpandButtonProps={({ row }) => ({
-            sx: {
-              color: row.original.laborerCount > 0 ? "primary.main" : "text.disabled",
-            },
-          })}
-          muiTableBodyRowProps={({ row }) => ({
-            sx: {
-              // Highlight row if it contains the matching settlement reference
-              backgroundColor:
-                highlightRef &&
-                row.original.settlementReferences.includes(highlightRef)
-                  ? alpha(theme.palette.primary.main, 0.15)
-                  : undefined,
-              transition: "background-color 0.3s ease-in-out",
-            },
-          })}
-        />
+        <Box ref={tableContainerRef}>
+          <DataTable<ContractLaborerPaymentView>
+            columns={columns}
+            data={filteredLaborers}
+            isLoading={loading}
+            enableExpanding
+            renderDetailPanel={renderDetailPanel}
+            initialState={{
+              sorting: [{ id: "outstanding", desc: true }],
+            }}
+            muiTableBodyRowProps={({ row }) => ({
+              "data-row-index": row.index,
+              sx: {
+                // Highlight row if it contains the matching settlement reference
+                backgroundColor:
+                  highlightRef &&
+                  row.original.settlementReferences.includes(highlightRef)
+                    ? alpha(theme.palette.primary.main, 0.15)
+                    : undefined,
+                transition: "background-color 0.3s ease-in-out",
+              },
+            })}
+          />
+        </Box>
       )}
 
       {/* Payment Dialog */}
-      {selectedLaborer && selectedWeek && (
-        <PaymentDialog
-          open={paymentDialogOpen}
-          onClose={() => {
-            setPaymentDialogOpen(false);
-            setSelectedLaborer(null);
-            setSelectedWeek(null);
-          }}
-          weeklyPayment={{
-            laborer: selectedLaborer,
-            weekStart: selectedWeek.weekStart,
-            weekEnd: selectedWeek.weekEnd,
-          }}
-          allowSubcontractLink
-          defaultSubcontractId={selectedLaborer.subcontractId || undefined}
-          onSuccess={handlePaymentSuccess}
-        />
-      )}
-
-      {/* Payment Ref Dialog - shows when clicking on ref codes */}
-      <PaymentRefDialog
-        open={refDialogOpen}
-        paymentReference={selectedPaymentRef}
-        onClose={() => {
-          setRefDialogOpen(false);
-          setSelectedPaymentRef(null);
-        }}
-        onEdit={(details) => {
-          setSelectedPaymentDetails(details);
-          setRefDialogOpen(false);
-          setEditDialogOpen(true);
-        }}
-        onDelete={(details) => {
-          setSelectedPaymentDetails(details);
-          setRefDialogOpen(false);
-          setDeleteDialogOpen(true);
-        }}
-      />
-
-      {/* Edit Payment Dialog */}
-      <ContractPaymentEditDialog
-        open={editDialogOpen}
-        paymentDetails={selectedPaymentDetails}
-        onClose={() => {
-          setEditDialogOpen(false);
-          setSelectedPaymentDetails(null);
-        }}
-        onSuccess={() => {
-          fetchData();
-          onDataChange?.();
-        }}
-      />
-
-      {/* Delete Payment Dialog */}
-      <ContractPaymentDeleteDialog
-        open={deleteDialogOpen}
-        paymentDetails={selectedPaymentDetails}
-        onClose={() => {
-          setDeleteDialogOpen(false);
-          setSelectedPaymentDetails(null);
-        }}
-        onSuccess={() => {
-          fetchData();
-          onDataChange?.();
-        }}
+      <ContractPaymentRecordDialog
+        open={paymentDialogOpen}
+        onClose={() => setPaymentDialogOpen(false)}
+        laborers={laborers}
+        onSuccess={handlePaymentSuccess}
       />
 
       {/* Payment History Dialog */}
       <ContractPaymentHistoryDialog
         open={historyDialogOpen}
         onClose={() => setHistoryDialogOpen(false)}
-        onViewPayment={(reference) => {
-          setHistoryDialogOpen(false);
-          setSelectedPaymentRef(reference);
+        onViewPayment={(ref: string) => {
+          setSelectedRef(ref);
           setRefDialogOpen(true);
         }}
       />
 
-      {/* Settlements Overview Dialog */}
-      <SettlementsOverviewDialog
-        open={overviewDialogOpen}
+      {/* Payment Ref Dialog */}
+      <PaymentRefDialog
+        open={refDialogOpen}
         onClose={() => {
-          setOverviewDialogOpen(false);
-          setOverviewRefs([]);
-          setOverviewContext({});
+          setRefDialogOpen(false);
+          setSelectedRef(null);
         }}
-        settlementRefs={overviewRefs}
-        weekStart={overviewContext.weekStart}
-        weekEnd={overviewContext.weekEnd}
-        laborerName={overviewContext.laborerName}
-        onViewDetails={(ref) => {
-          setSelectedPaymentRef(ref);
-          setRefDialogOpen(true);
-        }}
+        paymentReference={selectedRef}
       />
     </Box>
   );

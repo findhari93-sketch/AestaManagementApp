@@ -405,6 +405,53 @@ export interface LaborerPaymentEntryExtended extends LaborerPaymentEntry {
   settlementReference?: string;
 }
 
+// ============ CONTRACT LABORER PAYMENT VIEW (NEW UI) ============
+
+// For the laborer-centric view in ContractWeeklyPaymentsTab
+export interface ContractLaborerPaymentView {
+  laborerId: string;
+  laborerName: string;
+  laborerRole: string | null;
+  teamId: string | null;
+  teamName: string | null;
+  subcontractId: string | null;
+  subcontractTitle: string | null;
+
+  // Cumulative totals from all time
+  totalEarned: number;        // Sum of all daily_attendance.daily_earnings
+  totalPaid: number;          // Sum of all labor_payments.amount
+  outstanding: number;        // totalEarned - totalPaid
+  paymentProgress: number;    // Percentage (totalPaid / totalEarned * 100)
+
+  // Status
+  status: PaymentStatus;
+  lastPaymentDate: string | null;
+
+  // Weekly breakdown for expanded view (read-only)
+  weeklyBreakdown: WeekBreakdownEntry[];
+
+  // All settlement/payment references for this laborer (for highlighting)
+  settlementReferences: string[];
+}
+
+// Individual week data for expanded view
+export interface WeekBreakdownEntry {
+  weekStart: string;
+  weekEnd: string;
+  weekLabel: string;          // "Dec 01 - Dec 07, 2024"
+  earned: number;             // Salary earned this week
+  paid: number;               // Amount allocated to this week
+  balance: number;            // earned - paid
+  daysWorked: number;
+  isPaid: boolean;            // True if balance <= 0
+  allocations: {              // Payment allocations to this week
+    paymentId: string;
+    paymentReference: string | null;
+    amount: number;
+    paymentDate: string;
+  }[];
+}
+
 // ============ HELPER TYPES ============
 
 export interface WeekBoundary {
