@@ -203,6 +203,7 @@ export default function PaymentsContent({ initialData }: PaymentsContentProps) {
               dateTo={effectiveDateTo}
               onDataChange={handleDataChange}
               onSummaryChange={handleContractWeeklySummaryChange}
+              highlightRef={highlightRef}
             />
           </TabPanel>
         </Box>

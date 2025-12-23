@@ -1165,7 +1165,10 @@ export async function updateContractPayment(
     if (existingPayment.settlement_group_id) {
       const groupUpdates: any = {};
       if (updates.amount !== undefined) groupUpdates.total_amount = updates.amount;
-      if (updates.actualPaymentDate !== undefined) groupUpdates.actual_payment_date = updates.actualPaymentDate;
+      if (updates.actualPaymentDate !== undefined) {
+        groupUpdates.actual_payment_date = updates.actualPaymentDate;
+        groupUpdates.settlement_date = updates.actualPaymentDate; // Sync with v_all_expenses view
+      }
       if (updates.paymentType !== undefined) groupUpdates.payment_type = updates.paymentType;
       if (updates.paymentMode !== undefined) groupUpdates.payment_mode = updates.paymentMode;
       if (updates.proofUrl !== undefined) groupUpdates.proof_url = updates.proofUrl;

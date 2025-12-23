@@ -506,7 +506,7 @@ export default function ExpensesPage() {
         header: "Ref Code",
         size: 140,
         filterVariant: "text",
-        Cell: ({ cell }) => {
+        Cell: ({ cell, row }) => {
           const ref = cell.getValue<string>();
           return ref ? (
             <Chip
@@ -516,8 +516,10 @@ export default function ExpensesPage() {
               variant="outlined"
               clickable
               onClick={() => {
-                // Navigate to salary settlements page with ref code for highlighting
-                router.push(`/site/payments?tab=salary&highlight=${encodeURIComponent(ref)}`);
+                // contract_id indicates this is a contract labor settlement
+                const isContractSettlement = row.original.contract_id !== null;
+                const tab = isContractSettlement ? "contract" : "salary";
+                router.push(`/site/payments?tab=${tab}&highlight=${encodeURIComponent(ref)}`);
               }}
               sx={{ fontFamily: "monospace", fontWeight: 600, cursor: "pointer" }}
             />

@@ -93,6 +93,7 @@ interface ContractWeeklyPaymentsTabProps {
   dateTo?: string;
   onDataChange?: () => void;
   onSummaryChange?: (summary: PaymentSummaryData) => void;
+  highlightRef?: string | null;
 }
 
 // Get week boundaries (Sunday to Saturday)
@@ -126,6 +127,7 @@ export default function ContractWeeklyPaymentsTab({
   dateTo: propDateTo,
   onDataChange,
   onSummaryChange,
+  highlightRef,
 }: ContractWeeklyPaymentsTabProps) {
   const { selectedSite } = useSite();
   const { userProfile } = useAuth();
@@ -1324,6 +1326,17 @@ export default function ContractWeeklyPaymentsTab({
           muiExpandButtonProps={({ row }) => ({
             sx: {
               color: row.original.laborerCount > 0 ? "primary.main" : "text.disabled",
+            },
+          })}
+          muiTableBodyRowProps={({ row }) => ({
+            sx: {
+              // Highlight row if it contains the matching settlement reference
+              backgroundColor:
+                highlightRef &&
+                row.original.settlementReferences.includes(highlightRef)
+                  ? alpha(theme.palette.primary.main, 0.15)
+                  : undefined,
+              transition: "background-color 0.3s ease-in-out",
             },
           })}
         />
