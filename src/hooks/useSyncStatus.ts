@@ -90,21 +90,35 @@ export function useSyncStatus(): SyncStatusInfo {
 
   /**
    * Manual refresh handler
+   * Now properly validates that refresh actually completed successfully
    */
   const refresh = useCallback(async () => {
     setIsRefreshing(true);
     setStatus("syncing");
 
     try {
-      await manualRefresh();
-      setLastSyncTime(Date.now());
-      setStatus("success");
+      const success = await manualRefresh();
 
-      // Reset to idle after 2 seconds
-      setTimeout(() => {
-        setStatus("idle");
-      }, 2000);
+      if (success) {
+        setLastSyncTime(Date.now());
+        setStatus("success");
+
+        // Reset to idle after 2 seconds
+        setTimeout(() => {
+          setStatus("idle");
+        }, 2000);
+      } else {
+        // Refresh ran but some operations failed
+        console.warn("Refresh completed with some failures");
+        setStatus("error");
+
+        // Reset to idle after 3 seconds
+        setTimeout(() => {
+          setStatus("idle");
+        }, 3000);
+      }
     } catch (error) {
+      // Orchestrator not initialized or critical failure
       console.error("Manual refresh failed:", error);
       setStatus("error");
 

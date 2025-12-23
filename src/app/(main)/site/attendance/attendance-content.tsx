@@ -92,6 +92,11 @@ import type { WorkUpdates } from "@/types/work-updates.types";
 import type { DailyPaymentRecord } from "@/types/payment.types";
 import { createClient } from "@/lib/supabase/client";
 import { useSite } from "@/contexts/SiteContext";
+import {
+  useAttendanceData,
+  useInvalidateAttendanceData,
+  type RawAttendanceData,
+} from "@/hooks/useAttendanceData";
 import { useAuth } from "@/contexts/AuthContext";
 import { useDateRange } from "@/contexts/DateRangeContext";
 import PageHeader from "@/components/layout/PageHeader";
@@ -442,6 +447,358 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
     setPaidRecordDialog(null);
   };
 
+  // React Query hook for attendance data - properly handles site switching and caching
+  const {
+    data: attendanceQueryData,
+    isLoading: queryLoading,
+    isFetching: queryFetching,
+    isTransitioning: siteTransitioning,
+    refetch: refetchAttendance,
+  } = useAttendanceData({
+    dateFrom,
+    dateTo,
+    isAllTime,
+    enabled: !initialData || initialDataProcessedRef.current,
+  });
+
+  // Hook to invalidate attendance cache after mutations
+  const invalidateAttendance = useInvalidateAttendanceData();
+
+  // Track previous site ID to detect site changes and clear stale data
+  const previousSiteIdRef = useRef<string | null>(null);
+
+  // Clear state immediately when site changes to prevent showing old data
+  useEffect(() => {
+    if (selectedSite?.id && previousSiteIdRef.current !== selectedSite.id) {
+      if (previousSiteIdRef.current !== null) {
+        // Site is changing - clear all attendance-related state immediately
+        setAttendanceRecords([]);
+        setDateSummaries([]);
+        setWorkSummaries(new Map());
+        setLoading(true);
+      }
+      previousSiteIdRef.current = selectedSite.id;
+    }
+  }, [selectedSite?.id]);
+
+  // Process React Query data into component state when data changes
+  // This replaces the old manual fetch + setState pattern
+  useEffect(() => {
+    if (!attendanceQueryData) {
+      return;
+    }
+
+    const { dailyAttendance, marketAttendance, workSummaries: rawWorkSummaries, teaShopEntries } = attendanceQueryData;
+
+    // Build tea shop map (by date)
+    const teaShopMap = new Map<string, TeaShopData>();
+    teaShopEntries.forEach((t: any) => {
+      const existing = teaShopMap.get(t.date) || {
+        teaTotal: 0,
+        snacksTotal: 0,
+        total: 0,
+        workingCount: 0,
+        workingTotal: 0,
+        nonWorkingCount: 0,
+        nonWorkingTotal: 0,
+        marketCount: 0,
+        marketTotal: 0,
+      };
+      existing.teaTotal += t.tea_total || 0;
+      existing.snacksTotal += t.snacks_total || 0;
+      existing.total += t.total_amount || 0;
+      existing.workingCount += t.working_laborer_count || 0;
+      existing.workingTotal += t.working_laborer_total || 0;
+      existing.nonWorkingCount += t.nonworking_laborer_count || 0;
+      existing.nonWorkingTotal += t.nonworking_laborer_total || 0;
+      existing.marketCount += t.market_laborer_count || 0;
+      existing.marketTotal += t.market_laborer_total || 0;
+      teaShopMap.set(t.date, existing);
+    });
+
+    // Build work summaries map
+    const summaryMap = new Map<string, DailyWorkSummary>();
+    rawWorkSummaries.forEach((s: DailyWorkSummary) => {
+      summaryMap.set(s.date, s);
+    });
+    setWorkSummaries(summaryMap);
+
+    // Build market data map
+    const marketMap = new Map<
+      string,
+      {
+        count: number;
+        salary: number;
+        snacks: number;
+        inTime: string | null;
+        outTime: string | null;
+        expandedRecords: MarketLaborerRecord[];
+      }
+    >();
+    marketAttendance.forEach((m: any) => {
+      const existing = marketMap.get(m.date) || {
+        count: 0,
+        salary: 0,
+        snacks: 0,
+        inTime: null,
+        outTime: null,
+        expandedRecords: [],
+      };
+      const roleName = m.labor_roles?.name || "Worker";
+      const ratePerPerson = m.rate_per_person || 0;
+      const dayUnits = m.day_units || m.work_days || 1;
+      const perPersonEarnings = ratePerPerson * dayUnits;
+      const perPersonSnacks = (m.snacks_per_person || 0) * dayUnits;
+
+      // Expand into individual records
+      for (let i = 0; i < m.count; i++) {
+        existing.expandedRecords.push({
+          id: `${m.id || m.date}-${roleName}-${i}`,
+          originalDbId: m.id,
+          roleId: m.role_id,
+          date: m.date,
+          tempName: `${roleName} ${
+            existing.expandedRecords.filter((r) => r.roleName === roleName).length + 1
+          }`,
+          categoryName: "Market",
+          roleName: roleName,
+          index: i + 1,
+          workDays: m.work_days || 1,
+          dayUnits: dayUnits,
+          ratePerPerson: ratePerPerson,
+          dailyEarnings: perPersonEarnings,
+          snacksAmount: perPersonSnacks,
+          inTime: m.in_time || null,
+          outTime: m.out_time || null,
+          isPaid: m.is_paid || false,
+          paidAmount: m.is_paid ? perPersonEarnings : 0,
+          pendingAmount: m.is_paid ? 0 : perPersonEarnings,
+          groupCount: m.count,
+          paymentNotes: m.payment_notes || null,
+          engineerTransactionId: m.engineer_transaction_id || null,
+          expenseId: m.expense_id || null,
+        });
+      }
+
+      existing.count += m.count;
+      existing.salary += m.total_cost || m.count * ratePerPerson * dayUnits;
+      existing.snacks += m.total_snacks || 0;
+      if (!existing.inTime || (m.in_time && m.in_time < existing.inTime)) {
+        existing.inTime = m.in_time;
+      }
+      if (!existing.outTime || (m.out_time && m.out_time > existing.outTime)) {
+        existing.outTime = m.out_time;
+      }
+      marketMap.set(m.date, existing);
+    });
+
+    // Map attendance records
+    const records: AttendanceRecord[] = dailyAttendance.map((record: any) => ({
+      id: record.id,
+      date: record.date,
+      laborer_id: record.laborer_id,
+      laborer_name: record.laborers.name,
+      laborer_type: record.laborers.laborer_type || "daily_wage",
+      category_name: record.laborers.labor_categories?.name || "Unknown",
+      role_name: record.laborers.labor_roles?.name || "Unknown",
+      team_name: record.laborers.team?.name || null,
+      section_name: record.building_sections.name,
+      work_days: record.work_days,
+      hours_worked: record.hours_worked,
+      daily_rate_applied: record.daily_rate_applied,
+      daily_earnings: record.daily_earnings,
+      is_paid: record.is_paid || false,
+      payment_notes: record.payment_notes || null,
+      subcontract_title: record.subcontracts?.title || null,
+      engineer_transaction_id: record.engineer_transaction_id || null,
+      expense_id: record.expense_id || null,
+      paid_via: record.paid_via || null,
+      in_time: record.in_time,
+      lunch_out: record.lunch_out,
+      lunch_in: record.lunch_in,
+      out_time: record.out_time,
+      work_hours: record.work_hours,
+      break_hours: record.break_hours,
+      total_hours: record.total_hours,
+      day_units: record.day_units,
+      snacks_amount: record.snacks_amount || 0,
+      attendance_status: record.attendance_status || "confirmed",
+      work_progress_percent: record.work_progress_percent ?? 100,
+      entered_by: record.recorded_by || null,
+      entered_by_user_id: record.recorded_by_user_id || null,
+      entered_by_avatar: record.recorded_by_user?.avatar_url || null,
+      updated_by: record.updated_by || null,
+      updated_by_user_id: record.updated_by_user_id || null,
+      updated_by_avatar: record.updated_by_user?.avatar_url || null,
+      created_at: record.created_at,
+      updated_at: record.updated_at,
+    }));
+
+    setAttendanceRecords(records);
+
+    // Group by date for date-wise view
+    const dateMap = new Map<string, DateSummary>();
+    records.forEach((record) => {
+      const existing = dateMap.get(record.date);
+
+      if (existing) {
+        existing.records.push(record);
+        if (record.laborer_type === "contract") {
+          existing.contractLaborerCount++;
+          existing.contractLaborerAmount += record.daily_earnings;
+        } else {
+          existing.dailyLaborerCount++;
+          existing.dailyLaborerAmount += record.daily_earnings;
+        }
+        existing.totalLaborerCount =
+          existing.dailyLaborerCount +
+          existing.contractLaborerCount +
+          existing.marketLaborerCount;
+        existing.totalSalary += record.daily_earnings;
+        existing.totalSnacks += record.snacks_amount || 0;
+        existing.totalExpense = existing.totalSalary + existing.totalSnacks;
+        if (record.laborer_type !== "contract") {
+          if (record.is_paid) {
+            existing.paidCount++;
+            existing.paidAmount += record.daily_earnings;
+          } else {
+            existing.pendingCount++;
+            existing.pendingAmount += record.daily_earnings;
+          }
+        }
+        if (
+          record.in_time &&
+          (!existing.firstInTime || record.in_time < existing.firstInTime)
+        ) {
+          existing.firstInTime = record.in_time;
+        }
+        if (
+          record.out_time &&
+          (!existing.lastOutTime || record.out_time > existing.lastOutTime)
+        ) {
+          existing.lastOutTime = record.out_time;
+        }
+        const cat = record.category_name;
+        existing.categoryBreakdown[cat] = existing.categoryBreakdown[cat] || {
+          count: 0,
+          amount: 0,
+        };
+        existing.categoryBreakdown[cat].count += 1;
+        existing.categoryBreakdown[cat].amount += record.daily_earnings;
+      } else {
+        const workSummary = summaryMap.get(record.date);
+        const market = marketMap.get(record.date);
+        const teaShop = teaShopMap.get(record.date);
+        const categoryBreakdown: {
+          [key: string]: { count: number; amount: number };
+        } = {};
+        categoryBreakdown[record.category_name] = {
+          count: 1,
+          amount: record.daily_earnings,
+        };
+
+        const initialPaidCount =
+          record.laborer_type !== "contract" && record.is_paid ? 1 : 0;
+        const initialPendingCount =
+          record.laborer_type !== "contract" && !record.is_paid ? 1 : 0;
+        const initialPaidAmount =
+          record.laborer_type !== "contract" && record.is_paid
+            ? record.daily_earnings
+            : 0;
+        const initialPendingAmount =
+          record.laborer_type !== "contract" && !record.is_paid
+            ? record.daily_earnings
+            : 0;
+
+        dateMap.set(record.date, {
+          date: record.date,
+          records: [record],
+          marketLaborers: market?.expandedRecords || [],
+          dailyLaborerCount: record.laborer_type !== "contract" ? 1 : 0,
+          contractLaborerCount: record.laborer_type === "contract" ? 1 : 0,
+          marketLaborerCount: market?.count || 0,
+          totalLaborerCount: 1 + (market?.count || 0),
+          firstInTime: record.in_time || market?.inTime || null,
+          lastOutTime: record.out_time || market?.outTime || null,
+          totalSalary: record.daily_earnings + (market?.salary || 0),
+          totalSnacks: (record.snacks_amount || 0) + (market?.snacks || 0),
+          totalExpense:
+            record.daily_earnings +
+            (record.snacks_amount || 0) +
+            (market?.salary || 0) +
+            (market?.snacks || 0),
+          dailyLaborerAmount:
+            record.laborer_type !== "contract" ? record.daily_earnings : 0,
+          contractLaborerAmount:
+            record.laborer_type === "contract" ? record.daily_earnings : 0,
+          marketLaborerAmount: market?.salary || 0,
+          paidCount: initialPaidCount,
+          pendingCount: initialPendingCount,
+          paidAmount: initialPaidAmount,
+          pendingAmount: initialPendingAmount,
+          workDescription: workSummary?.work_description || null,
+          workStatus: workSummary?.work_status || null,
+          comments: workSummary?.comments || null,
+          workUpdates:
+            ((workSummary as DailyWorkSummary & { work_updates?: unknown })
+              ?.work_updates as unknown as WorkUpdates) || null,
+          categoryBreakdown,
+          isExpanded: false,
+          teaShop: teaShop || null,
+          attendanceStatus: record.attendance_status || "confirmed",
+          workProgressPercent: record.work_progress_percent ?? 100,
+        });
+      }
+    });
+
+    // Add dates that only have market laborers
+    marketMap.forEach((market, date) => {
+      if (!dateMap.has(date)) {
+        const workSummary = summaryMap.get(date);
+        const teaShop = teaShopMap.get(date);
+        dateMap.set(date, {
+          date,
+          records: [],
+          marketLaborers: market.expandedRecords || [],
+          dailyLaborerCount: 0,
+          contractLaborerCount: 0,
+          marketLaborerCount: market.count,
+          totalLaborerCount: market.count,
+          firstInTime: market.inTime,
+          lastOutTime: market.outTime,
+          totalSalary: market.salary,
+          totalSnacks: market.snacks,
+          totalExpense: market.salary + market.snacks,
+          dailyLaborerAmount: 0,
+          contractLaborerAmount: 0,
+          marketLaborerAmount: market.salary,
+          paidCount: 0,
+          pendingCount: market.count,
+          paidAmount: 0,
+          pendingAmount: market.salary,
+          workDescription: workSummary?.work_description || null,
+          workStatus: workSummary?.work_status || null,
+          comments: workSummary?.comments || null,
+          workUpdates:
+            ((workSummary as DailyWorkSummary & { work_updates?: unknown })
+              ?.work_updates as unknown as WorkUpdates) || null,
+          categoryBreakdown: {},
+          isExpanded: false,
+          teaShop: teaShop || null,
+          attendanceStatus: "confirmed",
+          workProgressPercent: 100,
+        });
+      }
+    });
+
+    setDateSummaries(
+      Array.from(dateMap.values()).sort(
+        (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+      )
+    );
+    setLoading(false);
+  }, [attendanceQueryData]);
+
   // Market laborer edit dialog state
   const [marketLaborerEditOpen, setMarketLaborerEditOpen] = useState(false);
   const [editingMarketLaborer, setEditingMarketLaborer] =
@@ -673,431 +1030,6 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
     return withWeeklySeparators;
   }, [dateSummaries, recentHolidays, dateFrom, dateTo]);
 
-  const fetchAttendanceHistory = useCallback(async () => {
-    if (!selectedSite) {
-      setLoading(false);
-      return;
-    }
-
-    // Increment version and capture current version for this fetch
-    const currentVersion = ++fetchVersionRef.current;
-
-    setLoading(true);
-    try {
-      // Build daily attendance query
-      let attendanceQuery = supabase
-        .from("daily_attendance")
-        .select(
-          `
-          id, date, laborer_id, work_days, hours_worked, daily_rate_applied, daily_earnings, is_paid, payment_notes, subcontract_id,
-          in_time, lunch_out, lunch_in, out_time, work_hours, break_hours, total_hours, day_units, snacks_amount,
-          attendance_status, work_progress_percent,
-          engineer_transaction_id, expense_id, paid_via,
-          entered_by, recorded_by, recorded_by_user_id, updated_by, updated_by_user_id, created_at, updated_at,
-          laborers!inner(name, team_id, category_id, role_id, laborer_type, team:teams!laborers_team_id_fkey(name), labor_categories(name), labor_roles(name)),
-          building_sections!inner(name),
-          subcontracts(title),
-          recorded_by_user:users!daily_attendance_recorded_by_user_id_fkey(avatar_url),
-          updated_by_user:users!daily_attendance_updated_by_user_id_fkey(avatar_url)
-        `
-        )
-        .eq("site_id", selectedSite.id)
-        .order("date", { ascending: false });
-
-      // Only apply date filters if not "All Time"
-      if (!isAllTime && dateFrom && dateTo) {
-        attendanceQuery = attendanceQuery.gte("date", dateFrom).lte("date", dateTo);
-      }
-
-      const { data: attendanceData, error } = await attendanceQuery;
-
-      if (error) throw error;
-
-      // Build market laborer attendance query
-      let marketQuery = (supabase.from("market_laborer_attendance") as any)
-        .select(
-          "id, role_id, date, count, work_days, rate_per_person, total_cost, day_units, snacks_per_person, total_snacks, in_time, out_time, is_paid, payment_notes, labor_roles(name)"
-        )
-        .eq("site_id", selectedSite.id);
-
-      if (!isAllTime && dateFrom && dateTo) {
-        marketQuery = marketQuery.gte("date", dateFrom).lte("date", dateTo);
-      }
-
-      const { data: marketData, error: marketError } = await marketQuery;
-      if (marketError) console.warn("Market laborer query failed:", marketError);
-
-      // Build work summaries query
-      let summaryQuery = (supabase.from("daily_work_summary") as any)
-        .select("*")
-        .eq("site_id", selectedSite.id);
-
-      if (!isAllTime && dateFrom && dateTo) {
-        summaryQuery = summaryQuery.gte("date", dateFrom).lte("date", dateTo);
-      }
-
-      const { data: summaryData, error: summaryError } = await summaryQuery;
-      if (summaryError) console.warn("Work summary query failed:", summaryError);
-
-      // Build tea shop entries query
-      let teaShopQuery = (supabase.from("tea_shop_entries") as any)
-        .select("date, tea_total, snacks_total, total_amount")
-        .eq("site_id", selectedSite.id);
-
-      if (!isAllTime && dateFrom && dateTo) {
-        teaShopQuery = teaShopQuery.gte("date", dateFrom).lte("date", dateTo);
-      }
-
-      const { data: teaShopData, error: teaShopError } = await teaShopQuery;
-      if (teaShopError) console.warn("Tea shop query failed:", teaShopError);
-
-      // Build tea shop map (by date, aggregate if multiple entries per day)
-      // Note: V2 columns (working_laborer_count, etc.) may not exist yet - using defaults
-      const teaShopMap = new Map<string, TeaShopData>();
-      (teaShopData || []).forEach((t: any) => {
-        const existing = teaShopMap.get(t.date) || {
-          teaTotal: 0,
-          snacksTotal: 0,
-          total: 0,
-          workingCount: 0,
-          workingTotal: 0,
-          nonWorkingCount: 0,
-          nonWorkingTotal: 0,
-          marketCount: 0,
-          marketTotal: 0,
-        };
-        existing.teaTotal += t.tea_total || 0;
-        existing.snacksTotal += t.snacks_total || 0;
-        existing.total += t.total_amount || 0;
-        // V2 columns - use 0 as default until migration is applied
-        existing.workingCount += t.working_laborer_count || 0;
-        existing.workingTotal += t.working_laborer_total || 0;
-        existing.nonWorkingCount += t.nonworking_laborer_count || 0;
-        existing.nonWorkingTotal += t.nonworking_laborer_total || 0;
-        existing.marketCount += t.market_laborer_count || 0;
-        existing.marketTotal += t.market_laborer_total || 0;
-        teaShopMap.set(t.date, existing);
-      });
-
-      // Check if this fetch is still current (handle race conditions)
-      if (currentVersion !== fetchVersionRef.current) {
-        console.log("[Attendance] Ignoring stale fetch result");
-        return;
-      }
-
-      // Build work summaries map
-      const summaryMap = new Map<string, DailyWorkSummary>();
-      (summaryData || []).forEach((s: DailyWorkSummary) => {
-        summaryMap.set(s.date, s);
-      });
-      setWorkSummaries(summaryMap);
-
-      // Build market data map (by date) - includes both summary and expanded individual records
-      const marketMap = new Map<
-        string,
-        {
-          count: number;
-          salary: number;
-          snacks: number;
-          inTime: string | null;
-          outTime: string | null;
-          expandedRecords: MarketLaborerRecord[];
-        }
-      >();
-      (marketData || []).forEach((m: any) => {
-        const existing = marketMap.get(m.date) || {
-          count: 0,
-          salary: 0,
-          snacks: 0,
-          inTime: null,
-          outTime: null,
-          expandedRecords: [],
-        };
-        const roleName = m.labor_roles?.name || "Worker";
-        const ratePerPerson = m.rate_per_person || 0;
-        const dayUnits = m.day_units || m.work_days || 1;
-        const perPersonEarnings = ratePerPerson * dayUnits;
-        const perPersonSnacks = (m.snacks_per_person || 0) * dayUnits;
-
-        // Expand into individual records (Mason 1, Mason 2, etc.)
-        for (let i = 0; i < m.count; i++) {
-          existing.expandedRecords.push({
-            id: `${m.id || m.date}-${roleName}-${i}`,
-            originalDbId: m.id,
-            roleId: m.role_id,
-            date: m.date,
-            tempName: `${roleName} ${
-              existing.expandedRecords.filter((r) => r.roleName === roleName)
-                .length + 1
-            }`,
-            categoryName: "Market",
-            roleName: roleName,
-            index: i + 1,
-            workDays: m.work_days || 1,
-            dayUnits: dayUnits,
-            ratePerPerson: ratePerPerson,
-            dailyEarnings: perPersonEarnings,
-            snacksAmount: perPersonSnacks,
-            inTime: m.in_time || null,
-            outTime: m.out_time || null,
-            isPaid: m.is_paid || false,
-            paidAmount: m.is_paid ? perPersonEarnings : 0,
-            pendingAmount: m.is_paid ? 0 : perPersonEarnings,
-            groupCount: m.count,
-            paymentNotes: m.payment_notes || null,
-            engineerTransactionId: m.engineer_transaction_id || null,
-            expenseId: m.expense_id || null,
-          });
-        }
-
-        existing.count += m.count;
-        existing.salary += m.total_cost || m.count * ratePerPerson * dayUnits;
-        existing.snacks += m.total_snacks || 0;
-        if (!existing.inTime || (m.in_time && m.in_time < existing.inTime)) {
-          existing.inTime = m.in_time;
-        }
-        if (
-          !existing.outTime ||
-          (m.out_time && m.out_time > existing.outTime)
-        ) {
-          existing.outTime = m.out_time;
-        }
-        marketMap.set(m.date, existing);
-      });
-
-      // Map attendance records (including audit fields)
-      const records: AttendanceRecord[] = (attendanceData || []).map(
-        (record: any) => ({
-          id: record.id,
-          date: record.date,
-          laborer_id: record.laborer_id,
-          laborer_name: record.laborers.name,
-          laborer_type: record.laborers.laborer_type || "daily_wage",
-          category_name: record.laborers.labor_categories?.name || "Unknown",
-          role_name: record.laborers.labor_roles?.name || "Unknown",
-          team_name: record.laborers.team?.name || null,
-          section_name: record.building_sections.name,
-          work_days: record.work_days,
-          hours_worked: record.hours_worked,
-          daily_rate_applied: record.daily_rate_applied,
-          daily_earnings: record.daily_earnings,
-          is_paid: record.is_paid || false,
-          payment_notes: record.payment_notes || null,
-          subcontract_title: record.subcontracts?.title || null,
-          // Payment/settlement fields
-          engineer_transaction_id: record.engineer_transaction_id || null,
-          expense_id: record.expense_id || null,
-          paid_via: record.paid_via || null,
-          in_time: record.in_time,
-          lunch_out: record.lunch_out,
-          lunch_in: record.lunch_in,
-          out_time: record.out_time,
-          work_hours: record.work_hours,
-          break_hours: record.break_hours,
-          total_hours: record.total_hours,
-          day_units: record.day_units,
-          snacks_amount: record.snacks_amount || 0,
-          // Two-phase attendance fields
-          attendance_status: record.attendance_status || "confirmed",
-          work_progress_percent: record.work_progress_percent ?? 100,
-          // Audit fields
-          entered_by: record.recorded_by || null,
-          entered_by_user_id: record.recorded_by_user_id || null,
-          entered_by_avatar: record.recorded_by_user?.avatar_url || null,
-          updated_by: record.updated_by || null,
-          updated_by_user_id: record.updated_by_user_id || null,
-          updated_by_avatar: record.updated_by_user?.avatar_url || null,
-          created_at: record.created_at,
-          updated_at: record.updated_at,
-        })
-      );
-
-      setAttendanceRecords(records);
-
-      // Group by date for date-wise view
-      const dateMap = new Map<string, DateSummary>();
-      records.forEach((record) => {
-        const existing = dateMap.get(record.date);
-
-        if (existing) {
-          existing.records.push(record);
-          // Update counts
-          if (record.laborer_type === "contract") {
-            existing.contractLaborerCount++;
-            existing.contractLaborerAmount += record.daily_earnings;
-          } else {
-            existing.dailyLaborerCount++;
-            existing.dailyLaborerAmount += record.daily_earnings;
-          }
-          existing.totalLaborerCount =
-            existing.dailyLaborerCount +
-            existing.contractLaborerCount +
-            existing.marketLaborerCount;
-          // Update amounts
-          existing.totalSalary += record.daily_earnings;
-          existing.totalSnacks += record.snacks_amount || 0;
-          existing.totalExpense = existing.totalSalary + existing.totalSnacks;
-          // Update payment breakdown (for daily laborers only - contract laborers tracked separately)
-          if (record.laborer_type !== "contract") {
-            if (record.is_paid) {
-              existing.paidCount++;
-              existing.paidAmount += record.daily_earnings;
-            } else {
-              existing.pendingCount++;
-              existing.pendingAmount += record.daily_earnings;
-            }
-          }
-          // Update times
-          if (
-            record.in_time &&
-            (!existing.firstInTime || record.in_time < existing.firstInTime)
-          ) {
-            existing.firstInTime = record.in_time;
-          }
-          if (
-            record.out_time &&
-            (!existing.lastOutTime || record.out_time > existing.lastOutTime)
-          ) {
-            existing.lastOutTime = record.out_time;
-          }
-          // Update category breakdown
-          const cat = record.category_name;
-          existing.categoryBreakdown[cat] = existing.categoryBreakdown[cat] || {
-            count: 0,
-            amount: 0,
-          };
-          existing.categoryBreakdown[cat].count += 1;
-          existing.categoryBreakdown[cat].amount += record.daily_earnings;
-        } else {
-          const workSummary = summaryMap.get(record.date);
-          const market = marketMap.get(record.date);
-          const teaShop = teaShopMap.get(record.date);
-          const categoryBreakdown: {
-            [key: string]: { count: number; amount: number };
-          } = {};
-          categoryBreakdown[record.category_name] = {
-            count: 1,
-            amount: record.daily_earnings,
-          };
-
-          // Initial payment breakdown for this date
-          const initialPaidCount =
-            record.laborer_type !== "contract" && record.is_paid ? 1 : 0;
-          const initialPendingCount =
-            record.laborer_type !== "contract" && !record.is_paid ? 1 : 0;
-          const initialPaidAmount =
-            record.laborer_type !== "contract" && record.is_paid
-              ? record.daily_earnings
-              : 0;
-          const initialPendingAmount =
-            record.laborer_type !== "contract" && !record.is_paid
-              ? record.daily_earnings
-              : 0;
-
-          dateMap.set(record.date, {
-            date: record.date,
-            records: [record],
-            marketLaborers: market?.expandedRecords || [],
-            dailyLaborerCount: record.laborer_type !== "contract" ? 1 : 0,
-            contractLaborerCount: record.laborer_type === "contract" ? 1 : 0,
-            marketLaborerCount: market?.count || 0,
-            totalLaborerCount: 1 + (market?.count || 0),
-            firstInTime: record.in_time || market?.inTime || null,
-            lastOutTime: record.out_time || market?.outTime || null,
-            totalSalary: record.daily_earnings + (market?.salary || 0),
-            totalSnacks: (record.snacks_amount || 0) + (market?.snacks || 0),
-            totalExpense:
-              record.daily_earnings +
-              (record.snacks_amount || 0) +
-              (market?.salary || 0) +
-              (market?.snacks || 0),
-            // Amounts by laborer type
-            dailyLaborerAmount:
-              record.laborer_type !== "contract" ? record.daily_earnings : 0,
-            contractLaborerAmount:
-              record.laborer_type === "contract" ? record.daily_earnings : 0,
-            marketLaborerAmount: market?.salary || 0,
-            // Payment breakdown
-            paidCount: initialPaidCount,
-            pendingCount: initialPendingCount,
-            paidAmount: initialPaidAmount,
-            pendingAmount: initialPendingAmount,
-            workDescription: workSummary?.work_description || null,
-            workStatus: workSummary?.work_status || null,
-            comments: workSummary?.comments || null,
-            workUpdates:
-              ((workSummary as DailyWorkSummary & { work_updates?: unknown })
-                ?.work_updates as unknown as WorkUpdates) || null,
-            categoryBreakdown,
-            isExpanded: false,
-            teaShop: teaShop || null,
-            attendanceStatus: record.attendance_status || "confirmed",
-            workProgressPercent: record.work_progress_percent ?? 100,
-          });
-        }
-      });
-
-      // Also add dates that only have market laborers (no named laborers)
-      marketMap.forEach((market, date) => {
-        if (!dateMap.has(date)) {
-          const workSummary = summaryMap.get(date);
-          const teaShop = teaShopMap.get(date);
-          dateMap.set(date, {
-            date,
-            records: [],
-            marketLaborers: market.expandedRecords || [],
-            dailyLaborerCount: 0,
-            contractLaborerCount: 0,
-            marketLaborerCount: market.count,
-            totalLaborerCount: market.count,
-            firstInTime: market.inTime,
-            lastOutTime: market.outTime,
-            totalSalary: market.salary,
-            totalSnacks: market.snacks,
-            totalExpense: market.salary + market.snacks,
-            // Amounts by laborer type (market only)
-            dailyLaborerAmount: 0,
-            contractLaborerAmount: 0,
-            marketLaborerAmount: market.salary,
-            // Market laborers payment tracking (pending by default)
-            paidCount: 0,
-            pendingCount: market.count,
-            paidAmount: 0,
-            pendingAmount: market.salary,
-            workDescription: workSummary?.work_description || null,
-            workStatus: workSummary?.work_status || null,
-            comments: workSummary?.comments || null,
-            workUpdates:
-              ((workSummary as DailyWorkSummary & { work_updates?: unknown })
-                ?.work_updates as unknown as WorkUpdates) || null,
-            categoryBreakdown: {},
-            isExpanded: false,
-            teaShop: teaShop || null,
-            attendanceStatus: "confirmed",
-            workProgressPercent: 100,
-          });
-        }
-      });
-
-      setDateSummaries(
-        Array.from(dateMap.values()).sort(
-          (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
-        )
-      );
-    } catch (error: any) {
-      // Only show error if this is still the current fetch
-      if (currentVersion === fetchVersionRef.current) {
-        console.error("Error fetching attendance history:", error);
-        alert("Failed to load attendance history: " + error.message);
-      }
-    } finally {
-      // Only set loading false if this is still the current fetch
-      if (currentVersion === fetchVersionRef.current) {
-        setLoading(false);
-      }
-    }
-  }, [dateFrom, dateTo, isAllTime, selectedSite, supabase]);
-
   // Process initialData from server on first render
   useEffect(() => {
     if (initialData && !initialDataProcessedRef.current) {
@@ -1306,16 +1238,16 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
       // Date range changed beyond server range - need to refetch
       // But only if we actually have a site selected
       if (selectedSite) {
-        fetchAttendanceHistory();
+        invalidateAttendance();
       }
       return;
     }
 
     // No server data - fetch client-side if site is selected
     if (selectedSite) {
-      fetchAttendanceHistory();
+      invalidateAttendance();
     }
-  }, [fetchAttendanceHistory, initialData, dateFrom, dateTo, selectedSite]);
+  }, [invalidateAttendance, initialData, dateFrom, dateTo, selectedSite]);
 
   // Check if today is a holiday for the selected site
   const checkTodayHoliday = useCallback(async () => {
@@ -1376,7 +1308,7 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
 
   const handleHolidaySuccess = () => {
     checkTodayHoliday();
-    fetchAttendanceHistory();
+    invalidateAttendance();
   };
 
   const toggleDateExpanded = (date: string) => {
@@ -1450,7 +1382,7 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
   const handlePaymentSuccess = () => {
     setPaymentDialogOpen(false);
     setPaymentRecords([]);
-    fetchAttendanceHistory();
+    invalidateAttendance();
   };
 
   const handleEditSubmit = async () => {
@@ -1536,7 +1468,7 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
 
       setEditDialogOpen(false);
       setEditingRecord(null);
-      fetchAttendanceHistory();
+      invalidateAttendance();
     } catch (error: any) {
       console.error("Edit failed:", error);
       alert("Failed to update: " + (error.message || "Unknown error"));
@@ -1641,14 +1573,14 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
           .delete()
           .eq("id", record.id);
         if (error) throw error;
-        fetchAttendanceHistory();
+        invalidateAttendance();
       } catch (error: any) {
         alert("Failed to delete: " + error.message);
       } finally {
         setLoading(false);
       }
     },
-    [fetchAttendanceHistory, supabase]
+    [invalidateAttendance, supabase]
   );
 
   // Cancel payment handler - reset payment status
@@ -1667,14 +1599,14 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
           })
           .eq("id", record.id);
         if (error) throw error;
-        fetchAttendanceHistory();
+        invalidateAttendance();
       } catch (error: any) {
         alert("Failed to cancel payment: " + error.message);
       } finally {
         setLoading(false);
       }
     },
-    [fetchAttendanceHistory, supabase]
+    [invalidateAttendance, supabase]
   );
 
   // Cancel market laborer payment handler
@@ -1693,14 +1625,14 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
           })
           .eq("id", record.originalDbId);
         if (error) throw error;
-        fetchAttendanceHistory();
+        invalidateAttendance();
       } catch (error: any) {
         alert("Failed to cancel payment: " + error.message);
       } finally {
         setLoading(false);
       }
     },
-    [fetchAttendanceHistory, supabase]
+    [invalidateAttendance, supabase]
   );
 
   // Market laborer edit handlers
@@ -1807,7 +1739,7 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
 
       setMarketLaborerEditOpen(false);
       setEditingMarketLaborer(null);
-      fetchAttendanceHistory();
+      invalidateAttendance();
     } catch (error: any) {
       console.error("Market laborer edit failed:", error);
       alert("Failed to update: " + (error.message || "Unknown error"));
@@ -1833,7 +1765,7 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
         .eq("id", record.originalDbId);
 
       if (error) throw error;
-      fetchAttendanceHistory();
+      invalidateAttendance();
     } catch (error: any) {
       alert("Failed to delete: " + error.message);
     } finally {
@@ -1917,7 +1849,7 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
         .eq("date", date);
       if (summaryError) throw summaryError;
 
-      fetchAttendanceHistory();
+      invalidateAttendance();
     } catch (error: any) {
       alert("Failed to delete: " + error.message);
     } finally {
@@ -4508,7 +4440,7 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
         siteId={selectedSite?.id || ""}
         date={selectedDateForDrawer}
         onSuccess={() => {
-          fetchAttendanceHistory();
+          invalidateAttendance();
           setSelectedDateForDrawer(undefined);
           setDrawerMode("full");
         }}
@@ -4528,7 +4460,7 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
           entry={teaShopEditingEntry}
           initialDate={teaShopDialogDate}
           onSuccess={() => {
-            fetchAttendanceHistory();
+            invalidateAttendance();
             setTeaShopDialogOpen(false);
             setTeaShopDialogDate(undefined);
             setTeaShopEditingEntry(null);
@@ -4959,7 +4891,7 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
         onSuccess={() => {
           setSettlementDialogOpen(false);
           setSettlementConfig(null);
-          fetchAttendanceHistory();
+          invalidateAttendance();
         }}
       />
 

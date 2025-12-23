@@ -127,19 +127,37 @@ export class BackgroundSyncOrchestrator {
 
   /**
    * Manual refresh all data
+   * @returns true if refresh completed successfully
    */
-  async refreshAll(): Promise<void> {
+  async refreshAll(): Promise<boolean> {
     console.log("Manual refresh triggered");
 
-    await Promise.allSettled([
-      this.syncReferenceData(),
-      this.currentSiteId
-        ? this.syncSiteContextData(this.currentSiteId)
-        : Promise.resolve(),
-      this.syncDashboardData(),
-    ]);
+    try {
+      const results = await Promise.allSettled([
+        this.syncReferenceData(),
+        this.currentSiteId
+          ? this.syncSiteContextData(this.currentSiteId)
+          : Promise.resolve(),
+        this.syncDashboardData(),
+      ]);
 
-    this.updateLastSyncTime("manual");
+      // Check if any sync failed
+      const hasFailures = results.some((r) => r.status === "rejected");
+
+      this.updateLastSyncTime("manual");
+
+      if (hasFailures) {
+        console.warn(
+          "Some sync operations failed:",
+          results.filter((r) => r.status === "rejected")
+        );
+      }
+
+      return !hasFailures;
+    } catch (error) {
+      console.error("Manual refresh failed:", error);
+      return false;
+    }
   }
 
   /**
@@ -420,9 +438,16 @@ export function updateSyncContext(siteId: string): void {
 
 /**
  * Trigger manual refresh
+ * @throws Error if sync orchestrator is not initialized
+ * @returns true if refresh was successful
  */
-export async function manualRefresh(): Promise<void> {
-  await syncOrchestratorInstance?.refreshAll();
+export async function manualRefresh(): Promise<boolean> {
+  if (!syncOrchestratorInstance) {
+    throw new Error(
+      "Sync orchestrator not initialized. Please wait for the app to fully load or refresh the page."
+    );
+  }
+  return await syncOrchestratorInstance.refreshAll();
 }
 
 /**
