@@ -159,24 +159,19 @@ export default function ExpensesPage() {
       // Calculate paid amounts for each subcontract
       const summaries: SubcontractSummary[] = await Promise.all(
         (subcontractsData || []).map(async (sc: any) => {
-          // Get subcontract_payments
+          // Get subcontract_payments (direct payments to subcontractor)
           const { data: paymentsData } = await supabase
             .from("subcontract_payments")
             .select("amount")
             .eq("contract_id", sc.id);
 
-          const directPaid = paymentsData?.reduce((sum, p) => sum + (p.amount || 0), 0) || 0;
+          const directPaid =
+            paymentsData?.reduce((sum, p) => sum + (p.amount || 0), 0) || 0;
 
-          // Get labor_payments linked to this subcontract
-          const { data: laborPaymentsData } = await supabase
-            .from("labor_payments")
-            .select("amount")
-            .eq("subcontract_id", sc.id);
-
-          const laborPaid = laborPaymentsData?.reduce((sum, p) => sum + (p.amount || 0), 0) || 0;
-
-          // Get expenses linked to this subcontract (only cleared expenses count toward paid)
-          // Use v_all_expenses view to include both regular expenses and settlement-derived expenses
+          // Get expenses linked to this subcontract from v_all_expenses
+          // This includes salary settlements (from settlement_groups) which represent labor payments
+          // NOTE: We don't query labor_payments separately because settlement_groups already
+          // aggregates those payments and appears in v_all_expenses. Querying both would double-count.
           const { data: expensesData } = await (supabase as any)
             .from("v_all_expenses")
             .select("amount")
@@ -184,9 +179,14 @@ export default function ExpensesPage() {
             .eq("is_deleted", false)
             .eq("is_cleared", true);
 
-          const expensesPaid = expensesData?.reduce((sum: number, e: any) => sum + (e.amount || 0), 0) || 0;
+          const expensesPaid =
+            expensesData?.reduce(
+              (sum: number, e: any) => sum + (e.amount || 0),
+              0
+            ) || 0;
 
-          const totalPaid = directPaid + laborPaid + expensesPaid;
+          // Total paid = direct subcontract payments + cleared expenses (includes salary settlements)
+          const totalPaid = directPaid + expensesPaid;
 
           return {
             id: sc.id,
