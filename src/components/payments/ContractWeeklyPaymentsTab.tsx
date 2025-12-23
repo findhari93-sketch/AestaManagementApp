@@ -1114,7 +1114,7 @@ export default function ContractWeeklyPaymentsTab({
               enableExpanding
               renderDetailPanel={renderWeekDetailPanel}
               initialState={{
-                sorting: [{ id: "weekStart", desc: true }],
+                sorting: [{ id: "weekLabel", desc: true }],
               }}
               muiTableBodyRowProps={({ row }) => ({
                 "data-row-index": row.index,
