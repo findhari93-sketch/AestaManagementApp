@@ -44,7 +44,18 @@ import {
   Person as PersonIcon,
   CheckCircle as CheckIcon,
   Receipt as ReceiptIcon,
+  Undo as ReturnIcon,
+  MoneyOff as ExpenseIcon,
+  Payments as ReimburseIcon,
+  ToggleOn as ToggleIcon,
+  ToggleOff as ToggleOffIcon,
+  Lock as LockIcon,
+  Info as InfoIcon,
 } from "@mui/icons-material";
+import FormControlLabel from "@mui/material/FormControlLabel";
+import Checkbox from "@mui/material/Checkbox";
+import ToggleButtonGroup from "@mui/material/ToggleButtonGroup";
+import ToggleButton from "@mui/material/ToggleButton";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import PageHeader from "@/components/layout/PageHeader";
@@ -58,6 +69,24 @@ import type {
 } from "@/types/database.types";
 import dayjs from "dayjs";
 import { createPaymentSettlementNotification, createSalaryExpense, clearPendingSalaryExpense } from "@/lib/services/notificationService";
+import PayerSourceSelector, { getPayerSourceLabel, getPayerSourceColor } from "@/components/settlement/PayerSourceSelector";
+import BatchSelector from "@/components/wallet/BatchSelector";
+import {
+  recordDeposit,
+  recordWalletSpending,
+  recordOwnMoneySpending,
+  recordReturn,
+  getPendingReimbursements,
+  settleReimbursement,
+  getAvailableBatches,
+} from "@/lib/services/walletService";
+import type { PayerSource } from "@/types/settlement.types";
+import type {
+  BatchOption,
+  BatchAllocation,
+  ExpenseMoneySource,
+  PendingReimbursement,
+} from "@/types/wallet.types";
 
 interface User {
   id: string;
@@ -121,6 +150,14 @@ export default function EngineerWalletPage() {
   const [openSettlementDialog, setOpenSettlementDialog] = useState(false);
   const [selectedEngineer, setSelectedEngineer] = useState<User | null>(null);
 
+  // New dialog states for three-button UI
+  const [openAddMoneyDialog, setOpenAddMoneyDialog] = useState(false);
+  const [openExpenseDialog, setOpenExpenseDialog] = useState(false);
+  const [openReturnDialog, setOpenReturnDialog] = useState(false);
+  const [openReimbursementDialog, setOpenReimbursementDialog] = useState(false);
+  const [pendingReimbursements, setPendingReimbursements] = useState<PendingReimbursement[]>([]);
+  const [availableBatches, setAvailableBatches] = useState<BatchOption[]>([]);
+
   const { userProfile } = useAuth();
   const supabase = createClient();
 
@@ -146,6 +183,54 @@ export default function EngineerWalletPage() {
     settlement_date: dayjs().format("YYYY-MM-DD"),
     settlement_type: "company_to_engineer" as "company_to_engineer" | "engineer_to_company",
     payment_mode: "cash" as PaymentMode,
+    notes: "",
+  });
+
+  // Add Money Form State
+  const [addMoneyForm, setAddMoneyForm] = useState({
+    user_id: "",
+    payer_source: "trust_account" as PayerSource,
+    payer_name: "",
+    amount: 0,
+    transaction_date: dayjs().format("YYYY-MM-DD"),
+    payment_mode: "cash" as PaymentMode,
+    site_id: "",
+    site_restricted: false,
+    notes: "",
+  });
+
+  // Record Expense Form State
+  const [expenseForm, setExpenseForm] = useState({
+    user_id: "",
+    money_source: "wallet" as ExpenseMoneySource,
+    amount: 0,
+    transaction_date: dayjs().format("YYYY-MM-DD"),
+    site_id: "",
+    recipient_type: "" as RecipientType | "",
+    payment_mode: "cash" as PaymentMode,
+    description: "",
+    notes: "",
+    selected_batches: [] as BatchAllocation[],
+  });
+
+  // Return Money Form State
+  const [returnForm, setReturnForm] = useState({
+    user_id: "",
+    amount: 0,
+    transaction_date: dayjs().format("YYYY-MM-DD"),
+    payment_mode: "cash" as PaymentMode,
+    notes: "",
+    selected_batches: [] as BatchAllocation[],
+  });
+
+  // Settle Reimbursement Form State
+  const [reimbursementForm, setReimbursementForm] = useState({
+    selected_expenses: [] as string[],
+    total_amount: 0,
+    payer_source: "trust_account" as PayerSource,
+    payer_name: "",
+    payment_mode: "cash" as PaymentMode,
+    settled_date: dayjs().format("YYYY-MM-DD"),
     notes: "",
   });
 
@@ -411,6 +496,302 @@ export default function EngineerWalletPage() {
     });
     setOpenTransactionDialog(true);
   };
+
+  // ===== NEW DIALOG HANDLERS =====
+
+  // Add Money to Wallet dialog
+  const handleOpenAddMoneyDialog = () => {
+    setAddMoneyForm({
+      user_id: selectedEngineer?.id || "",
+      payer_source: "trust_account",
+      payer_name: "",
+      amount: 0,
+      transaction_date: dayjs().format("YYYY-MM-DD"),
+      payment_mode: "cash",
+      site_id: "",
+      site_restricted: false,
+      notes: "",
+    });
+    setOpenAddMoneyDialog(true);
+  };
+
+  const handleSaveAddMoney = async () => {
+    try {
+      setError("");
+      setSuccess("");
+
+      if (!addMoneyForm.user_id) {
+        setError("Please select a site engineer");
+        return;
+      }
+
+      if (addMoneyForm.amount <= 0) {
+        setError("Amount must be greater than 0");
+        return;
+      }
+
+      const result = await recordDeposit(supabase, {
+        engineerId: addMoneyForm.user_id,
+        amount: addMoneyForm.amount,
+        payerSource: addMoneyForm.payer_source,
+        payerName: addMoneyForm.payer_name || undefined,
+        paymentMode: addMoneyForm.payment_mode,
+        siteId: addMoneyForm.site_id || undefined,
+        siteRestricted: addMoneyForm.site_restricted,
+        notes: addMoneyForm.notes || undefined,
+        transactionDate: addMoneyForm.transaction_date,
+        userName: userProfile?.name || "Unknown",
+        userId: userProfile?.id || "",
+      });
+
+      if (!result.success) {
+        setError(result.error || "Failed to add money");
+        return;
+      }
+
+      setSuccess(`Money added successfully! Batch Code: ${result.batchCode}`);
+      await fetchData();
+      setOpenAddMoneyDialog(false);
+    } catch (err: any) {
+      setError(err.message || "Failed to add money");
+    }
+  };
+
+  // Record Expense dialog
+  const handleOpenExpenseDialog = async () => {
+    setExpenseForm({
+      user_id: selectedEngineer?.id || "",
+      money_source: "wallet",
+      amount: 0,
+      transaction_date: dayjs().format("YYYY-MM-DD"),
+      site_id: "",
+      recipient_type: "",
+      payment_mode: "cash",
+      description: "",
+      notes: "",
+      selected_batches: [],
+    });
+
+    // Load available batches if engineer is selected
+    if (selectedEngineer?.id) {
+      const batches = await getAvailableBatches(supabase, selectedEngineer.id);
+      setAvailableBatches(batches);
+    }
+
+    setOpenExpenseDialog(true);
+  };
+
+  const handleSaveExpense = async () => {
+    try {
+      setError("");
+      setSuccess("");
+
+      if (!expenseForm.user_id) {
+        setError("Please select a site engineer");
+        return;
+      }
+
+      if (expenseForm.amount <= 0) {
+        setError("Amount must be greater than 0");
+        return;
+      }
+
+      if (!expenseForm.site_id) {
+        setError("Please select a site");
+        return;
+      }
+
+      let result;
+      if (expenseForm.money_source === "wallet") {
+        // Validate batch selection
+        const totalSelected = expenseForm.selected_batches.reduce((sum, b) => sum + b.amount, 0);
+        if (Math.abs(totalSelected - expenseForm.amount) > 0.01) {
+          setError(`Selected batch amount (Rs.${totalSelected.toLocaleString()}) must match expense amount (Rs.${expenseForm.amount.toLocaleString()})`);
+          return;
+        }
+
+        result = await recordWalletSpending(supabase, {
+          engineerId: expenseForm.user_id,
+          amount: expenseForm.amount,
+          siteId: expenseForm.site_id,
+          description: expenseForm.description,
+          recipientType: expenseForm.recipient_type,
+          paymentMode: expenseForm.payment_mode,
+          moneySource: "wallet",
+          batchAllocations: expenseForm.selected_batches,
+          notes: expenseForm.notes || undefined,
+          transactionDate: expenseForm.transaction_date,
+          userName: userProfile?.name || "Unknown",
+          userId: userProfile?.id || "",
+        });
+      } else {
+        result = await recordOwnMoneySpending(supabase, {
+          engineerId: expenseForm.user_id,
+          amount: expenseForm.amount,
+          siteId: expenseForm.site_id,
+          description: expenseForm.description,
+          recipientType: expenseForm.recipient_type,
+          paymentMode: expenseForm.payment_mode,
+          moneySource: "own_money",
+          notes: expenseForm.notes || undefined,
+          transactionDate: expenseForm.transaction_date,
+          userName: userProfile?.name || "Unknown",
+          userId: userProfile?.id || "",
+        });
+      }
+
+      if (!result.success) {
+        setError(result.error || "Failed to record expense");
+        return;
+      }
+
+      const message = expenseForm.money_source === "wallet"
+        ? "Expense recorded from wallet successfully!"
+        : "Expense recorded using own money. Pending reimbursement created.";
+      setSuccess(message);
+      await fetchData();
+      setOpenExpenseDialog(false);
+    } catch (err: any) {
+      setError(err.message || "Failed to record expense");
+    }
+  };
+
+  // Return Money dialog
+  const handleOpenReturnDialog = async () => {
+    setReturnForm({
+      user_id: selectedEngineer?.id || "",
+      amount: 0,
+      transaction_date: dayjs().format("YYYY-MM-DD"),
+      payment_mode: "cash",
+      notes: "",
+      selected_batches: [],
+    });
+
+    // Load available batches if engineer is selected
+    if (selectedEngineer?.id) {
+      const batches = await getAvailableBatches(supabase, selectedEngineer.id);
+      setAvailableBatches(batches);
+    }
+
+    setOpenReturnDialog(true);
+  };
+
+  const handleSaveReturn = async () => {
+    try {
+      setError("");
+      setSuccess("");
+
+      if (!returnForm.user_id) {
+        setError("Please select a site engineer");
+        return;
+      }
+
+      if (returnForm.amount <= 0) {
+        setError("Amount must be greater than 0");
+        return;
+      }
+
+      // Validate batch selection
+      const totalSelected = returnForm.selected_batches.reduce((sum, b) => sum + b.amount, 0);
+      if (Math.abs(totalSelected - returnForm.amount) > 0.01) {
+        setError(`Selected batch amount (Rs.${totalSelected.toLocaleString()}) must match return amount (Rs.${returnForm.amount.toLocaleString()})`);
+        return;
+      }
+
+      const result = await recordReturn(supabase, {
+        engineerId: returnForm.user_id,
+        amount: returnForm.amount,
+        paymentMode: returnForm.payment_mode,
+        batchAllocations: returnForm.selected_batches,
+        notes: returnForm.notes || undefined,
+        transactionDate: returnForm.transaction_date,
+        userName: userProfile?.name || "Unknown",
+        userId: userProfile?.id || "",
+      });
+
+      if (!result.success) {
+        setError(result.error || "Failed to record return");
+        return;
+      }
+
+      setSuccess("Money return recorded successfully!");
+      await fetchData();
+      setOpenReturnDialog(false);
+    } catch (err: any) {
+      setError(err.message || "Failed to record return");
+    }
+  };
+
+  // Settle Reimbursement dialog
+  const handleOpenReimbursementDialog = async () => {
+    // Load pending reimbursements
+    const pending = await getPendingReimbursements(supabase, selectedEngineer?.id);
+    setPendingReimbursements(pending);
+
+    setReimbursementForm({
+      selected_expenses: [],
+      total_amount: 0,
+      payer_source: "trust_account",
+      payer_name: "",
+      payment_mode: "cash",
+      settled_date: dayjs().format("YYYY-MM-DD"),
+      notes: "",
+    });
+
+    setOpenReimbursementDialog(true);
+  };
+
+  const handleSaveReimbursement = async () => {
+    try {
+      setError("");
+      setSuccess("");
+
+      if (reimbursementForm.selected_expenses.length === 0) {
+        setError("Please select at least one pending expense to reimburse");
+        return;
+      }
+
+      if (reimbursementForm.total_amount <= 0) {
+        setError("Amount must be greater than 0");
+        return;
+      }
+
+      // Get engineer ID from first selected expense
+      const firstExpense = pendingReimbursements.find(
+        (p) => reimbursementForm.selected_expenses.includes(p.transaction_id)
+      );
+      if (!firstExpense) {
+        setError("Could not find selected expense");
+        return;
+      }
+
+      const result = await settleReimbursement(supabase, {
+        expenseTransactionIds: reimbursementForm.selected_expenses,
+        engineerId: firstExpense.engineer_id,
+        totalAmount: reimbursementForm.total_amount,
+        payerSource: reimbursementForm.payer_source,
+        payerName: reimbursementForm.payer_name || undefined,
+        paymentMode: reimbursementForm.payment_mode,
+        notes: reimbursementForm.notes || undefined,
+        settledDate: reimbursementForm.settled_date,
+        userName: userProfile?.name || "Unknown",
+        userId: userProfile?.id || "",
+      });
+
+      if (!result.success) {
+        setError(result.error || "Failed to settle reimbursement");
+        return;
+      }
+
+      setSuccess("Reimbursement settled successfully!");
+      await fetchData();
+      setOpenReimbursementDialog(false);
+    } catch (err: any) {
+      setError(err.message || "Failed to settle reimbursement");
+    }
+  };
+
+  // ===== END NEW DIALOG HANDLERS =====
 
   const handleSaveTransaction = async () => {
     try {
@@ -750,20 +1131,30 @@ export default function EngineerWalletPage() {
         subtitle="Track money flow between company and site engineers"
         actions={
           canEdit && (
-            <Box sx={{ display: "flex", gap: 1 }}>
+            <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}>
               <Button
-                variant="outlined"
-                startIcon={<SettlementIcon />}
-                onClick={handleOpenSettlementDialog}
+                variant="contained"
+                color="success"
+                startIcon={<AddIcon />}
+                onClick={handleOpenAddMoneyDialog}
               >
-                Record Settlement
+                Add Money
               </Button>
               <Button
                 variant="contained"
-                startIcon={<AddIcon />}
-                onClick={handleOpenTransactionDialog}
+                color="warning"
+                startIcon={<ExpenseIcon />}
+                onClick={handleOpenExpenseDialog}
               >
-                Record Transaction
+                Record Expense
+              </Button>
+              <Button
+                variant="outlined"
+                color="info"
+                startIcon={<ReturnIcon />}
+                onClick={handleOpenReturnDialog}
+              >
+                Return Money
               </Button>
             </Box>
           )
@@ -1535,6 +1926,663 @@ export default function EngineerWalletPage() {
           <Button onClick={() => setOpenSettlementDialog(false)}>Cancel</Button>
           <Button onClick={handleSaveSettlement} variant="contained">
             Save Settlement
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* ===== NEW DIALOGS ===== */}
+
+      {/* Add Money to Wallet Dialog */}
+      <Dialog
+        open={openAddMoneyDialog}
+        onClose={() => setOpenAddMoneyDialog(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+          <AddIcon color="success" />
+          Add Money to Wallet
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ mt: 2 }}>
+            <Grid container spacing={2}>
+              <Grid size={{ xs: 12 }}>
+                <FormControl fullWidth required>
+                  <InputLabel>Site Engineer</InputLabel>
+                  <Select
+                    value={addMoneyForm.user_id}
+                    label="Site Engineer"
+                    onChange={(e) =>
+                      setAddMoneyForm({ ...addMoneyForm, user_id: e.target.value })
+                    }
+                  >
+                    {engineers.map((eng) => (
+                      <MenuItem key={eng.id} value={eng.id}>
+                        {eng.name} ({eng.role})
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+
+              <Grid size={{ xs: 12 }}>
+                <PayerSourceSelector
+                  value={addMoneyForm.payer_source}
+                  customName={addMoneyForm.payer_name}
+                  onChange={(source) => setAddMoneyForm({ ...addMoneyForm, payer_source: source })}
+                  onCustomNameChange={(name) => setAddMoneyForm({ ...addMoneyForm, payer_name: name })}
+                />
+              </Grid>
+
+              <Grid size={{ xs: 12, md: 6 }}>
+                <TextField
+                  fullWidth
+                  label="Amount"
+                  type="number"
+                  value={addMoneyForm.amount || ""}
+                  onChange={(e) =>
+                    setAddMoneyForm({ ...addMoneyForm, amount: Number(e.target.value) })
+                  }
+                  slotProps={{ input: { startAdornment: "Rs." } }}
+                  required
+                />
+              </Grid>
+              <Grid size={{ xs: 12, md: 6 }}>
+                <TextField
+                  fullWidth
+                  label="Date"
+                  type="date"
+                  value={addMoneyForm.transaction_date}
+                  onChange={(e) =>
+                    setAddMoneyForm({ ...addMoneyForm, transaction_date: e.target.value })
+                  }
+                  slotProps={{ inputLabel: { shrink: true } }}
+                  required
+                />
+              </Grid>
+
+              <Grid size={{ xs: 12 }}>
+                <FormControl fullWidth required>
+                  <InputLabel>Payment Mode</InputLabel>
+                  <Select
+                    value={addMoneyForm.payment_mode}
+                    label="Payment Mode"
+                    onChange={(e) =>
+                      setAddMoneyForm({ ...addMoneyForm, payment_mode: e.target.value as PaymentMode })
+                    }
+                  >
+                    <MenuItem value="cash">Cash</MenuItem>
+                    <MenuItem value="upi">UPI</MenuItem>
+                    <MenuItem value="bank_transfer">Bank Transfer</MenuItem>
+                  </Select>
+                </FormControl>
+              </Grid>
+
+              <Grid size={{ xs: 12 }}>
+                <Divider sx={{ my: 1 }} />
+                <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+                  Site Restriction (Optional)
+                </Typography>
+              </Grid>
+
+              <Grid size={{ xs: 12, md: 8 }}>
+                <FormControl fullWidth>
+                  <InputLabel>Restrict to Site</InputLabel>
+                  <Select
+                    value={addMoneyForm.site_id}
+                    label="Restrict to Site"
+                    onChange={(e) =>
+                      setAddMoneyForm({ ...addMoneyForm, site_id: e.target.value })
+                    }
+                  >
+                    <MenuItem value="">No restriction</MenuItem>
+                    {sites.map((site) => (
+                      <MenuItem key={site.id} value={site.id}>
+                        {site.name}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid size={{ xs: 12, md: 4 }}>
+                {addMoneyForm.site_id && (
+                  <FormControlLabel
+                    control={
+                      <Checkbox
+                        checked={addMoneyForm.site_restricted}
+                        onChange={(e) =>
+                          setAddMoneyForm({ ...addMoneyForm, site_restricted: e.target.checked })
+                        }
+                      />
+                    }
+                    label={
+                      <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                        <LockIcon fontSize="small" />
+                        <Typography variant="body2">Lock to site</Typography>
+                      </Box>
+                    }
+                  />
+                )}
+              </Grid>
+
+              {addMoneyForm.site_restricted && (
+                <Grid size={{ xs: 12 }}>
+                  <Alert severity="warning" icon={<LockIcon />}>
+                    This money can ONLY be used for the selected site. It will be blocked from use on other sites.
+                  </Alert>
+                </Grid>
+              )}
+
+              <Grid size={{ xs: 12 }}>
+                <TextField
+                  fullWidth
+                  label="Notes"
+                  value={addMoneyForm.notes}
+                  onChange={(e) =>
+                    setAddMoneyForm({ ...addMoneyForm, notes: e.target.value })
+                  }
+                  multiline
+                  rows={2}
+                />
+              </Grid>
+            </Grid>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setOpenAddMoneyDialog(false)}>Cancel</Button>
+          <Button onClick={handleSaveAddMoney} variant="contained" color="success">
+            Add Money
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Record Expense Dialog */}
+      <Dialog
+        open={openExpenseDialog}
+        onClose={() => setOpenExpenseDialog(false)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+          <ExpenseIcon color="warning" />
+          Record Expense
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ mt: 2 }}>
+            <Grid container spacing={2}>
+              <Grid size={{ xs: 12 }}>
+                <FormControl fullWidth required>
+                  <InputLabel>Site Engineer</InputLabel>
+                  <Select
+                    value={expenseForm.user_id}
+                    label="Site Engineer"
+                    onChange={async (e) => {
+                      const userId = e.target.value;
+                      setExpenseForm({ ...expenseForm, user_id: userId, selected_batches: [] });
+                      if (userId) {
+                        const batches = await getAvailableBatches(supabase, userId, expenseForm.site_id || null);
+                        setAvailableBatches(batches);
+                      }
+                    }}
+                  >
+                    {engineers.map((eng) => (
+                      <MenuItem key={eng.id} value={eng.id}>
+                        {eng.name} ({eng.role})
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+
+              <Grid size={{ xs: 12 }}>
+                <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+                  Money Source
+                </Typography>
+                <ToggleButtonGroup
+                  value={expenseForm.money_source}
+                  exclusive
+                  onChange={(_, value) => {
+                    if (value) {
+                      setExpenseForm({ ...expenseForm, money_source: value, selected_batches: [] });
+                    }
+                  }}
+                  fullWidth
+                >
+                  <ToggleButton value="wallet" color="primary">
+                    <WalletIcon sx={{ mr: 1 }} />
+                    From Wallet
+                  </ToggleButton>
+                  <ToggleButton value="own_money" color="warning">
+                    <PersonIcon sx={{ mr: 1 }} />
+                    Used Own Money
+                  </ToggleButton>
+                </ToggleButtonGroup>
+              </Grid>
+
+              <Grid size={{ xs: 12 }}>
+                <FormControl fullWidth required>
+                  <InputLabel>Site</InputLabel>
+                  <Select
+                    value={expenseForm.site_id}
+                    label="Site"
+                    onChange={async (e) => {
+                      const siteId = e.target.value;
+                      setExpenseForm({ ...expenseForm, site_id: siteId, selected_batches: [] });
+                      if (expenseForm.user_id) {
+                        const batches = await getAvailableBatches(supabase, expenseForm.user_id, siteId || null);
+                        setAvailableBatches(batches);
+                      }
+                    }}
+                  >
+                    {sites.map((site) => (
+                      <MenuItem key={site.id} value={site.id}>
+                        {site.name}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+
+              <Grid size={{ xs: 12, md: 6 }}>
+                <TextField
+                  fullWidth
+                  label="Amount"
+                  type="number"
+                  value={expenseForm.amount || ""}
+                  onChange={(e) =>
+                    setExpenseForm({ ...expenseForm, amount: Number(e.target.value) })
+                  }
+                  slotProps={{ input: { startAdornment: "Rs." } }}
+                  required
+                />
+              </Grid>
+              <Grid size={{ xs: 12, md: 6 }}>
+                <TextField
+                  fullWidth
+                  label="Date"
+                  type="date"
+                  value={expenseForm.transaction_date}
+                  onChange={(e) =>
+                    setExpenseForm({ ...expenseForm, transaction_date: e.target.value })
+                  }
+                  slotProps={{ inputLabel: { shrink: true } }}
+                  required
+                />
+              </Grid>
+
+              {expenseForm.money_source === "wallet" && expenseForm.user_id && expenseForm.amount > 0 && (
+                <Grid size={{ xs: 12 }}>
+                  <BatchSelector
+                    engineerId={expenseForm.user_id}
+                    siteId={expenseForm.site_id || null}
+                    requiredAmount={expenseForm.amount}
+                    selectedBatches={expenseForm.selected_batches}
+                    onSelectionChange={(batches) =>
+                      setExpenseForm({ ...expenseForm, selected_batches: batches })
+                    }
+                  />
+                </Grid>
+              )}
+
+              {expenseForm.money_source === "own_money" && (
+                <Grid size={{ xs: 12 }}>
+                  <Alert severity="info" icon={<InfoIcon />}>
+                    A pending reimbursement will be created. You can settle it later by specifying who paid the engineer back.
+                  </Alert>
+                </Grid>
+              )}
+
+              <Grid size={{ xs: 12, md: 6 }}>
+                <FormControl fullWidth required>
+                  <InputLabel>Payment Mode</InputLabel>
+                  <Select
+                    value={expenseForm.payment_mode}
+                    label="Payment Mode"
+                    onChange={(e) =>
+                      setExpenseForm({ ...expenseForm, payment_mode: e.target.value as PaymentMode })
+                    }
+                  >
+                    <MenuItem value="cash">Cash</MenuItem>
+                    <MenuItem value="upi">UPI</MenuItem>
+                    <MenuItem value="bank_transfer">Bank Transfer</MenuItem>
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid size={{ xs: 12, md: 6 }}>
+                <FormControl fullWidth>
+                  <InputLabel>Recipient Type</InputLabel>
+                  <Select
+                    value={expenseForm.recipient_type}
+                    label="Recipient Type"
+                    onChange={(e) =>
+                      setExpenseForm({ ...expenseForm, recipient_type: e.target.value as RecipientType })
+                    }
+                  >
+                    <MenuItem value="">Not specified</MenuItem>
+                    <MenuItem value="laborer">Laborer</MenuItem>
+                    <MenuItem value="mesthri">Mesthri</MenuItem>
+                    <MenuItem value="vendor">Vendor</MenuItem>
+                    <MenuItem value="other">Other</MenuItem>
+                  </Select>
+                </FormControl>
+              </Grid>
+
+              <Grid size={{ xs: 12 }}>
+                <TextField
+                  fullWidth
+                  label="Description"
+                  value={expenseForm.description}
+                  onChange={(e) =>
+                    setExpenseForm({ ...expenseForm, description: e.target.value })
+                  }
+                  placeholder="What is this expense for?"
+                />
+              </Grid>
+              <Grid size={{ xs: 12 }}>
+                <TextField
+                  fullWidth
+                  label="Notes"
+                  value={expenseForm.notes}
+                  onChange={(e) =>
+                    setExpenseForm({ ...expenseForm, notes: e.target.value })
+                  }
+                  multiline
+                  rows={2}
+                />
+              </Grid>
+            </Grid>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setOpenExpenseDialog(false)}>Cancel</Button>
+          <Button onClick={handleSaveExpense} variant="contained" color="warning">
+            Record Expense
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Return Money Dialog */}
+      <Dialog
+        open={openReturnDialog}
+        onClose={() => setOpenReturnDialog(false)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+          <ReturnIcon color="info" />
+          Return Money to Company
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ mt: 2 }}>
+            <Grid container spacing={2}>
+              <Grid size={{ xs: 12 }}>
+                <FormControl fullWidth required>
+                  <InputLabel>Site Engineer</InputLabel>
+                  <Select
+                    value={returnForm.user_id}
+                    label="Site Engineer"
+                    onChange={async (e) => {
+                      const userId = e.target.value;
+                      setReturnForm({ ...returnForm, user_id: userId, selected_batches: [] });
+                      if (userId) {
+                        const batches = await getAvailableBatches(supabase, userId);
+                        setAvailableBatches(batches);
+                      }
+                    }}
+                  >
+                    {engineers.map((eng) => (
+                      <MenuItem key={eng.id} value={eng.id}>
+                        {eng.name} ({eng.role})
+                        {walletSummary[eng.id] && walletSummary[eng.id].balance > 0 && (
+                          <Chip
+                            label={`Balance: Rs.${walletSummary[eng.id].balance.toLocaleString()}`}
+                            size="small"
+                            color="success"
+                            sx={{ ml: 1 }}
+                          />
+                        )}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+
+              <Grid size={{ xs: 12, md: 6 }}>
+                <TextField
+                  fullWidth
+                  label="Amount to Return"
+                  type="number"
+                  value={returnForm.amount || ""}
+                  onChange={(e) =>
+                    setReturnForm({ ...returnForm, amount: Number(e.target.value) })
+                  }
+                  slotProps={{ input: { startAdornment: "Rs." } }}
+                  required
+                />
+              </Grid>
+              <Grid size={{ xs: 12, md: 6 }}>
+                <TextField
+                  fullWidth
+                  label="Date"
+                  type="date"
+                  value={returnForm.transaction_date}
+                  onChange={(e) =>
+                    setReturnForm({ ...returnForm, transaction_date: e.target.value })
+                  }
+                  slotProps={{ inputLabel: { shrink: true } }}
+                  required
+                />
+              </Grid>
+
+              {returnForm.user_id && returnForm.amount > 0 && (
+                <Grid size={{ xs: 12 }}>
+                  <BatchSelector
+                    engineerId={returnForm.user_id}
+                    requiredAmount={returnForm.amount}
+                    selectedBatches={returnForm.selected_batches}
+                    onSelectionChange={(batches) =>
+                      setReturnForm({ ...returnForm, selected_batches: batches })
+                    }
+                  />
+                </Grid>
+              )}
+
+              <Grid size={{ xs: 12 }}>
+                <FormControl fullWidth required>
+                  <InputLabel>Payment Mode</InputLabel>
+                  <Select
+                    value={returnForm.payment_mode}
+                    label="Payment Mode"
+                    onChange={(e) =>
+                      setReturnForm({ ...returnForm, payment_mode: e.target.value as PaymentMode })
+                    }
+                  >
+                    <MenuItem value="cash">Cash</MenuItem>
+                    <MenuItem value="upi">UPI</MenuItem>
+                    <MenuItem value="bank_transfer">Bank Transfer</MenuItem>
+                  </Select>
+                </FormControl>
+              </Grid>
+
+              <Grid size={{ xs: 12 }}>
+                <TextField
+                  fullWidth
+                  label="Notes"
+                  value={returnForm.notes}
+                  onChange={(e) =>
+                    setReturnForm({ ...returnForm, notes: e.target.value })
+                  }
+                  multiline
+                  rows={2}
+                />
+              </Grid>
+            </Grid>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setOpenReturnDialog(false)}>Cancel</Button>
+          <Button onClick={handleSaveReturn} variant="contained" color="info">
+            Record Return
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Settle Reimbursement Dialog */}
+      <Dialog
+        open={openReimbursementDialog}
+        onClose={() => setOpenReimbursementDialog(false)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+          <ReimburseIcon color="secondary" />
+          Settle Reimbursement
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ mt: 2 }}>
+            {pendingReimbursements.length === 0 ? (
+              <Alert severity="info">
+                No pending reimbursements found. Engineers need to record expenses using their own money first.
+              </Alert>
+            ) : (
+              <Grid container spacing={2}>
+                <Grid size={{ xs: 12 }}>
+                  <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+                    Select Pending Expenses to Reimburse
+                  </Typography>
+                  <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: 250 }}>
+                    <Table size="small" stickyHeader>
+                      <TableHead>
+                        <TableRow>
+                          <TableCell padding="checkbox" />
+                          <TableCell>Engineer</TableCell>
+                          <TableCell>Site</TableCell>
+                          <TableCell>Description</TableCell>
+                          <TableCell align="right">Amount</TableCell>
+                          <TableCell>Date</TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {pendingReimbursements.map((pr) => (
+                          <TableRow
+                            key={pr.transaction_id}
+                            hover
+                            selected={reimbursementForm.selected_expenses.includes(pr.transaction_id)}
+                          >
+                            <TableCell padding="checkbox">
+                              <Checkbox
+                                checked={reimbursementForm.selected_expenses.includes(pr.transaction_id)}
+                                onChange={(e) => {
+                                  const selected = e.target.checked
+                                    ? [...reimbursementForm.selected_expenses, pr.transaction_id]
+                                    : reimbursementForm.selected_expenses.filter((id) => id !== pr.transaction_id);
+
+                                  const totalAmount = pendingReimbursements
+                                    .filter((p) => selected.includes(p.transaction_id))
+                                    .reduce((sum, p) => sum + p.amount, 0);
+
+                                  setReimbursementForm({
+                                    ...reimbursementForm,
+                                    selected_expenses: selected,
+                                    total_amount: totalAmount,
+                                  });
+                                }}
+                              />
+                            </TableCell>
+                            <TableCell>{pr.engineer_name}</TableCell>
+                            <TableCell>{pr.site_name || "-"}</TableCell>
+                            <TableCell>{pr.description || "-"}</TableCell>
+                            <TableCell align="right">Rs.{pr.amount.toLocaleString()}</TableCell>
+                            <TableCell>{dayjs(pr.transaction_date).format("DD MMM")}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                </Grid>
+
+                {reimbursementForm.selected_expenses.length > 0 && (
+                  <>
+                    <Grid size={{ xs: 12 }}>
+                      <Alert severity="success">
+                        Selected {reimbursementForm.selected_expenses.length} expense(s) totaling{" "}
+                        <strong>Rs.{reimbursementForm.total_amount.toLocaleString()}</strong>
+                      </Alert>
+                    </Grid>
+
+                    <Grid size={{ xs: 12 }}>
+                      <PayerSourceSelector
+                        value={reimbursementForm.payer_source}
+                        customName={reimbursementForm.payer_name}
+                        onChange={(source) =>
+                          setReimbursementForm({ ...reimbursementForm, payer_source: source })
+                        }
+                        onCustomNameChange={(name) =>
+                          setReimbursementForm({ ...reimbursementForm, payer_name: name })
+                        }
+                      />
+                    </Grid>
+
+                    <Grid size={{ xs: 12, md: 6 }}>
+                      <FormControl fullWidth required>
+                        <InputLabel>Payment Mode</InputLabel>
+                        <Select
+                          value={reimbursementForm.payment_mode}
+                          label="Payment Mode"
+                          onChange={(e) =>
+                            setReimbursementForm({
+                              ...reimbursementForm,
+                              payment_mode: e.target.value as PaymentMode,
+                            })
+                          }
+                        >
+                          <MenuItem value="cash">Cash</MenuItem>
+                          <MenuItem value="upi">UPI</MenuItem>
+                          <MenuItem value="bank_transfer">Bank Transfer</MenuItem>
+                        </Select>
+                      </FormControl>
+                    </Grid>
+                    <Grid size={{ xs: 12, md: 6 }}>
+                      <TextField
+                        fullWidth
+                        label="Settlement Date"
+                        type="date"
+                        value={reimbursementForm.settled_date}
+                        onChange={(e) =>
+                          setReimbursementForm({ ...reimbursementForm, settled_date: e.target.value })
+                        }
+                        slotProps={{ inputLabel: { shrink: true } }}
+                        required
+                      />
+                    </Grid>
+
+                    <Grid size={{ xs: 12 }}>
+                      <TextField
+                        fullWidth
+                        label="Notes"
+                        value={reimbursementForm.notes}
+                        onChange={(e) =>
+                          setReimbursementForm({ ...reimbursementForm, notes: e.target.value })
+                        }
+                        multiline
+                        rows={2}
+                      />
+                    </Grid>
+                  </>
+                )}
+              </Grid>
+            )}
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setOpenReimbursementDialog(false)}>Cancel</Button>
+          <Button
+            onClick={handleSaveReimbursement}
+            variant="contained"
+            color="secondary"
+            disabled={reimbursementForm.selected_expenses.length === 0}
+          >
+            Settle Reimbursement
           </Button>
         </DialogActions>
       </Dialog>
