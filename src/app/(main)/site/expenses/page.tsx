@@ -406,13 +406,44 @@ export default function ExpensesPage() {
 
   const columns = useMemo<MRT_ColumnDef<ExpenseWithCategory>[]>(() => {
     const cols: MRT_ColumnDef<ExpenseWithCategory>[] = [
+      // 1st column - Ref Code (pinned)
+      {
+        accessorKey: "settlement_reference",
+        header: "Ref Code",
+        size: 140,
+        filterVariant: "text",
+        enablePinning: true,
+        Cell: ({ cell, row }) => {
+          const ref = cell.getValue<string>();
+          return ref ? (
+            <Chip
+              label={ref}
+              size="small"
+              color="primary"
+              variant="outlined"
+              clickable
+              onClick={() => {
+                const isContractSettlement = row.original.contract_id !== null;
+                const tab = isContractSettlement ? "contract" : "salary";
+                router.push(`/site/payments?tab=${tab}&highlight=${encodeURIComponent(ref)}`);
+              }}
+              sx={{ fontFamily: "monospace", fontWeight: 600, cursor: "pointer" }}
+            />
+          ) : (
+            <Typography variant="body2" color="text.disabled">-</Typography>
+          );
+        },
+      },
+      // 2nd column - Settlement Date (pinned)
       {
         accessorKey: "date",
         header: "Settlement Date",
         size: 130,
+        enablePinning: true,
         Cell: ({ cell }) =>
           dayjs(cell.getValue<string>()).format("DD MMM YYYY"),
       },
+      // 3rd column - Recorded Date
       {
         accessorKey: "recorded_date",
         header: "Recorded Date",
@@ -420,7 +451,6 @@ export default function ExpensesPage() {
         Cell: ({ cell, row }) => {
           const recordedDate = cell.getValue<string>();
           const settlementDate = row.original.date;
-          // Show in different color if dates differ
           const isDifferent = recordedDate && settlementDate && recordedDate !== settlementDate;
           return (
             <Typography
@@ -519,33 +549,6 @@ export default function ExpensesPage() {
               variant="outlined"
               sx={{ color: 'text.disabled', borderColor: 'divider' }}
             />
-          );
-        },
-      },
-      {
-        accessorKey: "settlement_reference",
-        header: "Ref Code",
-        size: 140,
-        filterVariant: "text",
-        Cell: ({ cell, row }) => {
-          const ref = cell.getValue<string>();
-          return ref ? (
-            <Chip
-              label={ref}
-              size="small"
-              color="primary"
-              variant="outlined"
-              clickable
-              onClick={() => {
-                // contract_id indicates this is a contract labor settlement
-                const isContractSettlement = row.original.contract_id !== null;
-                const tab = isContractSettlement ? "contract" : "salary";
-                router.push(`/site/payments?tab=${tab}&highlight=${encodeURIComponent(ref)}`);
-              }}
-              sx={{ fontFamily: "monospace", fontWeight: 600, cursor: "pointer" }}
-            />
-          ) : (
-            <Typography variant="body2" color="text.disabled">-</Typography>
           );
         },
       },
@@ -796,7 +799,15 @@ export default function ExpensesPage() {
         </CardContent>
       </Card>
 
-      <DataTable columns={columns} data={expenses} isLoading={loading} />
+      <DataTable
+        columns={columns}
+        data={expenses}
+        isLoading={loading}
+        enableColumnPinning
+        initialState={{
+          columnPinning: { left: ["settlement_reference", "date"] },
+        }}
+      />
 
       <Dialog
         open={dialogOpen}
