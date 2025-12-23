@@ -25,6 +25,7 @@ import {
   ToggleButtonGroup,
   ToggleButton,
   Tooltip,
+  IconButton,
 } from "@mui/material";
 import {
   Refresh as RefreshIcon,
@@ -32,6 +33,8 @@ import {
   History as HistoryIcon,
   CalendarMonth as CalendarMonthIcon,
   Person as PersonIcon,
+  Visibility as VisibilityIcon,
+  Receipt as ReceiptIcon,
 } from "@mui/icons-material";
 import { createClient } from "@/lib/supabase/client";
 import { useSite } from "@/contexts/SiteContext";
@@ -42,6 +45,8 @@ import PaymentRefDialog from "./PaymentRefDialog";
 import ContractPaymentHistoryDialog from "./ContractPaymentHistoryDialog";
 import ContractLaborerSummaryDashboard from "./ContractLaborerSummaryDashboard";
 import ContractPaymentRecordDialog from "./ContractPaymentRecordDialog";
+import WeekSettlementsDialog from "./WeekSettlementsDialog";
+import ContractPaymentEditDialog from "./ContractPaymentEditDialog";
 import type {
   PaymentStatus,
   PaymentSummaryData,
@@ -152,6 +157,10 @@ export default function ContractWeeklyPaymentsTab({
   const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
   const [refDialogOpen, setRefDialogOpen] = useState(false);
   const [selectedRef, setSelectedRef] = useState<string | null>(null);
+  const [weekDetailsDialogOpen, setWeekDetailsDialogOpen] = useState(false);
+  const [selectedWeekForDetails, setSelectedWeekForDetails] = useState<WeekRowData | null>(null);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [editingPaymentDetails, setEditingPaymentDetails] = useState<import("@/types/payment.types").PaymentDetails | null>(null);
 
   // Date range
   const dateRange = useMemo(() => {
@@ -358,9 +367,9 @@ export default function ContractWeeklyPaymentsTab({
         const lastPayment = data.payments
           .sort((a: any, b: any) => new Date(b.actual_payment_date).getTime() - new Date(a.actual_payment_date).getTime())[0];
 
-        // Collect all settlement references from payments for highlighting
+        // Collect all payment references from payments for highlighting
         const settlementReferences = data.payments
-          .map((p: any) => p.settlement_reference)
+          .map((p: any) => p.payment_reference)
           .filter((ref: string | null): ref is string => ref != null && ref !== "");
 
         laborerViews.push({
@@ -790,6 +799,106 @@ export default function ContractWeeklyPaymentsTab({
           />
         ),
       },
+      {
+        accessorKey: "settlementReferences",
+        header: "Settlements",
+        size: 140,
+        Cell: ({ row }) => {
+          const refs = row.original.settlementReferences;
+          if (!refs || refs.length === 0) {
+            return <Typography variant="body2" color="text.secondary">No payments</Typography>;
+          }
+
+          const count = refs.length;
+
+          // Tooltip content with clickable ref codes
+          const TooltipContent = () => (
+            <Box sx={{ p: 1 }}>
+              <Typography variant="caption" fontWeight={600} sx={{ display: "block", mb: 1 }}>
+                {count} Payment{count > 1 ? "s" : ""}:
+              </Typography>
+              <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
+                {refs.map((ref) => (
+                  <Chip
+                    key={ref}
+                    label={ref}
+                    size="small"
+                    variant="outlined"
+                    sx={{
+                      fontFamily: "monospace",
+                      fontSize: "0.65rem",
+                      cursor: "pointer",
+                      "&:hover": { bgcolor: "action.hover" },
+                    }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedRef(ref);
+                      setRefDialogOpen(true);
+                    }}
+                  />
+                ))}
+              </Box>
+            </Box>
+          );
+
+          return (
+            <Tooltip
+              title={<TooltipContent />}
+              arrow
+              placement="left"
+              componentsProps={{
+                tooltip: {
+                  sx: {
+                    bgcolor: "background.paper",
+                    color: "text.primary",
+                    boxShadow: 3,
+                    "& .MuiTooltip-arrow": { color: "background.paper" },
+                    maxWidth: 300,
+                  },
+                },
+              }}
+            >
+              <Chip
+                size="small"
+                icon={<ReceiptIcon sx={{ fontSize: 14 }} />}
+                label={`${count} Settlement${count > 1 ? "s" : ""}`}
+                color={count > 0 ? "primary" : "default"}
+                variant="outlined"
+                sx={{ cursor: "pointer" }}
+              />
+            </Tooltip>
+          );
+        },
+      },
+      {
+        id: "actions",
+        header: "Actions",
+        size: 80,
+        Cell: ({ row }) => {
+          const refs = row.original.settlementReferences;
+          const hasPayments = refs && refs.length > 0;
+
+          return (
+            <Box sx={{ display: "flex", gap: 0.5 }}>
+              {hasPayments && (
+                <Tooltip title="View all settlements for this week">
+                  <IconButton
+                    size="small"
+                    color="primary"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedWeekForDetails(row.original);
+                      setWeekDetailsDialogOpen(true);
+                    }}
+                  >
+                    <VisibilityIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              )}
+            </Box>
+          );
+        },
+      },
     ],
     []
   );
@@ -1169,7 +1278,7 @@ export default function ContractWeeklyPaymentsTab({
       <ContractPaymentRecordDialog
         open={paymentDialogOpen}
         onClose={() => setPaymentDialogOpen(false)}
-        laborers={laborers}
+        weeks={weekGroups}
         onSuccess={handlePaymentSuccess}
       />
 
@@ -1191,6 +1300,44 @@ export default function ContractWeeklyPaymentsTab({
           setSelectedRef(null);
         }}
         paymentReference={selectedRef}
+        onEdit={(details) => {
+          setEditingPaymentDetails(details);
+          setEditDialogOpen(true);
+        }}
+      />
+
+      {/* Week Settlements Dialog */}
+      <WeekSettlementsDialog
+        open={weekDetailsDialogOpen}
+        onClose={() => {
+          setWeekDetailsDialogOpen(false);
+          setSelectedWeekForDetails(null);
+        }}
+        week={selectedWeekForDetails}
+        onViewPayment={(ref) => {
+          setSelectedRef(ref);
+          setRefDialogOpen(true);
+        }}
+        onEditPayment={(ref) => {
+          // Open payment ref dialog first to get details, then edit
+          setSelectedRef(ref);
+          setRefDialogOpen(true);
+        }}
+      />
+
+      {/* Payment Edit Dialog */}
+      <ContractPaymentEditDialog
+        open={editDialogOpen}
+        onClose={() => {
+          setEditDialogOpen(false);
+          setEditingPaymentDetails(null);
+        }}
+        paymentDetails={editingPaymentDetails}
+        onSuccess={() => {
+          fetchData();
+          setEditDialogOpen(false);
+          setEditingPaymentDetails(null);
+        }}
       />
     </Box>
   );

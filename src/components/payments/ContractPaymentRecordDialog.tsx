@@ -22,11 +22,17 @@ import {
   Alert,
   CircularProgress,
   Collapse,
-  Autocomplete,
   Chip,
   LinearProgress,
   Avatar,
   Divider,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Paper,
 } from "@mui/material";
 import { DatePicker } from "@mui/x-date-pickers/DatePicker";
 import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider";
@@ -35,11 +41,12 @@ import {
   Payment as PaymentIcon,
   AccountBalanceWallet as WalletIcon,
   Info as InfoIcon,
+  CalendarMonth as CalendarIcon,
 } from "@mui/icons-material";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSite } from "@/contexts/SiteContext";
-import { processContractPayment } from "@/lib/services/settlementService";
+import { processWaterfallContractPayment } from "@/lib/services/settlementService";
 import FileUploader, { UploadedFile } from "@/components/common/FileUploader";
 import SubcontractLinkSelector from "./SubcontractLinkSelector";
 import PayerSourceSelector from "@/components/settlement/PayerSourceSelector";
@@ -48,7 +55,6 @@ import type {
   PaymentMode,
   PaymentChannel,
   ContractPaymentType,
-  ContractLaborerPaymentView,
 } from "@/types/payment.types";
 import type { PayerSource } from "@/types/settlement.types";
 
@@ -60,29 +66,65 @@ interface Engineer {
   wallet_balance?: number;
 }
 
+// Week laborer data for display in dialog
+interface WeekLaborerData {
+  laborerId: string;
+  laborerName: string;
+  laborerRole: string | null;
+  teamId: string | null;
+  teamName: string | null;
+  subcontractId: string | null;
+  subcontractTitle: string | null;
+  daysWorked: number;
+  earned: number;
+  paid: number;
+  balance: number;
+  progress: number;
+}
+
+// Week row data passed from parent
+export interface WeekRowData {
+  id: string;
+  weekStart: string;
+  weekEnd: string;
+  weekLabel: string;
+  laborerCount: number;
+  totalSalary: number;
+  totalPaid: number;
+  totalDue: number;
+  paymentProgress: number;
+  status: string;
+  laborers: WeekLaborerData[];
+  settlementReferences: string[];
+}
+
 interface ContractPaymentRecordDialogProps {
   open: boolean;
   onClose: () => void;
-  laborers: ContractLaborerPaymentView[];
-  preselectedLaborerId?: string;
+  weeks: WeekRowData[];
   onSuccess?: () => void;
+}
+
+// Allocation preview for a single week
+interface WeekAllocationPreview {
+  weekLabel: string;
+  weekStart: string;
+  weekEnd: string;
+  weekDue: number;
+  allocated: number;
+  isFullyPaid: boolean;
+  laborerCount: number;
 }
 
 export default function ContractPaymentRecordDialog({
   open,
   onClose,
-  laborers,
-  preselectedLaborerId,
+  weeks,
   onSuccess,
 }: ContractPaymentRecordDialogProps) {
   const { userProfile } = useAuth();
   const { selectedSite } = useSite();
   const supabase = createClient();
-
-  // Laborer selection
-  const [selectedLaborerId, setSelectedLaborerId] = useState<string | null>(
-    preselectedLaborerId || null
-  );
 
   // Form state
   const [amount, setAmount] = useState<number>(0);
@@ -103,33 +145,54 @@ export default function ContractPaymentRecordDialog({
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Get selected laborer
-  const selectedLaborer = useMemo(
-    () => laborers.find((l) => l.laborerId === selectedLaborerId) || null,
-    [laborers, selectedLaborerId]
+  // Get weeks with outstanding balance, sorted oldest first
+  const weeksWithBalance = useMemo(
+    () => weeks
+      .filter((w) => w.totalDue > 0)
+      .sort((a, b) => new Date(a.weekStart).getTime() - new Date(b.weekStart).getTime()),
+    [weeks]
   );
 
-  // Filter laborers with outstanding balance
-  const laborersWithBalance = useMemo(
-    () => laborers.filter((l) => l.outstanding > 0),
-    [laborers]
+  // Calculate total outstanding across all weeks
+  const totalOutstanding = useMemo(
+    () => weeksWithBalance.reduce((sum, w) => sum + w.totalDue, 0),
+    [weeksWithBalance]
   );
 
-  // Set default amount when laborer is selected
-  useEffect(() => {
-    if (selectedLaborer && selectedLaborer.outstanding > 0) {
-      setAmount(selectedLaborer.outstanding);
-      // Auto-set subcontract if laborer has one
-      if (selectedLaborer.subcontractId) {
-        setSubcontractId(selectedLaborer.subcontractId);
-      }
+  // Calculate waterfall allocation preview
+  const allocationPreview = useMemo(() => {
+    if (amount <= 0 || weeksWithBalance.length === 0) return [];
+
+    const preview: WeekAllocationPreview[] = [];
+    let remaining = amount;
+
+    for (const week of weeksWithBalance) {
+      if (remaining <= 0) break;
+
+      const allocatedToWeek = Math.min(remaining, week.totalDue);
+
+      preview.push({
+        weekLabel: week.weekLabel,
+        weekStart: week.weekStart,
+        weekEnd: week.weekEnd,
+        weekDue: week.totalDue,
+        allocated: allocatedToWeek,
+        isFullyPaid: allocatedToWeek >= week.totalDue,
+        laborerCount: week.laborers.filter(l => l.balance > 0).length,
+      });
+
+      remaining -= allocatedToWeek;
     }
-  }, [selectedLaborer]);
+
+    return preview;
+  }, [amount, weeksWithBalance]);
+
+  // Check if payment exceeds total outstanding
+  const hasExcessPayment = amount > totalOutstanding;
 
   // Reset form on close
   useEffect(() => {
     if (!open) {
-      setSelectedLaborerId(preselectedLaborerId || null);
       setAmount(0);
       setPaymentMode("upi");
       setPaymentChannel("direct");
@@ -143,7 +206,7 @@ export default function ContractPaymentRecordDialog({
       setNotes("");
       setError(null);
     }
-  }, [open, preselectedLaborerId]);
+  }, [open]);
 
   // Fetch site engineers
   useEffect(() => {
@@ -194,37 +257,9 @@ export default function ContractPaymentRecordDialog({
     fetchEngineers();
   }, [selectedSite?.id, open, supabase]);
 
-  // Calculate auto-allocation preview
-  const allocationPreview = useMemo(() => {
-    if (!selectedLaborer || amount <= 0 || paymentType !== "salary") return [];
-
-    const preview: { weekLabel: string; amount: number; isFullyPaid: boolean }[] = [];
-    let remaining = amount;
-
-    // Sort weeks by oldest first
-    const sortedWeeks = [...selectedLaborer.weeklyBreakdown].sort(
-      (a, b) => new Date(a.weekStart).getTime() - new Date(b.weekStart).getTime()
-    );
-
-    for (const week of sortedWeeks) {
-      if (remaining <= 0) break;
-      if (week.balance <= 0) continue;
-
-      const allocAmount = Math.min(remaining, week.balance);
-      preview.push({
-        weekLabel: week.weekLabel,
-        amount: allocAmount,
-        isFullyPaid: allocAmount >= week.balance,
-      });
-      remaining -= allocAmount;
-    }
-
-    return preview;
-  }, [selectedLaborer, amount, paymentType]);
-
   const handleSubmit = async () => {
-    if (!selectedLaborer || !selectedSite || !userProfile || amount <= 0) {
-      setError("Please select a laborer and enter a valid amount");
+    if (!selectedSite || !userProfile || amount <= 0) {
+      setError("Please enter a valid payment amount");
       return;
     }
 
@@ -233,23 +268,40 @@ export default function ContractPaymentRecordDialog({
       return;
     }
 
+    if (weeksWithBalance.length === 0) {
+      setError("No outstanding balance to settle");
+      return;
+    }
+
     setProcessing(true);
     setError(null);
 
     try {
-      // Get the oldest unpaid week for payment reference
-      const oldestUnpaidWeek = selectedLaborer.weeklyBreakdown
-        .filter((w) => w.balance > 0)
-        .sort((a, b) => new Date(a.weekStart).getTime() - new Date(b.weekStart).getTime())[0];
+      // Build the weeks data with laborers for the service
+      const weeksToProcess = allocationPreview.map((preview) => {
+        const week = weeksWithBalance.find((w) => w.weekStart === preview.weekStart)!;
+        return {
+          weekStart: week.weekStart,
+          weekEnd: week.weekEnd,
+          weekLabel: week.weekLabel,
+          allocatedAmount: preview.allocated,
+          laborers: week.laborers
+            .filter((l) => l.balance > 0)
+            .map((l) => ({
+              laborerId: l.laborerId,
+              laborerName: l.laborerName,
+              balance: l.balance,
+              subcontractId: l.subcontractId,
+            })),
+        };
+      });
 
-      const result = await processContractPayment(supabase, {
+      const result = await processWaterfallContractPayment(supabase, {
         siteId: selectedSite.id,
-        laborerId: selectedLaborer.laborerId,
-        laborerName: selectedLaborer.laborerName,
-        amount: amount,
+        weeks: weeksToProcess,
+        totalAmount: amount,
         paymentType: paymentType,
         actualPaymentDate: actualPaymentDate.format("YYYY-MM-DD"),
-        paymentForDate: oldestUnpaidWeek?.weekStart || actualPaymentDate.format("YYYY-MM-DD"),
         paymentMode: paymentMode,
         paymentChannel: paymentChannel,
         payerSource: moneySource,
@@ -288,19 +340,27 @@ export default function ContractPaymentRecordDialog({
   }, []);
 
   const canSubmit =
-    selectedLaborer && amount > 0 && (paymentChannel !== "engineer_wallet" || selectedEngineerId);
+    amount > 0 && (paymentChannel !== "engineer_wallet" || selectedEngineerId);
+
+  // Format currency
+  const formatCurrency = (amt: number) => {
+    if (amt >= 100000) {
+      return `Rs.${(amt / 100000).toFixed(1)}L`;
+    }
+    return `Rs.${amt.toLocaleString()}`;
+  };
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
+    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
       <DialogTitle>
         <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <Box>
             <Typography variant="h6">Record Payment</Typography>
             <Typography variant="body2" color="text.secondary">
-              Contract laborer payment
+              Auto-allocates to oldest week first (waterfall)
             </Typography>
           </Box>
-          <PaymentIcon color="primary" />
+          <CalendarIcon color="primary" />
         </Box>
       </DialogTitle>
 
@@ -311,107 +371,34 @@ export default function ContractPaymentRecordDialog({
           </Alert>
         )}
 
-        {/* Laborer Selection */}
-        <Box sx={{ mb: 3 }}>
-          <Typography variant="subtitle2" gutterBottom>
-            Select Laborer
+        {/* Outstanding Summary */}
+        <Box sx={{ mb: 3, p: 2, bgcolor: "warning.50", borderRadius: 1, border: 1, borderColor: "warning.main" }}>
+          <Typography variant="subtitle2" color="warning.dark" gutterBottom>
+            Outstanding Balance Summary
           </Typography>
-          <Autocomplete
-            options={laborersWithBalance}
-            getOptionLabel={(option) =>
-              `${option.laborerName}${option.teamName ? ` (${option.teamName})` : ""} - Due: Rs.${option.outstanding.toLocaleString()}`
-            }
-            value={selectedLaborer}
-            onChange={(_, newValue) => {
-              setSelectedLaborerId(newValue?.laborerId || null);
-            }}
-            renderInput={(params) => (
-              <TextField {...params} placeholder="Search laborer..." size="small" fullWidth />
-            )}
-            renderOption={(props, option) => (
-              <Box component="li" {...props}>
-                <Box sx={{ flex: 1 }}>
-                  <Typography variant="body2">{option.laborerName}</Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    {option.teamName || "No team"} | Due: Rs.{option.outstanding.toLocaleString()}
-                  </Typography>
-                </Box>
-                <Chip
-                  label={`${option.paymentProgress.toFixed(0)}%`}
-                  size="small"
-                  color={option.paymentProgress >= 100 ? "success" : option.paymentProgress > 50 ? "warning" : "error"}
-                  variant="outlined"
-                />
+          <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <Box>
+              <Typography variant="h5" fontWeight={600} color="error.main">
+                {formatCurrency(totalOutstanding)}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                across {weeksWithBalance.length} week{weeksWithBalance.length !== 1 ? "s" : ""}
+              </Typography>
+            </Box>
+            {weeksWithBalance.length > 0 && (
+              <Box sx={{ textAlign: "right" }}>
+                <Typography variant="body2" color="text.secondary">
+                  Oldest: {weeksWithBalance[0].weekLabel}
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Due: {formatCurrency(weeksWithBalance[0].totalDue)}
+                </Typography>
               </Box>
             )}
-            disabled={processing}
-            noOptionsText="No laborers with outstanding balance"
-          />
+          </Box>
         </Box>
 
-        {/* Selected Laborer Details */}
-        {selectedLaborer && (
-          <Box sx={{ mb: 3, p: 2, bgcolor: "action.hover", borderRadius: 1 }}>
-            <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 1 }}>
-              <Typography variant="subtitle2">{selectedLaborer.laborerName}</Typography>
-              <Chip
-                label={selectedLaborer.status}
-                size="small"
-                color={
-                  selectedLaborer.status === "completed"
-                    ? "success"
-                    : selectedLaborer.status === "partial"
-                      ? "warning"
-                      : "error"
-                }
-              />
-            </Box>
-
-            <Box sx={{ display: "flex", justifyContent: "space-between", mb: 0.5 }}>
-              <Typography variant="body2" color="text.secondary">
-                Total Earned:
-              </Typography>
-              <Typography variant="body2">Rs.{selectedLaborer.totalEarned.toLocaleString()}</Typography>
-            </Box>
-            <Box sx={{ display: "flex", justifyContent: "space-between", mb: 0.5 }}>
-              <Typography variant="body2" color="text.secondary">
-                Total Paid:
-              </Typography>
-              <Typography variant="body2" color="success.main">
-                Rs.{selectedLaborer.totalPaid.toLocaleString()}
-              </Typography>
-            </Box>
-            <Divider sx={{ my: 1 }} />
-            <Box sx={{ display: "flex", justifyContent: "space-between" }}>
-              <Typography variant="body2" fontWeight={600}>
-                Outstanding:
-              </Typography>
-              <Typography variant="body2" fontWeight={600} color="error.main">
-                Rs.{selectedLaborer.outstanding.toLocaleString()}
-              </Typography>
-            </Box>
-
-            <Box sx={{ mt: 2 }}>
-              <LinearProgress
-                variant="determinate"
-                value={Math.min(selectedLaborer.paymentProgress, 100)}
-                color={
-                  selectedLaborer.paymentProgress >= 100
-                    ? "success"
-                    : selectedLaborer.paymentProgress > 50
-                      ? "warning"
-                      : "error"
-                }
-                sx={{ height: 6, borderRadius: 1 }}
-              />
-              <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: "block" }}>
-                {selectedLaborer.paymentProgress.toFixed(0)}% paid
-              </Typography>
-            </Box>
-          </Box>
-        )}
-
-        {/* Amount */}
+        {/* Payment Amount */}
         <Box sx={{ mb: 3 }}>
           <Typography variant="subtitle2" gutterBottom>
             Payment Amount
@@ -429,12 +416,14 @@ export default function ContractPaymentRecordDialog({
                 </Typography>
               ),
             }}
-            helperText={
-              selectedLaborer
-                ? `Full balance: Rs.${selectedLaborer.outstanding.toLocaleString()}`
-                : "Select a laborer first"
-            }
+            helperText={`Total outstanding: ${formatCurrency(totalOutstanding)}`}
           />
+          {hasExcessPayment && (
+            <Alert severity="warning" sx={{ mt: 1 }}>
+              Payment exceeds total outstanding by {formatCurrency(amount - totalOutstanding)}.
+              This will create an advance credit.
+            </Alert>
+          )}
         </Box>
 
         {/* Payment Type */}
@@ -447,29 +436,64 @@ export default function ContractPaymentRecordDialog({
               value={paymentType}
               onChange={(e) => setPaymentType(e.target.value as ContractPaymentType)}
             >
-              <MenuItem value="salary">Salary (Auto-allocate to weeks)</MenuItem>
+              <MenuItem value="salary">Salary (Auto-allocate oldest week first)</MenuItem>
               <MenuItem value="advance">Advance (Tracked separately)</MenuItem>
               <MenuItem value="other">Other</MenuItem>
             </Select>
           </FormControl>
         </Box>
 
-        {/* Auto-allocation Preview */}
+        {/* Waterfall Allocation Preview */}
         {paymentType === "salary" && allocationPreview.length > 0 && (
           <Alert severity="info" sx={{ mb: 3 }} icon={<InfoIcon fontSize="small" />}>
             <Typography variant="body2" fontWeight={500} gutterBottom>
-              This payment will be allocated to:
+              Payment will be allocated oldest-to-newest:
             </Typography>
-            {allocationPreview.map((item, idx) => (
-              <Box key={idx} sx={{ display: "flex", alignItems: "center", gap: 1, mt: 0.5 }}>
-                <Typography variant="body2">
-                  {item.weekLabel}: Rs.{item.amount.toLocaleString()}
-                </Typography>
-                {item.isFullyPaid && (
-                  <Chip label="Fully Paid" size="small" color="success" variant="outlined" />
-                )}
-              </Box>
-            ))}
+            <TableContainer component={Paper} variant="outlined" sx={{ mt: 1 }}>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Week</TableCell>
+                    <TableCell align="right">Due</TableCell>
+                    <TableCell align="right">Allocated</TableCell>
+                    <TableCell align="center">Status</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {allocationPreview.map((item, index) => (
+                    <TableRow key={item.weekStart}>
+                      <TableCell>
+                        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                          <Typography variant="body2">{item.weekLabel}</Typography>
+                          {index === 0 && (
+                            <Chip label="Oldest" size="small" color="warning" variant="outlined" />
+                          )}
+                        </Box>
+                        <Typography variant="caption" color="text.secondary">
+                          {item.laborerCount} laborer{item.laborerCount !== 1 ? "s" : ""}
+                        </Typography>
+                      </TableCell>
+                      <TableCell align="right">{formatCurrency(item.weekDue)}</TableCell>
+                      <TableCell align="right" sx={{ fontWeight: 600 }}>
+                        {formatCurrency(item.allocated)}
+                      </TableCell>
+                      <TableCell align="center">
+                        {item.isFullyPaid ? (
+                          <Chip label="Fully Cleared" size="small" color="success" variant="outlined" />
+                        ) : (
+                          <Chip label="Partial" size="small" color="warning" variant="outlined" />
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+            {allocationPreview.length < weeksWithBalance.length && (
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: "block" }}>
+                {weeksWithBalance.length - allocationPreview.length} more week(s) will remain unpaid
+              </Typography>
+            )}
           </Alert>
         )}
 
@@ -649,7 +673,7 @@ export default function ContractPaymentRecordDialog({
           disabled={!canSubmit || processing}
           startIcon={processing ? <CircularProgress size={18} /> : <PaymentIcon />}
         >
-          {processing ? "Processing..." : `Record Rs.${amount.toLocaleString()}`}
+          {processing ? "Processing..." : `Record ${formatCurrency(amount)}`}
         </Button>
       </DialogActions>
     </Dialog>

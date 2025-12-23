@@ -39,8 +39,8 @@ export default function ContractLaborerSummaryDashboard({
   const totalOutstanding = laborers.reduce((sum, l) => sum + Math.max(0, l.outstanding), 0);
   const laborersWithDue = laborers.filter((l) => l.outstanding > 0).length;
   const totalPaid = laborers.reduce((sum, l) => sum + l.totalPaid, 0);
-  const totalEarned = laborers.reduce((sum, l) => sum + l.totalEarned, 0);
-  const paymentProgress = totalEarned > 0 ? Math.round((totalPaid / totalEarned) * 100) : 0;
+  const totalSalary = laborers.reduce((sum, l) => sum + l.totalEarned, 0); // Total salary due
+  const paymentProgress = totalSalary > 0 ? Math.round((totalPaid / totalSalary) * 100) : 0;
 
   // Determine progress color: red < 50%, orange 50-80%, green >= 80%
   const getProgressColor = (progress: number): "error" | "warning" | "success" => {
@@ -133,7 +133,7 @@ export default function ContractLaborerSummaryDashboard({
                 {laborers.length}
               </Typography>
               <Chip
-                label={`Rs.${Math.round(totalEarned / Math.max(laborers.length, 1)).toLocaleString()} avg earned`}
+                label={`Rs.${Math.round(totalSalary / Math.max(laborers.length, 1)).toLocaleString()} avg salary`}
                 size="small"
                 color="info"
                 variant="outlined"
@@ -163,7 +163,7 @@ export default function ContractLaborerSummaryDashboard({
                 {formatCurrency(totalPaid)}
               </Typography>
               <Chip
-                label={totalEarned > 0 ? `${Math.round((totalPaid / totalEarned) * 100)}% of earned` : "0%"}
+                label={totalSalary > 0 ? `${Math.round((totalPaid / totalSalary) * 100)}% of salary` : "0%"}
                 size="small"
                 color="success"
                 variant="outlined"
@@ -225,7 +225,7 @@ export default function ContractLaborerSummaryDashboard({
                     {formatCurrency(totalPaid)}
                   </Typography>
                   <Typography variant="caption" color="text.disabled">
-                    of {formatCurrency(totalEarned)}
+                    of {formatCurrency(totalSalary)}
                   </Typography>
                 </Box>
               </Box>
