@@ -67,6 +67,7 @@ import {
 import FileUploader, { UploadedFile } from "@/components/common/FileUploader";
 import SubcontractLinkSelector from "@/components/payments/SubcontractLinkSelector";
 import PayerSourceSelector from "./PayerSourceSelector";
+import BatchSelector from "@/components/wallet/BatchSelector";
 import dayjs from "dayjs";
 import type {
   UnifiedSettlementConfig,
@@ -75,6 +76,12 @@ import type {
   SettlementTypeSelection,
 } from "@/types/settlement.types";
 import type { PaymentMode, PaymentChannel } from "@/types/payment.types";
+import type { BatchAllocation } from "@/types/wallet.types";
+import { recordWalletSpending } from "@/lib/services/walletService";
+import {
+  processSettlement,
+  processWeeklySettlement,
+} from "@/lib/services/settlementService";
 
 // Slide up transition for mobile fullscreen
 const SlideTransition = React.forwardRef(function Transition(
@@ -131,6 +138,9 @@ export default function UnifiedSettlementDialog({
   const [subcontractId, setSubcontractId] = useState<string | null>(null);
   const [proofFile, setProofFile] = useState<UploadedFile | null>(null);
   const [notes, setNotes] = useState<string>("");
+
+  // Batch allocations for engineer wallet spending
+  const [batchAllocations, setBatchAllocations] = useState<BatchAllocation[]>([]);
 
   // Data state
   const [engineers, setEngineers] = useState<Engineer[]>([]);
@@ -393,6 +403,19 @@ export default function UnifiedSettlementDialog({
       return;
     }
 
+    // Validate batch allocations for engineer wallet
+    if (paymentChannel === "engineer_wallet") {
+      if (!batchAllocations || batchAllocations.length === 0) {
+        setError("Please select which wallet batches to use for this settlement");
+        return;
+      }
+      const totalBatchAmount = batchAllocations.reduce((sum, b) => sum + b.amount, 0);
+      if (Math.abs(totalBatchAmount - calculatedAmounts.selected) > 0.01) {
+        setError(`Selected batch amount (Rs.${totalBatchAmount.toLocaleString()}) must match settlement amount (Rs.${calculatedAmounts.selected.toLocaleString()})`);
+        return;
+      }
+    }
+
     if ((paymentMode === "upi" || paymentMode === "net_banking") && !proofFile) {
       setError("Please upload payment proof for UPI/Bank transfer");
       return;
@@ -405,29 +428,33 @@ export default function UnifiedSettlementDialog({
       const paymentDate = dayjs().format("YYYY-MM-DD");
       let engineerTransactionId: string | null = null;
 
-      // 1. If via engineer wallet, create transaction first
+      // 1. If via engineer wallet, record spending transaction (deducts from wallet batches)
       if (paymentChannel === "engineer_wallet") {
-        const { data: txData, error: txError } = await (supabase
-          .from("site_engineer_transactions") as any)
-          .insert({
-            user_id: selectedEngineerId,
-            site_id: selectedSite.id,
-            transaction_type: "received_from_company",
-            settlement_status: "pending_settlement",
-            amount: calculatedAmounts.selected,
-            description: engineerReference,
-            payment_mode: paymentMode,
-            proof_url: proofFile?.url || null,
-            is_settled: false,
-            recorded_by: userProfile.name,
-            recorded_by_user_id: userProfile.id,
-            related_subcontract_id: subcontractId,
-          })
-          .select()
-          .single();
+        // Use walletService for proper batch tracking
+        // Map payment mode for wallet service (net_banking -> bank_transfer for compatibility)
+        const walletPaymentMode = paymentMode === "net_banking" ? "bank_transfer" : paymentMode;
+        const spendingResult = await recordWalletSpending(supabase, {
+          engineerId: selectedEngineerId,
+          amount: calculatedAmounts.selected,
+          siteId: selectedSite.id,
+          description: engineerReference || `Salary settlement`,
+          recipientType: "laborer",
+          paymentMode: walletPaymentMode as any,
+          moneySource: "wallet",
+          batchAllocations: batchAllocations,
+          subcontractId: subcontractId || undefined,
+          proofUrl: proofFile?.url || undefined,
+          notes: notes || undefined,
+          transactionDate: paymentDate,
+          userName: userProfile.name || "Unknown",
+          userId: userProfile.id,
+        });
 
-        if (txError) throw txError;
-        engineerTransactionId = txData.id;
+        if (!spendingResult.success) {
+          throw new Error(spendingResult.error || "Failed to record wallet spending");
+        }
+
+        engineerTransactionId = spendingResult.transactionId || null;
 
         // Get engineer details for notification
         const selectedEngineer = engineers.find((e) => e.id === selectedEngineerId);
@@ -1023,7 +1050,20 @@ export default function UnifiedSettlementDialog({
               value={engineerReference}
               onChange={(e) => setEngineerReference(e.target.value)}
               helperText="This helps the engineer know which payment to settle"
+              sx={{ mb: 2 }}
             />
+
+            {/* Batch Selection for wallet spending */}
+            {selectedEngineerId && calculatedAmounts.selected > 0 && (
+              <BatchSelector
+                engineerId={selectedEngineerId}
+                siteId={selectedSite?.id || null}
+                requiredAmount={calculatedAmounts.selected}
+                selectedBatches={batchAllocations}
+                onSelectionChange={setBatchAllocations}
+                disabled={processing}
+              />
+            )}
           </Box>
         </Collapse>
 

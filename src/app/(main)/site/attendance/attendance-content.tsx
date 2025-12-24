@@ -3741,6 +3741,114 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
                                           }}
                                         />
                                       )}
+                                      {entry.summary.dailyLaborerCount > 0 && (
+                                        <Chip
+                                          label={
+                                            <Box
+                                              sx={{
+                                                display: "flex",
+                                                alignItems: "center",
+                                                gap: 0.5,
+                                              }}
+                                            >
+                                              Daily: ₹
+                                              {entry.summary.dailyLaborerAmount.toLocaleString()}
+                                              <Box
+                                                component="span"
+                                                sx={{ opacity: 0.8 }}
+                                              >
+                                                (
+                                                {
+                                                  entry.summary
+                                                    .dailyLaborerCount
+                                                }
+                                                )
+                                              </Box>
+                                            </Box>
+                                          }
+                                          size="small"
+                                          color="warning"
+                                          variant="filled"
+                                          sx={{
+                                            height: { xs: 22, sm: 24 },
+                                            "& .MuiChip-label": {
+                                              px: { xs: 0.75, sm: 1 },
+                                              fontSize: {
+                                                xs: "0.65rem",
+                                                sm: "0.75rem",
+                                              },
+                                            },
+                                          }}
+                                        />
+                                      )}
+                                      {(entry.summary.dailyLaborerAmount > 0 ||
+                                        entry.summary.marketLaborerAmount > 0) && (
+                                        <Chip
+                                          label={
+                                            <Box
+                                              sx={{
+                                                display: "flex",
+                                                alignItems: "center",
+                                                gap: 0.5,
+                                              }}
+                                            >
+                                              Total Daily Pay: ₹
+                                              {(
+                                                entry.summary.dailyLaborerAmount +
+                                                entry.summary.marketLaborerAmount
+                                              ).toLocaleString()}
+                                            </Box>
+                                          }
+                                          size="small"
+                                          color="error"
+                                          variant="filled"
+                                          sx={{
+                                            height: { xs: 22, sm: 24 },
+                                            "& .MuiChip-label": {
+                                              px: { xs: 0.75, sm: 1 },
+                                              fontSize: {
+                                                xs: "0.65rem",
+                                                sm: "0.75rem",
+                                              },
+                                            },
+                                          }}
+                                        />
+                                      )}
+                                      {(entry.summary.dailyLaborerAmount > 0 ||
+                                        entry.summary.marketLaborerAmount > 0 ||
+                                        entry.summary.contractLaborerAmount > 0) && (
+                                        <Chip
+                                          label={
+                                            <Box
+                                              sx={{
+                                                display: "flex",
+                                                alignItems: "center",
+                                                gap: 0.5,
+                                              }}
+                                            >
+                                              Total: ₹
+                                              {(
+                                                entry.summary.dailyLaborerAmount +
+                                                entry.summary.marketLaborerAmount +
+                                                entry.summary.contractLaborerAmount
+                                              ).toLocaleString()}
+                                            </Box>
+                                          }
+                                          size="small"
+                                          color="default"
+                                          variant="filled"
+                                          sx={{
+                                            height: { xs: 22, sm: 24 },
+                                            "& .MuiChip-label": {
+                                              px: { xs: 0.75, sm: 1 },
+                                              fontSize: {
+                                                xs: "0.65rem",
+                                                sm: "0.75rem",
+                                              },
+                                            },
+                                          }}
+                                        />
+                                      )}
                                     </Box>
                                     {/* Right side: Audit Avatar and Edit Button */}
                                     <Box

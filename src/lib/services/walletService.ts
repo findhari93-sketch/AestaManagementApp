@@ -320,6 +320,9 @@ export async function recordWalletSpending(
         recorded_by: config.userName,
         recorded_by_user_id: config.userId,
         is_settled: false,
+        // Settlement linking
+        settlement_reference: config.settlementReference || null,
+        settlement_group_id: config.settlementGroupId || null,
       })
       .select()
       .single();

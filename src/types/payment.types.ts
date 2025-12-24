@@ -405,6 +405,110 @@ export interface LaborerPaymentEntryExtended extends LaborerPaymentEntry {
   settlementReference?: string;
 }
 
+// ============ DATE-WISE SETTLEMENT TYPES (NEW) ============
+
+// Settlement type differentiation
+export type SettlementType = "date_wise" | "labor_wise" | "weekly";
+
+// Week allocation entry for a single settlement spanning multiple weeks
+export interface WeekAllocationEntry {
+  weekStart: string;
+  weekEnd: string;
+  weekLabel: string;
+  allocatedAmount: number;
+  laborerCount: number;
+  isFullyPaid: boolean;
+}
+
+// Date-wise settlement details
+export interface DateWiseSettlement {
+  settlementGroupId: string;
+  settlementReference: string;
+  settlementDate: string;
+  totalAmount: number;
+  weekAllocations: WeekAllocationEntry[];
+  paymentMode: PaymentMode | null;
+  paymentChannel: PaymentChannel;
+  payerSource: string | null;
+  payerName: string | null;
+  proofUrls: string[];
+  notes: string | null;
+  subcontractId: string | null;
+  subcontractTitle: string | null;
+  createdBy: string;
+  createdByName: string | null;
+  createdAt: string;
+  isCancelled: boolean;
+}
+
+// Configuration for creating date-wise settlements
+export interface DateWiseSettlementConfig {
+  siteId: string;
+  settlementDate: string;
+  totalAmount: number;
+  paymentMode: PaymentMode;
+  paymentChannel: PaymentChannel;
+  payerSource: string;
+  customPayerName?: string;
+  engineerId?: string;
+  proofUrls?: string[];
+  notes?: string;
+  subcontractId?: string;
+  userId: string;
+  userName: string;
+}
+
+// Result from creating a date-wise settlement
+export interface DateWiseSettlementResult {
+  success: boolean;
+  settlementGroupId: string;
+  settlementReference: string;
+  totalAmount: number;
+  weekAllocations: WeekAllocationEntry[];
+  laborPaymentIds: string[];
+  error?: string;
+}
+
+// Maestri earnings calculation result
+export interface MaestriEarningsResult {
+  totalDaysWorked: number;
+  laborerCount: number;
+  marginPerDay: number;
+  totalMaestriEarnings: number;
+  byWeek: {
+    weekStart: string;
+    weekEnd: string;
+    weekLabel: string;
+    daysWorked: number;
+    laborerCount: number;
+    earnings: number;
+  }[];
+}
+
+// Extended PaymentDetails with new fields for date-wise view
+export interface PaymentDetailsExtended extends PaymentDetails {
+  settlementType: SettlementType;
+  proofUrls: string[];
+  weekAllocations: WeekAllocationEntry[];
+}
+
+// Summary for a week row in the table
+export interface WeekSettlementSummary {
+  weekStart: string;
+  weekEnd: string;
+  weekLabel: string;
+  totalSalary: number;
+  totalPaid: number;
+  totalDue: number;
+  paymentProgress: number;
+  status: PaymentStatus;
+  laborerCount: number;
+  // Date-wise settlements for this week
+  settlements: DateWiseSettlement[];
+  // All settlement refs for tooltip
+  settlementReferences: string[];
+}
+
 // ============ CONTRACT LABORER PAYMENT VIEW (NEW UI) ============
 
 // For the laborer-centric view in ContractWeeklyPaymentsTab

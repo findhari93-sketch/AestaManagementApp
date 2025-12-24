@@ -51,6 +51,9 @@ import {
   ToggleOff as ToggleOffIcon,
   Lock as LockIcon,
   Info as InfoIcon,
+  Visibility as ViewIcon,
+  Edit as EditIcon,
+  Delete as DeleteIcon,
 } from "@mui/icons-material";
 import FormControlLabel from "@mui/material/FormControlLabel";
 import Checkbox from "@mui/material/Checkbox";
@@ -86,7 +89,15 @@ import type {
   BatchAllocation,
   ExpenseMoneySource,
   PendingReimbursement,
+  UnifiedSettlementRecord,
 } from "@/types/wallet.types";
+import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
+import TransactionDetailDialog from "@/components/wallet/TransactionDetailDialog";
+import TransactionEditDialog from "@/components/wallet/TransactionEditDialog";
+import TransactionDeleteDialog from "@/components/wallet/TransactionDeleteDialog";
+import SettlementDetailDialog from "@/components/wallet/SettlementDetailDialog";
+import SettlementEditDialog from "@/components/wallet/SettlementEditDialog";
+import SettlementDeleteDialog from "@/components/wallet/SettlementDeleteDialog";
 
 interface User {
   id: string;
@@ -102,6 +113,7 @@ interface Site {
 interface TransactionWithDetails extends SiteEngineerTransaction {
   user_name?: string;
   site_name?: string;
+  // batch_code, settlement_reference, settlement_group_id are now in SiteEngineerTransaction from database types
 }
 
 interface SettlementWithDetails extends SiteEngineerSettlement {
@@ -157,6 +169,21 @@ export default function EngineerWalletPage() {
   const [openReimbursementDialog, setOpenReimbursementDialog] = useState(false);
   const [pendingReimbursements, setPendingReimbursements] = useState<PendingReimbursement[]>([]);
   const [availableBatches, setAvailableBatches] = useState<BatchOption[]>([]);
+
+  // Unified settlements (merged from both old and new tables)
+  const [unifiedSettlements, setUnifiedSettlements] = useState<UnifiedSettlementRecord[]>([]);
+
+  // Transaction action dialogs
+  const [selectedTransaction, setSelectedTransaction] = useState<TransactionWithDetails | null>(null);
+  const [openTransactionDetailDialog, setOpenTransactionDetailDialog] = useState(false);
+  const [openTransactionEditDialog, setOpenTransactionEditDialog] = useState(false);
+  const [openTransactionDeleteDialog, setOpenTransactionDeleteDialog] = useState(false);
+
+  // Settlement action dialogs
+  const [selectedSettlement, setSelectedSettlement] = useState<UnifiedSettlementRecord | null>(null);
+  const [openSettlementDetailDialog, setOpenSettlementDetailDialog] = useState(false);
+  const [openSettlementEditDialog, setOpenSettlementEditDialog] = useState(false);
+  const [openSettlementDeleteDialog, setOpenSettlementDeleteDialog] = useState(false);
 
   const { userProfile } = useAuth();
   const supabase = createClient();
@@ -292,15 +319,86 @@ export default function EngineerWalletPage() {
       );
       setSettlements(formattedSettlements);
 
+      // Fetch settlement_groups (new table) and merge with legacy
+      const { data: settlementGroupsData, error: groupsError } = await supabase
+        .from("settlement_groups")
+        .select(`
+          *,
+          site:sites(name),
+          creator:users!settlement_groups_created_by_fkey(name)
+        `)
+        .eq("is_cancelled", false)
+        .order("settlement_date", { ascending: false })
+        .limit(100);
+
+      if (groupsError) {
+        console.error("Error fetching settlement_groups:", groupsError);
+      }
+
+      // Map legacy settlements to UnifiedSettlementRecord
+      const legacyUnified: UnifiedSettlementRecord[] = formattedSettlements.map((s) => ({
+        id: s.id,
+        source: "legacy" as const,
+        settlement_reference: null,
+        settlement_date: s.settlement_date,
+        total_amount: s.amount,
+        laborer_count: 0,
+        payment_mode: s.payment_mode,
+        payer_source: null,
+        payer_name: null,
+        proof_url: null,
+        notes: s.notes || null,
+        site_id: null,
+        site_name: null,
+        engineer_id: s.site_engineer_id,
+        engineer_name: s.engineer_name || null,
+        is_cancelled: false,
+        cancellation_reason: null,
+        created_at: s.created_at || new Date().toISOString(),
+        created_by_name: s.recorded_by || null,
+        settlement_type: s.settlement_type as "company_to_engineer" | "engineer_to_company",
+      }));
+
+      // Map settlement_groups to UnifiedSettlementRecord
+      const groupsUnified: UnifiedSettlementRecord[] = ((settlementGroupsData || []) as any[]).map((g) => ({
+        id: g.id,
+        source: "settlement_group" as const,
+        settlement_reference: g.settlement_reference,
+        settlement_date: g.settlement_date,
+        total_amount: Number(g.total_amount),
+        laborer_count: g.laborer_count,
+        payment_mode: g.payment_mode,
+        payer_source: g.payer_source,
+        payer_name: g.payer_name,
+        proof_url: g.proof_url,
+        notes: g.notes,
+        site_id: g.site_id,
+        site_name: g.site?.name || null,
+        engineer_id: g.created_by,
+        engineer_name: g.created_by_name || g.creator?.name || null,
+        is_cancelled: g.is_cancelled || false,
+        cancellation_reason: g.cancellation_reason,
+        created_at: g.created_at,
+        created_by_name: g.created_by_name,
+        payment_channel: g.payment_channel,
+        subcontract_id: g.subcontract_id,
+      }));
+
+      // Merge and sort by date descending
+      const mergedSettlements = [...legacyUnified, ...groupsUnified].sort(
+        (a, b) => new Date(b.settlement_date).getTime() - new Date(a.settlement_date).getTime()
+      );
+      setUnifiedSettlements(mergedSettlements);
+
       // Fetch pending attendance settlements - find attendance with engineer_transaction_id but not paid
       // First get unique transaction IDs from unpaid attendance
       const { data: unpaidDailyAttendance } = await (supabase.from("daily_attendance") as any)
-        .select("engineer_transaction_id, amount")
+        .select("engineer_transaction_id, daily_earnings")
         .not("engineer_transaction_id", "is", null)
         .eq("is_paid", false);
 
       const { data: unpaidMarketAttendance } = await (supabase.from("market_laborer_attendance") as any)
-        .select("engineer_transaction_id, total_wages")
+        .select("engineer_transaction_id, total_cost")
         .not("engineer_transaction_id", "is", null)
         .eq("is_paid", false);
 
@@ -311,14 +409,14 @@ export default function EngineerWalletPage() {
           txAggregates[a.engineer_transaction_id] = { count: 0, amount: 0 };
         }
         txAggregates[a.engineer_transaction_id].count += 1;
-        txAggregates[a.engineer_transaction_id].amount += a.amount || 0;
+        txAggregates[a.engineer_transaction_id].amount += a.daily_earnings || 0;
       });
       ((unpaidMarketAttendance || []) as any[]).forEach((a: any) => {
         if (!txAggregates[a.engineer_transaction_id]) {
           txAggregates[a.engineer_transaction_id] = { count: 0, amount: 0 };
         }
         txAggregates[a.engineer_transaction_id].count += 1;
-        txAggregates[a.engineer_transaction_id].amount += a.total_wages || 0;
+        txAggregates[a.engineer_transaction_id].amount += a.total_cost || 0;
       });
 
       const txIds = Object.keys(txAggregates);
@@ -1120,9 +1218,257 @@ export default function EngineerWalletPage() {
   }, [transactions, selectedEngineer]);
 
   const filteredSettlements = useMemo(() => {
-    if (!selectedEngineer) return settlements;
-    return settlements.filter((s) => s.site_engineer_id === selectedEngineer.id);
-  }, [settlements, selectedEngineer]);
+    if (!selectedEngineer) return unifiedSettlements;
+    return unifiedSettlements.filter((s) => s.engineer_id === selectedEngineer.id);
+  }, [unifiedSettlements, selectedEngineer]);
+
+  // Transaction action handlers
+  const handleViewTransaction = (transaction: TransactionWithDetails) => {
+    setSelectedTransaction(transaction);
+    setOpenTransactionDetailDialog(true);
+  };
+
+  const handleEditTransaction = (transaction: TransactionWithDetails) => {
+    setSelectedTransaction(transaction);
+    setOpenTransactionEditDialog(true);
+  };
+
+  const handleDeleteTransaction = (transaction: TransactionWithDetails) => {
+    setSelectedTransaction(transaction);
+    setOpenTransactionDeleteDialog(true);
+  };
+
+  // Settlement action handlers
+  const handleViewSettlement = (settlement: UnifiedSettlementRecord) => {
+    setSelectedSettlement(settlement);
+    setOpenSettlementDetailDialog(true);
+  };
+
+  const handleEditSettlement = (settlement: UnifiedSettlementRecord) => {
+    setSelectedSettlement(settlement);
+    setOpenSettlementEditDialog(true);
+  };
+
+  const handleDeleteSettlement = (settlement: UnifiedSettlementRecord) => {
+    setSelectedSettlement(settlement);
+    setOpenSettlementDeleteDialog(true);
+  };
+
+  // MRT columns for transactions
+  const transactionColumns = useMemo<MRT_ColumnDef<TransactionWithDetails>[]>(
+    () => [
+      {
+        accessorKey: "transaction_date",
+        header: "Date",
+        size: 100,
+        Cell: ({ row }) => dayjs(row.original.transaction_date).format("DD MMM YYYY"),
+      },
+      {
+        accessorKey: "user_name",
+        header: "Engineer",
+        size: 120,
+      },
+      {
+        accessorKey: "transaction_type",
+        header: "Type",
+        size: 140,
+        Cell: ({ row }) => (
+          <Chip
+            label={getTransactionTypeLabel(row.original.transaction_type as SiteEngineerTransactionType)}
+            size="small"
+            color={getTransactionTypeColor(row.original.transaction_type as SiteEngineerTransactionType)}
+          />
+        ),
+      },
+      {
+        accessorKey: "batch_code",
+        header: "Batch",
+        size: 130,
+        Cell: ({ row }) =>
+          row.original.batch_code ? (
+            <Chip
+              label={row.original.batch_code}
+              size="small"
+              variant="outlined"
+              sx={{ fontFamily: "monospace", fontSize: "0.7rem" }}
+            />
+          ) : (
+            "-"
+          ),
+      },
+      {
+        accessorKey: "settlement_reference",
+        header: "Sett. Ref",
+        size: 130,
+        Cell: ({ row }) =>
+          row.original.settlement_reference ? (
+            <Chip
+              label={row.original.settlement_reference}
+              size="small"
+              color="info"
+              variant="outlined"
+              sx={{ fontFamily: "monospace", fontSize: "0.7rem" }}
+            />
+          ) : (
+            "-"
+          ),
+      },
+      {
+        accessorKey: "site_name",
+        header: "Site",
+        size: 120,
+      },
+      {
+        accessorKey: "amount",
+        header: "Amount",
+        size: 100,
+        Cell: ({ row }) => (
+          <Typography
+            fontWeight={600}
+            fontSize="0.85rem"
+            color={
+              row.original.transaction_type === "received_from_company"
+                ? "success.main"
+                : row.original.transaction_type === "returned_to_company"
+                ? "info.main"
+                : "error.main"
+            }
+          >
+            {row.original.transaction_type === "received_from_company" ? "+" : "-"}
+            Rs.{row.original.amount.toLocaleString()}
+          </Typography>
+        ),
+      },
+      {
+        accessorKey: "payment_mode",
+        header: "Mode",
+        size: 80,
+        Cell: ({ row }) => (
+          <Chip label={row.original.payment_mode.toUpperCase()} size="small" variant="outlined" />
+        ),
+      },
+      {
+        accessorKey: "description",
+        header: "Desc",
+        size: 150,
+        Cell: ({ row }) => row.original.description || row.original.notes || "-",
+      },
+      {
+        accessorKey: "is_settled",
+        header: "Settled",
+        size: 90,
+        Cell: ({ row }) =>
+          row.original.transaction_type === "used_own_money" ? (
+            row.original.is_settled ? (
+              <Chip label="Settled" size="small" color="success" icon={<CheckIcon />} />
+            ) : (
+              <Chip label="Pending" size="small" color="warning" />
+            )
+          ) : (
+            "-"
+          ),
+      },
+    ],
+    []
+  );
+
+  // MRT columns for settlements
+  const settlementColumns = useMemo<MRT_ColumnDef<UnifiedSettlementRecord>[]>(
+    () => [
+      {
+        accessorKey: "settlement_date",
+        header: "Date",
+        size: 100,
+        Cell: ({ row }) => dayjs(row.original.settlement_date).format("DD MMM YYYY"),
+      },
+      {
+        accessorKey: "settlement_reference",
+        header: "Reference",
+        size: 130,
+        Cell: ({ row }) =>
+          row.original.settlement_reference ? (
+            <Chip
+              label={row.original.settlement_reference}
+              size="small"
+              color="info"
+              sx={{ fontFamily: "monospace", fontSize: "0.7rem" }}
+            />
+          ) : (
+            "-"
+          ),
+      },
+      {
+        accessorKey: "source",
+        header: "Source",
+        size: 100,
+        Cell: ({ row }) => (
+          <Chip
+            label={row.original.source === "legacy" ? "Legacy" : "New"}
+            size="small"
+            color={row.original.source === "legacy" ? "default" : "primary"}
+            variant="outlined"
+          />
+        ),
+      },
+      {
+        accessorKey: "engineer_name",
+        header: "Engineer",
+        size: 120,
+        Cell: ({ row }) => row.original.engineer_name || "-",
+      },
+      {
+        accessorKey: "site_name",
+        header: "Site",
+        size: 120,
+        Cell: ({ row }) => row.original.site_name || "-",
+      },
+      {
+        accessorKey: "laborer_count",
+        header: "Laborers",
+        size: 80,
+        Cell: ({ row }) => row.original.laborer_count || "-",
+      },
+      {
+        accessorKey: "total_amount",
+        header: "Amount",
+        size: 100,
+        Cell: ({ row }) => (
+          <Typography fontWeight={600} fontSize="0.85rem" color="success.main">
+            Rs.{row.original.total_amount.toLocaleString()}
+          </Typography>
+        ),
+      },
+      {
+        accessorKey: "payment_mode",
+        header: "Mode",
+        size: 80,
+        Cell: ({ row }) =>
+          row.original.payment_mode ? (
+            <Chip label={row.original.payment_mode.toUpperCase()} size="small" variant="outlined" />
+          ) : (
+            "-"
+          ),
+      },
+      {
+        accessorKey: "is_cancelled",
+        header: "Status",
+        size: 90,
+        Cell: ({ row }) =>
+          row.original.is_cancelled ? (
+            <Chip label="Cancelled" size="small" color="error" />
+          ) : (
+            <Chip label="Active" size="small" color="success" variant="outlined" />
+          ),
+      },
+      {
+        accessorKey: "created_by_name",
+        header: "Created By",
+        size: 100,
+        Cell: ({ row }) => row.original.created_by_name || "-",
+      },
+    ],
+    []
+  );
 
   return (
     <Box>
@@ -1388,131 +1734,131 @@ export default function EngineerWalletPage() {
           </Tabs>
 
           <TabPanel value={tabValue} index={0}>
-            <TableContainer>
-              <Table>
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Date</TableCell>
-                    <TableCell>Engineer</TableCell>
-                    <TableCell>Type</TableCell>
-                    <TableCell>Site</TableCell>
-                    <TableCell align="right">Amount</TableCell>
-                    <TableCell>Mode</TableCell>
-                    <TableCell>Description</TableCell>
-                    <TableCell>Settled?</TableCell>
-                    <TableCell>Recorded By</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {filteredTransactions.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={9} align="center">
-                        No transactions found
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    filteredTransactions.map((t) => (
-                      <TableRow key={t.id}>
-                        <TableCell>{dayjs(t.transaction_date).format("DD MMM YYYY")}</TableCell>
-                        <TableCell>{t.user_name}</TableCell>
-                        <TableCell>
-                          <Chip
-                            label={getTransactionTypeLabel(t.transaction_type as SiteEngineerTransactionType)}
-                            size="small"
-                            color={getTransactionTypeColor(t.transaction_type as SiteEngineerTransactionType)}
-                          />
-                        </TableCell>
-                        <TableCell>{t.site_name}</TableCell>
-                        <TableCell align="right">
-                          <Typography
-                            fontWeight={600}
-                            color={
-                              t.transaction_type === "received_from_company"
-                                ? "success.main"
-                                : t.transaction_type === "returned_to_company"
-                                ? "info.main"
-                                : "error.main"
-                            }
-                          >
-                            {t.transaction_type === "received_from_company" ? "+" : "-"}₹
-                            {t.amount.toLocaleString()}
-                          </Typography>
-                        </TableCell>
-                        <TableCell>
-                          <Chip label={t.payment_mode.toUpperCase()} size="small" variant="outlined" />
-                        </TableCell>
-                        <TableCell>{t.description || t.notes || "-"}</TableCell>
-                        <TableCell>
-                          {t.transaction_type === "used_own_money" ? (
-                            t.is_settled ? (
-                              <Chip label="Settled" size="small" color="success" icon={<CheckIcon />} />
-                            ) : (
-                              <Chip label="Pending" size="small" color="warning" />
-                            )
-                          ) : (
-                            "-"
-                          )}
-                        </TableCell>
-                        <TableCell>{t.recorded_by}</TableCell>
-                      </TableRow>
-                    ))
+            <DataTable<TransactionWithDetails>
+              columns={transactionColumns}
+              data={filteredTransactions}
+              isLoading={loading}
+              enableRowActions
+              positionActionsColumn="last"
+              renderRowActions={({ row }) => (
+                <Box
+                  className="row-actions"
+                  sx={{
+                    display: "flex",
+                    gap: 0.5,
+                    opacity: 0,
+                    transition: "opacity 0.2s",
+                  }}
+                >
+                  <Tooltip title="View details">
+                    <IconButton
+                      size="small"
+                      onClick={() => handleViewTransaction(row.original)}
+                    >
+                      <ViewIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                  {canEdit && (
+                    <>
+                      <Tooltip title="Edit">
+                        <IconButton
+                          size="small"
+                          onClick={() => handleEditTransaction(row.original)}
+                        >
+                          <EditIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                      <Tooltip title="Delete">
+                        <IconButton
+                          size="small"
+                          color="error"
+                          onClick={() => handleDeleteTransaction(row.original)}
+                        >
+                          <DeleteIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                    </>
                   )}
-                </TableBody>
-              </Table>
-            </TableContainer>
+                </Box>
+              )}
+              muiTableBodyRowProps={{
+                sx: {
+                  "&:hover .row-actions": {
+                    opacity: 1,
+                  },
+                },
+              }}
+              initialState={{
+                sorting: [{ id: "transaction_date", desc: true }],
+              }}
+              pageSize={50}
+            />
           </TabPanel>
 
           <TabPanel value={tabValue} index={1}>
-            <TableContainer>
-              <Table>
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Date</TableCell>
-                    <TableCell>Engineer</TableCell>
-                    <TableCell>Type</TableCell>
-                    <TableCell align="right">Amount</TableCell>
-                    <TableCell>Mode</TableCell>
-                    <TableCell>Notes</TableCell>
-                    <TableCell>Recorded By</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {filteredSettlements.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={7} align="center">
-                        No settlements found
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    filteredSettlements.map((s) => (
-                      <TableRow key={s.id}>
-                        <TableCell>{dayjs(s.settlement_date).format("DD MMM YYYY")}</TableCell>
-                        <TableCell>{s.engineer_name}</TableCell>
-                        <TableCell>
-                          <Chip
-                            label={
-                              s.settlement_type === "company_to_engineer"
-                                ? "Company → Engineer"
-                                : "Engineer → Company"
-                            }
-                            size="small"
-                            color={s.settlement_type === "company_to_engineer" ? "success" : "info"}
-                          />
-                        </TableCell>
-                        <TableCell align="right">
-                          <Typography fontWeight={600}>₹{s.amount.toLocaleString()}</Typography>
-                        </TableCell>
-                        <TableCell>
-                          <Chip label={s.payment_mode.toUpperCase()} size="small" variant="outlined" />
-                        </TableCell>
-                        <TableCell>{s.notes || "-"}</TableCell>
-                        <TableCell>{s.recorded_by}</TableCell>
-                      </TableRow>
-                    ))
+            <DataTable<UnifiedSettlementRecord>
+              columns={settlementColumns}
+              data={filteredSettlements}
+              isLoading={loading}
+              enableRowActions
+              positionActionsColumn="last"
+              renderRowActions={({ row }) => (
+                <Box
+                  className="row-actions"
+                  sx={{
+                    display: "flex",
+                    gap: 0.5,
+                    opacity: 0,
+                    transition: "opacity 0.2s",
+                  }}
+                >
+                  <Tooltip title="View details">
+                    <IconButton
+                      size="small"
+                      onClick={() => handleViewSettlement(row.original)}
+                    >
+                      <ViewIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                  {canEdit && !row.original.is_cancelled && (
+                    <>
+                      <Tooltip title="Edit">
+                        <IconButton
+                          size="small"
+                          onClick={() => handleEditSettlement(row.original)}
+                        >
+                          <EditIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                      <Tooltip title={row.original.source === "legacy" ? "Delete" : "Cancel"}>
+                        <IconButton
+                          size="small"
+                          color="error"
+                          onClick={() => handleDeleteSettlement(row.original)}
+                        >
+                          <DeleteIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                    </>
                   )}
-                </TableBody>
-              </Table>
-            </TableContainer>
+                </Box>
+              )}
+              muiTableBodyRowProps={({ row }) => ({
+                sx: {
+                  "&:hover .row-actions": {
+                    opacity: 1,
+                  },
+                  ...(row.original.is_cancelled && {
+                    opacity: 0.6,
+                    backgroundColor: "action.hover",
+                  }),
+                },
+              })}
+              initialState={{
+                sorting: [{ id: "settlement_date", desc: true }],
+              }}
+              pageSize={50}
+            />
           </TabPanel>
 
           {/* Pending Attendance Settlements Tab */}
@@ -2586,6 +2932,44 @@ export default function EngineerWalletPage() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Transaction Dialogs */}
+      <TransactionDetailDialog
+        open={openTransactionDetailDialog}
+        onClose={() => setOpenTransactionDetailDialog(false)}
+        transaction={selectedTransaction}
+      />
+      <TransactionEditDialog
+        open={openTransactionEditDialog}
+        onClose={() => setOpenTransactionEditDialog(false)}
+        transaction={selectedTransaction}
+        onSuccess={fetchData}
+      />
+      <TransactionDeleteDialog
+        open={openTransactionDeleteDialog}
+        onClose={() => setOpenTransactionDeleteDialog(false)}
+        transaction={selectedTransaction}
+        onSuccess={fetchData}
+      />
+
+      {/* Settlement Dialogs */}
+      <SettlementDetailDialog
+        open={openSettlementDetailDialog}
+        onClose={() => setOpenSettlementDetailDialog(false)}
+        settlement={selectedSettlement}
+      />
+      <SettlementEditDialog
+        open={openSettlementEditDialog}
+        onClose={() => setOpenSettlementEditDialog(false)}
+        settlement={selectedSettlement}
+        onSuccess={fetchData}
+      />
+      <SettlementDeleteDialog
+        open={openSettlementDeleteDialog}
+        onClose={() => setOpenSettlementDeleteDialog(false)}
+        settlement={selectedSettlement}
+        onSuccess={fetchData}
+      />
     </Box>
   );
 }

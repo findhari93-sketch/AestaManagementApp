@@ -122,6 +122,13 @@ export type Database = {
             referencedRelation: "laborers"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "advances_laborer_id_fkey"
+            columns: ["laborer_id"]
+            isOneToOne: false
+            referencedRelation: "v_laborer_advance_summary"
+            referencedColumns: ["laborer_id"]
+          },
         ]
       }
       attendance_expense_sync: {
@@ -586,6 +593,7 @@ export type Database = {
           recorded_by: string | null
           recorded_by_user_id: string | null
           section_id: string | null
+          settlement_group_id: string | null
           site_id: string
           snacks_amount: number | null
           start_time: string | null
@@ -642,6 +650,7 @@ export type Database = {
           recorded_by?: string | null
           recorded_by_user_id?: string | null
           section_id?: string | null
+          settlement_group_id?: string | null
           site_id: string
           snacks_amount?: number | null
           start_time?: string | null
@@ -698,6 +707,7 @@ export type Database = {
           recorded_by?: string | null
           recorded_by_user_id?: string | null
           section_id?: string | null
+          settlement_group_id?: string | null
           site_id?: string
           snacks_amount?: number | null
           start_time?: string | null
@@ -767,6 +777,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "daily_attendance_laborer_id_fkey"
+            columns: ["laborer_id"]
+            isOneToOne: false
+            referencedRelation: "v_laborer_advance_summary"
+            referencedColumns: ["laborer_id"]
+          },
+          {
             foreignKeyName: "daily_attendance_payment_id_fkey"
             columns: ["payment_id"]
             isOneToOne: false
@@ -793,6 +810,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "v_section_cost_summary"
             referencedColumns: ["section_id"]
+          },
+          {
+            foreignKeyName: "daily_attendance_settlement_group_id_fkey"
+            columns: ["settlement_group_id"]
+            isOneToOne: false
+            referencedRelation: "settlement_groups"
+            referencedColumns: ["id"]
           },
           {
             foreignKeyName: "daily_attendance_site_id_fkey"
@@ -1518,6 +1542,115 @@ export type Database = {
           },
         ]
       }
+      engineer_reimbursements: {
+        Row: {
+          amount: number
+          created_at: string | null
+          engineer_id: string
+          expense_transaction_id: string
+          id: string
+          notes: string | null
+          payer_name: string | null
+          payer_source: string
+          payment_mode: string
+          proof_url: string | null
+          settled_by_name: string | null
+          settled_by_user_id: string | null
+          settled_date: string
+        }
+        Insert: {
+          amount: number
+          created_at?: string | null
+          engineer_id: string
+          expense_transaction_id: string
+          id?: string
+          notes?: string | null
+          payer_name?: string | null
+          payer_source: string
+          payment_mode: string
+          proof_url?: string | null
+          settled_by_name?: string | null
+          settled_by_user_id?: string | null
+          settled_date?: string
+        }
+        Update: {
+          amount?: number
+          created_at?: string | null
+          engineer_id?: string
+          expense_transaction_id?: string
+          id?: string
+          notes?: string | null
+          payer_name?: string | null
+          payer_source?: string
+          payment_mode?: string
+          proof_url?: string | null
+          settled_by_name?: string | null
+          settled_by_user_id?: string | null
+          settled_date?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "engineer_reimbursements_engineer_id_fkey"
+            columns: ["engineer_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "engineer_reimbursements_expense_transaction_id_fkey"
+            columns: ["expense_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "site_engineer_transactions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "engineer_reimbursements_settled_by_user_id_fkey"
+            columns: ["settled_by_user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      engineer_wallet_batch_usage: {
+        Row: {
+          amount_used: number
+          batch_transaction_id: string
+          created_at: string | null
+          id: string
+          transaction_id: string
+        }
+        Insert: {
+          amount_used: number
+          batch_transaction_id: string
+          created_at?: string | null
+          id?: string
+          transaction_id: string
+        }
+        Update: {
+          amount_used?: number
+          batch_transaction_id?: string
+          created_at?: string | null
+          id?: string
+          transaction_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "engineer_wallet_batch_usage_batch_transaction_id_fkey"
+            columns: ["batch_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "site_engineer_transactions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "engineer_wallet_batch_usage_transaction_id_fkey"
+            columns: ["transaction_id"]
+            isOneToOne: false
+            referencedRelation: "site_engineer_transactions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       expense_categories: {
         Row: {
           created_at: string
@@ -1696,6 +1829,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "laborers"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "expenses_laborer_id_fkey"
+            columns: ["laborer_id"]
+            isOneToOne: false
+            referencedRelation: "v_laborer_advance_summary"
+            referencedColumns: ["laborer_id"]
           },
           {
             foreignKeyName: "expenses_paid_by_fkey"
@@ -2084,10 +2224,13 @@ export type Database = {
       }
       labor_payments: {
         Row: {
+          actual_payment_date: string | null
+          advance_deduction_from_payment_id: string | null
           amount: number
           attendance_id: string | null
           created_at: string | null
           id: string
+          is_advance_deduction: boolean | null
           is_under_contract: boolean | null
           laborer_id: string
           notes: string | null
@@ -2097,18 +2240,24 @@ export type Database = {
           payment_date: string
           payment_for_date: string
           payment_mode: string
+          payment_reference: string | null
+          payment_type: string | null
           proof_url: string | null
           recorded_by: string
           recorded_by_user_id: string | null
+          settlement_group_id: string | null
           site_engineer_transaction_id: string | null
           site_id: string
           subcontract_id: string | null
         }
         Insert: {
+          actual_payment_date?: string | null
+          advance_deduction_from_payment_id?: string | null
           amount: number
           attendance_id?: string | null
           created_at?: string | null
           id?: string
+          is_advance_deduction?: boolean | null
           is_under_contract?: boolean | null
           laborer_id: string
           notes?: string | null
@@ -2118,18 +2267,24 @@ export type Database = {
           payment_date?: string
           payment_for_date: string
           payment_mode: string
+          payment_reference?: string | null
+          payment_type?: string | null
           proof_url?: string | null
           recorded_by: string
           recorded_by_user_id?: string | null
+          settlement_group_id?: string | null
           site_engineer_transaction_id?: string | null
           site_id: string
           subcontract_id?: string | null
         }
         Update: {
+          actual_payment_date?: string | null
+          advance_deduction_from_payment_id?: string | null
           amount?: number
           attendance_id?: string | null
           created_at?: string | null
           id?: string
+          is_advance_deduction?: boolean | null
           is_under_contract?: boolean | null
           laborer_id?: string
           notes?: string | null
@@ -2139,14 +2294,24 @@ export type Database = {
           payment_date?: string
           payment_for_date?: string
           payment_mode?: string
+          payment_reference?: string | null
+          payment_type?: string | null
           proof_url?: string | null
           recorded_by?: string
           recorded_by_user_id?: string | null
+          settlement_group_id?: string | null
           site_engineer_transaction_id?: string | null
           site_id?: string
           subcontract_id?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "labor_payments_advance_deduction_from_payment_id_fkey"
+            columns: ["advance_deduction_from_payment_id"]
+            isOneToOne: false
+            referencedRelation: "labor_payments"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "labor_payments_attendance_id_fkey"
             columns: ["attendance_id"]
@@ -2169,6 +2334,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "labor_payments_laborer_id_fkey"
+            columns: ["laborer_id"]
+            isOneToOne: false
+            referencedRelation: "v_laborer_advance_summary"
+            referencedColumns: ["laborer_id"]
+          },
+          {
             foreignKeyName: "labor_payments_paid_by_user_id_fkey"
             columns: ["paid_by_user_id"]
             isOneToOne: false
@@ -2180,6 +2352,13 @@ export type Database = {
             columns: ["recorded_by_user_id"]
             isOneToOne: false
             referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "labor_payments_settlement_group_id_fkey"
+            columns: ["settlement_group_id"]
+            isOneToOne: false
+            referencedRelation: "settlement_groups"
             referencedColumns: ["id"]
           },
           {
@@ -2299,6 +2478,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "laborer_site_assignments_laborer_id_fkey"
+            columns: ["laborer_id"]
+            isOneToOne: false
+            referencedRelation: "v_laborer_advance_summary"
+            referencedColumns: ["laborer_id"]
+          },
+          {
             foreignKeyName: "laborer_site_assignments_site_id_fkey"
             columns: ["site_id"]
             isOneToOne: false
@@ -2334,6 +2520,8 @@ export type Database = {
           role_id: string
           status: Database["public"]["Enums"]["laborer_status"]
           team_id: string | null
+          total_advance_deducted: number | null
+          total_advance_given: number | null
           updated_at: string
         }
         Insert: {
@@ -2362,6 +2550,8 @@ export type Database = {
           role_id: string
           status?: Database["public"]["Enums"]["laborer_status"]
           team_id?: string | null
+          total_advance_deducted?: number | null
+          total_advance_given?: number | null
           updated_at?: string
         }
         Update: {
@@ -2390,6 +2580,8 @@ export type Database = {
           role_id?: string
           status?: Database["public"]["Enums"]["laborer_status"]
           team_id?: string | null
+          total_advance_deducted?: number | null
+          total_advance_given?: number | null
           updated_at?: string
         }
         Relationships: [
@@ -2723,8 +2915,10 @@ export type Database = {
           rate_per_person: number
           role_id: string
           section_id: string | null
+          settlement_group_id: string | null
           site_id: string
           snacks_per_person: number | null
+          subcontract_id: string | null
           total_cost: number
           total_hours: number | null
           total_snacks: number | null
@@ -2764,8 +2958,10 @@ export type Database = {
           rate_per_person: number
           role_id: string
           section_id?: string | null
+          settlement_group_id?: string | null
           site_id: string
           snacks_per_person?: number | null
+          subcontract_id?: string | null
           total_cost: number
           total_hours?: number | null
           total_snacks?: number | null
@@ -2805,8 +3001,10 @@ export type Database = {
           rate_per_person?: number
           role_id?: string
           section_id?: string | null
+          settlement_group_id?: string | null
           site_id?: string
           snacks_per_person?: number | null
+          subcontract_id?: string | null
           total_cost?: number
           total_hours?: number | null
           total_snacks?: number | null
@@ -2874,10 +3072,24 @@ export type Database = {
             referencedColumns: ["section_id"]
           },
           {
+            foreignKeyName: "market_laborer_attendance_settlement_group_id_fkey"
+            columns: ["settlement_group_id"]
+            isOneToOne: false
+            referencedRelation: "settlement_groups"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "market_laborer_attendance_site_id_fkey"
             columns: ["site_id"]
             isOneToOne: false
             referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "market_laborer_attendance_subcontract_id_fkey"
+            columns: ["subcontract_id"]
+            isOneToOne: false
+            referencedRelation: "subcontracts"
             referencedColumns: ["id"]
           },
           {
@@ -3464,6 +3676,68 @@ export type Database = {
             columns: ["payment_plan_id"]
             isOneToOne: false
             referencedRelation: "client_payment_plans"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      payment_week_allocations: {
+        Row: {
+          allocated_amount: number
+          created_at: string
+          id: string
+          labor_payment_id: string
+          laborer_id: string
+          site_id: string
+          week_end: string
+          week_start: string
+        }
+        Insert: {
+          allocated_amount: number
+          created_at?: string
+          id?: string
+          labor_payment_id: string
+          laborer_id: string
+          site_id: string
+          week_end: string
+          week_start: string
+        }
+        Update: {
+          allocated_amount?: number
+          created_at?: string
+          id?: string
+          labor_payment_id?: string
+          laborer_id?: string
+          site_id?: string
+          week_end?: string
+          week_start?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payment_week_allocations_labor_payment_id_fkey"
+            columns: ["labor_payment_id"]
+            isOneToOne: false
+            referencedRelation: "labor_payments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payment_week_allocations_laborer_id_fkey"
+            columns: ["laborer_id"]
+            isOneToOne: false
+            referencedRelation: "laborers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payment_week_allocations_laborer_id_fkey"
+            columns: ["laborer_id"]
+            isOneToOne: false
+            referencedRelation: "v_laborer_advance_summary"
+            referencedColumns: ["laborer_id"]
+          },
+          {
+            foreignKeyName: "payment_week_allocations_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
             referencedColumns: ["id"]
           },
         ]
@@ -4189,6 +4463,142 @@ export type Database = {
             referencedRelation: "laborers"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "salary_periods_laborer_id_fkey"
+            columns: ["laborer_id"]
+            isOneToOne: false
+            referencedRelation: "v_laborer_advance_summary"
+            referencedColumns: ["laborer_id"]
+          },
+        ]
+      }
+      settlement_groups: {
+        Row: {
+          actual_payment_date: string | null
+          cancellation_reason: string | null
+          cancelled_at: string | null
+          cancelled_by: string | null
+          cancelled_by_user_id: string | null
+          created_at: string
+          created_by: string | null
+          created_by_name: string | null
+          engineer_transaction_id: string | null
+          id: string
+          is_cancelled: boolean
+          laborer_count: number
+          notes: string | null
+          payer_name: string | null
+          payer_source: string | null
+          payment_channel: string
+          payment_mode: string | null
+          payment_type: string | null
+          proof_url: string | null
+          proof_urls: string[] | null
+          settlement_date: string
+          settlement_reference: string
+          settlement_type: string | null
+          site_id: string
+          subcontract_id: string | null
+          total_amount: number
+          updated_at: string
+          week_allocations: Json | null
+        }
+        Insert: {
+          actual_payment_date?: string | null
+          cancellation_reason?: string | null
+          cancelled_at?: string | null
+          cancelled_by?: string | null
+          cancelled_by_user_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          created_by_name?: string | null
+          engineer_transaction_id?: string | null
+          id?: string
+          is_cancelled?: boolean
+          laborer_count?: number
+          notes?: string | null
+          payer_name?: string | null
+          payer_source?: string | null
+          payment_channel: string
+          payment_mode?: string | null
+          payment_type?: string | null
+          proof_url?: string | null
+          proof_urls?: string[] | null
+          settlement_date: string
+          settlement_reference: string
+          settlement_type?: string | null
+          site_id: string
+          subcontract_id?: string | null
+          total_amount: number
+          updated_at?: string
+          week_allocations?: Json | null
+        }
+        Update: {
+          actual_payment_date?: string | null
+          cancellation_reason?: string | null
+          cancelled_at?: string | null
+          cancelled_by?: string | null
+          cancelled_by_user_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          created_by_name?: string | null
+          engineer_transaction_id?: string | null
+          id?: string
+          is_cancelled?: boolean
+          laborer_count?: number
+          notes?: string | null
+          payer_name?: string | null
+          payer_source?: string | null
+          payment_channel?: string
+          payment_mode?: string | null
+          payment_type?: string | null
+          proof_url?: string | null
+          proof_urls?: string[] | null
+          settlement_date?: string
+          settlement_reference?: string
+          settlement_type?: string | null
+          site_id?: string
+          subcontract_id?: string | null
+          total_amount?: number
+          updated_at?: string
+          week_allocations?: Json | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "settlement_groups_cancelled_by_user_id_fkey"
+            columns: ["cancelled_by_user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "settlement_groups_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "settlement_groups_engineer_transaction_id_fkey"
+            columns: ["engineer_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "site_engineer_transactions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "settlement_groups_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "settlement_groups_subcontract_id_fkey"
+            columns: ["subcontract_id"]
+            isOneToOne: false
+            referencedRelation: "subcontracts"
+            referencedColumns: ["id"]
+          },
         ]
       }
       site_clients: {
@@ -4305,6 +4715,7 @@ export type Database = {
       site_engineer_transactions: {
         Row: {
           amount: number
+          batch_code: string | null
           cancellation_reason: string | null
           cancelled_at: string | null
           cancelled_by: string | null
@@ -4320,6 +4731,8 @@ export type Database = {
           money_source: string | null
           money_source_name: string | null
           notes: string | null
+          payer_name: string | null
+          payer_source: string | null
           payment_mode: string
           proof_url: string | null
           recipient_id: string | null
@@ -4328,13 +4741,17 @@ export type Database = {
           recorded_by_user_id: string | null
           related_attendance_id: string | null
           related_subcontract_id: string | null
+          remaining_balance: number | null
           settled_by: string | null
           settled_date: string | null
+          settlement_group_id: string | null
           settlement_mode: string | null
           settlement_proof_url: string | null
           settlement_reason: string | null
+          settlement_reference: string | null
           settlement_status: string | null
           site_id: string | null
+          site_restricted: boolean | null
           transaction_date: string
           transaction_type: string
           updated_at: string | null
@@ -4342,6 +4759,7 @@ export type Database = {
         }
         Insert: {
           amount: number
+          batch_code?: string | null
           cancellation_reason?: string | null
           cancelled_at?: string | null
           cancelled_by?: string | null
@@ -4357,6 +4775,8 @@ export type Database = {
           money_source?: string | null
           money_source_name?: string | null
           notes?: string | null
+          payer_name?: string | null
+          payer_source?: string | null
           payment_mode: string
           proof_url?: string | null
           recipient_id?: string | null
@@ -4365,13 +4785,17 @@ export type Database = {
           recorded_by_user_id?: string | null
           related_attendance_id?: string | null
           related_subcontract_id?: string | null
+          remaining_balance?: number | null
           settled_by?: string | null
           settled_date?: string | null
+          settlement_group_id?: string | null
           settlement_mode?: string | null
           settlement_proof_url?: string | null
           settlement_reason?: string | null
+          settlement_reference?: string | null
           settlement_status?: string | null
           site_id?: string | null
+          site_restricted?: boolean | null
           transaction_date?: string
           transaction_type: string
           updated_at?: string | null
@@ -4379,6 +4803,7 @@ export type Database = {
         }
         Update: {
           amount?: number
+          batch_code?: string | null
           cancellation_reason?: string | null
           cancelled_at?: string | null
           cancelled_by?: string | null
@@ -4394,6 +4819,8 @@ export type Database = {
           money_source?: string | null
           money_source_name?: string | null
           notes?: string | null
+          payer_name?: string | null
+          payer_source?: string | null
           payment_mode?: string
           proof_url?: string | null
           recipient_id?: string | null
@@ -4402,13 +4829,17 @@ export type Database = {
           recorded_by_user_id?: string | null
           related_attendance_id?: string | null
           related_subcontract_id?: string | null
+          remaining_balance?: number | null
           settled_by?: string | null
           settled_date?: string | null
+          settlement_group_id?: string | null
           settlement_mode?: string | null
           settlement_proof_url?: string | null
           settlement_reason?: string | null
+          settlement_reference?: string | null
           settlement_status?: string | null
           site_id?: string | null
+          site_restricted?: boolean | null
           transaction_date?: string
           transaction_type?: string
           updated_at?: string | null
@@ -4462,6 +4893,13 @@ export type Database = {
             columns: ["settled_by"]
             isOneToOne: false
             referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "site_engineer_transactions_settlement_group_id_fkey"
+            columns: ["settlement_group_id"]
+            isOneToOne: false
+            referencedRelation: "settlement_groups"
             referencedColumns: ["id"]
           },
           {
@@ -5538,6 +5976,7 @@ export type Database = {
           id: string
           is_rate_based: boolean
           laborer_id: string | null
+          maestri_margin_per_day: number | null
           measurement_unit:
             | Database["public"]["Enums"]["measurement_unit"]
             | null
@@ -5567,6 +6006,7 @@ export type Database = {
           id?: string
           is_rate_based?: boolean
           laborer_id?: string | null
+          maestri_margin_per_day?: number | null
           measurement_unit?:
             | Database["public"]["Enums"]["measurement_unit"]
             | null
@@ -5596,6 +6036,7 @@ export type Database = {
           id?: string
           is_rate_based?: boolean
           laborer_id?: string | null
+          maestri_margin_per_day?: number | null
           measurement_unit?:
             | Database["public"]["Enums"]["measurement_unit"]
             | null
@@ -5627,6 +6068,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "laborers"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contracts_laborer_id_fkey"
+            columns: ["laborer_id"]
+            isOneToOne: false
+            referencedRelation: "v_laborer_advance_summary"
+            referencedColumns: ["laborer_id"]
           },
           {
             foreignKeyName: "contracts_site_id_fkey"
@@ -5835,6 +6283,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "laborers"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tea_shop_consumption_details_laborer_id_fkey"
+            columns: ["laborer_id"]
+            isOneToOne: false
+            referencedRelation: "v_laborer_advance_summary"
+            referencedColumns: ["laborer_id"]
           },
         ]
       }
@@ -6758,6 +7213,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "daily_attendance_laborer_id_fkey"
+            columns: ["laborer_id"]
+            isOneToOne: false
+            referencedRelation: "v_laborer_advance_summary"
+            referencedColumns: ["laborer_id"]
+          },
+          {
             foreignKeyName: "daily_attendance_section_id_fkey"
             columns: ["section_id"]
             isOneToOne: false
@@ -6800,6 +7262,38 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      v_all_expenses: {
+        Row: {
+          amount: number | null
+          category_id: string | null
+          category_name: string | null
+          cleared_date: string | null
+          contract_id: string | null
+          created_at: string | null
+          date: string | null
+          description: string | null
+          entered_by: string | null
+          entered_by_user_id: string | null
+          expense_type: string | null
+          id: string | null
+          is_cleared: boolean | null
+          is_deleted: boolean | null
+          module: string | null
+          paid_by: string | null
+          payer_name: string | null
+          payment_mode: string | null
+          receipt_url: string | null
+          settlement_group_id: string | null
+          settlement_reference: string | null
+          site_id: string | null
+          site_payer_id: string | null
+          source_id: string | null
+          source_type: string | null
+          subcontract_title: string | null
+          vendor_name: string | null
+        }
+        Relationships: []
       }
       v_delivery_verification_details: {
         Row: {
@@ -6952,6 +7446,36 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      v_laborer_advance_summary: {
+        Row: {
+          calculated_advance_deducted: number | null
+          calculated_advance_given: number | null
+          laborer_id: string | null
+          laborer_name: string | null
+          pending_advance: number | null
+          total_advance_deducted: number | null
+          total_advance_given: number | null
+        }
+        Insert: {
+          calculated_advance_deducted?: never
+          calculated_advance_given?: never
+          laborer_id?: string | null
+          laborer_name?: string | null
+          pending_advance?: never
+          total_advance_deducted?: number | null
+          total_advance_given?: number | null
+        }
+        Update: {
+          calculated_advance_deducted?: never
+          calculated_advance_given?: never
+          laborer_id?: string | null
+          laborer_name?: string | null
+          pending_advance?: never
+          total_advance_deducted?: number | null
+          total_advance_given?: number | null
+        }
+        Relationships: []
       }
       v_local_purchases_details: {
         Row: {
@@ -7198,6 +7722,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "laborers"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "advances_laborer_id_fkey"
+            columns: ["laborer_id"]
+            isOneToOne: false
+            referencedRelation: "v_laborer_advance_summary"
+            referencedColumns: ["laborer_id"]
           },
         ]
       }
@@ -7479,6 +8010,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "laborers"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "salary_periods_laborer_id_fkey"
+            columns: ["laborer_id"]
+            isOneToOne: false
+            referencedRelation: "v_laborer_advance_summary"
+            referencedColumns: ["laborer_id"]
           },
         ]
       }
@@ -7799,10 +8337,19 @@ export type Database = {
         Args: { p_purchase_id: string; p_user_id: string }
         Returns: string
       }
+      generate_batch_code: { Args: { p_payer_source: string }; Returns: string }
       generate_grn_number: { Args: never; Returns: string }
       generate_local_purchase_number: { Args: never; Returns: string }
       generate_mr_number: { Args: never; Returns: string }
+      generate_payment_reference: {
+        Args: { p_site_id: string }
+        Returns: string
+      }
       generate_po_number: { Args: never; Returns: string }
+      generate_settlement_reference: {
+        Args: { p_site_id: string }
+        Returns: string
+      }
       generate_transfer_number: { Args: never; Returns: string }
       generate_weekly_notifications: { Args: never; Returns: number }
       get_current_user_id: { Args: never; Returns: string }

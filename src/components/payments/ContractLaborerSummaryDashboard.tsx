@@ -10,23 +10,27 @@ import {
   Chip,
   Skeleton,
   CircularProgress,
+  Tooltip,
 } from "@mui/material";
 import {
   Warning as OutstandingIcon,
   People as PeopleIcon,
   CheckCircle as PaidIcon,
   TrendingUp as ProgressIcon,
+  AccountBalance as MaestriIcon,
 } from "@mui/icons-material";
-import type { ContractLaborerPaymentView } from "@/types/payment.types";
+import type { ContractLaborerPaymentView, MaestriEarningsResult } from "@/types/payment.types";
 
 interface ContractLaborerSummaryDashboardProps {
   laborers: ContractLaborerPaymentView[];
   loading?: boolean;
+  maestriEarnings?: MaestriEarningsResult | null;
 }
 
 export default function ContractLaborerSummaryDashboard({
   laborers,
   loading = false,
+  maestriEarnings,
 }: ContractLaborerSummaryDashboardProps) {
   const formatCurrency = (amount: number) => {
     if (amount >= 100000) {
@@ -174,7 +178,7 @@ export default function ContractLaborerSummaryDashboard({
         </Grid>
 
         {/* Payment Progress */}
-        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+        <Grid size={{ xs: 12, sm: 6, md: maestriEarnings ? 2.4 : 3 }}>
           <Card
             sx={{
               bgcolor: `${progressColor}.50`,
@@ -232,6 +236,40 @@ export default function ContractLaborerSummaryDashboard({
             </CardContent>
           </Card>
         </Grid>
+
+        {/* Maestri Earnings - Only shown if configured */}
+        {maestriEarnings && maestriEarnings.marginPerDay > 0 && (
+          <Grid size={{ xs: 12, sm: 6, md: 2.4 }}>
+            <Card
+              sx={{
+                bgcolor: "secondary.50",
+                borderLeft: 4,
+                borderColor: "secondary.main",
+              }}
+            >
+              <CardContent sx={{ py: 2, "&:last-child": { pb: 2 } }}>
+                <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
+                  <MaestriIcon color="secondary" fontSize="small" />
+                  <Tooltip title="Maestri earns this margin per laborer per day worked">
+                    <Typography variant="caption" color="text.secondary" sx={{ cursor: "help" }}>
+                      Maestri Earnings
+                    </Typography>
+                  </Tooltip>
+                </Box>
+                <Typography variant="h5" fontWeight={600} color="secondary.dark">
+                  {formatCurrency(maestriEarnings.totalMaestriEarnings)}
+                </Typography>
+                <Chip
+                  label={`Rs.${maestriEarnings.marginPerDay}/day/laborer`}
+                  size="small"
+                  color="secondary"
+                  variant="outlined"
+                  sx={{ mt: 1 }}
+                />
+              </CardContent>
+            </Card>
+          </Grid>
+        )}
       </Grid>
     </Box>
   );

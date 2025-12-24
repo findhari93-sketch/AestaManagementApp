@@ -35,6 +35,8 @@ import {
   Person as PersonIcon,
   Visibility as VisibilityIcon,
   Receipt as ReceiptIcon,
+  Edit as EditIcon,
+  Delete as DeleteIcon,
 } from "@mui/icons-material";
 import { createClient } from "@/lib/supabase/client";
 import { useSite } from "@/contexts/SiteContext";
@@ -45,8 +47,11 @@ import PaymentRefDialog from "./PaymentRefDialog";
 import ContractPaymentHistoryDialog from "./ContractPaymentHistoryDialog";
 import ContractLaborerSummaryDashboard from "./ContractLaborerSummaryDashboard";
 import ContractPaymentRecordDialog from "./ContractPaymentRecordDialog";
-import WeekSettlementsDialog from "./WeekSettlementsDialog";
+import WeekSettlementsDialogV2 from "./WeekSettlementsDialogV2";
 import ContractPaymentEditDialog from "./ContractPaymentEditDialog";
+import ContractSettlementEditDialog from "./ContractSettlementEditDialog";
+import DeleteSettlementConfirmDialog from "./DeleteSettlementConfirmDialog";
+import type { DateWiseSettlement } from "@/types/payment.types";
 import type {
   PaymentStatus,
   PaymentSummaryData,
@@ -161,6 +166,11 @@ export default function ContractWeeklyPaymentsTab({
   const [selectedWeekForDetails, setSelectedWeekForDetails] = useState<WeekRowData | null>(null);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [editingPaymentDetails, setEditingPaymentDetails] = useState<import("@/types/payment.types").PaymentDetails | null>(null);
+
+  // New date-wise settlement dialogs
+  const [editSettlementDialogOpen, setEditSettlementDialogOpen] = useState(false);
+  const [deleteSettlementDialogOpen, setDeleteSettlementDialogOpen] = useState(false);
+  const [selectedSettlement, setSelectedSettlement] = useState<DateWiseSettlement | null>(null);
 
   // Date range
   const dateRange = useMemo(() => {
@@ -801,7 +811,7 @@ export default function ContractWeeklyPaymentsTab({
       },
       {
         accessorKey: "settlementReferences",
-        header: "Settlements",
+        header: "Transactions",
         size: 140,
         Cell: ({ row }) => {
           const refs = row.original.settlementReferences;
@@ -842,38 +852,26 @@ export default function ContractWeeklyPaymentsTab({
           );
 
           return (
-            <Tooltip
-              title={<TooltipContent />}
-              arrow
-              placement="left"
-              componentsProps={{
-                tooltip: {
-                  sx: {
-                    bgcolor: "background.paper",
-                    color: "text.primary",
-                    boxShadow: 3,
-                    "& .MuiTooltip-arrow": { color: "background.paper" },
-                    maxWidth: 300,
-                  },
-                },
+            <Chip
+              size="small"
+              icon={<ReceiptIcon sx={{ fontSize: 14 }} />}
+              label={`${count} Transaction${count > 1 ? "s" : ""}`}
+              color={count > 0 ? "primary" : "default"}
+              variant="outlined"
+              sx={{ cursor: "pointer" }}
+              onClick={(e) => {
+                e.stopPropagation();
+                setSelectedWeekForDetails(row.original);
+                setWeekDetailsDialogOpen(true);
               }}
-            >
-              <Chip
-                size="small"
-                icon={<ReceiptIcon sx={{ fontSize: 14 }} />}
-                label={`${count} Settlement${count > 1 ? "s" : ""}`}
-                color={count > 0 ? "primary" : "default"}
-                variant="outlined"
-                sx={{ cursor: "pointer" }}
-              />
-            </Tooltip>
+            />
           );
         },
       },
       {
         id: "actions",
         header: "Actions",
-        size: 80,
+        size: 120,
         Cell: ({ row }) => {
           const refs = row.original.settlementReferences;
           const hasPayments = refs && refs.length > 0;
@@ -881,19 +879,47 @@ export default function ContractWeeklyPaymentsTab({
           return (
             <Box sx={{ display: "flex", gap: 0.5 }}>
               {hasPayments && (
-                <Tooltip title="View all settlements for this week">
-                  <IconButton
-                    size="small"
-                    color="primary"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setSelectedWeekForDetails(row.original);
-                      setWeekDetailsDialogOpen(true);
-                    }}
-                  >
-                    <VisibilityIcon fontSize="small" />
-                  </IconButton>
-                </Tooltip>
+                <>
+                  <Tooltip title="View all settlements for this week">
+                    <IconButton
+                      size="small"
+                      color="primary"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedWeekForDetails(row.original);
+                        setWeekDetailsDialogOpen(true);
+                      }}
+                    >
+                      <VisibilityIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                  <Tooltip title="Edit settlements">
+                    <IconButton
+                      size="small"
+                      color="info"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedWeekForDetails(row.original);
+                        setWeekDetailsDialogOpen(true);
+                      }}
+                    >
+                      <EditIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                  <Tooltip title="Delete settlements">
+                    <IconButton
+                      size="small"
+                      color="error"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedWeekForDetails(row.original);
+                        setWeekDetailsDialogOpen(true);
+                      }}
+                    >
+                      <DeleteIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                </>
               )}
             </Box>
           );
@@ -1306,8 +1332,8 @@ export default function ContractWeeklyPaymentsTab({
         }}
       />
 
-      {/* Week Settlements Dialog */}
-      <WeekSettlementsDialog
+      {/* Week Settlements Dialog V2 - Date-wise primary view */}
+      <WeekSettlementsDialogV2
         open={weekDetailsDialogOpen}
         onClose={() => {
           setWeekDetailsDialogOpen(false);
@@ -1318,10 +1344,49 @@ export default function ContractWeeklyPaymentsTab({
           setSelectedRef(ref);
           setRefDialogOpen(true);
         }}
-        onEditPayment={(ref) => {
-          // Open payment ref dialog first to get details, then edit
-          setSelectedRef(ref);
-          setRefDialogOpen(true);
+        onEditSettlement={(settlement) => {
+          setSelectedSettlement(settlement);
+          setEditSettlementDialogOpen(true);
+        }}
+        onDeleteSettlement={(settlement) => {
+          setSelectedSettlement(settlement);
+          setDeleteSettlementDialogOpen(true);
+        }}
+        onRefresh={fetchData}
+      />
+
+      {/* Contract Settlement Edit Dialog - For date-wise settlements */}
+      <ContractSettlementEditDialog
+        open={editSettlementDialogOpen}
+        onClose={() => {
+          setEditSettlementDialogOpen(false);
+          setSelectedSettlement(null);
+        }}
+        settlement={selectedSettlement}
+        onSuccess={() => {
+          fetchData();
+          setEditSettlementDialogOpen(false);
+          setSelectedSettlement(null);
+        }}
+        onDelete={(settlement) => {
+          setEditSettlementDialogOpen(false);
+          setSelectedSettlement(settlement);
+          setDeleteSettlementDialogOpen(true);
+        }}
+      />
+
+      {/* Delete Settlement Confirm Dialog */}
+      <DeleteSettlementConfirmDialog
+        open={deleteSettlementDialogOpen}
+        onClose={() => {
+          setDeleteSettlementDialogOpen(false);
+          setSelectedSettlement(null);
+        }}
+        settlement={selectedSettlement}
+        onSuccess={() => {
+          fetchData();
+          setDeleteSettlementDialogOpen(false);
+          setSelectedSettlement(null);
         }}
       />
 

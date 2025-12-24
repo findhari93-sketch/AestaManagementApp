@@ -285,6 +285,9 @@ export interface RecordSpendingConfig {
   transactionDate?: string;
   userName: string;
   userId: string;
+  // Settlement linking
+  settlementReference?: string;
+  settlementGroupId?: string;
 }
 
 /** Config for recording return */
@@ -331,6 +334,41 @@ export interface BatchValidationResult {
   valid: boolean;
   errors: string[];
   warnings: string[];
+}
+
+// ============================================
+// Unified Settlement Types
+// ============================================
+
+/** Source of settlement record - legacy table or new settlement_groups */
+export type SettlementRecordSource = "legacy" | "settlement_group";
+
+/** Unified settlement record for displaying both old and new settlements */
+export interface UnifiedSettlementRecord {
+  id: string;
+  source: SettlementRecordSource;
+  settlement_reference: string | null;
+  settlement_date: string;
+  total_amount: number;
+  laborer_count: number;
+  payment_mode: string | null;
+  payer_source: PayerSource | null;
+  payer_name: string | null;
+  proof_url: string | null;
+  notes: string | null;
+  site_id: string | null;
+  site_name: string | null;
+  engineer_id: string | null;
+  engineer_name: string | null;
+  is_cancelled: boolean;
+  cancellation_reason: string | null;
+  created_at: string;
+  created_by_name: string | null;
+  // Legacy-specific fields
+  settlement_type?: "company_to_engineer" | "engineer_to_company";
+  // New settlement-specific fields
+  payment_channel?: "direct" | "engineer_wallet";
+  subcontract_id?: string | null;
 }
 
 /** Helper to get display text for payment source via engineer */

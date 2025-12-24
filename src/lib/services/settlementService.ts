@@ -10,6 +10,8 @@ import type {
   PaymentWeekAllocation,
 } from "@/types/payment.types";
 import type { PayerSource, SettlementRecord } from "@/types/settlement.types";
+import type { BatchAllocation } from "@/types/wallet.types";
+import { recordWalletSpending } from "./walletService";
 
 export interface SettlementResult {
   success: boolean;
@@ -35,6 +37,8 @@ export interface SettlementConfig {
   subcontractId?: string;
   userId: string;
   userName: string;
+  // For engineer wallet spending - which batches to use
+  batchAllocations?: BatchAllocation[];
 }
 
 /**
@@ -61,32 +65,7 @@ export async function processSettlement(
       effectiveSubcontractId = await getSubcontractFromAttendanceRecords(supabase, config.records) ?? undefined;
     }
 
-    // 1. If via engineer wallet, create engineer transaction first
-    if (config.paymentChannel === "engineer_wallet" && config.engineerId) {
-      const { data: txData, error: txError } = await (supabase
-        .from("site_engineer_transactions") as any)
-        .insert({
-          user_id: config.engineerId,
-          site_id: config.siteId,
-          transaction_type: "received_from_company",
-          settlement_status: "pending_settlement",
-          amount: config.totalAmount,
-          description: config.engineerReference || "Salary settlement",
-          payment_mode: config.paymentMode,
-          proof_url: config.proofUrl || null,
-          is_settled: false,
-          recorded_by: config.userName,
-          recorded_by_user_id: config.userId,
-          related_subcontract_id: effectiveSubcontractId || null,
-        })
-        .select()
-        .single();
-
-      if (txError) throw txError;
-      engineerTransactionId = txData.id;
-    }
-
-    // 2. Generate settlement reference and create settlement_group
+    // 1. Generate settlement reference FIRST (needed for wallet spending)
     const { data: refData, error: refError } = await supabase.rpc(
       "generate_settlement_reference",
       { p_site_id: config.siteId }
@@ -98,6 +77,42 @@ export async function processSettlement(
       settlementReference = `SET-${dayjs().format("YYYYMM")}-${Date.now().toString().slice(-4)}`;
     } else {
       settlementReference = refData as string;
+    }
+
+    // 2. If via engineer wallet, record spending transaction (deducts from wallet batches)
+    if (config.paymentChannel === "engineer_wallet" && config.engineerId) {
+      // Validate batch allocations are provided
+      if (!config.batchAllocations || config.batchAllocations.length === 0) {
+        throw new Error("Batch allocation required for engineer wallet settlement. Please select which wallet batches to use.");
+      }
+
+      // Use walletService.recordWalletSpending for proper batch tracking
+      // Map payment mode for compatibility (net_banking -> bank_transfer)
+      const walletPaymentMode = config.paymentMode === "net_banking" ? "bank_transfer" : config.paymentMode;
+      const spendingResult = await recordWalletSpending(supabase, {
+        engineerId: config.engineerId,
+        amount: config.totalAmount,
+        siteId: config.siteId,
+        description: config.engineerReference || `Salary settlement ${settlementReference}`,
+        recipientType: "laborer",
+        paymentMode: walletPaymentMode as any,
+        moneySource: "wallet",
+        batchAllocations: config.batchAllocations,
+        subcontractId: effectiveSubcontractId,
+        proofUrl: config.proofUrl,
+        notes: config.notes,
+        transactionDate: paymentDate,
+        userName: config.userName,
+        userId: config.userId,
+        settlementReference: settlementReference,
+        // settlementGroupId will be updated after creating the group
+      });
+
+      if (!spendingResult.success) {
+        throw new Error(spendingResult.error || "Failed to record wallet spending");
+      }
+
+      engineerTransactionId = spendingResult.transactionId || null;
     }
 
     // Calculate laborer count (market records may have count field)
@@ -142,6 +157,18 @@ export async function processSettlement(
     }
 
     settlementGroupId = groupData.id;
+
+    // Update engineer transaction with settlement_group_id (for wallet spending)
+    if (engineerTransactionId && config.paymentChannel === "engineer_wallet") {
+      const { error: updateTxError } = await supabase
+        .from("site_engineer_transactions")
+        .update({ settlement_group_id: settlementGroupId })
+        .eq("id", engineerTransactionId);
+
+      if (updateTxError) {
+        console.warn("Could not update engineer transaction with settlement_group_id:", updateTxError);
+      }
+    }
 
     // 3. Update attendance records with settlement_group_id
     const updateData = {
@@ -233,6 +260,7 @@ export async function processWeeklySettlement(
     subcontractId?: string;
     userId: string;
     userName: string;
+    batchAllocations?: BatchAllocation[];
   }
 ): Promise<SettlementResult> {
   try {
@@ -241,32 +269,7 @@ export async function processWeeklySettlement(
     let settlementGroupId: string | undefined;
     let settlementReference: string | undefined;
 
-    // 1. If via engineer wallet, create engineer transaction
-    if (config.paymentChannel === "engineer_wallet" && config.engineerId) {
-      const { data: txData, error: txError } = await (supabase
-        .from("site_engineer_transactions") as any)
-        .insert({
-          user_id: config.engineerId,
-          site_id: config.siteId,
-          transaction_type: "received_from_company",
-          settlement_status: "pending_settlement",
-          amount: config.totalAmount,
-          description: config.engineerReference || `Weekly settlement (${config.dateFrom} - ${config.dateTo})`,
-          payment_mode: config.paymentMode,
-          proof_url: config.proofUrl || null,
-          is_settled: false,
-          recorded_by: config.userName,
-          recorded_by_user_id: config.userId,
-          related_subcontract_id: config.subcontractId || null,
-        })
-        .select()
-        .single();
-
-      if (txError) throw txError;
-      engineerTransactionId = txData.id;
-    }
-
-    // 2. Generate settlement reference
+    // 1. Generate settlement reference FIRST (needed for wallet spending)
     const { data: refData, error: refError } = await supabase.rpc(
       "generate_settlement_reference",
       { p_site_id: config.siteId }
@@ -277,6 +280,41 @@ export async function processWeeklySettlement(
       settlementReference = `SET-${dayjs().format("YYYYMM")}-${Date.now().toString().slice(-4)}`;
     } else {
       settlementReference = refData as string;
+    }
+
+    // 2. If via engineer wallet, record spending transaction (deducts from wallet batches)
+    if (config.paymentChannel === "engineer_wallet" && config.engineerId) {
+      // Validate batch allocations are provided
+      if (!config.batchAllocations || config.batchAllocations.length === 0) {
+        throw new Error("Batch allocation required for engineer wallet settlement. Please select which wallet batches to use.");
+      }
+
+      // Use walletService.recordWalletSpending for proper batch tracking
+      // Map payment mode for compatibility (net_banking -> bank_transfer)
+      const walletPaymentMode = config.paymentMode === "net_banking" ? "bank_transfer" : config.paymentMode;
+      const spendingResult = await recordWalletSpending(supabase, {
+        engineerId: config.engineerId,
+        amount: config.totalAmount,
+        siteId: config.siteId,
+        description: config.engineerReference || `Weekly settlement ${settlementReference} (${config.dateFrom} - ${config.dateTo})`,
+        recipientType: "laborer",
+        paymentMode: walletPaymentMode as any,
+        moneySource: "wallet",
+        batchAllocations: config.batchAllocations,
+        subcontractId: config.subcontractId,
+        proofUrl: config.proofUrl,
+        notes: config.notes,
+        transactionDate: paymentDate,
+        userName: config.userName,
+        userId: config.userId,
+        settlementReference: settlementReference,
+      });
+
+      if (!spendingResult.success) {
+        throw new Error(spendingResult.error || "Failed to record wallet spending");
+      }
+
+      engineerTransactionId = spendingResult.transactionId || null;
     }
 
     // 3. Count records that will be settled
@@ -348,6 +386,18 @@ export async function processWeeklySettlement(
     }
 
     settlementGroupId = groupData.id;
+
+    // Update engineer transaction with settlement_group_id (for wallet spending)
+    if (engineerTransactionId && config.paymentChannel === "engineer_wallet") {
+      const { error: updateTxError } = await supabase
+        .from("site_engineer_transactions")
+        .update({ settlement_group_id: settlementGroupId })
+        .eq("id", engineerTransactionId);
+
+      if (updateTxError) {
+        console.warn("Could not update engineer transaction with settlement_group_id:", updateTxError);
+      }
+    }
 
     // 5. Update attendance records with settlement_group_id
     const updateData = {
@@ -1717,6 +1767,569 @@ export async function processWaterfallContractPayment(
     return {
       success: false,
       error: err.message || "Failed to process waterfall contract payment",
+    };
+  }
+}
+
+// ============================================================================
+// DATE-WISE CONTRACT SETTLEMENT (NEW - SINGLE SETTLEMENT PER PAYMENT DATE)
+// ============================================================================
+
+import type {
+  DateWiseSettlementConfig,
+  DateWiseSettlementResult,
+  WeekAllocationEntry,
+  MaestriEarningsResult,
+} from "@/types/payment.types";
+
+/**
+ * Process a date-wise contract settlement.
+ * Creates ONE settlement record per payment date that allocates to multiple weeks (oldest first).
+ * This is the new approach where:
+ * - Each payment date creates a single SET-* reference
+ * - Money flows to oldest unpaid week first (waterfall)
+ * - Single settlement can span multiple weeks
+ * - Week allocations are stored in settlement_groups.week_allocations JSONB
+ */
+export async function processDateWiseContractSettlement(
+  supabase: SupabaseClient,
+  config: DateWiseSettlementConfig
+): Promise<DateWiseSettlementResult> {
+  try {
+    const paymentDate = dayjs().format("YYYY-MM-DD");
+    let engineerTransactionId: string | null = null;
+    let settlementGroupId: string = "";
+    let settlementReference: string = "";
+    const laborPaymentIds: string[] = [];
+    const weekAllocations: WeekAllocationEntry[] = [];
+    let remainingAmount = config.totalAmount;
+
+    // 1. Get all unpaid weeks for contract laborers at this site, ordered oldest first
+    const { data: unpaidWeeksData, error: unpaidWeeksError } = await supabase
+      .from("daily_attendance")
+      .select(`
+        id,
+        date,
+        laborer_id,
+        daily_earnings,
+        is_paid,
+        laborers!inner(id, name, labor_roles(name))
+      `)
+      .eq("site_id", config.siteId)
+      .eq("laborer_type", "contract")
+      .eq("is_paid", false)
+      .order("date", { ascending: true });
+
+    if (unpaidWeeksError) {
+      throw new Error(`Failed to fetch unpaid attendance: ${unpaidWeeksError.message}`);
+    }
+
+    if (!unpaidWeeksData || unpaidWeeksData.length === 0) {
+      return {
+        success: false,
+        settlementGroupId: "",
+        settlementReference: "",
+        totalAmount: 0,
+        weekAllocations: [],
+        laborPaymentIds: [],
+        error: "No unpaid attendance records found for contract laborers",
+      };
+    }
+
+    // 2. Group attendance by week
+    const weekDataMap = new Map<string, {
+      weekStart: string;
+      weekEnd: string;
+      weekLabel: string;
+      totalDue: number;
+      laborers: Map<string, {
+        laborerId: string;
+        laborerName: string;
+        laborerRole: string | null;
+        balance: number;
+        attendanceIds: string[];
+      }>;
+    }>();
+
+    for (const att of unpaidWeeksData) {
+      const d = dayjs(att.date);
+      const weekStart = d.day(0).format("YYYY-MM-DD"); // Sunday
+      const weekEnd = d.day(6).format("YYYY-MM-DD"); // Saturday
+      const weekLabel = `${dayjs(weekStart).format("MMM DD")} - ${dayjs(weekEnd).format("MMM DD, YYYY")}`;
+
+      if (!weekDataMap.has(weekStart)) {
+        weekDataMap.set(weekStart, {
+          weekStart,
+          weekEnd,
+          weekLabel,
+          totalDue: 0,
+          laborers: new Map(),
+        });
+      }
+
+      const week = weekDataMap.get(weekStart)!;
+      const laborerData = att.laborers as any;
+      const laborerId = att.laborer_id;
+
+      if (!week.laborers.has(laborerId)) {
+        week.laborers.set(laborerId, {
+          laborerId,
+          laborerName: laborerData?.name || "Unknown",
+          laborerRole: laborerData?.labor_roles?.name || null,
+          balance: 0,
+          attendanceIds: [],
+        });
+      }
+
+      const laborer = week.laborers.get(laborerId)!;
+      laborer.balance += att.daily_earnings || 0;
+      laborer.attendanceIds.push(att.id);
+      week.totalDue += att.daily_earnings || 0;
+    }
+
+    // 3. Sort weeks by date (oldest first)
+    const sortedWeeks = Array.from(weekDataMap.values()).sort(
+      (a, b) => new Date(a.weekStart).getTime() - new Date(b.weekStart).getTime()
+    );
+
+    // 4. If via engineer wallet, create engineer transaction
+    if (config.paymentChannel === "engineer_wallet" && config.engineerId) {
+      const { data: txData, error: txError } = await (supabase
+        .from("site_engineer_transactions") as any)
+        .insert({
+          user_id: config.engineerId,
+          site_id: config.siteId,
+          transaction_type: "received_from_company",
+          settlement_status: "pending_settlement",
+          amount: config.totalAmount,
+          description: `Contract settlement - Rs.${config.totalAmount.toLocaleString()}`,
+          payment_mode: config.paymentMode,
+          proof_url: config.proofUrls?.[0] || null,
+          is_settled: false,
+          recorded_by: config.userName,
+          recorded_by_user_id: config.userId,
+          related_subcontract_id: config.subcontractId || null,
+        })
+        .select()
+        .single();
+
+      if (txError) throw txError;
+      engineerTransactionId = txData.id;
+    }
+
+    // 5. Generate settlement reference
+    const { data: refData, error: refError } = await supabase.rpc(
+      "generate_settlement_reference",
+      { p_site_id: config.siteId }
+    );
+
+    if (refError) {
+      console.warn("Could not generate settlement reference:", refError);
+      settlementReference = `SET-${dayjs().format("YYYYMM")}-${Date.now().toString().slice(-4)}`;
+    } else {
+      settlementReference = refData as string;
+    }
+
+    // 6. Calculate week allocations (waterfall - oldest first)
+    let totalLaborerCount = 0;
+    for (const week of sortedWeeks) {
+      if (remainingAmount <= 0) break;
+
+      const allocatedAmount = Math.min(remainingAmount, week.totalDue);
+      const isFullyPaid = allocatedAmount >= week.totalDue;
+      const laborerCount = week.laborers.size;
+
+      if (allocatedAmount > 0) {
+        weekAllocations.push({
+          weekStart: week.weekStart,
+          weekEnd: week.weekEnd,
+          weekLabel: week.weekLabel,
+          allocatedAmount,
+          laborerCount,
+          isFullyPaid,
+        });
+        totalLaborerCount += laborerCount;
+        remainingAmount -= allocatedAmount;
+      }
+    }
+
+    // 7. Create settlement_group with week_allocations JSONB
+    const { data: groupData, error: groupError } = await (supabase
+      .from("settlement_groups") as any)
+      .insert({
+        settlement_reference: settlementReference,
+        site_id: config.siteId,
+        settlement_date: config.settlementDate,
+        total_amount: config.totalAmount,
+        laborer_count: totalLaborerCount,
+        payment_channel: config.paymentChannel,
+        payment_mode: config.paymentMode,
+        payment_type: "salary",
+        actual_payment_date: config.settlementDate,
+        payer_source: config.payerSource,
+        payer_name: config.payerSource === "custom" || config.payerSource === "other_site_money"
+          ? config.customPayerName
+          : null,
+        proof_url: config.proofUrls?.[0] || null,
+        proof_urls: config.proofUrls || null,
+        notes: config.notes || null,
+        subcontract_id: config.subcontractId || null,
+        engineer_transaction_id: engineerTransactionId,
+        created_by: config.userId,
+        created_by_name: config.userName,
+        settlement_type: "date_wise",
+        week_allocations: weekAllocations,
+      })
+      .select()
+      .single();
+
+    if (groupError) {
+      console.error("Error creating settlement_group:", groupError);
+      throw groupError;
+    }
+
+    settlementGroupId = groupData.id;
+
+    // 8. Create labor_payments and payment_week_allocations for each laborer
+    let processedAmount = 0;
+    for (const allocation of weekAllocations) {
+      const week = weekDataMap.get(allocation.weekStart);
+      if (!week) continue;
+
+      // Calculate proportional split within this week
+      const weekTotalDue = week.totalDue;
+
+      for (const [, laborer] of week.laborers) {
+        if (laborer.balance <= 0) continue;
+
+        // Proportional share
+        const proportion = laborer.balance / weekTotalDue;
+        const laborerAmount = Math.round(allocation.allocatedAmount * proportion);
+        const finalAmount = Math.min(laborerAmount, laborer.balance);
+
+        if (finalAmount <= 0) continue;
+
+        // Generate unique payment reference
+        const { data: payRefData, error: payRefError } = await supabase.rpc(
+          "generate_payment_reference",
+          { p_site_id: config.siteId }
+        );
+
+        let paymentReference: string;
+        if (payRefError) {
+          paymentReference = `PAY-${dayjs().format("YYYYMM")}-${Date.now().toString().slice(-4)}`;
+        } else {
+          paymentReference = payRefData as string;
+        }
+
+        // Create labor_payments record
+        const { data: paymentData, error: paymentError } = await (supabase
+          .from("labor_payments") as any)
+          .insert({
+            laborer_id: laborer.laborerId,
+            site_id: config.siteId,
+            payment_date: paymentDate,
+            payment_for_date: week.weekStart,
+            actual_payment_date: config.settlementDate,
+            amount: finalAmount,
+            payment_mode: config.paymentMode,
+            payment_channel: config.paymentChannel,
+            payment_type: "salary",
+            payment_reference: paymentReference,
+            is_under_contract: true,
+            subcontract_id: config.subcontractId || null,
+            proof_url: config.proofUrls?.[0] || null,
+            paid_by: config.userName,
+            paid_by_user_id: config.userId,
+            recorded_by: config.userName,
+            recorded_by_user_id: config.userId,
+            notes: `Date-wise settlement (${allocation.weekLabel})${config.notes ? `: ${config.notes}` : ""}`,
+            settlement_group_id: settlementGroupId,
+            site_engineer_transaction_id: engineerTransactionId,
+          })
+          .select()
+          .single();
+
+        if (paymentError) {
+          console.error(`Error creating labor_payment for ${laborer.laborerName}:`, paymentError);
+          continue;
+        }
+
+        laborPaymentIds.push(paymentData.id);
+        processedAmount += finalAmount;
+
+        // Create payment_week_allocation
+        await supabase
+          .from("payment_week_allocations")
+          .insert({
+            labor_payment_id: paymentData.id,
+            laborer_id: laborer.laborerId,
+            site_id: config.siteId,
+            week_start: week.weekStart,
+            week_end: week.weekEnd,
+            allocated_amount: finalAmount,
+          });
+
+        // Mark attendance as paid if laborer's week is fully covered
+        if (finalAmount >= laborer.balance) {
+          await supabase
+            .from("daily_attendance")
+            .update({
+              is_paid: true,
+              payment_date: paymentDate,
+              payment_id: paymentData.id,
+              settlement_group_id: settlementGroupId,
+            })
+            .in("id", laborer.attendanceIds);
+        }
+      }
+    }
+
+    return {
+      success: true,
+      settlementGroupId,
+      settlementReference,
+      totalAmount: config.totalAmount,
+      weekAllocations,
+      laborPaymentIds,
+    };
+  } catch (err: any) {
+    console.error("Date-wise contract settlement error:", err);
+    return {
+      success: false,
+      settlementGroupId: "",
+      settlementReference: "",
+      totalAmount: 0,
+      weekAllocations: [],
+      laborPaymentIds: [],
+      error: err.message || "Failed to process date-wise contract settlement",
+    };
+  }
+}
+
+/**
+ * Get date-wise settlements for a week range.
+ * Returns settlements grouped by settlement date (not by laborer).
+ */
+export async function getDateWiseSettlements(
+  supabase: SupabaseClient,
+  siteId: string,
+  weekStart: string,
+  weekEnd: string
+): Promise<{
+  settlements: Array<{
+    settlementGroupId: string;
+    settlementReference: string;
+    settlementDate: string;
+    totalAmount: number;
+    weekAllocations: WeekAllocationEntry[];
+    paymentMode: string | null;
+    paymentChannel: string;
+    payerSource: string | null;
+    payerName: string | null;
+    proofUrls: string[];
+    notes: string | null;
+    createdBy: string | null;
+    createdAt: string;
+  }>;
+  total: number;
+}> {
+  try {
+    // Query settlement_groups that have allocations touching this week range
+    const { data, error } = await (supabase
+      .from("settlement_groups") as any)
+      .select(`
+        id,
+        settlement_reference,
+        settlement_date,
+        total_amount,
+        week_allocations,
+        payment_mode,
+        payment_channel,
+        payer_source,
+        payer_name,
+        proof_url,
+        proof_urls,
+        notes,
+        created_by_name,
+        created_at,
+        is_cancelled
+      `)
+      .eq("site_id", siteId)
+      .eq("is_cancelled", false)
+      // Include settlements with date_wise type OR NULL (for backwards compatibility)
+      .or("settlement_type.eq.date_wise,settlement_type.is.null")
+      .order("settlement_date", { ascending: false });
+
+    if (error) {
+      console.error("Error fetching date-wise settlements:", error);
+      return { settlements: [], total: 0 };
+    }
+
+    // Filter settlements that have allocations touching the requested week range
+    const settlements = (data || [])
+      .filter((sg: any) => {
+        if (!sg.week_allocations) return false;
+        const allocations = sg.week_allocations as WeekAllocationEntry[];
+        return allocations.some(
+          (a) => a.weekStart <= weekEnd && a.weekEnd >= weekStart
+        );
+      })
+      .map((sg: any) => ({
+        settlementGroupId: sg.id,
+        settlementReference: sg.settlement_reference,
+        settlementDate: sg.settlement_date,
+        totalAmount: sg.total_amount,
+        weekAllocations: (sg.week_allocations as WeekAllocationEntry[]) || [],
+        paymentMode: sg.payment_mode,
+        paymentChannel: sg.payment_channel,
+        payerSource: sg.payer_source,
+        payerName: sg.payer_name,
+        proofUrls: sg.proof_urls || (sg.proof_url ? [sg.proof_url] : []),
+        notes: sg.notes,
+        createdBy: sg.created_by_name,
+        createdAt: sg.created_at,
+      }));
+
+    return { settlements, total: settlements.length };
+  } catch (err: any) {
+    console.error("Error in getDateWiseSettlements:", err);
+    return { settlements: [], total: 0 };
+  }
+}
+
+// ============================================================================
+// MAESTRI EARNINGS CALCULATION
+// ============================================================================
+
+/**
+ * Calculate Maestri (contractor) earnings based on margin per day.
+ * Earnings = maestri_margin_per_day × days_worked × unique_laborers
+ */
+export async function getMaestriEarnings(
+  supabase: SupabaseClient,
+  siteId: string,
+  subcontractId: string,
+  dateFrom?: string,
+  dateTo?: string
+): Promise<MaestriEarningsResult> {
+  try {
+    // 1. Get the maestri margin from subcontract
+    const { data: subcontract, error: scError } = await supabase
+      .from("subcontracts")
+      .select("maestri_margin_per_day")
+      .eq("id", subcontractId)
+      .single();
+
+    if (scError || !subcontract) {
+      console.error("Could not fetch subcontract:", scError);
+      return {
+        totalDaysWorked: 0,
+        laborerCount: 0,
+        marginPerDay: 0,
+        totalMaestriEarnings: 0,
+        byWeek: [],
+      };
+    }
+
+    const marginPerDay = subcontract.maestri_margin_per_day || 0;
+
+    // 2. Build the attendance query
+    let query = supabase
+      .from("daily_attendance")
+      .select("id, date, laborer_id, daily_earnings, attendance_status")
+      .eq("site_id", siteId)
+      .eq("laborer_type", "contract")
+      .neq("attendance_status", "absent");
+
+    // Optional date filters
+    if (dateFrom) {
+      query = query.gte("date", dateFrom);
+    }
+    if (dateTo) {
+      query = query.lte("date", dateTo);
+    }
+
+    const { data: attendanceData, error: attError } = await query;
+
+    if (attError || !attendanceData) {
+      console.error("Could not fetch attendance for maestri earnings:", attError);
+      return {
+        totalDaysWorked: 0,
+        laborerCount: 0,
+        marginPerDay,
+        totalMaestriEarnings: 0,
+        byWeek: [],
+      };
+    }
+
+    // 3. Group by week and count days/laborers
+    const weekDataMap = new Map<string, {
+      weekStart: string;
+      weekEnd: string;
+      weekLabel: string;
+      daysWorked: number;
+      laborerIds: Set<string>;
+    }>();
+
+    const allLaborerIds = new Set<string>();
+    let totalDaysWorked = 0;
+
+    for (const att of attendanceData) {
+      const d = dayjs(att.date);
+      const weekStart = d.day(0).format("YYYY-MM-DD");
+      const weekEnd = d.day(6).format("YYYY-MM-DD");
+      const weekLabel = `${dayjs(weekStart).format("MMM DD")} - ${dayjs(weekEnd).format("MMM DD, YYYY")}`;
+
+      if (!weekDataMap.has(weekStart)) {
+        weekDataMap.set(weekStart, {
+          weekStart,
+          weekEnd,
+          weekLabel,
+          daysWorked: 0,
+          laborerIds: new Set(),
+        });
+      }
+
+      const week = weekDataMap.get(weekStart)!;
+      week.daysWorked += 1;
+      week.laborerIds.add(att.laborer_id);
+      allLaborerIds.add(att.laborer_id);
+      totalDaysWorked += 1;
+    }
+
+    // 4. Calculate earnings per week
+    const byWeek = Array.from(weekDataMap.values())
+      .sort((a, b) => new Date(a.weekStart).getTime() - new Date(b.weekStart).getTime())
+      .map((week) => ({
+        weekStart: week.weekStart,
+        weekEnd: week.weekEnd,
+        weekLabel: week.weekLabel,
+        daysWorked: week.daysWorked,
+        laborerCount: week.laborerIds.size,
+        earnings: week.daysWorked * marginPerDay,
+      }));
+
+    // 5. Calculate total earnings
+    // Note: totalDaysWorked here is the sum of attendance records (laborer-days)
+    // So total earnings = totalDaysWorked * marginPerDay
+    const totalMaestriEarnings = totalDaysWorked * marginPerDay;
+
+    return {
+      totalDaysWorked,
+      laborerCount: allLaborerIds.size,
+      marginPerDay,
+      totalMaestriEarnings,
+      byWeek,
+    };
+  } catch (err: any) {
+    console.error("Error calculating maestri earnings:", err);
+    return {
+      totalDaysWorked: 0,
+      laborerCount: 0,
+      marginPerDay: 0,
+      totalMaestriEarnings: 0,
+      byWeek: [],
     };
   }
 }
