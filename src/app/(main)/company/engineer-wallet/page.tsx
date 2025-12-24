@@ -98,6 +98,7 @@ import TransactionDeleteDialog from "@/components/wallet/TransactionDeleteDialog
 import SettlementDetailDialog from "@/components/wallet/SettlementDetailDialog";
 import SettlementEditDialog from "@/components/wallet/SettlementEditDialog";
 import SettlementDeleteDialog from "@/components/wallet/SettlementDeleteDialog";
+import BatchUsageSummaryDialog from "@/components/wallet/BatchUsageSummaryDialog";
 
 interface User {
   id: string;
@@ -184,6 +185,10 @@ export default function EngineerWalletPage() {
   const [openSettlementDetailDialog, setOpenSettlementDetailDialog] = useState(false);
   const [openSettlementEditDialog, setOpenSettlementEditDialog] = useState(false);
   const [openSettlementDeleteDialog, setOpenSettlementDeleteDialog] = useState(false);
+
+  // Batch usage dialog
+  const [selectedBatchForUsage, setSelectedBatchForUsage] = useState<TransactionWithDetails | null>(null);
+  const [openBatchUsageDialog, setOpenBatchUsageDialog] = useState(false);
 
   const { userProfile } = useAuth();
   const supabase = createClient();
@@ -1254,6 +1259,14 @@ export default function EngineerWalletPage() {
     setOpenSettlementDeleteDialog(true);
   };
 
+  // Handler for batch code click - shows which settlements used this batch
+  const handleBatchClick = (transaction: TransactionWithDetails) => {
+    if (transaction.transaction_type === "received_from_company" && transaction.batch_code) {
+      setSelectedBatchForUsage(transaction);
+      setOpenBatchUsageDialog(true);
+    }
+  };
+
   // MRT columns for transactions
   const transactionColumns = useMemo<MRT_ColumnDef<TransactionWithDetails>[]>(
     () => [
@@ -1290,7 +1303,20 @@ export default function EngineerWalletPage() {
               label={row.original.batch_code}
               size="small"
               variant="outlined"
-              sx={{ fontFamily: "monospace", fontSize: "0.7rem" }}
+              onClick={
+                row.original.transaction_type === "received_from_company"
+                  ? () => handleBatchClick(row.original)
+                  : undefined
+              }
+              sx={{
+                fontFamily: "monospace",
+                fontSize: "0.7rem",
+                cursor: row.original.transaction_type === "received_from_company" ? "pointer" : "default",
+                "&:hover": row.original.transaction_type === "received_from_company" ? {
+                  backgroundColor: "primary.light",
+                  color: "primary.contrastText",
+                } : {},
+              }}
             />
           ) : (
             "-"
@@ -2969,6 +2995,22 @@ export default function EngineerWalletPage() {
         onClose={() => setOpenSettlementDeleteDialog(false)}
         settlement={selectedSettlement}
         onSuccess={fetchData}
+      />
+
+      {/* Batch Usage Dialog - shows which settlements used a batch */}
+      <BatchUsageSummaryDialog
+        open={openBatchUsageDialog}
+        onClose={() => {
+          setOpenBatchUsageDialog(false);
+          setSelectedBatchForUsage(null);
+        }}
+        batchId={selectedBatchForUsage?.id || null}
+        batchCode={selectedBatchForUsage?.batch_code || ""}
+        originalAmount={selectedBatchForUsage?.amount || 0}
+        remainingBalance={selectedBatchForUsage?.remaining_balance || 0}
+        payerSource={selectedBatchForUsage?.payer_source}
+        payerName={selectedBatchForUsage?.payer_name}
+        transactionDate={selectedBatchForUsage?.transaction_date}
       />
     </Box>
   );

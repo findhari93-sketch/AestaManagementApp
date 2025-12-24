@@ -476,6 +476,44 @@ export default function ContractWeeklyPaymentsTab({
         });
       });
 
+      // Fetch settlement_groups to get SET-* references for each week
+      const { data: settlementGroupsData } = await (supabase as any)
+        .from("settlement_groups")
+        .select("id, settlement_reference, settlement_date, week_allocations")
+        .eq("site_id", selectedSite.id)
+        .eq("is_cancelled", false)
+        .or("settlement_type.eq.date_wise,settlement_type.is.null");
+
+      // Add settlement_group references to each week row
+      if (settlementGroupsData && settlementGroupsData.length > 0) {
+        weekRows.forEach((weekRow) => {
+          const weekStart = weekRow.weekStart;
+          const weekEnd = weekRow.weekEnd;
+
+          // Find settlements that overlap with this week
+          settlementGroupsData.forEach((sg: any) => {
+            let overlaps = false;
+
+            // Check week_allocations for overlap
+            if (sg.week_allocations && Array.isArray(sg.week_allocations) && sg.week_allocations.length > 0) {
+              overlaps = sg.week_allocations.some(
+                (a: any) => a.weekStart <= weekEnd && a.weekEnd >= weekStart
+              );
+            } else if (sg.settlement_date) {
+              // Fallback: check if settlement_date falls within week
+              overlaps = sg.settlement_date >= weekStart && sg.settlement_date <= weekEnd;
+            }
+
+            // Add the reference if it overlaps and not already present
+            if (overlaps && sg.settlement_reference) {
+              if (!weekRow.settlementReferences.includes(sg.settlement_reference)) {
+                weekRow.settlementReferences.push(sg.settlement_reference);
+              }
+            }
+          });
+        });
+      }
+
       // Sort by week start date descending (most recent first)
       weekRows.sort((a, b) => new Date(b.weekStart).getTime() - new Date(a.weekStart).getTime());
       setWeekGroups(weekRows);
@@ -852,19 +890,38 @@ export default function ContractWeeklyPaymentsTab({
           );
 
           return (
-            <Chip
-              size="small"
-              icon={<ReceiptIcon sx={{ fontSize: 14 }} />}
-              label={`${count} Transaction${count > 1 ? "s" : ""}`}
-              color={count > 0 ? "primary" : "default"}
-              variant="outlined"
-              sx={{ cursor: "pointer" }}
-              onClick={(e) => {
-                e.stopPropagation();
-                setSelectedWeekForDetails(row.original);
-                setWeekDetailsDialogOpen(true);
+            <Tooltip
+              title={<TooltipContent />}
+              arrow
+              placement="top"
+              componentsProps={{
+                tooltip: {
+                  sx: {
+                    maxWidth: 300,
+                    bgcolor: "background.paper",
+                    color: "text.primary",
+                    boxShadow: 3,
+                    "& .MuiTooltip-arrow": {
+                      color: "background.paper",
+                    },
+                  },
+                },
               }}
-            />
+            >
+              <Chip
+                size="small"
+                icon={<ReceiptIcon sx={{ fontSize: 14 }} />}
+                label={`${count} Transaction${count > 1 ? "s" : ""}`}
+                color={count > 0 ? "primary" : "default"}
+                variant="outlined"
+                sx={{ cursor: "pointer" }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSelectedWeekForDetails(row.original);
+                  setWeekDetailsDialogOpen(true);
+                }}
+              />
+            </Tooltip>
           );
         },
       },

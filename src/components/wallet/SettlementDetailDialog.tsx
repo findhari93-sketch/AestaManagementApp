@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useEffect, useState } from "react";
 import {
   Dialog,
   DialogTitle,
@@ -14,15 +14,47 @@ import {
   Grid,
   Link,
   Alert,
+  CircularProgress,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Paper,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
 } from "@mui/material";
 import {
   Receipt as ReceiptIcon,
   SwapHoriz as SettlementIcon,
-  Payment as PaymentIcon,
+  ExpandMore as ExpandMoreIcon,
+  People as PeopleIcon,
+  AccountBalanceWallet as WalletIcon,
 } from "@mui/icons-material";
 import type { UnifiedSettlementRecord } from "@/types/wallet.types";
 import { getPayerSourceLabel } from "@/components/settlement/PayerSourceSelector";
+import type { PayerSource } from "@/types/settlement.types";
+import { createClient } from "@/lib/supabase/client";
 import dayjs from "dayjs";
+
+interface LaborerBreakdown {
+  laborer_id: string | null;
+  laborer_name: string;
+  amount: number;
+  work_date: string;
+  attendance_type: string;
+}
+
+interface BatchSource {
+  batch_code: string;
+  batch_transaction_id: string;
+  amount_used: number;
+  payer_source: string | null;
+  payer_name: string | null;
+  batch_date: string;
+}
 
 interface SettlementDetailDialogProps {
   open: boolean;
@@ -35,17 +67,102 @@ export default function SettlementDetailDialog({
   onClose,
   settlement,
 }: SettlementDetailDialogProps) {
+  const [laborers, setLaborers] = useState<LaborerBreakdown[]>([]);
+  const [batchSources, setBatchSources] = useState<BatchSource[]>([]);
+  const [loadingLaborers, setLoadingLaborers] = useState(false);
+  const [loadingBatches, setLoadingBatches] = useState(false);
+
+  const supabase = createClient();
+
+  // Fetch laborers and batch sources when dialog opens
+  useEffect(() => {
+    if (open && settlement && settlement.source === "settlement_group") {
+      fetchLaborers();
+      fetchBatchSources();
+    } else {
+      setLaborers([]);
+      setBatchSources([]);
+    }
+  }, [open, settlement]);
+
+  const fetchLaborers = async () => {
+    if (!settlement) return;
+    setLoadingLaborers(true);
+    try {
+      // Use any cast since the RPC function is defined in migration but not in generated types yet
+      const { data, error } = await (supabase.rpc as any)("get_settlement_laborers", {
+        p_settlement_group_id: settlement.id,
+      });
+      if (error) throw error;
+      setLaborers((data as LaborerBreakdown[]) || []);
+    } catch (err) {
+      console.error("Error fetching laborers:", err);
+      setLaborers([]);
+    } finally {
+      setLoadingLaborers(false);
+    }
+  };
+
+  const fetchBatchSources = async () => {
+    if (!settlement) return;
+    setLoadingBatches(true);
+    try {
+      // Use any cast since the RPC function is defined in migration but not in generated types yet
+      const { data, error } = await (supabase.rpc as any)("get_settlement_batch_sources", {
+        p_settlement_group_id: settlement.id,
+      });
+      if (error) throw error;
+      setBatchSources((data as BatchSource[]) || []);
+    } catch (err) {
+      console.error("Error fetching batch sources:", err);
+      setBatchSources([]);
+    } finally {
+      setLoadingBatches(false);
+    }
+  };
+
   if (!settlement) return null;
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
+    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
       <DialogTitle sx={{ display: "flex", alignItems: "center", gap: 1 }}>
         <SettlementIcon color="primary" />
         Settlement Details
+        {settlement.settlement_reference && (
+          <Chip
+            label={settlement.settlement_reference}
+            size="small"
+            color="info"
+            sx={{ ml: 1, fontFamily: "monospace" }}
+          />
+        )}
       </DialogTitle>
       <DialogContent dividers>
         <Grid container spacing={2}>
-          <Grid size={{ xs: 6 }}>
+          {/* Header info */}
+          <Grid size={{ xs: 6, md: 3 }}>
+            <Typography variant="caption" color="text.secondary">
+              Amount
+            </Typography>
+            <Typography variant="h6" fontWeight={700} color="success.main">
+              Rs.{settlement.total_amount.toLocaleString()}
+            </Typography>
+          </Grid>
+          <Grid size={{ xs: 6, md: 3 }}>
+            <Typography variant="caption" color="text.secondary">
+              Settlement Date
+            </Typography>
+            <Typography variant="body1">
+              {dayjs(settlement.settlement_date).format("DD MMM YYYY")}
+            </Typography>
+          </Grid>
+          <Grid size={{ xs: 6, md: 3 }}>
+            <Typography variant="caption" color="text.secondary">
+              Laborers
+            </Typography>
+            <Typography variant="body1">{settlement.laborer_count || "-"}</Typography>
+          </Grid>
+          <Grid size={{ xs: 6, md: 3 }}>
             <Typography variant="caption" color="text.secondary">
               Source
             </Typography>
@@ -58,46 +175,12 @@ export default function SettlementDetailDialog({
               />
             </Box>
           </Grid>
-          <Grid size={{ xs: 6 }}>
-            <Typography variant="caption" color="text.secondary">
-              Amount
-            </Typography>
-            <Typography variant="h6" fontWeight={700} color="success.main">
-              Rs.{settlement.total_amount.toLocaleString()}
-            </Typography>
+
+          <Grid size={{ xs: 12 }}>
+            <Divider sx={{ my: 1 }} />
           </Grid>
 
-          {settlement.settlement_reference && (
-            <Grid size={{ xs: 12 }}>
-              <Typography variant="caption" color="text.secondary">
-                Reference Code
-              </Typography>
-              <Box sx={{ mt: 0.5 }}>
-                <Chip
-                  label={settlement.settlement_reference}
-                  size="small"
-                  color="info"
-                  sx={{ fontFamily: "monospace" }}
-                />
-              </Box>
-            </Grid>
-          )}
-
-          <Grid size={{ xs: 6 }}>
-            <Typography variant="caption" color="text.secondary">
-              Settlement Date
-            </Typography>
-            <Typography variant="body1">
-              {dayjs(settlement.settlement_date).format("DD MMM YYYY")}
-            </Typography>
-          </Grid>
-          <Grid size={{ xs: 6 }}>
-            <Typography variant="caption" color="text.secondary">
-              Laborers
-            </Typography>
-            <Typography variant="body1">{settlement.laborer_count || "-"}</Typography>
-          </Grid>
-
+          {/* Site and Engineer */}
           <Grid size={{ xs: 6 }}>
             <Typography variant="caption" color="text.secondary">
               Site
@@ -106,11 +189,12 @@ export default function SettlementDetailDialog({
           </Grid>
           <Grid size={{ xs: 6 }}>
             <Typography variant="caption" color="text.secondary">
-              Engineer
+              Settled By
             </Typography>
             <Typography variant="body1">{settlement.engineer_name || "-"}</Typography>
           </Grid>
 
+          {/* Payment details */}
           {settlement.payment_mode && (
             <Grid size={{ xs: 6 }}>
               <Typography variant="caption" color="text.secondary">
@@ -141,7 +225,7 @@ export default function SettlementDetailDialog({
               </Typography>
               <Box sx={{ mt: 0.5 }}>
                 <Chip
-                  label={settlement.payment_channel === "engineer_wallet" ? "Via Engineer" : "Direct"}
+                  label={settlement.payment_channel === "engineer_wallet" ? "Via Engineer Wallet" : "Direct"}
                   size="small"
                   color={settlement.payment_channel === "engineer_wallet" ? "warning" : "success"}
                   variant="outlined"
@@ -150,30 +234,122 @@ export default function SettlementDetailDialog({
             </Grid>
           )}
 
-          {/* Legacy-specific: settlement type */}
-          {settlement.settlement_type && (
-            <Grid size={{ xs: 6 }}>
-              <Typography variant="caption" color="text.secondary">
-                Settlement Type
-              </Typography>
-              <Box sx={{ mt: 0.5 }}>
-                <Chip
-                  label={
-                    settlement.settlement_type === "company_to_engineer"
-                      ? "Company → Engineer"
-                      : "Engineer → Company"
-                  }
-                  size="small"
-                  color={settlement.settlement_type === "company_to_engineer" ? "success" : "info"}
-                />
-              </Box>
+          {/* Batch Sources - Only for engineer_wallet settlements */}
+          {settlement.payment_channel === "engineer_wallet" && settlement.source === "settlement_group" && (
+            <Grid size={{ xs: 12 }}>
+              <Accordion defaultExpanded={batchSources.length > 0}>
+                <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                  <WalletIcon sx={{ mr: 1 }} color="primary" />
+                  <Typography fontWeight={600}>
+                    Wallet Batches Used {batchSources.length > 0 && `(${batchSources.length})`}
+                  </Typography>
+                </AccordionSummary>
+                <AccordionDetails>
+                  {loadingBatches ? (
+                    <Box sx={{ display: "flex", justifyContent: "center", p: 2 }}>
+                      <CircularProgress size={24} />
+                    </Box>
+                  ) : batchSources.length > 0 ? (
+                    <TableContainer component={Paper} variant="outlined">
+                      <Table size="small">
+                        <TableHead>
+                          <TableRow>
+                            <TableCell>Batch Code</TableCell>
+                            <TableCell>Source</TableCell>
+                            <TableCell align="right">Amount Used</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {batchSources.map((batch, idx) => (
+                            <TableRow key={idx}>
+                              <TableCell>
+                                <Chip
+                                  label={batch.batch_code}
+                                  size="small"
+                                  variant="outlined"
+                                  sx={{ fontFamily: "monospace" }}
+                                />
+                              </TableCell>
+                              <TableCell>
+                                {batch.payer_source
+                                  ? getPayerSourceLabel(batch.payer_source as PayerSource)
+                                  : "-"}
+                                {batch.payer_name && ` (${batch.payer_name})`}
+                              </TableCell>
+                              <TableCell align="right">
+                                Rs.{batch.amount_used.toLocaleString()}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+                  ) : (
+                    <Typography variant="body2" color="text.secondary" sx={{ p: 2, textAlign: "center" }}>
+                      No batch usage records found
+                    </Typography>
+                  )}
+                </AccordionDetails>
+              </Accordion>
             </Grid>
           )}
 
-          <Grid size={{ xs: 12 }}>
-            <Divider sx={{ my: 1 }} />
-          </Grid>
+          {/* Laborers Breakdown */}
+          {settlement.source === "settlement_group" && (
+            <Grid size={{ xs: 12 }}>
+              <Accordion>
+                <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                  <PeopleIcon sx={{ mr: 1 }} color="primary" />
+                  <Typography fontWeight={600}>
+                    Laborers Paid {laborers.length > 0 && `(${laborers.length})`}
+                  </Typography>
+                </AccordionSummary>
+                <AccordionDetails>
+                  {loadingLaborers ? (
+                    <Box sx={{ display: "flex", justifyContent: "center", p: 2 }}>
+                      <CircularProgress size={24} />
+                    </Box>
+                  ) : laborers.length > 0 ? (
+                    <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: 300 }}>
+                      <Table size="small" stickyHeader>
+                        <TableHead>
+                          <TableRow>
+                            <TableCell>Name</TableCell>
+                            <TableCell>Type</TableCell>
+                            <TableCell>Work Date</TableCell>
+                            <TableCell align="right">Amount</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {laborers.map((laborer, idx) => (
+                            <TableRow key={idx}>
+                              <TableCell>{laborer.laborer_name}</TableCell>
+                              <TableCell>
+                                <Chip
+                                  label={laborer.attendance_type === "daily" ? "Daily" : "Market"}
+                                  size="small"
+                                  color={laborer.attendance_type === "daily" ? "primary" : "secondary"}
+                                  variant="outlined"
+                                />
+                              </TableCell>
+                              <TableCell>{dayjs(laborer.work_date).format("DD MMM")}</TableCell>
+                              <TableCell align="right">Rs.{laborer.amount.toLocaleString()}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+                  ) : (
+                    <Typography variant="body2" color="text.secondary" sx={{ p: 2, textAlign: "center" }}>
+                      No laborer records found
+                    </Typography>
+                  )}
+                </AccordionDetails>
+              </Accordion>
+            </Grid>
+          )}
 
+          {/* Notes */}
           {settlement.notes && (
             <Grid size={{ xs: 12 }}>
               <Typography variant="caption" color="text.secondary">
@@ -185,6 +361,7 @@ export default function SettlementDetailDialog({
             </Grid>
           )}
 
+          {/* Payment Proof */}
           {settlement.proof_url && (
             <Grid size={{ xs: 12 }}>
               <Typography variant="caption" color="text.secondary">
@@ -204,6 +381,7 @@ export default function SettlementDetailDialog({
             <Divider sx={{ my: 1 }} />
           </Grid>
 
+          {/* Created info */}
           <Grid size={{ xs: 6 }}>
             <Typography variant="caption" color="text.secondary">
               Created By
@@ -219,6 +397,7 @@ export default function SettlementDetailDialog({
             </Typography>
           </Grid>
 
+          {/* Cancelled warning */}
           {settlement.is_cancelled && (
             <Grid size={{ xs: 12 }}>
               <Alert severity="error">

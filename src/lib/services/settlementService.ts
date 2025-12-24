@@ -2169,11 +2169,18 @@ export async function getDateWiseSettlements(
     // Filter settlements that have allocations touching the requested week range
     const settlements = (data || [])
       .filter((sg: any) => {
-        if (!sg.week_allocations) return false;
-        const allocations = sg.week_allocations as WeekAllocationEntry[];
-        return allocations.some(
-          (a) => a.weekStart <= weekEnd && a.weekEnd >= weekStart
-        );
+        // If week_allocations exists, use it for filtering
+        if (sg.week_allocations && Array.isArray(sg.week_allocations) && sg.week_allocations.length > 0) {
+          const allocations = sg.week_allocations as WeekAllocationEntry[];
+          return allocations.some(
+            (a) => a.weekStart <= weekEnd && a.weekEnd >= weekStart
+          );
+        }
+        // Otherwise, filter by settlement_date falling within week range
+        if (sg.settlement_date) {
+          return sg.settlement_date >= weekStart && sg.settlement_date <= weekEnd;
+        }
+        return false;
       })
       .map((sg: any) => ({
         settlementGroupId: sg.id,

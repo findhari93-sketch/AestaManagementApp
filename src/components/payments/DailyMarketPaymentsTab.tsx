@@ -16,12 +16,22 @@ import {
   Tooltip,
   useTheme,
   useMediaQuery,
+  Card,
+  CardContent,
+  Grid,
+  Chip,
+  LinearProgress,
+  alpha,
 } from "@mui/material";
 import {
   Refresh as RefreshIcon,
   Fullscreen as FullscreenIcon,
   FullscreenExit as FullscreenExitIcon,
   Close as CloseIcon,
+  AccountBalanceWallet as SalaryIcon,
+  CheckCircle as PaidIcon,
+  Warning as OutstandingIcon,
+  TrendingUp as ProgressIcon,
 } from "@mui/icons-material";
 import { useFullscreen } from "@/hooks/useFullscreen";
 import { createClient } from "@/lib/supabase/client";
@@ -494,6 +504,30 @@ export default function DailyMarketPaymentsTab({
 
     onSummaryChange(summary);
   }, [dateGroups, onSummaryChange]);
+
+  // Calculate summary dashboard data
+  const dashboardSummary = useMemo(() => {
+    const allRecords = dateGroups.flatMap((g) => [...g.dailyRecords, ...g.marketRecords]);
+    const totalSalary = allRecords.reduce((sum, r) => sum + r.amount, 0);
+    const totalPaid = allRecords.filter((r) => r.isPaid).reduce((sum, r) => sum + r.amount, 0);
+    const pendingWithEngineer = allRecords
+      .filter((r) => !r.isPaid && r.paidVia === "engineer_wallet")
+      .reduce((sum, r) => sum + r.amount, 0);
+    const totalDue = totalSalary - totalPaid;
+    const progress = totalSalary > 0 ? (totalPaid / totalSalary) * 100 : 0;
+    const recordCount = allRecords.length;
+    const paidCount = allRecords.filter((r) => r.isPaid).length;
+
+    return {
+      totalSalary,
+      totalPaid,
+      totalDue,
+      pendingWithEngineer,
+      progress,
+      recordCount,
+      paidCount,
+    };
+  }, [dateGroups]);
 
   // Filter records
   const filteredDateGroups = useMemo(() => {
@@ -1147,6 +1181,182 @@ export default function DailyMarketPaymentsTab({
           <IconButton onClick={exitFullscreen} size="small">
             <CloseIcon />
           </IconButton>
+        </Box>
+      )}
+
+      {/* Summary Dashboard */}
+      {!loading && dateGroups.length > 0 && (
+        <Box sx={{ mb: 3 }}>
+          <Grid container spacing={2}>
+            {/* Total Salary */}
+            <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+              <Card
+                sx={{
+                  bgcolor: "primary.50",
+                  borderLeft: 4,
+                  borderColor: "primary.main",
+                }}
+              >
+                <CardContent sx={{ py: 2, "&:last-child": { pb: 2 } }}>
+                  <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
+                    <SalaryIcon color="primary" fontSize="small" />
+                    <Typography variant="caption" color="text.secondary">
+                      Total Salary
+                    </Typography>
+                  </Box>
+                  <Typography variant="h5" fontWeight={600} color="primary.dark">
+                    Rs.{dashboardSummary.totalSalary.toLocaleString()}
+                  </Typography>
+                  <Chip
+                    label={`${dashboardSummary.recordCount} records`}
+                    size="small"
+                    color="primary"
+                    variant="outlined"
+                    sx={{ mt: 1 }}
+                  />
+                </CardContent>
+              </Card>
+            </Grid>
+
+            {/* Paid Amount */}
+            <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+              <Card
+                sx={{
+                  bgcolor: "success.50",
+                  borderLeft: 4,
+                  borderColor: "success.main",
+                }}
+              >
+                <CardContent sx={{ py: 2, "&:last-child": { pb: 2 } }}>
+                  <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
+                    <PaidIcon color="success" fontSize="small" />
+                    <Typography variant="caption" color="text.secondary">
+                      Paid
+                    </Typography>
+                  </Box>
+                  <Typography variant="h5" fontWeight={600} color="success.dark">
+                    Rs.{dashboardSummary.totalPaid.toLocaleString()}
+                  </Typography>
+                  <Chip
+                    label={`${dashboardSummary.paidCount} paid`}
+                    size="small"
+                    color="success"
+                    variant="outlined"
+                    sx={{ mt: 1 }}
+                  />
+                </CardContent>
+              </Card>
+            </Grid>
+
+            {/* Outstanding */}
+            <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+              <Card
+                sx={{
+                  bgcolor: dashboardSummary.totalDue > 0 ? "error.50" : "grey.50",
+                  borderLeft: 4,
+                  borderColor: dashboardSummary.totalDue > 0 ? "error.main" : "grey.400",
+                }}
+              >
+                <CardContent sx={{ py: 2, "&:last-child": { pb: 2 } }}>
+                  <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
+                    <OutstandingIcon color={dashboardSummary.totalDue > 0 ? "error" : "disabled"} fontSize="small" />
+                    <Typography variant="caption" color="text.secondary">
+                      Outstanding
+                    </Typography>
+                  </Box>
+                  <Typography
+                    variant="h5"
+                    fontWeight={600}
+                    color={dashboardSummary.totalDue > 0 ? "error.dark" : "text.disabled"}
+                  >
+                    Rs.{dashboardSummary.totalDue.toLocaleString()}
+                  </Typography>
+                  {dashboardSummary.pendingWithEngineer > 0 && (
+                    <Chip
+                      label={`Rs.${dashboardSummary.pendingWithEngineer.toLocaleString()} with engineer`}
+                      size="small"
+                      color="warning"
+                      variant="outlined"
+                      sx={{ mt: 1 }}
+                    />
+                  )}
+                </CardContent>
+              </Card>
+            </Grid>
+
+            {/* Payment Progress */}
+            <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+              <Card
+                sx={{
+                  bgcolor: dashboardSummary.progress >= 100
+                    ? "success.50"
+                    : dashboardSummary.progress >= 50
+                    ? "info.50"
+                    : "warning.50",
+                  borderLeft: 4,
+                  borderColor: dashboardSummary.progress >= 100
+                    ? "success.main"
+                    : dashboardSummary.progress >= 50
+                    ? "info.main"
+                    : "warning.main",
+                }}
+              >
+                <CardContent sx={{ py: 2, "&:last-child": { pb: 2 } }}>
+                  <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
+                    <ProgressIcon
+                      color={
+                        dashboardSummary.progress >= 100
+                          ? "success"
+                          : dashboardSummary.progress >= 50
+                          ? "info"
+                          : "warning"
+                      }
+                      fontSize="small"
+                    />
+                    <Typography variant="caption" color="text.secondary">
+                      Progress
+                    </Typography>
+                  </Box>
+                  <Box sx={{ display: "flex", alignItems: "baseline", gap: 1 }}>
+                    <Typography
+                      variant="h5"
+                      fontWeight={600}
+                      color={
+                        dashboardSummary.progress >= 100
+                          ? "success.dark"
+                          : dashboardSummary.progress >= 50
+                          ? "info.dark"
+                          : "warning.dark"
+                      }
+                    >
+                      {Math.round(dashboardSummary.progress)}%
+                    </Typography>
+                    <Typography variant="caption" color="text.disabled">
+                      complete
+                    </Typography>
+                  </Box>
+                  <LinearProgress
+                    variant="determinate"
+                    value={Math.min(dashboardSummary.progress, 100)}
+                    sx={{
+                      mt: 1.5,
+                      height: 8,
+                      borderRadius: 4,
+                      bgcolor: alpha(theme.palette.primary.main, 0.1),
+                      "& .MuiLinearProgress-bar": {
+                        borderRadius: 4,
+                        bgcolor: dashboardSummary.progress >= 100
+                          ? "success.main"
+                          : dashboardSummary.progress >= 50
+                          ? "info.main"
+                          : "warning.main",
+                      },
+                    }}
+                  />
+                </CardContent>
+              </Card>
+            </Grid>
+          </Grid>
         </Box>
       )}
 
