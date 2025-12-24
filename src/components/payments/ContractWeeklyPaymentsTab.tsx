@@ -105,6 +105,7 @@ interface WeekRowData {
   status: PaymentStatus;
   laborers: WeekLaborerData[];
   settlementReferences: string[];
+  paymentDates: string[]; // Unique payment dates for this week (for transaction count)
 }
 
 // Get week boundaries (Sunday to Saturday)
@@ -472,7 +473,8 @@ export default function ContractWeeklyPaymentsTab({
           paymentProgress,
           status,
           laborers: data.laborers,
-          settlementReferences: Array.from(data.settlementRefs),
+          settlementReferences: [], // Will be populated from settlement_groups
+          paymentDates: [], // Will be populated from settlement_groups
         });
       });
 
@@ -484,11 +486,12 @@ export default function ContractWeeklyPaymentsTab({
         .eq("is_cancelled", false)
         .or("settlement_type.eq.date_wise,settlement_type.is.null");
 
-      // Add settlement_group references to each week row
+      // Add settlement_group references and payment dates to each week row
       if (settlementGroupsData && settlementGroupsData.length > 0) {
         weekRows.forEach((weekRow) => {
           const weekStart = weekRow.weekStart;
           const weekEnd = weekRow.weekEnd;
+          const paymentDatesSet = new Set<string>();
 
           // Find settlements that overlap with this week
           settlementGroupsData.forEach((sg: any) => {
@@ -504,13 +507,20 @@ export default function ContractWeeklyPaymentsTab({
               overlaps = sg.settlement_date >= weekStart && sg.settlement_date <= weekEnd;
             }
 
-            // Add the reference if it overlaps and not already present
+            // Add the reference and date if it overlaps
             if (overlaps && sg.settlement_reference) {
               if (!weekRow.settlementReferences.includes(sg.settlement_reference)) {
                 weekRow.settlementReferences.push(sg.settlement_reference);
               }
+              // Track unique payment dates
+              if (sg.settlement_date) {
+                paymentDatesSet.add(sg.settlement_date);
+              }
             }
           });
+
+          // Convert Set to sorted array (oldest first)
+          weekRow.paymentDates = Array.from(paymentDatesSet).sort();
         });
       }
 
@@ -763,6 +773,13 @@ export default function ContractWeeklyPaymentsTab({
   const weekColumns: MRT_ColumnDef<WeekRowData>[] = useMemo(
     () => [
       {
+        accessorKey: "weekStart",
+        header: "Week Start",
+        enableHiding: true,
+        // Hidden column for sorting by date
+        Cell: () => null,
+      },
+      {
         accessorKey: "weekLabel",
         header: "Week",
         Cell: ({ row }) => (
@@ -848,44 +865,61 @@ export default function ContractWeeklyPaymentsTab({
         ),
       },
       {
-        accessorKey: "settlementReferences",
+        accessorKey: "paymentDates",
         header: "Transactions",
         size: 140,
         Cell: ({ row }) => {
+          const paymentDates = row.original.paymentDates;
           const refs = row.original.settlementReferences;
-          if (!refs || refs.length === 0) {
+
+          // Count is based on unique payment dates
+          const count = paymentDates?.length || 0;
+
+          if (count === 0) {
             return <Typography variant="body2" color="text.secondary">No payments</Typography>;
           }
 
-          const count = refs.length;
-
-          // Tooltip content with clickable ref codes
+          // Tooltip content showing payment dates with their ref codes
           const TooltipContent = () => (
             <Box sx={{ p: 1 }}>
               <Typography variant="caption" fontWeight={600} sx={{ display: "block", mb: 1 }}>
-                {count} Payment{count > 1 ? "s" : ""}:
+                {count} Payment Date{count > 1 ? "s" : ""}:
               </Typography>
               <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
-                {refs.map((ref) => (
-                  <Chip
-                    key={ref}
-                    label={ref}
-                    size="small"
-                    variant="outlined"
-                    sx={{
-                      fontFamily: "monospace",
-                      fontSize: "0.65rem",
-                      cursor: "pointer",
-                      "&:hover": { bgcolor: "action.hover" },
-                    }}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setSelectedRef(ref);
-                      setRefDialogOpen(true);
-                    }}
-                  />
+                {paymentDates.map((date) => (
+                  <Typography key={date} variant="caption" sx={{ fontFamily: "monospace" }}>
+                    {dayjs(date).format("MMM D, YYYY")}
+                  </Typography>
                 ))}
               </Box>
+              {refs && refs.length > 0 && (
+                <Box sx={{ mt: 1, borderTop: 1, borderColor: "divider", pt: 1 }}>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.5 }}>
+                    Click to view details:
+                  </Typography>
+                  <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
+                    {refs.map((ref) => (
+                      <Chip
+                        key={ref}
+                        label={ref}
+                        size="small"
+                        variant="outlined"
+                        sx={{
+                          fontFamily: "monospace",
+                          fontSize: "0.6rem",
+                          cursor: "pointer",
+                          "&:hover": { bgcolor: "action.hover" },
+                        }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedRef(ref);
+                          setRefDialogOpen(true);
+                        }}
+                      />
+                    ))}
+                  </Box>
+                </Box>
+              )}
             </Box>
           );
 
@@ -897,7 +931,7 @@ export default function ContractWeeklyPaymentsTab({
               componentsProps={{
                 tooltip: {
                   sx: {
-                    maxWidth: 300,
+                    maxWidth: 350,
                     bgcolor: "background.paper",
                     color: "text.primary",
                     boxShadow: 3,
@@ -1306,7 +1340,8 @@ export default function ContractWeeklyPaymentsTab({
               enableExpanding
               renderDetailPanel={renderWeekDetailPanel}
               initialState={{
-                sorting: [{ id: "weekLabel", desc: true }],
+                sorting: [{ id: "weekStart", desc: true }],
+                columnVisibility: { weekStart: false },
               }}
               muiTableBodyRowProps={({ row }) => ({
                 "data-row-index": row.index,

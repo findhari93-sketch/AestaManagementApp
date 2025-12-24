@@ -1637,16 +1637,32 @@ export async function processWaterfallContractPayment(
 
       let laborersProcessed = 0;
 
+      // Pre-calculate amounts using remainder distribution to avoid rounding loss
+      // Filter laborers with positive balance first
+      const activeLaborers = week.laborers.filter(l => l.balance > 0);
+      let allocatedSoFar = 0;
+      const laborerAmounts = new Map<string, number>();
+
+      activeLaborers.forEach((laborer, index) => {
+        let finalAmount: number;
+        if (index === activeLaborers.length - 1) {
+          // Last laborer gets the remainder to ensure exact total
+          finalAmount = Math.min(week.allocatedAmount - allocatedSoFar, laborer.balance);
+        } else {
+          // Use floor for intermediate laborers to avoid over-allocation
+          const proportion = laborer.balance / weekTotalDue;
+          finalAmount = Math.min(Math.floor(week.allocatedAmount * proportion), laborer.balance);
+        }
+        laborerAmounts.set(laborer.laborerId, Math.max(0, finalAmount));
+        allocatedSoFar += Math.max(0, finalAmount);
+      });
+
       // 5. Create labor_payments for each laborer in this week (proportional within week)
       for (const laborer of week.laborers) {
         if (laborer.balance <= 0) continue;
 
-        // Proportional share of week allocation
-        const proportion = laborer.balance / weekTotalDue;
-        const laborerAmount = Math.round(week.allocatedAmount * proportion);
-
-        // Cap at laborer's balance
-        const finalAmount = Math.min(laborerAmount, laborer.balance);
+        // Get pre-calculated amount
+        const finalAmount = laborerAmounts.get(laborer.laborerId) || 0;
 
         if (finalAmount <= 0) continue;
 
@@ -1999,13 +2015,30 @@ export async function processDateWiseContractSettlement(
       // Calculate proportional split within this week
       const weekTotalDue = week.totalDue;
 
+      // Pre-calculate amounts using remainder distribution to avoid rounding loss
+      const activeLaborers = Array.from(week.laborers.values()).filter(l => l.balance > 0);
+      let allocatedSoFar = 0;
+      const laborerAmounts = new Map<string, number>();
+
+      activeLaborers.forEach((laborer, index) => {
+        let finalAmount: number;
+        if (index === activeLaborers.length - 1) {
+          // Last laborer gets the remainder to ensure exact total
+          finalAmount = Math.min(allocation.allocatedAmount - allocatedSoFar, laborer.balance);
+        } else {
+          // Use floor for intermediate laborers to avoid over-allocation
+          const proportion = laborer.balance / weekTotalDue;
+          finalAmount = Math.min(Math.floor(allocation.allocatedAmount * proportion), laborer.balance);
+        }
+        laborerAmounts.set(laborer.laborerId, Math.max(0, finalAmount));
+        allocatedSoFar += Math.max(0, finalAmount);
+      });
+
       for (const [, laborer] of week.laborers) {
         if (laborer.balance <= 0) continue;
 
-        // Proportional share
-        const proportion = laborer.balance / weekTotalDue;
-        const laborerAmount = Math.round(allocation.allocatedAmount * proportion);
-        const finalAmount = Math.min(laborerAmount, laborer.balance);
+        // Get pre-calculated amount
+        const finalAmount = laborerAmounts.get(laborer.laborerId) || 0;
 
         if (finalAmount <= 0) continue;
 
