@@ -53,39 +53,17 @@ export default function TransactionDeleteDialog({
     setError("");
 
     try {
-      // Step 1: Delete batch usage records (these have CASCADE, but explicit is safer)
-      const { error: batchErr } = await supabase
-        .from("engineer_wallet_batch_usage")
-        .delete()
-        .eq("transaction_id", transaction.id);
-      if (batchErr) console.warn("Batch usage delete:", batchErr.message);
+      // Use RPC function that handles all FK constraints with SECURITY DEFINER
+      const { data, error: rpcError } = await (supabase.rpc as any)("delete_engineer_transaction", {
+        p_transaction_id: transaction.id,
+      });
 
-      // Step 2: Unlink related records - use RPC for bulk updates to bypass potential RLS issues
-      // These may fail silently if no records exist, which is fine
-      const unlinkQueries = [
-        supabase.from("daily_attendance").update({ engineer_transaction_id: null }).eq("engineer_transaction_id", transaction.id),
-        supabase.from("market_laborer_attendance").update({ engineer_transaction_id: null }).eq("engineer_transaction_id", transaction.id),
-        supabase.from("expenses").update({ engineer_transaction_id: null }).eq("engineer_transaction_id", transaction.id),
-        supabase.from("local_purchases").update({ reimbursement_transaction_id: null }).eq("reimbursement_transaction_id", transaction.id),
-        supabase.from("settlement_groups").update({ engineer_transaction_id: null }).eq("engineer_transaction_id", transaction.id),
-      ];
-
-      // Run unlink queries in parallel, ignore errors (they may have no matching rows)
-      await Promise.allSettled(unlinkQueries);
-
-      // Step 3: Delete the transaction
-      const { error: deleteError, data } = await supabase
-        .from("site_engineer_transactions")
-        .delete()
-        .eq("id", transaction.id)
-        .select();
-
-      if (deleteError) {
-        console.error("Delete error:", deleteError);
-        throw new Error(deleteError.message || "Failed to delete transaction");
+      if (rpcError) {
+        console.error("Delete RPC error:", rpcError);
+        throw new Error(rpcError.message || "Failed to delete transaction");
       }
 
-      if (!data || data.length === 0) {
+      if (data === false) {
         throw new Error("Transaction not found or already deleted");
       }
 

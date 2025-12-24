@@ -20,8 +20,6 @@ import {
   CardContent,
   Grid,
   Chip,
-  LinearProgress,
-  alpha,
 } from "@mui/material";
 import {
   Refresh as RefreshIcon,
@@ -1317,42 +1315,49 @@ export default function DailyMarketPaymentsTab({
                       Progress
                     </Typography>
                   </Box>
-                  <Box sx={{ display: "flex", alignItems: "baseline", gap: 1 }}>
-                    <Typography
-                      variant="h5"
-                      fontWeight={600}
-                      color={
-                        dashboardSummary.progress >= 100
-                          ? "success.dark"
-                          : dashboardSummary.progress >= 50
-                          ? "info.dark"
-                          : "warning.dark"
-                      }
-                    >
-                      {Math.round(dashboardSummary.progress)}%
-                    </Typography>
-                    <Typography variant="caption" color="text.disabled">
-                      complete
-                    </Typography>
+                  <Box sx={{ display: "flex", alignItems: "center", justifyContent: "center", py: 1 }}>
+                    <Box sx={{ position: "relative", display: "inline-flex" }}>
+                      <CircularProgress
+                        variant="determinate"
+                        value={Math.min(dashboardSummary.progress, 100)}
+                        size={70}
+                        thickness={5}
+                        sx={{
+                          color: dashboardSummary.progress >= 100
+                            ? "success.main"
+                            : dashboardSummary.progress >= 50
+                            ? "info.main"
+                            : "warning.main",
+                        }}
+                      />
+                      <Box
+                        sx={{
+                          top: 0,
+                          left: 0,
+                          bottom: 0,
+                          right: 0,
+                          position: "absolute",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                        }}
+                      >
+                        <Typography
+                          variant="body1"
+                          fontWeight={700}
+                          color={
+                            dashboardSummary.progress >= 100
+                              ? "success.dark"
+                              : dashboardSummary.progress >= 50
+                              ? "info.dark"
+                              : "warning.dark"
+                          }
+                        >
+                          {Math.round(dashboardSummary.progress)}%
+                        </Typography>
+                      </Box>
+                    </Box>
                   </Box>
-                  <LinearProgress
-                    variant="determinate"
-                    value={Math.min(dashboardSummary.progress, 100)}
-                    sx={{
-                      mt: 1.5,
-                      height: 8,
-                      borderRadius: 4,
-                      bgcolor: alpha(theme.palette.primary.main, 0.1),
-                      "& .MuiLinearProgress-bar": {
-                        borderRadius: 4,
-                        bgcolor: dashboardSummary.progress >= 100
-                          ? "success.main"
-                          : dashboardSummary.progress >= 50
-                          ? "info.main"
-                          : "warning.main",
-                      },
-                    }}
-                  />
                 </CardContent>
               </Card>
             </Grid>

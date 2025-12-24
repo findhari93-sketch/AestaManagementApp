@@ -176,11 +176,6 @@ export default function PaymentsContent({ initialData }: PaymentsContentProps) {
         </Box>
       )}
 
-      {/* Summary Cards - only show for Daily & Market tab (Contract tab has its own dashboard) */}
-      {activeTab === 0 && (
-        <PaymentSummaryCards data={summaryData} loading={summaryLoading} />
-      )}
-
       {/* Tabs */}
       <Paper sx={{ mb: 3 }}>
         <Tabs
