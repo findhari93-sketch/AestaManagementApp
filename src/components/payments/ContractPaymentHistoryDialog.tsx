@@ -264,6 +264,8 @@ export default function ContractPaymentHistoryDialog({
   // Data state
   const [settlements, setSettlements] = useState<SettlementRecord[]>([]);
   const [loading, setLoading] = useState(false);
+  // Total of ALL contract labor payments (including those without settlement_group_id)
+  const [totalContractPaid, setTotalContractPaid] = useState(0);
 
   // Screenshot viewer state
   const [screenshotViewerOpen, setScreenshotViewerOpen] = useState(false);
@@ -275,15 +277,26 @@ export default function ContractPaymentHistoryDialog({
 
     setLoading(true);
     try {
-      // First, get contract labor_payments with their amounts (to calculate contract-only totals)
-      const { data: contractPayments } = await supabase
+      // First, get ALL contract labor_payments to calculate the total (matching summary calculation)
+      const { data: allContractPayments } = await supabase
         .from("labor_payments")
         .select("settlement_group_id, amount")
         .eq("site_id", selectedSite.id)
-        .eq("is_under_contract", true)
-        .not("settlement_group_id", "is", null);
+        .eq("is_under_contract", true);
 
-      if (!contractPayments || contractPayments.length === 0) {
+      // Calculate total from ALL contract payments (to match summary)
+      const totalPaid = (allContractPayments || []).reduce(
+        (sum: number, p: any) => sum + (p.amount || 0),
+        0
+      );
+      setTotalContractPaid(totalPaid);
+
+      // Filter to only payments with settlement_group_id for the table
+      const contractPayments = (allContractPayments || []).filter(
+        (p: any) => p.settlement_group_id != null
+      );
+
+      if (contractPayments.length === 0) {
         setSettlements([]);
         setLoading(false);
         return;
@@ -590,10 +603,17 @@ export default function ContractPaymentHistoryDialog({
 
   // Calculate summary stats
   const summaryStats = useMemo(() => {
-    const totalAmount = settlements.reduce((sum, s) => sum + s.totalAmount, 0);
+    // totalAmount from grouped settlements (what's shown in table)
+    const groupedAmount = settlements.reduce((sum, s) => sum + s.totalAmount, 0);
     const uniqueDates = new Set(settlements.map((s) => s.settlementDate)).size;
-    return { totalAmount, count: settlements.length, uniqueDates };
-  }, [settlements]);
+    // Use totalContractPaid for the header total (matches summary dashboard)
+    return {
+      totalAmount: totalContractPaid, // All contract payments total
+      groupedAmount, // Just grouped settlements total
+      count: settlements.length,
+      uniqueDates
+    };
+  }, [settlements, totalContractPaid]);
 
   return (
     <Dialog
