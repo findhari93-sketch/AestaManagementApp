@@ -74,7 +74,7 @@ export async function processSettlement(
     if (refError) {
       console.warn("Could not generate settlement reference:", refError);
       // Fallback reference
-      settlementReference = `SET-${dayjs().format("YYYYMM")}-${Date.now().toString().slice(-4)}`;
+      settlementReference = `SET-${dayjs().format("YYMMDD")}-${Date.now().toString().slice(-4)}`;
     } else {
       settlementReference = refData as string;
     }
@@ -277,7 +277,7 @@ export async function processWeeklySettlement(
 
     if (refError) {
       console.warn("Could not generate settlement reference:", refError);
-      settlementReference = `SET-${dayjs().format("YYYYMM")}-${Date.now().toString().slice(-4)}`;
+      settlementReference = `SET-${dayjs().format("YYMMDD")}-${Date.now().toString().slice(-4)}`;
     } else {
       settlementReference = refData as string;
     }
@@ -736,7 +736,7 @@ export async function processContractPayment(
 
     if (refError) {
       console.warn("Could not generate settlement reference:", refError);
-      settlementReference = `SET-${dayjs().format("YYYYMM")}-${Date.now().toString().slice(-4)}`;
+      settlementReference = `SET-${dayjs().format("YYMMDD")}-${Date.now().toString().slice(-4)}`;
     } else {
       settlementReference = refData as string;
     }
@@ -749,7 +749,7 @@ export async function processContractPayment(
 
     if (payRefError) {
       console.warn("Could not generate payment reference:", payRefError);
-      paymentReference = `PAY-${dayjs().format("YYYYMM")}-${Date.now().toString().slice(-4)}`;
+      paymentReference = `PAY-${dayjs().format("YYMMDD")}-${Date.now().toString().slice(-4)}`;
     } else {
       paymentReference = payRefData as string;
     }
@@ -1587,7 +1587,7 @@ export async function processWaterfallContractPayment(
 
     if (refError) {
       console.warn("Could not generate settlement reference:", refError);
-      settlementReference = `SET-${dayjs().format("YYYYMM")}-${Date.now().toString().slice(-4)}`;
+      settlementReference = `SET-${dayjs().format("YYMMDD")}-${Date.now().toString().slice(-4)}`;
     } else {
       settlementReference = refData as string;
     }
@@ -1674,7 +1674,7 @@ export async function processWaterfallContractPayment(
 
         let paymentReference: string;
         if (payRefError) {
-          paymentReference = `PAY-${dayjs().format("YYYYMM")}-${Date.now().toString().slice(-4)}-${laborer.laborerId.slice(0, 4)}`;
+          paymentReference = `PAY-${dayjs().format("YYMMDD")}-${Date.now().toString().slice(-4)}-${laborer.laborerId.slice(0, 4)}`;
         } else {
           paymentReference = payRefData as string;
         }
@@ -1941,7 +1941,7 @@ export async function processDateWiseContractSettlement(
 
     if (refError) {
       console.warn("Could not generate settlement reference:", refError);
-      settlementReference = `SET-${dayjs().format("YYYYMM")}-${Date.now().toString().slice(-4)}`;
+      settlementReference = `SET-${dayjs().format("YYMMDD")}-${Date.now().toString().slice(-4)}`;
     } else {
       settlementReference = refData as string;
     }
@@ -2050,7 +2050,7 @@ export async function processDateWiseContractSettlement(
 
         let paymentReference: string;
         if (payRefError) {
-          paymentReference = `PAY-${dayjs().format("YYYYMM")}-${Date.now().toString().slice(-4)}`;
+          paymentReference = `PAY-${dayjs().format("YYMMDD")}-${Date.now().toString().slice(-4)}`;
         } else {
           paymentReference = payRefData as string;
         }
@@ -2143,12 +2143,14 @@ export async function processDateWiseContractSettlement(
 /**
  * Get date-wise settlements for a week range.
  * Returns settlements grouped by settlement date (not by laborer).
+ * @param contractOnly - If true, only returns settlements for contract laborers (has linked labor_payments with is_under_contract=true)
  */
 export async function getDateWiseSettlements(
   supabase: SupabaseClient,
   siteId: string,
   weekStart: string,
-  weekEnd: string
+  weekEnd: string,
+  contractOnly: boolean = false
 ): Promise<{
   settlements: Array<{
     settlementGroupId: string;
@@ -2164,12 +2166,31 @@ export async function getDateWiseSettlements(
     notes: string | null;
     createdBy: string | null;
     createdAt: string;
+    subcontractId: string | null;
   }>;
   total: number;
 }> {
   try {
+    // If contractOnly, first get settlement_group_ids that have contract labor_payments
+    let contractSettlementIds: string[] | null = null;
+    if (contractOnly) {
+      const { data: contractPayments } = await supabase
+        .from("labor_payments")
+        .select("settlement_group_id")
+        .eq("site_id", siteId)
+        .eq("is_under_contract", true)
+        .not("settlement_group_id", "is", null);
+
+      if (contractPayments && contractPayments.length > 0) {
+        contractSettlementIds = [...new Set(contractPayments.map((p: any) => p.settlement_group_id))];
+      } else {
+        // No contract settlements found
+        return { settlements: [], total: 0 };
+      }
+    }
+
     // Query settlement_groups that have allocations touching this week range
-    const { data, error } = await (supabase
+    let query = (supabase
       .from("settlement_groups") as any)
       .select(`
         id,
@@ -2186,13 +2207,21 @@ export async function getDateWiseSettlements(
         notes,
         created_by_name,
         created_at,
-        is_cancelled
+        is_cancelled,
+        subcontract_id
       `)
       .eq("site_id", siteId)
       .eq("is_cancelled", false)
       // Include settlements with date_wise type OR NULL (for backwards compatibility)
       .or("settlement_type.eq.date_wise,settlement_type.is.null")
       .order("settlement_date", { ascending: false });
+
+    // Filter to only contract settlements if needed
+    if (contractOnly && contractSettlementIds) {
+      query = query.in("id", contractSettlementIds);
+    }
+
+    const { data, error } = await query;
 
     if (error) {
       console.error("Error fetching date-wise settlements:", error);
@@ -2229,6 +2258,7 @@ export async function getDateWiseSettlements(
         notes: sg.notes,
         createdBy: sg.created_by_name,
         createdAt: sg.created_at,
+        subcontractId: sg.subcontract_id || null,
       }));
 
     return { settlements, total: settlements.length };
@@ -2370,6 +2400,49 @@ export async function getMaestriEarnings(
       marginPerDay: 0,
       totalMaestriEarnings: 0,
       byWeek: [],
+    };
+  }
+}
+
+/**
+ * Update the payer_source for a settlement
+ * Useful for "System Recovered" payments that need source assignment
+ */
+export async function updateSettlementPayerSource(
+  supabase: SupabaseClient,
+  settlementGroupId: string,
+  payerSource: string,
+  customPayerName?: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    // Update settlement_groups record
+    const updateData: Record<string, unknown> = {
+      payer_source: payerSource,
+      updated_at: new Date().toISOString(),
+    };
+
+    // Only set payer_name for custom or other_site_money sources
+    if (payerSource === "custom" || payerSource === "other_site_money") {
+      updateData.payer_name = customPayerName || null;
+    } else {
+      updateData.payer_name = null;
+    }
+
+    const { error: updateError } = await supabase
+      .from("settlement_groups")
+      .update(updateData)
+      .eq("id", settlementGroupId);
+
+    if (updateError) {
+      throw updateError;
+    }
+
+    return { success: true };
+  } catch (err: any) {
+    console.error("Error updating settlement payer source:", err);
+    return {
+      success: false,
+      error: err.message || "Failed to update payer source",
     };
   }
 }

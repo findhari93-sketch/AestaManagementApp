@@ -45,12 +45,13 @@ import dayjs from "dayjs";
 import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
 import PaymentRefDialog from "./PaymentRefDialog";
 import ContractPaymentHistoryDialog from "./ContractPaymentHistoryDialog";
-import ContractLaborerSummaryDashboard from "./ContractLaborerSummaryDashboard";
+import ContractSummaryDashboardV2 from "./ContractSummaryDashboardV2";
 import ContractPaymentRecordDialog from "./ContractPaymentRecordDialog";
-import WeekSettlementsDialogV2 from "./WeekSettlementsDialogV2";
+import WeekSettlementsDialogV3 from "./WeekSettlementsDialogV3";
 import ContractPaymentEditDialog from "./ContractPaymentEditDialog";
 import ContractSettlementEditDialog from "./ContractSettlementEditDialog";
 import DeleteSettlementConfirmDialog from "./DeleteSettlementConfirmDialog";
+import DateTransactionDetailPanel from "./DateTransactionDetailPanel";
 import type { DateWiseSettlement } from "@/types/payment.types";
 import type {
   PaymentStatus,
@@ -105,7 +106,8 @@ interface WeekRowData {
   status: PaymentStatus;
   laborers: WeekLaborerData[];
   settlementReferences: string[];
-  paymentDates: string[]; // Unique payment dates for this week (for transaction count)
+  paymentDates: string[]; // Unique payment dates for this week
+  transactionCount: number; // Actual count of settlement transactions
 }
 
 // Get week boundaries (Sunday to Saturday)
@@ -146,6 +148,9 @@ export default function ContractWeeklyPaymentsTab({
   const [viewMode, setViewMode] = useState<ViewMode>("weekly");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Advance tracking state (separate from salary)
+  const [totalAdvancesGiven, setTotalAdvancesGiven] = useState(0);
 
   // Auto-scroll refs
   const tableContainerRef = useRef<HTMLDivElement>(null);
@@ -475,16 +480,34 @@ export default function ContractWeeklyPaymentsTab({
           laborers: data.laborers,
           settlementReferences: [], // Will be populated from settlement_groups
           paymentDates: [], // Will be populated from settlement_groups
+          transactionCount: 0, // Will be populated from settlement_groups
         });
       });
 
-      // Fetch settlement_groups to get SET-* references for each week
-      const { data: settlementGroupsData } = await (supabase as any)
-        .from("settlement_groups")
-        .select("id, settlement_reference, settlement_date, week_allocations")
+      // First, get settlement_group_ids that have contract labor_payments
+      const { data: contractPayments } = await supabase
+        .from("labor_payments")
+        .select("settlement_group_id")
         .eq("site_id", selectedSite.id)
-        .eq("is_cancelled", false)
-        .or("settlement_type.eq.date_wise,settlement_type.is.null");
+        .eq("is_under_contract", true)
+        .not("settlement_group_id", "is", null);
+
+      const contractSettlementIds = contractPayments && contractPayments.length > 0
+        ? [...new Set(contractPayments.map((p: any) => p.settlement_group_id))]
+        : [];
+
+      // Fetch settlement_groups to get SET-* references for each week (contract settlements only)
+      let settlementGroupsData: any[] = [];
+      if (contractSettlementIds.length > 0) {
+        const { data: sgData } = await (supabase as any)
+          .from("settlement_groups")
+          .select("id, settlement_reference, settlement_date, week_allocations")
+          .eq("site_id", selectedSite.id)
+          .eq("is_cancelled", false)
+          .or("settlement_type.eq.date_wise,settlement_type.is.null")
+          .in("id", contractSettlementIds);
+        settlementGroupsData = sgData || [];
+      }
 
       // Add settlement_group references and payment dates to each week row
       if (settlementGroupsData && settlementGroupsData.length > 0) {
@@ -492,6 +515,7 @@ export default function ContractWeeklyPaymentsTab({
           const weekStart = weekRow.weekStart;
           const weekEnd = weekRow.weekEnd;
           const paymentDatesSet = new Set<string>();
+          let transactionCount = 0;
 
           // Find settlements that overlap with this week
           settlementGroupsData.forEach((sg: any) => {
@@ -509,6 +533,8 @@ export default function ContractWeeklyPaymentsTab({
 
             // Add the reference and date if it overlaps
             if (overlaps && sg.settlement_reference) {
+              // Count each settlement transaction
+              transactionCount++;
               if (!weekRow.settlementReferences.includes(sg.settlement_reference)) {
                 weekRow.settlementReferences.push(sg.settlement_reference);
               }
@@ -521,12 +547,19 @@ export default function ContractWeeklyPaymentsTab({
 
           // Convert Set to sorted array (oldest first)
           weekRow.paymentDates = Array.from(paymentDatesSet).sort();
+          weekRow.transactionCount = transactionCount;
         });
       }
 
       // Sort by week start date descending (most recent first)
       weekRows.sort((a, b) => new Date(b.weekStart).getTime() - new Date(a.weekStart).getTime());
       setWeekGroups(weekRows);
+
+      // Calculate total advances given (payment_type = 'advance')
+      const advanceTotal = (paymentsData || [])
+        .filter((p: any) => p.payment_type === "advance")
+        .reduce((sum: number, p: any) => sum + (p.amount || 0), 0);
+      setTotalAdvancesGiven(advanceTotal);
 
       // Fetch filter options
       const { data: subcontractsData } = await supabase
@@ -701,6 +734,8 @@ export default function ContractWeeklyPaymentsTab({
       {
         accessorKey: "teamName",
         header: "Team",
+        filterVariant: "select",
+        filterSelectOptions: teams.map((t) => ({ value: t.name, label: t.name })),
         Cell: ({ row }) => row.original.teamName || "-",
       },
       {
@@ -756,6 +791,13 @@ export default function ContractWeeklyPaymentsTab({
       {
         accessorKey: "status",
         header: "Status",
+        filterVariant: "select",
+        filterSelectOptions: [
+          { value: "pending", label: "Pending" },
+          { value: "partial", label: "Partial" },
+          { value: "completed", label: "Completed" },
+          { value: "advance", label: "Advance" },
+        ],
         Cell: ({ row }) => (
           <Chip
             label={getPaymentStatusLabel(row.original.status)}
@@ -766,7 +808,7 @@ export default function ContractWeeklyPaymentsTab({
         ),
       },
     ],
-    []
+    [teams]
   );
 
   // Week columns for week-wise view
@@ -855,6 +897,13 @@ export default function ContractWeeklyPaymentsTab({
       {
         accessorKey: "status",
         header: "Status",
+        filterVariant: "select",
+        filterSelectOptions: [
+          { value: "pending", label: "Pending" },
+          { value: "partial", label: "Partial" },
+          { value: "completed", label: "Completed" },
+          { value: "advance", label: "Advance" },
+        ],
         Cell: ({ row }) => (
           <Chip
             label={getPaymentStatusLabel(row.original.status)}
@@ -865,61 +914,60 @@ export default function ContractWeeklyPaymentsTab({
         ),
       },
       {
-        accessorKey: "paymentDates",
+        accessorKey: "transactionCount",
         header: "Transactions",
         size: 140,
         Cell: ({ row }) => {
           const paymentDates = row.original.paymentDates;
           const refs = row.original.settlementReferences;
 
-          // Count is based on unique payment dates
-          const count = paymentDates?.length || 0;
+          // Use actual transaction count (not unique payment dates)
+          const count = row.original.transactionCount || 0;
 
           if (count === 0) {
             return <Typography variant="body2" color="text.secondary">No payments</Typography>;
           }
 
-          // Tooltip content showing payment dates with their ref codes
+          // Build date-to-ref mapping for tooltip
+          const dateRefPairs = paymentDates.map((date, idx) => ({
+            date,
+            ref: refs?.[idx] || null,
+          }));
+
+          // Tooltip content showing payment dates
           const TooltipContent = () => (
             <Box sx={{ p: 1 }}>
               <Typography variant="caption" fontWeight={600} sx={{ display: "block", mb: 1 }}>
-                {count} Payment Date{count > 1 ? "s" : ""}:
+                {count} Transaction{count > 1 ? "s" : ""} on {paymentDates.length} date{paymentDates.length > 1 ? "s" : ""}:
               </Typography>
               <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
-                {paymentDates.map((date) => (
-                  <Typography key={date} variant="caption" sx={{ fontFamily: "monospace" }}>
-                    {dayjs(date).format("MMM D, YYYY")}
-                  </Typography>
-                ))}
-              </Box>
-              {refs && refs.length > 0 && (
-                <Box sx={{ mt: 1, borderTop: 1, borderColor: "divider", pt: 1 }}>
-                  <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.5 }}>
-                    Click to view details:
-                  </Typography>
-                  <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
-                    {refs.map((ref) => (
-                      <Chip
-                        key={ref}
-                        label={ref}
-                        size="small"
-                        variant="outlined"
+                {dateRefPairs.map(({ date, ref }) => (
+                  <Box key={date} sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                    <Typography variant="caption" sx={{ minWidth: 80 }}>
+                      {dayjs(date).format("MMM D")}
+                    </Typography>
+                    {ref && (
+                      <Typography
+                        variant="caption"
                         sx={{
                           fontFamily: "monospace",
-                          fontSize: "0.6rem",
-                          cursor: "pointer",
-                          "&:hover": { bgcolor: "action.hover" },
+                          fontSize: "0.65rem",
+                          color: "primary.main",
                         }}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedRef(ref);
-                          setRefDialogOpen(true);
-                        }}
-                      />
-                    ))}
+                      >
+                        • {ref}
+                      </Typography>
+                    )}
                   </Box>
-                </Box>
-              )}
+                ))}
+              </Box>
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{ display: "block", mt: 1, fontStyle: "italic" }}
+              >
+                Click to view details
+              </Typography>
             </Box>
           );
 
@@ -962,56 +1010,30 @@ export default function ContractWeeklyPaymentsTab({
       {
         id: "actions",
         header: "Actions",
-        size: 120,
+        size: 80,
         Cell: ({ row }) => {
           const refs = row.original.settlementReferences;
           const hasPayments = refs && refs.length > 0;
 
+          if (!hasPayments || !canEdit) {
+            return null;
+          }
+
           return (
             <Box sx={{ display: "flex", gap: 0.5 }}>
-              {hasPayments && (
-                <>
-                  <Tooltip title="View all settlements for this week">
-                    <IconButton
-                      size="small"
-                      color="primary"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedWeekForDetails(row.original);
-                        setWeekDetailsDialogOpen(true);
-                      }}
-                    >
-                      <VisibilityIcon fontSize="small" />
-                    </IconButton>
-                  </Tooltip>
-                  <Tooltip title="Edit settlements">
-                    <IconButton
-                      size="small"
-                      color="info"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedWeekForDetails(row.original);
-                        setWeekDetailsDialogOpen(true);
-                      }}
-                    >
-                      <EditIcon fontSize="small" />
-                    </IconButton>
-                  </Tooltip>
-                  <Tooltip title="Delete settlements">
-                    <IconButton
-                      size="small"
-                      color="error"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedWeekForDetails(row.original);
-                        setWeekDetailsDialogOpen(true);
-                      }}
-                    >
-                      <DeleteIcon fontSize="small" />
-                    </IconButton>
-                  </Tooltip>
-                </>
-              )}
+              <Tooltip title="Edit/Delete settlements">
+                <IconButton
+                  size="small"
+                  color="info"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedWeekForDetails(row.original);
+                    setWeekDetailsDialogOpen(true);
+                  }}
+                >
+                  <EditIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
             </Box>
           );
         },
@@ -1020,95 +1042,22 @@ export default function ContractWeeklyPaymentsTab({
     []
   );
 
-  // Render laborers detail panel for week-wise view
+  // Render date-wise transactions detail panel for week-wise view
   const renderWeekDetailPanel = ({ row }: { row: { original: WeekRowData } }) => {
     const week = row.original;
 
-    if (week.laborers.length === 0) {
-      return (
-        <Box sx={{ p: 2 }}>
-          <Typography variant="body2" color="text.secondary">
-            No laborers for this week
-          </Typography>
-        </Box>
-      );
-    }
-
     return (
-      <Box sx={{ p: 2 }}>
-        <Typography variant="subtitle2" gutterBottom>
-          Laborers ({week.laborerCount})
-        </Typography>
-        <TableContainer component={Paper} variant="outlined">
-          <Table size="small">
-            <TableHead>
-              <TableRow>
-                <TableCell>Laborer</TableCell>
-                <TableCell>Team</TableCell>
-                <TableCell>Days</TableCell>
-                <TableCell align="right">Earned</TableCell>
-                <TableCell align="right">Paid</TableCell>
-                <TableCell align="right">Due</TableCell>
-                <TableCell>Progress</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {week.laborers.map((laborer) => (
-                <TableRow
-                  key={laborer.laborerId}
-                  sx={{
-                    bgcolor: laborer.balance <= 0 ? alpha(theme.palette.success.main, 0.05) : undefined,
-                  }}
-                >
-                  <TableCell>
-                    <Box>
-                      <Typography variant="body2" fontWeight={500}>
-                        {laborer.laborerName}
-                      </Typography>
-                      {laborer.laborerRole && (
-                        <Typography variant="caption" color="text.secondary">
-                          {laborer.laborerRole}
-                        </Typography>
-                      )}
-                    </Box>
-                  </TableCell>
-                  <TableCell>{laborer.teamName || "-"}</TableCell>
-                  <TableCell>{laborer.daysWorked}</TableCell>
-                  <TableCell align="right">{formatCurrency(laborer.earned)}</TableCell>
-                  <TableCell align="right" sx={{ color: "success.main" }}>
-                    {formatCurrency(laborer.paid)}
-                  </TableCell>
-                  <TableCell
-                    align="right"
-                    sx={{ color: laborer.balance > 0 ? "error.main" : "success.main" }}
-                  >
-                    {formatCurrency(Math.max(0, laborer.balance))}
-                  </TableCell>
-                  <TableCell>
-                    <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                      <LinearProgress
-                        variant="determinate"
-                        value={Math.min(laborer.progress, 100)}
-                        color={
-                          laborer.progress >= 100
-                            ? "success"
-                            : laborer.progress > 50
-                              ? "warning"
-                              : "error"
-                        }
-                        sx={{ width: 60, height: 6, borderRadius: 1 }}
-                      />
-                      <Typography variant="caption">
-                        {laborer.progress.toFixed(0)}%
-                      </Typography>
-                    </Box>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
-      </Box>
+      <DateTransactionDetailPanel
+        week={week}
+        onViewRef={(ref) => {
+          setSelectedRef(ref);
+          setRefDialogOpen(true);
+        }}
+        onOpenSettlementDetails={(settlement) => {
+          setSelectedSettlement(settlement);
+          setEditSettlementDialogOpen(true);
+        }}
+      />
     );
   };
 
@@ -1203,8 +1152,15 @@ export default function ContractWeeklyPaymentsTab({
 
   return (
     <Box>
-      {/* Summary Dashboard */}
-      <ContractLaborerSummaryDashboard laborers={laborers} loading={loading} />
+      {/* Summary Dashboard with Advance Tracking */}
+      <ContractSummaryDashboardV2
+        totalSalaryEarned={laborers.reduce((sum, l) => sum + l.totalEarned, 0)}
+        totalSalarySettled={laborers.reduce((sum, l) => sum + l.totalPaid, 0) - totalAdvancesGiven}
+        totalAdvancesGiven={totalAdvancesGiven}
+        laborerCount={laborers.length}
+        laborersWithDue={laborers.filter((l) => l.outstanding > 0).length}
+        loading={loading}
+      />
 
       {/* Action Bar */}
       <Box
@@ -1424,8 +1380,8 @@ export default function ContractWeeklyPaymentsTab({
         }}
       />
 
-      {/* Week Settlements Dialog V2 - Date-wise primary view */}
-      <WeekSettlementsDialogV2
+      {/* Week Settlements Dialog V3 - Date-wise with Card/Table toggle */}
+      <WeekSettlementsDialogV3
         open={weekDetailsDialogOpen}
         onClose={() => {
           setWeekDetailsDialogOpen(false);

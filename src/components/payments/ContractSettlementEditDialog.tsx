@@ -29,6 +29,7 @@ import {
   Receipt as ReceiptIcon,
   Save as SaveIcon,
   Delete as DeleteIcon,
+  ZoomIn as ZoomInIcon,
 } from "@mui/icons-material";
 import { DatePicker } from "@mui/x-date-pickers/DatePicker";
 import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider";
@@ -42,6 +43,7 @@ import type { PayerSource } from "@/types/settlement.types";
 import PayerSourceSelector from "@/components/settlement/PayerSourceSelector";
 import FileUploader from "@/components/common/FileUploader";
 import SubcontractLinkSelector from "@/components/payments/SubcontractLinkSelector";
+import ScreenshotViewer from "@/components/common/ScreenshotViewer";
 
 interface ContractSettlementEditDialogProps {
   open: boolean;
@@ -70,6 +72,10 @@ export default function ContractSettlementEditDialog({
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Screenshot viewer state
+  const [screenshotViewerOpen, setScreenshotViewerOpen] = useState(false);
+  const [viewerInitialIndex, setViewerInitialIndex] = useState(0);
 
   // Form state
   const [paymentDate, setPaymentDate] = useState<dayjs.Dayjs | null>(null);
@@ -302,44 +308,81 @@ export default function ContractSettlementEditDialog({
               Payment Proof Screenshots
             </Typography>
 
-            {/* Existing files */}
+            {/* Existing files - Clickable for fullscreen view */}
             {proofUrls.length > 0 && (
               <Box sx={{ display: "flex", gap: 1, mb: 1, flexWrap: "wrap" }}>
                 {proofUrls.map((url, idx) => (
-                  <Box
-                    key={idx}
-                    sx={{
-                      position: "relative",
-                      width: 64,
-                      height: 64,
-                      borderRadius: 1,
-                      overflow: "hidden",
-                      border: `1px solid ${theme.palette.divider}`,
-                    }}
-                  >
+                  <Tooltip key={idx} title="Click to view fullscreen">
                     <Box
-                      component="img"
-                      src={url}
-                      alt={`Proof ${idx + 1}`}
-                      sx={{ width: "100%", height: "100%", objectFit: "cover" }}
-                    />
-                    <IconButton
-                      size="small"
-                      onClick={() => handleRemoveFile(idx)}
                       sx={{
-                        position: "absolute",
-                        top: -8,
-                        right: -8,
-                        bgcolor: "error.main",
-                        color: "white",
-                        "&:hover": { bgcolor: "error.dark" },
-                        width: 20,
-                        height: 20,
+                        position: "relative",
+                        width: 64,
+                        height: 64,
+                        borderRadius: 1,
+                        overflow: "hidden",
+                        border: `1px solid ${theme.palette.divider}`,
+                        cursor: "pointer",
+                        transition: "all 0.2s",
+                        "&:hover": {
+                          borderColor: theme.palette.primary.main,
+                          transform: "scale(1.05)",
+                          "& .zoom-overlay": {
+                            opacity: 1,
+                          },
+                        },
+                      }}
+                      onClick={() => {
+                        setViewerInitialIndex(idx);
+                        setScreenshotViewerOpen(true);
                       }}
                     >
-                      <CloseIcon sx={{ fontSize: 14 }} />
-                    </IconButton>
-                  </Box>
+                      <Box
+                        component="img"
+                        src={url}
+                        alt={`Proof ${idx + 1}`}
+                        sx={{ width: "100%", height: "100%", objectFit: "cover" }}
+                      />
+                      {/* Zoom overlay on hover */}
+                      <Box
+                        className="zoom-overlay"
+                        sx={{
+                          position: "absolute",
+                          top: 0,
+                          left: 0,
+                          right: 0,
+                          bottom: 0,
+                          bgcolor: "rgba(0,0,0,0.4)",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          opacity: 0,
+                          transition: "opacity 0.2s",
+                        }}
+                      >
+                        <ZoomInIcon sx={{ color: "white" }} />
+                      </Box>
+                      {/* Delete button */}
+                      <IconButton
+                        size="small"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleRemoveFile(idx);
+                        }}
+                        sx={{
+                          position: "absolute",
+                          top: -8,
+                          right: -8,
+                          bgcolor: "error.main",
+                          color: "white",
+                          "&:hover": { bgcolor: "error.dark" },
+                          width: 20,
+                          height: 20,
+                        }}
+                      >
+                        <CloseIcon sx={{ fontSize: 14 }} />
+                      </IconButton>
+                    </Box>
+                  </Tooltip>
                 ))}
               </Box>
             )}
@@ -389,6 +432,15 @@ export default function ContractSettlementEditDialog({
           </Box>
         </DialogActions>
       </Dialog>
+
+      {/* Screenshot Viewer for Fullscreen Proof View */}
+      <ScreenshotViewer
+        open={screenshotViewerOpen}
+        onClose={() => setScreenshotViewerOpen(false)}
+        images={proofUrls}
+        initialIndex={viewerInitialIndex}
+        title="Payment Proof"
+      />
     </LocalizationProvider>
   );
 }

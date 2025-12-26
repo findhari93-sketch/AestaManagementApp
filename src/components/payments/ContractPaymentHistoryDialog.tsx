@@ -31,17 +31,15 @@ import {
   AccountBalance as AccountBalanceIcon,
   Link as LinkIcon,
   Notes as NotesIcon,
+  CalendarMonth as CalendarMonthIcon,
 } from "@mui/icons-material";
 import { createClient } from "@/lib/supabase/client";
 import { useSite } from "@/contexts/SiteContext";
-import {
-  getContractPaymentHistory,
-  ContractPaymentHistoryRecord,
-} from "@/lib/services/settlementService";
 import dayjs from "dayjs";
 import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
 import { getPayerSourceLabel, getPayerSourceColor } from "@/components/settlement/PayerSourceSelector";
 import type { PayerSource } from "@/types/settlement.types";
+import ScreenshotViewer from "@/components/common/ScreenshotViewer";
 
 interface ContractPaymentHistoryDialogProps {
   open: boolean;
@@ -49,33 +47,28 @@ interface ContractPaymentHistoryDialogProps {
   onViewPayment?: (reference: string) => void;
 }
 
+// Settlement record type
+interface SettlementRecord {
+  id: string;
+  settlementReference: string;
+  settlementDate: string;
+  totalAmount: number;
+  paymentMode: string | null;
+  paymentChannel: string;
+  payerSource: string | null;
+  payerName: string | null;
+  subcontractId: string | null;
+  subcontractTitle: string | null;
+  proofUrl: string | null;
+  proofUrls: string[];
+  notes: string | null;
+  createdBy: string | null;
+  createdAt: string;
+  laborerCount: number;
+  weekAllocations: { weekStart: string; weekEnd: string; amount: number }[];
+}
+
 // Helper functions
-function getPaymentTypeLabel(type: string): string {
-  switch (type) {
-    case "salary":
-      return "Salary";
-    case "advance":
-      return "Advance";
-    case "other":
-      return "Other";
-    default:
-      return type;
-  }
-}
-
-function getPaymentTypeColor(type: string): "success" | "warning" | "default" | "info" {
-  switch (type) {
-    case "salary":
-      return "success";
-    case "advance":
-      return "warning";
-    case "other":
-      return "info";
-    default:
-      return "default";
-  }
-}
-
 function getPaymentModeLabel(mode: string | null): string {
   if (!mode) return "N/A";
   switch (mode) {
@@ -106,9 +99,9 @@ function getChannelLabel(channel: string | null): string {
 
 // Audit Info Popover Component
 function AuditInfoPopover({
-  payment,
+  settlement,
 }: {
-  payment: ContractPaymentHistoryRecord;
+  settlement: SettlementRecord;
 }) {
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
   const theme = useTheme();
@@ -126,7 +119,7 @@ function AuditInfoPopover({
 
   return (
     <>
-      <Tooltip title="View audit details">
+      <Tooltip title="View details">
         <IconButton
           size="small"
           onClick={handleClick}
@@ -157,8 +150,8 @@ function AuditInfoPopover({
         slotProps={{
           paper: {
             sx: {
-              minWidth: 280,
-              maxWidth: 350,
+              minWidth: 300,
+              maxWidth: 400,
               borderRadius: 2,
               boxShadow: theme.shadows[8],
             },
@@ -167,7 +160,7 @@ function AuditInfoPopover({
       >
         <Box sx={{ p: 2 }}>
           <Typography variant="subtitle2" fontWeight={600} gutterBottom>
-            Payment Audit Details
+            Settlement Details
           </Typography>
           <Divider sx={{ my: 1 }} />
           <List dense disablePadding>
@@ -177,7 +170,7 @@ function AuditInfoPopover({
               </ListItemIcon>
               <ListItemText
                 primary="Recorded By"
-                secondary={payment.recordedBy}
+                secondary={settlement.createdBy || "System"}
                 primaryTypographyProps={{ variant: "caption", color: "text.secondary" }}
                 secondaryTypographyProps={{ variant: "body2", fontWeight: 500 }}
               />
@@ -188,7 +181,7 @@ function AuditInfoPopover({
               </ListItemIcon>
               <ListItemText
                 primary="Created At"
-                secondary={dayjs(payment.createdAt).format("DD MMM YYYY, hh:mm A")}
+                secondary={dayjs(settlement.createdAt).format("DD MMM YYYY, hh:mm A")}
                 primaryTypographyProps={{ variant: "caption", color: "text.secondary" }}
                 secondaryTypographyProps={{ variant: "body2", fontWeight: 500 }}
               />
@@ -200,35 +193,53 @@ function AuditInfoPopover({
               <ListItemText
                 primary="Payment Source"
                 secondary={
-                  payment.payerSource
-                    ? getPayerSourceLabel(payment.payerSource as PayerSource, payment.payerName || undefined)
+                  settlement.payerSource
+                    ? getPayerSourceLabel(settlement.payerSource as PayerSource, settlement.payerName || undefined)
                     : "Not specified"
                 }
                 primaryTypographyProps={{ variant: "caption", color: "text.secondary" }}
                 secondaryTypographyProps={{ variant: "body2", fontWeight: 500 }}
               />
             </ListItem>
-            {payment.subcontractTitle && (
+            {settlement.subcontractTitle && (
               <ListItem disableGutters>
                 <ListItemIcon sx={{ minWidth: 36 }}>
                   <LinkIcon fontSize="small" color="primary" />
                 </ListItemIcon>
                 <ListItemText
                   primary="Linked Subcontract"
-                  secondary={payment.subcontractTitle}
+                  secondary={settlement.subcontractTitle}
                   primaryTypographyProps={{ variant: "caption", color: "text.secondary" }}
                   secondaryTypographyProps={{ variant: "body2", fontWeight: 500 }}
                 />
               </ListItem>
             )}
-            {payment.notes && (
+            {settlement.weekAllocations && settlement.weekAllocations.length > 0 && (
+              <ListItem disableGutters sx={{ flexDirection: "column", alignItems: "flex-start" }}>
+                <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.5 }}>
+                  <CalendarMonthIcon fontSize="small" color="primary" />
+                  <Typography variant="caption" color="text.secondary">
+                    Weeks Covered
+                  </Typography>
+                </Box>
+                <Box sx={{ ml: 4, display: "flex", flexDirection: "column", gap: 0.5 }}>
+                  {settlement.weekAllocations.map((wa, idx) => (
+                    <Typography key={idx} variant="body2" fontWeight={500}>
+                      {dayjs(wa.weekStart).format("MMM D")} - {dayjs(wa.weekEnd).format("MMM D, YYYY")}
+                      {wa.amount > 0 && ` (₹${wa.amount.toLocaleString("en-IN")})`}
+                    </Typography>
+                  ))}
+                </Box>
+              </ListItem>
+            )}
+            {settlement.notes && (
               <ListItem disableGutters>
                 <ListItemIcon sx={{ minWidth: 36 }}>
                   <NotesIcon fontSize="small" color="primary" />
                 </ListItemIcon>
                 <ListItemText
                   primary="Notes"
-                  secondary={payment.notes}
+                  secondary={settlement.notes}
                   primaryTypographyProps={{ variant: "caption", color: "text.secondary" }}
                   secondaryTypographyProps={{ variant: "body2", fontWeight: 500, sx: { whiteSpace: "pre-wrap" } }}
                 />
@@ -251,97 +262,164 @@ export default function ContractPaymentHistoryDialog({
   const theme = useTheme();
 
   // Data state
-  const [payments, setPayments] = useState<ContractPaymentHistoryRecord[]>([]);
+  const [settlements, setSettlements] = useState<SettlementRecord[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // Fetch all data (MRT will handle pagination/filtering)
-  const fetchPayments = useCallback(async () => {
+  // Screenshot viewer state
+  const [screenshotViewerOpen, setScreenshotViewerOpen] = useState(false);
+  const [viewerImages, setViewerImages] = useState<string[]>([]);
+
+  // Fetch settlement groups for contract laborers
+  const fetchSettlements = useCallback(async () => {
     if (!open || !selectedSite) return;
 
     setLoading(true);
     try {
-      const result = await getContractPaymentHistory(supabase, selectedSite.id, {
-        limit: 500, // Fetch more records, MRT handles client-side pagination
-      });
-      setPayments(result.payments);
+      // First, get settlement_group_ids that have contract labor_payments
+      const { data: contractPayments } = await supabase
+        .from("labor_payments")
+        .select("settlement_group_id")
+        .eq("site_id", selectedSite.id)
+        .eq("is_under_contract", true)
+        .not("settlement_group_id", "is", null);
+
+      if (!contractPayments || contractPayments.length === 0) {
+        setSettlements([]);
+        setLoading(false);
+        return;
+      }
+
+      const contractSettlementIds = [...new Set(contractPayments.map((p: any) => p.settlement_group_id))];
+
+      // Fetch settlement_groups with subcontract info
+      const { data: settlementData, error } = await (supabase as any)
+        .from("settlement_groups")
+        .select(`
+          id,
+          settlement_reference,
+          settlement_date,
+          total_amount,
+          payment_mode,
+          payment_channel,
+          payer_source,
+          payer_name,
+          subcontract_id,
+          proof_url,
+          proof_urls,
+          notes,
+          created_by_name,
+          created_at,
+          laborer_count,
+          week_allocations,
+          subcontracts (
+            title
+          )
+        `)
+        .eq("site_id", selectedSite.id)
+        .eq("is_cancelled", false)
+        .in("id", contractSettlementIds)
+        .order("settlement_date", { ascending: false });
+
+      if (error) {
+        console.error("Error fetching settlements:", error);
+        setSettlements([]);
+        return;
+      }
+
+      // Map to SettlementRecord format
+      const mapped: SettlementRecord[] = (settlementData || []).map((sg: any) => ({
+        id: sg.id,
+        settlementReference: sg.settlement_reference,
+        settlementDate: sg.settlement_date,
+        totalAmount: sg.total_amount,
+        paymentMode: sg.payment_mode,
+        paymentChannel: sg.payment_channel,
+        payerSource: sg.payer_source,
+        payerName: sg.payer_name,
+        subcontractId: sg.subcontract_id,
+        subcontractTitle: sg.subcontracts?.title || null,
+        proofUrl: sg.proof_url,
+        proofUrls: sg.proof_urls || (sg.proof_url ? [sg.proof_url] : []),
+        notes: sg.notes,
+        createdBy: sg.created_by_name,
+        createdAt: sg.created_at,
+        laborerCount: sg.laborer_count || 0,
+        weekAllocations: sg.week_allocations || [],
+      }));
+
+      setSettlements(mapped);
     } catch (err) {
-      console.error("Error fetching payment history:", err);
+      console.error("Error fetching settlement history:", err);
+      setSettlements([]);
     } finally {
       setLoading(false);
     }
   }, [open, selectedSite, supabase]);
 
   useEffect(() => {
-    fetchPayments();
-  }, [fetchPayments]);
+    fetchSettlements();
+  }, [fetchSettlements]);
 
-  const handleViewPayment = (payment: ContractPaymentHistoryRecord) => {
-    const reference = payment.paymentReference || payment.settlementReference;
-    if (reference && onViewPayment) {
-      onViewPayment(reference);
+  const handleViewSettlement = (settlement: SettlementRecord) => {
+    if (settlement.settlementReference && onViewPayment) {
+      onViewPayment(settlement.settlementReference);
     }
   };
 
+  const handleOpenScreenshotViewer = (images: string[]) => {
+    setViewerImages(images);
+    setScreenshotViewerOpen(true);
+  };
+
   // Define columns for MRT
-  const columns = useMemo<MRT_ColumnDef<ContractPaymentHistoryRecord>[]>(
+  const columns = useMemo<MRT_ColumnDef<SettlementRecord>[]>(
     () => [
       {
-        accessorKey: "actualPaymentDate",
+        accessorKey: "settlementDate",
         header: "Date",
-        size: 110,
+        size: 120,
         filterVariant: "date-range",
         Cell: ({ cell }) => (
-          <Typography variant="body2" fontWeight={500}>
-            {dayjs(cell.getValue<string>()).format("DD MMM YYYY")}
-          </Typography>
-        ),
-        sortingFn: (a, b) =>
-          dayjs(a.original.actualPaymentDate).diff(dayjs(b.original.actualPaymentDate)),
-      },
-      {
-        accessorKey: "laborerName",
-        header: "Laborer",
-        size: 160,
-        Cell: ({ row }) => (
           <Box>
-            <Typography variant="body2" fontWeight={500} noWrap>
-              {row.original.laborerName}
+            <Typography variant="body2" fontWeight={600}>
+              {dayjs(cell.getValue<string>()).format("DD MMM YYYY")}
             </Typography>
-            {row.original.laborerRole && (
-              <Typography variant="caption" color="text.secondary" noWrap>
-                {row.original.laborerRole}
-              </Typography>
-            )}
+            <Typography variant="caption" color="text.secondary">
+              {dayjs(cell.getValue<string>()).format("dddd")}
+            </Typography>
           </Box>
         ),
+        sortingFn: (a, b) =>
+          dayjs(a.original.settlementDate).diff(dayjs(b.original.settlementDate)),
       },
       {
-        accessorKey: "paymentReference",
+        accessorKey: "settlementReference",
         header: "Reference",
-        size: 130,
+        size: 140,
         Cell: ({ row }) => (
           <Tooltip title="Click row to view details">
             <Chip
               size="small"
               icon={<ReceiptIcon sx={{ fontSize: 14 }} />}
-              label={row.original.paymentReference || row.original.settlementReference || "N/A"}
+              label={row.original.settlementReference}
+              color="primary"
               variant="outlined"
-              sx={{ fontFamily: "monospace", fontSize: "0.7rem" }}
+              sx={{ fontFamily: "monospace", fontSize: "0.75rem" }}
             />
           </Tooltip>
         ),
       },
       {
-        accessorKey: "amount",
+        accessorKey: "totalAmount",
         header: "Amount",
-        size: 100,
+        size: 120,
         filterVariant: "range-slider",
         muiFilterSliderProps: {
           marks: true,
-          step: 500,
+          step: 1000,
         },
         Cell: ({ cell }) => (
-          <Typography variant="body2" fontWeight={600} color="success.main">
+          <Typography variant="body2" fontWeight={700} color="success.main">
             ₹{cell.getValue<number>().toLocaleString("en-IN")}
           </Typography>
         ),
@@ -353,21 +431,15 @@ export default function ContractPaymentHistoryDialog({
         ),
       },
       {
-        accessorKey: "paymentType",
-        header: "Type",
+        accessorKey: "laborerCount",
+        header: "Laborers",
         size: 90,
-        filterVariant: "select",
-        filterSelectOptions: [
-          { value: "salary", label: "Salary" },
-          { value: "advance", label: "Advance" },
-          { value: "other", label: "Other" },
-        ],
         Cell: ({ cell }) => (
           <Chip
             size="small"
-            label={getPaymentTypeLabel(cell.getValue<string>())}
-            color={getPaymentTypeColor(cell.getValue<string>())}
-            sx={{ fontWeight: 500 }}
+            label={`${cell.getValue<number>()} laborers`}
+            variant="outlined"
+            sx={{ fontSize: "0.7rem" }}
           />
         ),
       },
@@ -391,13 +463,13 @@ export default function ContractPaymentHistoryDialog({
       {
         accessorKey: "payerSource",
         header: "Paid By",
-        size: 130,
+        size: 140,
         filterVariant: "select",
         filterSelectOptions: [
           { value: "own_money", label: "Own Money" },
           { value: "client_money", label: "Client Money" },
           { value: "trust_account", label: "Trust Account" },
-          { value: "company_money", label: "Company Money" },
+          { value: "amma_money", label: "Amma Money" },
           { value: "other_site_money", label: "Other Site" },
           { value: "custom", label: "Custom" },
         ],
@@ -422,33 +494,33 @@ export default function ContractPaymentHistoryDialog({
         },
       },
       {
-        accessorKey: "paymentChannel",
-        header: "Channel",
-        size: 100,
-        filterVariant: "select",
-        filterSelectOptions: [
-          { value: "direct", label: "Direct" },
-          { value: "engineer_wallet", label: "Via Engineer" },
-        ],
-        Cell: ({ cell }) => (
-          <Chip
-            size="small"
-            variant="outlined"
-            label={getChannelLabel(cell.getValue<string | null>())}
-            color={cell.getValue<string>() === "engineer_wallet" ? "info" : "default"}
-            sx={{ fontSize: "0.7rem" }}
-          />
-        ),
-      },
-      {
         accessorKey: "subcontractTitle",
         header: "Subcontract",
-        size: 140,
+        size: 150,
         Cell: ({ cell }) => {
           const value = cell.getValue<string | null>();
           return value ? (
             <Tooltip title={value}>
-              <Typography variant="body2" noWrap sx={{ maxWidth: 120 }}>
+              <Typography variant="body2" noWrap sx={{ maxWidth: 130 }}>
+                {value}
+              </Typography>
+            </Tooltip>
+          ) : (
+            <Typography variant="body2" color="text.secondary">
+              -
+            </Typography>
+          );
+        },
+      },
+      {
+        accessorKey: "notes",
+        header: "Notes",
+        size: 160,
+        Cell: ({ cell }) => {
+          const value = cell.getValue<string | null>();
+          return value ? (
+            <Tooltip title={value}>
+              <Typography variant="body2" color="text.secondary" noWrap sx={{ maxWidth: 140 }}>
                 {value}
               </Typography>
             </Tooltip>
@@ -462,17 +534,17 @@ export default function ContractPaymentHistoryDialog({
       {
         id: "proof",
         header: "Proof",
-        size: 60,
+        size: 70,
         enableColumnFilter: false,
         enableSorting: false,
         Cell: ({ row }) =>
-          row.original.proofUrl ? (
+          row.original.proofUrls && row.original.proofUrls.length > 0 ? (
             <Tooltip title="View proof">
               <IconButton
                 size="small"
                 onClick={(e) => {
                   e.stopPropagation();
-                  window.open(row.original.proofUrl!, "_blank");
+                  handleOpenScreenshotViewer(row.original.proofUrls);
                 }}
               >
                 <ImageIcon fontSize="small" color="primary" />
@@ -486,11 +558,11 @@ export default function ContractPaymentHistoryDialog({
       },
       {
         id: "audit",
-        header: "Audit",
-        size: 60,
+        header: "Details",
+        size: 70,
         enableColumnFilter: false,
         enableSorting: false,
-        Cell: ({ row }) => <AuditInfoPopover payment={row.original} />,
+        Cell: ({ row }) => <AuditInfoPopover settlement={row.original} />,
       },
     ],
     []
@@ -498,11 +570,10 @@ export default function ContractPaymentHistoryDialog({
 
   // Calculate summary stats
   const summaryStats = useMemo(() => {
-    const totalAmount = payments.reduce((sum, p) => sum + p.amount, 0);
-    const salaryTotal = payments.filter((p) => p.paymentType === "salary").reduce((sum, p) => sum + p.amount, 0);
-    const advanceTotal = payments.filter((p) => p.paymentType === "advance").reduce((sum, p) => sum + p.amount, 0);
-    return { totalAmount, salaryTotal, advanceTotal, count: payments.length };
-  }, [payments]);
+    const totalAmount = settlements.reduce((sum, s) => sum + s.totalAmount, 0);
+    const uniqueDates = new Set(settlements.map((s) => s.settlementDate)).size;
+    return { totalAmount, count: settlements.length, uniqueDates };
+  }, [settlements]);
 
   return (
     <Dialog
@@ -525,10 +596,10 @@ export default function ContractPaymentHistoryDialog({
             </Avatar>
             <Box>
               <Typography variant="h6" fontWeight={600}>
-                Contract Payment History
+                Contract Settlement History
               </Typography>
               <Typography variant="caption" color="text.secondary">
-                {summaryStats.count} payments • Total: ₹{summaryStats.totalAmount.toLocaleString("en-IN")}
+                {summaryStats.count} settlements on {summaryStats.uniqueDates} dates • Total: ₹{summaryStats.totalAmount.toLocaleString("en-IN")}
               </Typography>
             </Box>
           </Box>
@@ -561,7 +632,7 @@ export default function ContractPaymentHistoryDialog({
             }}
           >
             <Typography variant="caption" color="text.secondary">
-              Total Payments
+              Total Settlements
             </Typography>
             <Typography variant="h6" fontWeight={700}>
               {summaryStats.count}
@@ -578,10 +649,10 @@ export default function ContractPaymentHistoryDialog({
             }}
           >
             <Typography variant="caption" color="text.secondary">
-              Total Amount
+              Payment Dates
             </Typography>
-            <Typography variant="h6" fontWeight={700} color="success.main">
-              ₹{summaryStats.totalAmount.toLocaleString("en-IN")}
+            <Typography variant="h6" fontWeight={700}>
+              {summaryStats.uniqueDates}
             </Typography>
           </Box>
           <Box
@@ -591,47 +662,30 @@ export default function ContractPaymentHistoryDialog({
               bgcolor: "background.paper",
               borderRadius: 2,
               border: `1px solid ${alpha(theme.palette.success.main, 0.3)}`,
-              minWidth: 140,
+              minWidth: 160,
             }}
           >
             <Typography variant="caption" color="text.secondary">
-              Salary Payments
+              Total Amount Paid
             </Typography>
             <Typography variant="h6" fontWeight={700} color="success.main">
-              ₹{summaryStats.salaryTotal.toLocaleString("en-IN")}
-            </Typography>
-          </Box>
-          <Box
-            sx={{
-              px: 2,
-              py: 1,
-              bgcolor: "background.paper",
-              borderRadius: 2,
-              border: `1px solid ${alpha(theme.palette.warning.main, 0.3)}`,
-              minWidth: 140,
-            }}
-          >
-            <Typography variant="caption" color="text.secondary">
-              Advance Payments
-            </Typography>
-            <Typography variant="h6" fontWeight={700} color="warning.main">
-              ₹{summaryStats.advanceTotal.toLocaleString("en-IN")}
+              ₹{summaryStats.totalAmount.toLocaleString("en-IN")}
             </Typography>
           </Box>
         </Box>
 
         {/* MRT Table */}
-        <Box sx={{ flex: 1, overflow: "hidden", p: 2 }}>
+        <Box sx={{ flex: 1, overflow: "auto", p: 2 }}>
           <DataTable
             columns={columns}
-            data={payments}
+            data={settlements}
             isLoading={loading}
             enableSelection={false}
-            pageSize={30}
-            maxHeight="calc(90vh - 280px)"
-            mobileHiddenColumns={["paymentChannel", "subcontractTitle", "audit"]}
+            pageSize={50}
+            maxHeight="calc(90vh - 260px)"
+            mobileHiddenColumns={["laborerCount", "subcontractTitle", "notes"]}
             muiTableBodyRowProps={({ row }) => ({
-              onClick: () => handleViewPayment(row.original),
+              onClick: () => handleViewSettlement(row.original),
               sx: {
                 cursor: onViewPayment ? "pointer" : "default",
                 "&:hover": {
@@ -641,18 +695,29 @@ export default function ContractPaymentHistoryDialog({
             })}
             renderTopToolbarCustomActions={() => (
               <Typography variant="body2" color="text.secondary" sx={{ ml: 1 }}>
-                Click any row to view payment details
+                Date-wise settlement records (SET-* references)
               </Typography>
             )}
             initialState={{
-              sorting: [{ id: "actualPaymentDate", desc: true }],
-              columnVisibility: {
-                paymentChannel: false, // Hidden by default, can be shown via column visibility toggle
-              },
+              sorting: [{ id: "settlementDate", desc: true }],
             }}
+            muiPaginationProps={{
+              rowsPerPageOptions: [10, 25, 50, 100],
+              showFirstButton: true,
+              showLastButton: true,
+            }}
+            enablePagination={true}
           />
         </Box>
       </DialogContent>
+
+      {/* Screenshot Viewer */}
+      <ScreenshotViewer
+        open={screenshotViewerOpen}
+        onClose={() => setScreenshotViewerOpen(false)}
+        images={viewerImages}
+        title="Payment Proof"
+      />
     </Dialog>
   );
 }
