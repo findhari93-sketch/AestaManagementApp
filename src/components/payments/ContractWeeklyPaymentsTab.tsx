@@ -44,6 +44,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import dayjs from "dayjs";
 import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
 import PaymentRefDialog from "./PaymentRefDialog";
+import SettlementRefDetailDialog from "./SettlementRefDetailDialog";
 import ContractPaymentHistoryDialog from "./ContractPaymentHistoryDialog";
 import ContractSummaryDashboardV2 from "./ContractSummaryDashboardV2";
 import ContractPaymentRecordDialog from "./ContractPaymentRecordDialog";
@@ -167,6 +168,7 @@ export default function ContractWeeklyPaymentsTab({
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
   const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
   const [refDialogOpen, setRefDialogOpen] = useState(false);
+  const [settlementRefDialogOpen, setSettlementRefDialogOpen] = useState(false);
   const [selectedRef, setSelectedRef] = useState<string | null>(null);
   const [weekDetailsDialogOpen, setWeekDetailsDialogOpen] = useState(false);
   const [selectedWeekForDetails, setSelectedWeekForDetails] = useState<WeekRowData | null>(null);
@@ -1049,10 +1051,7 @@ export default function ContractWeeklyPaymentsTab({
     return (
       <DateTransactionDetailPanel
         week={week}
-        onViewRef={(ref) => {
-          setSelectedRef(ref);
-          setRefDialogOpen(true);
-        }}
+        onViewRef={handleViewReference}
         onOpenSettlementDetails={(settlement) => {
           setSelectedSettlement(settlement);
           setEditSettlementDialogOpen(true);
@@ -1132,6 +1131,17 @@ export default function ContractWeeklyPaymentsTab({
   const handlePaymentSuccess = () => {
     fetchData();
     onDataChange?.();
+  };
+
+  // Handler to view payment/settlement details based on reference type
+  const handleViewReference = (ref: string) => {
+    setSelectedRef(ref);
+    // Check if it's a settlement reference (SET-*) or payment reference (PAY-*)
+    if (ref.startsWith("SET-")) {
+      setSettlementRefDialogOpen(true);
+    } else {
+      setRefDialogOpen(true);
+    }
   };
 
   if (loading) {
@@ -1360,13 +1370,10 @@ export default function ContractWeeklyPaymentsTab({
       <ContractPaymentHistoryDialog
         open={historyDialogOpen}
         onClose={() => setHistoryDialogOpen(false)}
-        onViewPayment={(ref: string) => {
-          setSelectedRef(ref);
-          setRefDialogOpen(true);
-        }}
+        onViewPayment={handleViewReference}
       />
 
-      {/* Payment Ref Dialog */}
+      {/* Payment Ref Dialog - For PAY-* references */}
       <PaymentRefDialog
         open={refDialogOpen}
         onClose={() => {
@@ -1380,6 +1387,16 @@ export default function ContractWeeklyPaymentsTab({
         }}
       />
 
+      {/* Settlement Ref Detail Dialog - For SET-* references */}
+      <SettlementRefDetailDialog
+        open={settlementRefDialogOpen}
+        onClose={() => {
+          setSettlementRefDialogOpen(false);
+          setSelectedRef(null);
+        }}
+        settlementReference={selectedRef}
+      />
+
       {/* Week Settlements Dialog V3 - Date-wise with Card/Table toggle */}
       <WeekSettlementsDialogV3
         open={weekDetailsDialogOpen}
@@ -1388,10 +1405,7 @@ export default function ContractWeeklyPaymentsTab({
           setSelectedWeekForDetails(null);
         }}
         week={selectedWeekForDetails}
-        onViewPayment={(ref) => {
-          setSelectedRef(ref);
-          setRefDialogOpen(true);
-        }}
+        onViewPayment={handleViewReference}
         onEditSettlement={(settlement) => {
           setSelectedSettlement(settlement);
           setEditSettlementDialogOpen(true);
