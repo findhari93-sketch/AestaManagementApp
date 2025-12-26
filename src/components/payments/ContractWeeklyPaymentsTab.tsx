@@ -495,33 +495,77 @@ export default function ContractWeeklyPaymentsTab({
         settlementGroupsData = sgData || [];
       }
 
-      // Calculate PAID per week from settlement_groups.week_allocations (NOT from labor_payments)
-      // This is the key fix: use actual transaction amounts allocated to each week
-      const weekPaidFromSettlements = new Map<string, number>();
+      // Calculate PAID per week using WATERFALL allocation
+      // Sort weeks by date (oldest first) for waterfall calculation
+      const sortedWeeksForWaterfall = [...weekRows].sort(
+        (a, b) => new Date(a.weekStart).getTime() - new Date(b.weekStart).getTime()
+      );
 
-      (settlementGroupsData || []).forEach((sg: any) => {
-        if (sg.week_allocations && Array.isArray(sg.week_allocations)) {
-          // Each week_allocation has { weekStart, weekEnd, amount }
-          sg.week_allocations.forEach((alloc: any) => {
-            if (alloc.weekStart && alloc.amount > 0) {
-              const currentPaid = weekPaidFromSettlements.get(alloc.weekStart) || 0;
-              weekPaidFromSettlements.set(alloc.weekStart, currentPaid + alloc.amount);
+      // Sort settlements by date (oldest first) for waterfall
+      const sortedSettlements = [...(settlementGroupsData || [])].sort(
+        (a: any, b: any) => new Date(a.settlement_date).getTime() - new Date(b.settlement_date).getTime()
+      );
+
+      // Track paid amounts per week and which settlements apply to each week
+      const weekPaidFromSettlements = new Map<string, number>();
+      const weekSettlementRefs = new Map<string, Set<string>>();
+      const weekPaymentDates = new Map<string, Set<string>>();
+
+      // Initialize maps
+      sortedWeeksForWaterfall.forEach((week) => {
+        weekPaidFromSettlements.set(week.weekStart, 0);
+        weekSettlementRefs.set(week.weekStart, new Set());
+        weekPaymentDates.set(week.weekStart, new Set());
+      });
+
+      // Track remaining due per week (will be updated as we allocate payments)
+      const weekRemainingDue = new Map<string, number>();
+      sortedWeeksForWaterfall.forEach((week) => {
+        weekRemainingDue.set(week.weekStart, week.totalSalary);
+      });
+
+      // Process each settlement in date order and allocate using waterfall
+      sortedSettlements.forEach((sg: any) => {
+        let remainingAmount = sg.total_amount || 0;
+        const settlementRef = sg.settlement_reference;
+        const settlementDate = sg.settlement_date;
+
+        // Allocate to weeks in order (oldest first) until amount is exhausted
+        for (const week of sortedWeeksForWaterfall) {
+          if (remainingAmount <= 0) break;
+
+          const weekDue = weekRemainingDue.get(week.weekStart) || 0;
+          if (weekDue <= 0) continue; // Week already fully paid
+
+          // Allocate as much as possible to this week
+          const allocation = Math.min(remainingAmount, weekDue);
+          if (allocation > 0) {
+            // Update paid amount for this week
+            const currentPaid = weekPaidFromSettlements.get(week.weekStart) || 0;
+            weekPaidFromSettlements.set(week.weekStart, currentPaid + allocation);
+
+            // Update remaining due for this week
+            weekRemainingDue.set(week.weekStart, weekDue - allocation);
+
+            // Track settlement reference and date for this week
+            if (settlementRef) {
+              weekSettlementRefs.get(week.weekStart)?.add(settlementRef);
             }
-          });
+            if (settlementDate) {
+              weekPaymentDates.get(week.weekStart)?.add(settlementDate);
+            }
+
+            remainingAmount -= allocation;
+          }
         }
       });
 
-      // Update weekRows with CORRECT Paid values from settlement_groups
+      // Update weekRows with calculated Paid values
       weekRows.forEach((weekRow) => {
         const weekStart = weekRow.weekStart;
-        const weekEnd = weekRow.weekEnd;
-        const paymentDatesSet = new Set<string>();
-        let transactionCount = 0;
-
-        // Get paid amount from settlement_groups week_allocations
         const paidFromSettlements = weekPaidFromSettlements.get(weekStart) || 0;
 
-        // Update the totalPaid with the correct value from settlements
+        // Update the totalPaid with the waterfall-calculated value
         weekRow.totalPaid = paidFromSettlements;
         weekRow.totalDue = Math.max(0, weekRow.totalSalary - paidFromSettlements);
         weekRow.paymentProgress = weekRow.totalSalary > 0
@@ -537,32 +581,13 @@ export default function ContractWeeklyPaymentsTab({
           weekRow.status = "pending";
         }
 
-        // Find settlements that have allocations to this week
-        (settlementGroupsData || []).forEach((sg: any) => {
-          let hasAllocationToThisWeek = false;
+        // Get settlement references and dates from the maps
+        const refs = weekSettlementRefs.get(weekStart);
+        weekRow.settlementReferences = refs ? Array.from(refs) : [];
+        weekRow.transactionCount = weekRow.settlementReferences.length;
 
-          // Check week_allocations for this week
-          if (sg.week_allocations && Array.isArray(sg.week_allocations)) {
-            hasAllocationToThisWeek = sg.week_allocations.some(
-              (a: any) => a.weekStart === weekStart
-            );
-          }
-
-          // Add the reference and date if it has allocation to this week
-          if (hasAllocationToThisWeek && sg.settlement_reference) {
-            transactionCount++;
-            if (!weekRow.settlementReferences.includes(sg.settlement_reference)) {
-              weekRow.settlementReferences.push(sg.settlement_reference);
-            }
-            if (sg.settlement_date) {
-              paymentDatesSet.add(sg.settlement_date);
-            }
-          }
-        });
-
-        // Convert Set to sorted array (oldest first)
-        weekRow.paymentDates = Array.from(paymentDatesSet).sort();
-        weekRow.transactionCount = transactionCount;
+        const dates = weekPaymentDates.get(weekStart);
+        weekRow.paymentDates = dates ? Array.from(dates).sort() : [];
       });
 
       // Sort by week start date descending (most recent first)
