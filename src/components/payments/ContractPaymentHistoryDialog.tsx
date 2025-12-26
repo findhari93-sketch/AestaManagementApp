@@ -275,10 +275,10 @@ export default function ContractPaymentHistoryDialog({
 
     setLoading(true);
     try {
-      // First, get settlement_group_ids that have contract labor_payments
+      // First, get contract labor_payments with their amounts (to calculate contract-only totals)
       const { data: contractPayments } = await supabase
         .from("labor_payments")
-        .select("settlement_group_id")
+        .select("settlement_group_id, amount")
         .eq("site_id", selectedSite.id)
         .eq("is_under_contract", true)
         .not("settlement_group_id", "is", null);
@@ -289,7 +289,22 @@ export default function ContractPaymentHistoryDialog({
         return;
       }
 
-      const contractSettlementIds = [...new Set(contractPayments.map((p: any) => p.settlement_group_id))];
+      // Group by settlement_group_id and sum amounts (contract laborers only)
+      const contractAmountsBySettlement = new Map<string, { amount: number; laborerCount: number }>();
+      contractPayments.forEach((p: any) => {
+        const existing = contractAmountsBySettlement.get(p.settlement_group_id);
+        if (existing) {
+          existing.amount += p.amount || 0;
+          existing.laborerCount += 1;
+        } else {
+          contractAmountsBySettlement.set(p.settlement_group_id, {
+            amount: p.amount || 0,
+            laborerCount: 1,
+          });
+        }
+      });
+
+      const contractSettlementIds = [...contractAmountsBySettlement.keys()];
 
       // Fetch settlement_groups with subcontract info
       const { data: settlementData, error } = await (supabase as any)
@@ -326,26 +341,31 @@ export default function ContractPaymentHistoryDialog({
         return;
       }
 
-      // Map to SettlementRecord format
-      const mapped: SettlementRecord[] = (settlementData || []).map((sg: any) => ({
-        id: sg.id,
-        settlementReference: sg.settlement_reference,
-        settlementDate: sg.settlement_date,
-        totalAmount: sg.total_amount,
-        paymentMode: sg.payment_mode,
-        paymentChannel: sg.payment_channel,
-        payerSource: sg.payer_source,
-        payerName: sg.payer_name,
-        subcontractId: sg.subcontract_id,
-        subcontractTitle: sg.subcontracts?.title || null,
-        proofUrl: sg.proof_url,
-        proofUrls: sg.proof_urls || (sg.proof_url ? [sg.proof_url] : []),
-        notes: sg.notes,
-        createdBy: sg.created_by_name,
-        createdAt: sg.created_at,
-        laborerCount: sg.laborer_count || 0,
-        weekAllocations: sg.week_allocations || [],
-      }));
+      // Map to SettlementRecord format - using contract-only amounts
+      const mapped: SettlementRecord[] = (settlementData || []).map((sg: any) => {
+        const contractData = contractAmountsBySettlement.get(sg.id);
+        return {
+          id: sg.id,
+          settlementReference: sg.settlement_reference,
+          settlementDate: sg.settlement_date,
+          // Use contract-only amount instead of total_amount
+          totalAmount: contractData?.amount || 0,
+          paymentMode: sg.payment_mode,
+          paymentChannel: sg.payment_channel,
+          payerSource: sg.payer_source,
+          payerName: sg.payer_name,
+          subcontractId: sg.subcontract_id,
+          subcontractTitle: sg.subcontracts?.title || null,
+          proofUrl: sg.proof_url,
+          proofUrls: sg.proof_urls || (sg.proof_url ? [sg.proof_url] : []),
+          notes: sg.notes,
+          createdBy: sg.created_by_name,
+          createdAt: sg.created_at,
+          // Use contract-only laborer count
+          laborerCount: contractData?.laborerCount || 0,
+          weekAllocations: sg.week_allocations || [],
+        };
+      });
 
       setSettlements(mapped);
     } catch (err) {
