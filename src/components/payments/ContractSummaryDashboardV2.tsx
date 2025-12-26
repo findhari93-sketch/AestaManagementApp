@@ -32,6 +32,10 @@ export interface ContractSummaryDashboardV2Props {
   laborerCount: number;
   laborersWithDue: number;
 
+  // Record counts
+  salaryRecordCount?: number;
+  advanceRecordCount?: number;
+
   // Loading state
   loading?: boolean;
 }
@@ -42,6 +46,8 @@ export default function ContractSummaryDashboardV2({
   totalAdvancesGiven,
   laborerCount,
   laborersWithDue,
+  salaryRecordCount = 0,
+  advanceRecordCount = 0,
   loading = false,
 }: ContractSummaryDashboardV2Props) {
   const formatCurrency = (amount: number) => {
@@ -119,7 +125,7 @@ export default function ContractSummaryDashboardV2({
                 {formatCurrency(totalSalarySettled)}
               </Typography>
               <Chip
-                label={`${paymentProgress}% of salary`}
+                label={`${salaryRecordCount} settlement${salaryRecordCount !== 1 ? "s" : ""}`}
                 size="small"
                 color="success"
                 variant="outlined"
@@ -158,7 +164,7 @@ export default function ContractSummaryDashboardV2({
                 {formatCurrency(totalAdvancesGiven)}
               </Typography>
               <Chip
-                label="Tracked separately"
+                label={`${advanceRecordCount} settlement${advanceRecordCount !== 1 ? "s" : ""}`}
                 size="small"
                 color={totalAdvancesGiven > 0 ? "warning" : "default"}
                 variant="outlined"
@@ -190,7 +196,7 @@ export default function ContractSummaryDashboardV2({
                 {formatCurrency(totalPaid)}
               </Typography>
               <Chip
-                label={`${laborerCount} laborer${laborerCount !== 1 ? "s" : ""}`}
+                label={`${salaryRecordCount} settlement${salaryRecordCount !== 1 ? "s" : ""}`}
                 size="small"
                 color="info"
                 variant="outlined"

@@ -214,14 +214,68 @@ export default function WeekSettlementsDialogV3({
               borderRadius: 2,
               cursor: "pointer",
               transition: "all 0.2s",
+              position: "relative",
               "&:hover": {
                 borderColor: theme.palette.primary.main,
                 boxShadow: theme.shadows[3],
                 transform: "translateY(-2px)",
+                "& .card-actions": {
+                  opacity: 1,
+                },
               },
             }}
-            onClick={() => onEditSettlement?.(settlement)}
+            onClick={() => onViewPayment(settlement.settlementReference)}
           >
+            {/* Edit/Delete Actions - Top Right */}
+            {(onEditSettlement || onDeleteSettlement) && (
+              <Box
+                className="card-actions"
+                sx={{
+                  position: "absolute",
+                  top: 8,
+                  right: 8,
+                  display: "flex",
+                  gap: 0.5,
+                  opacity: 0.7,
+                  transition: "opacity 0.2s",
+                  bgcolor: alpha(theme.palette.background.paper, 0.9),
+                  borderRadius: 1,
+                  p: 0.25,
+                }}
+              >
+                {onEditSettlement && (
+                  <Tooltip title="Edit">
+                    <IconButton
+                      size="small"
+                      color="primary"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onEditSettlement(settlement);
+                      }}
+                      sx={{ p: 0.5 }}
+                    >
+                      <EditIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                )}
+                {onDeleteSettlement && (
+                  <Tooltip title="Delete">
+                    <IconButton
+                      size="small"
+                      color="error"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onDeleteSettlement(settlement);
+                      }}
+                      sx={{ p: 0.5 }}
+                    >
+                      <DeleteIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                )}
+              </Box>
+            )}
+
             <CardContent sx={{ p: 2, "&:last-child": { pb: 2 } }}>
               {/* Date - Prominent */}
               <Typography variant="h6" fontWeight={600} color="primary.main">

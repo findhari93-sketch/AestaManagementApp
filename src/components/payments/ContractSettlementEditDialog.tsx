@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {
   Dialog,
   DialogTitle,
@@ -21,15 +21,25 @@ import {
   Tooltip,
   alpha,
   useTheme,
+  InputAdornment,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Paper,
+  Collapse,
 } from "@mui/material";
 import {
   Close as CloseIcon,
   Edit as EditIcon,
-  OpenInNew as OpenInNewIcon,
   Receipt as ReceiptIcon,
   Save as SaveIcon,
   Delete as DeleteIcon,
   ZoomIn as ZoomInIcon,
+  ExpandMore as ExpandMoreIcon,
+  ExpandLess as ExpandLessIcon,
 } from "@mui/icons-material";
 import { DatePicker } from "@mui/x-date-pickers/DatePicker";
 import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider";
@@ -37,13 +47,21 @@ import { AdapterDayjs } from "@mui/x-date-pickers/AdapterDayjs";
 import dayjs from "dayjs";
 import { createClient } from "@/lib/supabase/client";
 import { useSite } from "@/contexts/SiteContext";
-import { useRouter } from "next/navigation";
 import type { DateWiseSettlement, PaymentMode } from "@/types/payment.types";
 import type { PayerSource } from "@/types/settlement.types";
 import PayerSourceSelector from "@/components/settlement/PayerSourceSelector";
 import FileUploader from "@/components/common/FileUploader";
 import SubcontractLinkSelector from "@/components/payments/SubcontractLinkSelector";
 import ScreenshotViewer from "@/components/common/ScreenshotViewer";
+
+interface LaborerPaymentInfo {
+  id: string;
+  laborerId: string;
+  laborerName: string;
+  laborerRole: string | null;
+  amount: number;
+  paymentReference: string | null;
+}
 
 interface ContractSettlementEditDialogProps {
   open: boolean;
@@ -66,11 +84,11 @@ export default function ContractSettlementEditDialog({
   onDelete,
 }: ContractSettlementEditDialogProps) {
   const theme = useTheme();
-  const router = useRouter();
   const { selectedSite } = useSite();
   const supabase = createClient();
 
   const [loading, setLoading] = useState(false);
+  const [fetchingLaborers, setFetchingLaborers] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Screenshot viewer state
@@ -78,6 +96,8 @@ export default function ContractSettlementEditDialog({
   const [viewerInitialIndex, setViewerInitialIndex] = useState(0);
 
   // Form state
+  const [totalAmount, setTotalAmount] = useState<number>(0);
+  const [amountInput, setAmountInput] = useState<string>("");
   const [paymentDate, setPaymentDate] = useState<dayjs.Dayjs | null>(null);
   const [paymentMode, setPaymentMode] = useState<PaymentMode>("upi");
   const [payerSource, setPayerSource] = useState<PayerSource>("own_money");
@@ -86,9 +106,24 @@ export default function ContractSettlementEditDialog({
   const [proofUrls, setProofUrls] = useState<string[]>([]);
   const [subcontractId, setSubcontractId] = useState<string | null>(null);
 
+  // Laborer payments for this settlement (fetched from labor_payments)
+  const [laborerPayments, setLaborerPayments] = useState<LaborerPaymentInfo[]>([]);
+  const [showLaborerBreakdown, setShowLaborerBreakdown] = useState(false);
+
+  // Track original amount for comparison
+  const [originalAmount, setOriginalAmount] = useState<number>(0);
+
+  // Calculate if amount changed
+  const amountChanged = useMemo(() => {
+    return Math.abs(totalAmount - originalAmount) >= 1; // Allow for small rounding differences
+  }, [totalAmount, originalAmount]);
+
   // Initialize form from settlement
   useEffect(() => {
     if (settlement) {
+      setTotalAmount(settlement.totalAmount);
+      setAmountInput(settlement.totalAmount.toString());
+      setOriginalAmount(settlement.totalAmount);
       setPaymentDate(settlement.settlementDate ? dayjs(settlement.settlementDate) : null);
       setPaymentMode((settlement.paymentMode as PaymentMode) || "upi");
       setPayerSource((settlement.payerSource as PayerSource) || "own_money");
@@ -99,8 +134,55 @@ export default function ContractSettlementEditDialog({
     }
   }, [settlement]);
 
+  // Fetch laborer payments when dialog opens
+  useEffect(() => {
+    const fetchLaborerPayments = async () => {
+      if (!open || !settlement?.settlementGroupId) return;
+
+      setFetchingLaborers(true);
+      try {
+        const { data, error: fetchError } = await supabase
+          .from("labor_payments")
+          .select(`
+            id,
+            laborer_id,
+            amount,
+            payment_reference,
+            laborers(name, labor_roles(name))
+          `)
+          .eq("settlement_group_id", settlement.settlementGroupId)
+          .eq("is_under_contract", true)
+          .order("amount", { ascending: false });
+
+        if (fetchError) throw fetchError;
+
+        const payments: LaborerPaymentInfo[] = (data || []).map((p: any) => ({
+          id: p.id,
+          laborerId: p.laborer_id,
+          laborerName: p.laborers?.name || "Unknown",
+          laborerRole: p.laborers?.labor_roles?.name || null,
+          amount: p.amount,
+          paymentReference: p.payment_reference,
+        }));
+
+        setLaborerPayments(payments);
+      } catch (err) {
+        console.error("Error fetching laborer payments:", err);
+      } finally {
+        setFetchingLaborers(false);
+      }
+    };
+
+    fetchLaborerPayments();
+  }, [open, settlement?.settlementGroupId, supabase]);
+
   const handleSave = async () => {
     if (!settlement || !selectedSite?.id) return;
+
+    if (totalAmount <= 0) {
+      setError("Amount must be greater than zero");
+      return;
+    }
 
     setLoading(true);
     setError(null);
@@ -111,6 +193,7 @@ export default function ContractSettlementEditDialog({
       const { error: updateError } = await (supabase as any)
         .from("settlement_groups")
         .update({
+          total_amount: totalAmount,
           settlement_date: paymentDate?.format("YYYY-MM-DD"),
           actual_payment_date: paymentDate?.format("YYYY-MM-DD"),
           payment_mode: paymentMode,
@@ -128,17 +211,57 @@ export default function ContractSettlementEditDialog({
         throw updateError;
       }
 
-      // Update associated labor_payments with new metadata
-      await supabase
-        .from("labor_payments")
-        .update({
-          actual_payment_date: paymentDate?.format("YYYY-MM-DD"),
-          payment_mode: paymentMode,
-          proof_url: proofUrls[0] || null,
-          notes,
-          subcontract_id: subcontractId,
-        })
-        .eq("settlement_group_id", settlement.settlementGroupId);
+      // If amount changed, update labor_payments proportionally
+      if (amountChanged && laborerPayments.length > 0) {
+        const currentTotal = laborerPayments.reduce((sum, p) => sum + p.amount, 0);
+
+        if (currentTotal > 0) {
+          // Calculate new amounts proportionally
+          let allocatedSoFar = 0;
+          const newAmounts: { id: string; amount: number }[] = [];
+
+          laborerPayments.forEach((payment, index) => {
+            let newAmount: number;
+            if (index === laborerPayments.length - 1) {
+              // Last laborer gets the remainder to ensure exact total
+              newAmount = totalAmount - allocatedSoFar;
+            } else {
+              // Proportional distribution
+              const proportion = payment.amount / currentTotal;
+              newAmount = Math.round(totalAmount * proportion);
+            }
+            newAmounts.push({ id: payment.id, amount: Math.max(0, newAmount) });
+            allocatedSoFar += Math.max(0, newAmount);
+          });
+
+          // Update each labor_payment with the new amount
+          for (const item of newAmounts) {
+            await supabase
+              .from("labor_payments")
+              .update({
+                amount: item.amount,
+                actual_payment_date: paymentDate?.format("YYYY-MM-DD"),
+                payment_mode: paymentMode,
+                proof_url: proofUrls[0] || null,
+                notes,
+                subcontract_id: subcontractId,
+              })
+              .eq("id", item.id);
+          }
+        }
+      } else {
+        // Amount not changed, just update metadata
+        await supabase
+          .from("labor_payments")
+          .update({
+            actual_payment_date: paymentDate?.format("YYYY-MM-DD"),
+            payment_mode: paymentMode,
+            proof_url: proofUrls[0] || null,
+            notes,
+            subcontract_id: subcontractId,
+          })
+          .eq("settlement_group_id", settlement.settlementGroupId);
+      }
 
       onSuccess?.();
       onClose();
@@ -147,15 +270,6 @@ export default function ContractSettlementEditDialog({
       setError(err.message || "Failed to update settlement");
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleNavigateToAttendance = () => {
-    // Navigate to attendance page with highlight parameters
-    if (settlement?.weekAllocations && settlement.weekAllocations.length > 0) {
-      const firstWeek = settlement.weekAllocations[0];
-      const url = `/site/attendance?date=${firstWeek.weekStart}&from=contract-payment&returnTo=${encodeURIComponent(window.location.pathname + window.location.search)}`;
-      router.push(url);
     }
   };
 
@@ -216,28 +330,133 @@ export default function ContractSettlementEditDialog({
                 sx={{ fontFamily: "monospace" }}
               />
             </Box>
-            <Typography variant="h5" fontWeight={600}>
-              {formatCurrency(settlement.totalAmount)}
-            </Typography>
           </Box>
 
-          {/* Amount Edit Info */}
-          <Alert
-            severity="info"
-            sx={{ mb: 3 }}
-            action={
+          {/* Amount Field - Editable */}
+          <Box sx={{ mb: 3 }}>
+            <Typography variant="subtitle2" gutterBottom>
+              Total Amount
+            </Typography>
+            <TextField
+              fullWidth
+              size="small"
+              type="text"
+              inputMode="numeric"
+              value={amountInput}
+              onChange={(e) => {
+                const value = e.target.value;
+                // Only allow digits and optional decimal point
+                if (value === "" || /^\d*\.?\d*$/.test(value)) {
+                  setAmountInput(value);
+                  const numValue = parseFloat(value) || 0;
+                  setTotalAmount(numValue);
+                }
+              }}
+              InputProps={{
+                startAdornment: <InputAdornment position="start">Rs.</InputAdornment>,
+              }}
+              helperText={
+                amountChanged
+                  ? `Original: ${formatCurrency(originalAmount)} → New: ${formatCurrency(totalAmount)}`
+                  : undefined
+              }
+              sx={{
+                "& .MuiOutlinedInput-root": amountChanged
+                  ? { borderColor: theme.palette.warning.main }
+                  : {},
+              }}
+            />
+            {amountChanged && laborerPayments.length > 1 && (
+              <Alert severity="info" sx={{ mt: 1 }} icon={false}>
+                <Typography variant="caption">
+                  The new amount will be distributed proportionally among {laborerPayments.length} laborers.
+                </Typography>
+              </Alert>
+            )}
+          </Box>
+
+          {/* Laborer Breakdown - Collapsible */}
+          {laborerPayments.length > 0 && (
+            <Box sx={{ mb: 3 }}>
               <Button
-                color="inherit"
                 size="small"
-                endIcon={<OpenInNewIcon fontSize="small" />}
-                onClick={handleNavigateToAttendance}
+                onClick={() => setShowLaborerBreakdown(!showLaborerBreakdown)}
+                endIcon={showLaborerBreakdown ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+                sx={{ mb: 1, textTransform: "none" }}
               >
-                Go to Attendance
+                {showLaborerBreakdown ? "Hide" : "Show"} Laborer Breakdown ({laborerPayments.length})
               </Button>
-            }
-          >
-            To modify payment amounts, please edit the attendance records.
-          </Alert>
+              <Collapse in={showLaborerBreakdown}>
+                <TableContainer component={Paper} variant="outlined">
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Laborer</TableCell>
+                        <TableCell align="right">Current Amount</TableCell>
+                        {amountChanged && <TableCell align="right">New Amount</TableCell>}
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {laborerPayments.map((payment, index) => {
+                        const currentTotal = laborerPayments.reduce((sum, p) => sum + p.amount, 0);
+                        let newAmount = payment.amount;
+                        if (amountChanged && currentTotal > 0) {
+                          if (index === laborerPayments.length - 1) {
+                            const allocatedSoFar = laborerPayments
+                              .slice(0, -1)
+                              .reduce((sum, p) => sum + Math.round(totalAmount * (p.amount / currentTotal)), 0);
+                            newAmount = totalAmount - allocatedSoFar;
+                          } else {
+                            newAmount = Math.round(totalAmount * (payment.amount / currentTotal));
+                          }
+                        }
+                        return (
+                          <TableRow key={payment.id}>
+                            <TableCell>
+                              <Typography variant="body2">{payment.laborerName}</Typography>
+                              {payment.laborerRole && (
+                                <Typography variant="caption" color="text.secondary">
+                                  {payment.laborerRole}
+                                </Typography>
+                              )}
+                            </TableCell>
+                            <TableCell align="right">
+                              {formatCurrency(payment.amount)}
+                            </TableCell>
+                            {amountChanged && (
+                              <TableCell align="right" sx={{ color: "warning.main", fontWeight: 600 }}>
+                                {formatCurrency(Math.max(0, newAmount))}
+                              </TableCell>
+                            )}
+                          </TableRow>
+                        );
+                      })}
+                      <TableRow>
+                        <TableCell sx={{ fontWeight: 600 }}>Total</TableCell>
+                        <TableCell align="right" sx={{ fontWeight: 600 }}>
+                          {formatCurrency(laborerPayments.reduce((sum, p) => sum + p.amount, 0))}
+                        </TableCell>
+                        {amountChanged && (
+                          <TableCell align="right" sx={{ fontWeight: 600, color: "warning.main" }}>
+                            {formatCurrency(totalAmount)}
+                          </TableCell>
+                        )}
+                      </TableRow>
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              </Collapse>
+            </Box>
+          )}
+
+          {fetchingLaborers && (
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 2 }}>
+              <CircularProgress size={16} />
+              <Typography variant="caption" color="text.secondary">
+                Loading laborer breakdown...
+              </Typography>
+            </Box>
+          )}
 
           {/* Payment Date */}
           <Box sx={{ mb: 2 }}>

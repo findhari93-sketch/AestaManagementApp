@@ -128,6 +128,7 @@ export default function ContractPaymentRecordDialog({
 
   // Form state
   const [amount, setAmount] = useState<number>(0);
+  const [amountInput, setAmountInput] = useState<string>(""); // String state for input to prevent browser number issues
   const [paymentMode, setPaymentMode] = useState<PaymentMode>("upi");
   const [paymentChannel, setPaymentChannel] = useState<PaymentChannel>("direct");
   const [selectedEngineerId, setSelectedEngineerId] = useState<string>("");
@@ -194,6 +195,7 @@ export default function ContractPaymentRecordDialog({
   useEffect(() => {
     if (!open) {
       setAmount(0);
+      setAmountInput("");
       setPaymentMode("upi");
       setPaymentChannel("direct");
       setSelectedEngineerId("");
@@ -268,8 +270,9 @@ export default function ContractPaymentRecordDialog({
       return;
     }
 
-    if (weeksWithBalance.length === 0) {
-      setError("No outstanding balance to settle");
+    // For salary payments, we need outstanding balance; for advances, we don't
+    if (paymentType === "salary" && weeksWithBalance.length === 0) {
+      setError("No outstanding balance to settle. Use 'Advance' for prepayments.");
       return;
     }
 
@@ -278,23 +281,27 @@ export default function ContractPaymentRecordDialog({
 
     try {
       // Build the weeks data with laborers for the service
-      const weeksToProcess = allocationPreview.map((preview) => {
-        const week = weeksWithBalance.find((w) => w.weekStart === preview.weekStart)!;
-        return {
-          weekStart: week.weekStart,
-          weekEnd: week.weekEnd,
-          weekLabel: week.weekLabel,
-          allocatedAmount: preview.allocated,
-          laborers: week.laborers
-            .filter((l) => l.balance > 0)
-            .map((l) => ({
-              laborerId: l.laborerId,
-              laborerName: l.laborerName,
-              balance: l.balance,
-              subcontractId: l.subcontractId,
-            })),
-        };
-      });
+      // For advance payments, we pass empty weeks array (no waterfall allocation)
+      const weeksToProcess =
+        paymentType === "advance" || paymentType === "other"
+          ? []
+          : allocationPreview.map((preview) => {
+              const week = weeksWithBalance.find((w) => w.weekStart === preview.weekStart)!;
+              return {
+                weekStart: week.weekStart,
+                weekEnd: week.weekEnd,
+                weekLabel: week.weekLabel,
+                allocatedAmount: preview.allocated,
+                laborers: week.laborers
+                  .filter((l) => l.balance > 0)
+                  .map((l) => ({
+                    laborerId: l.laborerId,
+                    laborerName: l.laborerName,
+                    balance: l.balance,
+                    subcontractId: l.subcontractId,
+                  })),
+              };
+            });
 
       const result = await processWaterfallContractPayment(supabase, {
         siteId: selectedSite.id,
@@ -404,11 +411,20 @@ export default function ContractPaymentRecordDialog({
             Payment Amount
           </Typography>
           <TextField
-            type="number"
+            type="text"
+            inputMode="numeric"
             size="small"
             fullWidth
-            value={amount || ""}
-            onChange={(e) => setAmount(Number(e.target.value))}
+            value={amountInput}
+            onChange={(e) => {
+              const value = e.target.value;
+              // Only allow digits and optional decimal point
+              if (value === "" || /^\d*\.?\d*$/.test(value)) {
+                setAmountInput(value);
+                const numValue = parseFloat(value) || 0;
+                setAmount(numValue);
+              }
+            }}
             InputProps={{
               startAdornment: (
                 <Typography variant="body2" sx={{ mr: 0.5, color: "text.secondary" }}>
@@ -418,10 +434,15 @@ export default function ContractPaymentRecordDialog({
             }}
             helperText={`Total outstanding: ${formatCurrency(totalOutstanding)}`}
           />
-          {hasExcessPayment && (
-            <Alert severity="warning" sx={{ mt: 1 }}>
-              Payment exceeds total outstanding by {formatCurrency(amount - totalOutstanding)}.
-              This will create an advance credit.
+          {hasExcessPayment && paymentType === "salary" && (
+            <Alert severity="info" sx={{ mt: 1 }}>
+              <Typography variant="body2" fontWeight={500}>
+                Overpayment: {formatCurrency(amount - totalOutstanding)} excess
+              </Typography>
+              <Typography variant="caption">
+                Excess amount will automatically carry forward to future weeks via waterfall allocation.
+                The balance will show as "Overpaid" until future salary is earned.
+              </Typography>
             </Alert>
           )}
         </Box>
@@ -441,6 +462,26 @@ export default function ContractPaymentRecordDialog({
               <MenuItem value="other">Other</MenuItem>
             </Select>
           </FormControl>
+          {paymentType === "advance" && (
+            <Alert severity="warning" sx={{ mt: 1.5 }} icon={<InfoIcon fontSize="small" />}>
+              <Typography variant="body2" fontWeight={500}>
+                Advance Payment
+              </Typography>
+              <Typography variant="caption">
+                Advances are tracked separately from salary settlements. They do NOT reduce the weekly
+                due amounts and are NOT included in the waterfall allocation. Use this for upfront
+                payments that will be adjusted against future earnings.
+              </Typography>
+            </Alert>
+          )}
+          {paymentType === "other" && (
+            <Alert severity="info" sx={{ mt: 1.5 }}>
+              <Typography variant="caption">
+                "Other" payments are recorded but not allocated to specific weeks.
+                Use for miscellaneous payments like bonuses or adjustments.
+              </Typography>
+            </Alert>
+          )}
         </Box>
 
         {/* Waterfall Allocation Preview */}

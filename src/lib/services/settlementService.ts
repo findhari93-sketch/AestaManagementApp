@@ -2172,17 +2172,26 @@ export async function getDateWiseSettlements(
 }> {
   try {
     // If contractOnly, first get settlement_group_ids that have contract labor_payments
+    // AND calculate the actual amount from labor_payments (more accurate than settlement_groups.total_amount)
+    let contractSettlementAmounts: Map<string, number> | null = null;
     let contractSettlementIds: string[] | null = null;
+
     if (contractOnly) {
       const { data: contractPayments } = await supabase
         .from("labor_payments")
-        .select("settlement_group_id")
+        .select("settlement_group_id, amount")
         .eq("site_id", siteId)
         .eq("is_under_contract", true)
         .not("settlement_group_id", "is", null);
 
       if (contractPayments && contractPayments.length > 0) {
-        contractSettlementIds = [...new Set(contractPayments.map((p: any) => p.settlement_group_id))];
+        // Group by settlement_group_id and sum amounts
+        contractSettlementAmounts = new Map();
+        contractPayments.forEach((p: any) => {
+          const currentAmount = contractSettlementAmounts!.get(p.settlement_group_id) || 0;
+          contractSettlementAmounts!.set(p.settlement_group_id, currentAmount + (p.amount || 0));
+        });
+        contractSettlementIds = [...contractSettlementAmounts.keys()];
       } else {
         // No contract settlements found
         return { settlements: [], total: 0 };
@@ -2248,7 +2257,8 @@ export async function getDateWiseSettlements(
         settlementGroupId: sg.id,
         settlementReference: sg.settlement_reference,
         settlementDate: sg.settlement_date,
-        totalAmount: sg.total_amount,
+        // Use calculated amount from labor_payments if available (more accurate than stored total_amount)
+        totalAmount: contractSettlementAmounts?.get(sg.id) ?? sg.total_amount,
         weekAllocations: (sg.week_allocations as WeekAllocationEntry[]) || [],
         paymentMode: sg.payment_mode,
         paymentChannel: sg.payment_channel,

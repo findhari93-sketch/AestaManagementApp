@@ -57,6 +57,7 @@ import { generateWhatsAppUrl, generatePaymentReminderMessage } from "@/lib/forma
 import SettlementDetailsDialog from "@/components/settlement/SettlementDetailsDialog";
 import DateViewDetailsDialog from "./DateViewDetailsDialog";
 import DateSettlementsEditDialog from "./DateSettlementsEditDialog";
+import SettlementRefDetailDialog from "./SettlementRefDetailDialog";
 
 interface DailyMarketPaymentsTabProps {
   dateFrom: string;
@@ -168,6 +169,10 @@ export default function DailyMarketPaymentsTab({
   const [dateSettlementsEditOpen, setDateSettlementsEditOpen] = useState(false);
   const [dateSettlementsEditDate, setDateSettlementsEditDate] = useState<string>("");
   const [dateSettlementsEditRecords, setDateSettlementsEditRecords] = useState<DailyPaymentRecord[]>([]);
+
+  // Settlement ref detail dialog state
+  const [settlementRefDialogOpen, setSettlementRefDialogOpen] = useState(false);
+  const [selectedSettlementRef, setSelectedSettlementRef] = useState<string | null>(null);
 
   // Fetch data
   const fetchData = useCallback(async () => {
@@ -1501,6 +1506,10 @@ export default function DailyMarketPaymentsTab({
             setDateSettlementsEditRecords(records);
             setDateSettlementsEditOpen(true);
           }}
+          onViewSettlementRef={(ref) => {
+            setSelectedSettlementRef(ref);
+            setSettlementRefDialogOpen(true);
+          }}
           highlightRef={highlightRef}
         />
       )}
@@ -1600,6 +1609,16 @@ export default function DailyMarketPaymentsTab({
           fetchData();
           onDataChange?.();
         }}
+      />
+
+      {/* Settlement Ref Detail Dialog (view full settlement details by ref code) */}
+      <SettlementRefDetailDialog
+        open={settlementRefDialogOpen}
+        onClose={() => {
+          setSettlementRefDialogOpen(false);
+          setSelectedSettlementRef(null);
+        }}
+        settlementReference={selectedSettlementRef}
       />
     </Box>
   );

@@ -22,6 +22,8 @@ import {
   Receipt as ReceiptIcon,
   Image as ImageIcon,
   Payment as PaymentIcon,
+  Edit as EditIcon,
+  Delete as DeleteIcon,
 } from "@mui/icons-material";
 import { createClient } from "@/lib/supabase/client";
 import { useSite } from "@/contexts/SiteContext";
@@ -52,6 +54,9 @@ interface DateTransactionDetailPanelProps {
   week: WeekRowData;
   onViewRef?: (ref: string) => void;
   onOpenSettlementDetails?: (settlement: DateWiseSettlement) => void;
+  onEditSettlement?: (settlement: DateWiseSettlement) => void;
+  onDeleteSettlement?: (settlement: DateWiseSettlement) => void;
+  canEdit?: boolean;
 }
 
 // Format currency
@@ -82,6 +87,9 @@ export default function DateTransactionDetailPanel({
   week,
   onViewRef,
   onOpenSettlementDetails,
+  onEditSettlement,
+  onDeleteSettlement,
+  canEdit = false,
 }: DateTransactionDetailPanelProps) {
   const theme = useTheme();
   const { selectedSite } = useSite();
@@ -195,6 +203,7 @@ export default function DateTransactionDetailPanel({
               <TableCell>Proof</TableCell>
               <TableCell>Recorded By</TableCell>
               <TableCell>Notes</TableCell>
+              {canEdit && <TableCell align="center">Actions</TableCell>}
             </TableRow>
           </TableHead>
           <TableBody>
@@ -293,6 +302,36 @@ export default function DateTransactionDetailPanel({
                     <Typography variant="body2" color="text.disabled">-</Typography>
                   )}
                 </TableCell>
+                {canEdit && (
+                  <TableCell align="center">
+                    <Box sx={{ display: "flex", gap: 0.5, justifyContent: "center" }}>
+                      <Tooltip title="Edit settlement">
+                        <IconButton
+                          size="small"
+                          color="primary"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onEditSettlement?.(settlement);
+                          }}
+                        >
+                          <EditIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                      <Tooltip title="Delete settlement">
+                        <IconButton
+                          size="small"
+                          color="error"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onDeleteSettlement?.(settlement);
+                          }}
+                        >
+                          <DeleteIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                    </Box>
+                  </TableCell>
+                )}
               </TableRow>
             ))}
           </TableBody>

@@ -592,8 +592,7 @@ export default function ContractPaymentHistoryDialog({
   const summaryStats = useMemo(() => {
     // totalAmount from grouped settlements (matches summary dashboard)
     const totalAmount = settlements.reduce((sum, s) => sum + s.totalAmount, 0);
-    const uniqueDates = new Set(settlements.map((s) => s.settlementDate)).size;
-    return { totalAmount, count: settlements.length, uniqueDates };
+    return { totalAmount, count: settlements.length };
   }, [settlements]);
 
   return (
@@ -620,7 +619,7 @@ export default function ContractPaymentHistoryDialog({
                 Contract Settlement History
               </Typography>
               <Typography variant="caption" color="text.secondary">
-                {summaryStats.count} settlements on {summaryStats.uniqueDates} dates • Total: ₹{summaryStats.totalAmount.toLocaleString("en-IN")}
+                {summaryStats.count} settlements • Total: ₹{summaryStats.totalAmount.toLocaleString("en-IN")}
               </Typography>
             </Box>
           </Box>
@@ -657,23 +656,6 @@ export default function ContractPaymentHistoryDialog({
             </Typography>
             <Typography variant="h6" fontWeight={700}>
               {summaryStats.count}
-            </Typography>
-          </Box>
-          <Box
-            sx={{
-              px: 2,
-              py: 1,
-              bgcolor: "background.paper",
-              borderRadius: 2,
-              border: `1px solid ${theme.palette.divider}`,
-              minWidth: 140,
-            }}
-          >
-            <Typography variant="caption" color="text.secondary">
-              Payment Dates
-            </Typography>
-            <Typography variant="h6" fontWeight={700}>
-              {summaryStats.uniqueDates}
             </Typography>
           </Box>
           <Box

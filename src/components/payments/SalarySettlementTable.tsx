@@ -78,6 +78,7 @@ interface SalarySettlementTableProps {
   onNotifyDate: (date: string, records: DailyPaymentRecord[]) => void;
   onConfirmSettlement?: (transactionId: string) => void;
   onEditSettlements?: (date: string, records: DailyPaymentRecord[]) => void;
+  onViewSettlementRef?: (ref: string) => void;
   highlightRef?: string | null;
 }
 
@@ -130,6 +131,7 @@ export default function SalarySettlementTable({
   onNotifyDate,
   onConfirmSettlement,
   onEditSettlements,
+  onViewSettlementRef,
   highlightRef,
 }: SalarySettlementTableProps) {
   const theme = useTheme();
@@ -601,11 +603,19 @@ export default function SalarySettlementTable({
                   size="small"
                   color="primary"
                   variant="outlined"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onViewSettlementRef?.(ref);
+                  }}
                   sx={{
                     fontFamily: "monospace",
                     fontWeight: 600,
                     fontSize: "0.7rem",
                     height: 22,
+                    cursor: onViewSettlementRef ? "pointer" : "default",
+                    "&:hover": onViewSettlementRef
+                      ? { bgcolor: alpha(theme.palette.primary.main, 0.1) }
+                      : {},
                   }}
                 />
               ))}
@@ -617,6 +627,15 @@ export default function SalarySettlementTable({
         accessorKey: "status",
         header: "Status",
         size: 160,
+        filterVariant: "select",
+        filterSelectOptions: [
+          { value: "all_paid", label: "All Paid" },
+          { value: "all_pending", label: "All Pending" },
+          { value: "partial", label: "Partial" },
+          { value: "sent_to_engineer", label: "Sent to Engineer" },
+          { value: "contract_only", label: "Contract Only" },
+          { value: "holiday", label: "Holiday" },
+        ],
         Cell: ({ row }) => {
           const { status, pendingAmount, paidAmount, sentToEngineerAmount, awaitingApprovalAmount, hasAwaitingApprovalRecords } =
             row.original;
