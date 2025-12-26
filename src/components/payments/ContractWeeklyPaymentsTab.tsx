@@ -470,124 +470,112 @@ export default function ContractWeeklyPaymentsTab({
         });
       });
 
-      // First, get settlement_group_ids that have contract labor_payments
-      const { data: contractPayments } = await supabase
-        .from("labor_payments")
-        .select("settlement_group_id")
+      // Fetch ALL settlement_groups for contract payments (with total_amount and week_allocations)
+      // We identify contract settlements by settlement_type = 'date_wise' which is used for waterfall payments
+      const { data: settlementGroupsData } = await (supabase as any)
+        .from("settlement_groups")
+        .select("id, settlement_reference, settlement_date, total_amount, week_allocations, payment_type")
         .eq("site_id", selectedSite.id)
-        .eq("is_under_contract", true)
-        .not("settlement_group_id", "is", null);
+        .eq("is_cancelled", false)
+        .or("settlement_type.eq.date_wise,settlement_type.is.null");
 
-      const contractSettlementIds = contractPayments && contractPayments.length > 0
-        ? [...new Set(contractPayments.map((p: any) => p.settlement_group_id))]
-        : [];
+      // Calculate PAID per week from settlement_groups.week_allocations (NOT from labor_payments)
+      // This is the key fix: use actual transaction amounts allocated to each week
+      const weekPaidFromSettlements = new Map<string, number>();
 
-      // Fetch settlement_groups to get SET-* references for each week (contract settlements only)
-      let settlementGroupsData: any[] = [];
-      if (contractSettlementIds.length > 0) {
-        const { data: sgData } = await (supabase as any)
-          .from("settlement_groups")
-          .select("id, settlement_reference, settlement_date, week_allocations")
-          .eq("site_id", selectedSite.id)
-          .eq("is_cancelled", false)
-          .or("settlement_type.eq.date_wise,settlement_type.is.null")
-          .in("id", contractSettlementIds);
-        settlementGroupsData = sgData || [];
-      }
-
-      // Add settlement_group references and payment dates to each week row
-      if (settlementGroupsData && settlementGroupsData.length > 0) {
-        weekRows.forEach((weekRow) => {
-          const weekStart = weekRow.weekStart;
-          const weekEnd = weekRow.weekEnd;
-          const paymentDatesSet = new Set<string>();
-          let transactionCount = 0;
-
-          // Find settlements that overlap with this week
-          settlementGroupsData.forEach((sg: any) => {
-            let overlaps = false;
-
-            // Check week_allocations for overlap
-            if (sg.week_allocations && Array.isArray(sg.week_allocations) && sg.week_allocations.length > 0) {
-              overlaps = sg.week_allocations.some(
-                (a: any) => a.weekStart <= weekEnd && a.weekEnd >= weekStart
-              );
-            } else if (sg.settlement_date) {
-              // Fallback: check if settlement_date falls within week
-              overlaps = sg.settlement_date >= weekStart && sg.settlement_date <= weekEnd;
-            }
-
-            // Add the reference and date if it overlaps
-            if (overlaps && sg.settlement_reference) {
-              // Count each settlement transaction
-              transactionCount++;
-              if (!weekRow.settlementReferences.includes(sg.settlement_reference)) {
-                weekRow.settlementReferences.push(sg.settlement_reference);
-              }
-              // Track unique payment dates
-              if (sg.settlement_date) {
-                paymentDatesSet.add(sg.settlement_date);
-              }
+      (settlementGroupsData || []).forEach((sg: any) => {
+        if (sg.week_allocations && Array.isArray(sg.week_allocations)) {
+          // Each week_allocation has { weekStart, weekEnd, amount }
+          sg.week_allocations.forEach((alloc: any) => {
+            if (alloc.weekStart && alloc.amount > 0) {
+              const currentPaid = weekPaidFromSettlements.get(alloc.weekStart) || 0;
+              weekPaidFromSettlements.set(alloc.weekStart, currentPaid + alloc.amount);
             }
           });
+        }
+      });
 
-          // Convert Set to sorted array (oldest first)
-          weekRow.paymentDates = Array.from(paymentDatesSet).sort();
-          weekRow.transactionCount = transactionCount;
+      // Update weekRows with CORRECT Paid values from settlement_groups
+      weekRows.forEach((weekRow) => {
+        const weekStart = weekRow.weekStart;
+        const weekEnd = weekRow.weekEnd;
+        const paymentDatesSet = new Set<string>();
+        let transactionCount = 0;
+
+        // Get paid amount from settlement_groups week_allocations
+        const paidFromSettlements = weekPaidFromSettlements.get(weekStart) || 0;
+
+        // Update the totalPaid with the correct value from settlements
+        weekRow.totalPaid = paidFromSettlements;
+        weekRow.totalDue = Math.max(0, weekRow.totalSalary - paidFromSettlements);
+        weekRow.paymentProgress = weekRow.totalSalary > 0
+          ? (paidFromSettlements / weekRow.totalSalary) * 100
+          : 0;
+
+        // Update status based on new calculations
+        if (weekRow.totalDue <= 0) {
+          weekRow.status = weekRow.totalDue < 0 ? "advance" : "completed";
+        } else if (paidFromSettlements > 0) {
+          weekRow.status = "partial";
+        } else {
+          weekRow.status = "pending";
+        }
+
+        // Find settlements that have allocations to this week
+        (settlementGroupsData || []).forEach((sg: any) => {
+          let hasAllocationToThisWeek = false;
+
+          // Check week_allocations for this week
+          if (sg.week_allocations && Array.isArray(sg.week_allocations)) {
+            hasAllocationToThisWeek = sg.week_allocations.some(
+              (a: any) => a.weekStart === weekStart
+            );
+          }
+
+          // Add the reference and date if it has allocation to this week
+          if (hasAllocationToThisWeek && sg.settlement_reference) {
+            transactionCount++;
+            if (!weekRow.settlementReferences.includes(sg.settlement_reference)) {
+              weekRow.settlementReferences.push(sg.settlement_reference);
+            }
+            if (sg.settlement_date) {
+              paymentDatesSet.add(sg.settlement_date);
+            }
+          }
         });
-      }
+
+        // Convert Set to sorted array (oldest first)
+        weekRow.paymentDates = Array.from(paymentDatesSet).sort();
+        weekRow.transactionCount = transactionCount;
+      });
 
       // Sort by week start date descending (most recent first)
       weekRows.sort((a, b) => new Date(b.weekStart).getTime() - new Date(a.weekStart).getTime());
       setWeekGroups(weekRows);
 
-      // Calculate settlement stats - count SETTLEMENTS (transactions), not individual labor payments
-      // This matches the History dialog exactly (only non-cancelled settlements)
-      // Use settlementGroupsData IDs which are already filtered by is_cancelled = false
-      const validSettlementIds = new Set(settlementGroupsData.map((sg: any) => sg.id));
-
-      const paymentsWithValidSettlement = (paymentsData || []).filter(
-        (p: any) => p.settlement_group_id != null && validSettlementIds.has(p.settlement_group_id)
-      );
-
-      // Group by settlement_group_id and sum amounts (matching History dialog logic)
-      const settlementAmounts = new Map<string, { salaryAmount: number; advanceAmount: number }>();
-      paymentsWithValidSettlement.forEach((p: any) => {
-        const existing = settlementAmounts.get(p.settlement_group_id);
-        const amount = p.amount || 0;
-        const isAdvance = p.payment_type === "advance";
-
-        if (existing) {
-          if (isAdvance) {
-            existing.advanceAmount += amount;
-          } else {
-            existing.salaryAmount += amount;
-          }
-        } else {
-          settlementAmounts.set(p.settlement_group_id, {
-            salaryAmount: isAdvance ? 0 : amount,
-            advanceAmount: isAdvance ? amount : 0,
-          });
-        }
-      });
-
-      // Calculate totals from grouped settlements
+      // Calculate settlement stats from settlement_groups directly (NOT labor_payments)
+      // This ensures consistency between summary and week table
       let salaryTotal = 0;
       let advanceTotal = 0;
+      let salarySettlementCount = 0;
       let advanceSettlementCount = 0;
 
-      settlementAmounts.forEach((amounts) => {
-        salaryTotal += amounts.salaryAmount;
-        if (amounts.advanceAmount > 0) {
-          advanceTotal += amounts.advanceAmount;
+      (settlementGroupsData || []).forEach((sg: any) => {
+        const amount = sg.total_amount || 0;
+        const isAdvance = sg.payment_type === "advance";
+
+        if (isAdvance) {
+          advanceTotal += amount;
           advanceSettlementCount++;
+        } else {
+          salaryTotal += amount;
+          salarySettlementCount++;
         }
       });
 
       setTotalAdvancesGiven(advanceTotal);
       setAdvanceRecordCount(advanceSettlementCount);
-      // Use total settlement count (matching History which shows all non-cancelled settlements)
-      setSalaryRecordCount(settlementAmounts.size);
+      setSalaryRecordCount(salarySettlementCount);
       setTotalSalaryPaid(salaryTotal + advanceTotal); // Total paid = salary + advances
 
       // Fetch filter options

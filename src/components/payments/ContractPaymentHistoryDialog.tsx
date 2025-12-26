@@ -269,44 +269,14 @@ export default function ContractPaymentHistoryDialog({
   const [screenshotViewerOpen, setScreenshotViewerOpen] = useState(false);
   const [viewerImages, setViewerImages] = useState<string[]>([]);
 
-  // Fetch settlement groups for contract laborers
+  // Fetch settlement groups for contract payments (directly from settlement_groups, NOT labor_payments)
   const fetchSettlements = useCallback(async () => {
     if (!open || !selectedSite) return;
 
     setLoading(true);
     try {
-      // Get contract labor_payments with settlement_group_id (consistent with summary)
-      const { data: contractPayments } = await supabase
-        .from("labor_payments")
-        .select("settlement_group_id, amount")
-        .eq("site_id", selectedSite.id)
-        .eq("is_under_contract", true)
-        .not("settlement_group_id", "is", null);
-
-      if (!contractPayments || contractPayments.length === 0) {
-        setSettlements([]);
-        setLoading(false);
-        return;
-      }
-
-      // Group by settlement_group_id and sum amounts (contract laborers only)
-      const contractAmountsBySettlement = new Map<string, { amount: number; laborerCount: number }>();
-      contractPayments.forEach((p: any) => {
-        const existing = contractAmountsBySettlement.get(p.settlement_group_id);
-        if (existing) {
-          existing.amount += p.amount || 0;
-          existing.laborerCount += 1;
-        } else {
-          contractAmountsBySettlement.set(p.settlement_group_id, {
-            amount: p.amount || 0,
-            laborerCount: 1,
-          });
-        }
-      });
-
-      const contractSettlementIds = [...contractAmountsBySettlement.keys()];
-
-      // Fetch settlement_groups with subcontract info
+      // Fetch settlement_groups directly - contract settlements use settlement_type = 'date_wise'
+      // This is consistent with the weekly tab and avoids labor_payments which is inaccurate for contracts
       const { data: settlementData, error } = await (supabase as any)
         .from("settlement_groups")
         .select(`
@@ -332,7 +302,7 @@ export default function ContractPaymentHistoryDialog({
         `)
         .eq("site_id", selectedSite.id)
         .eq("is_cancelled", false)
-        .in("id", contractSettlementIds)
+        .or("settlement_type.eq.date_wise,settlement_type.is.null")
         .order("settlement_date", { ascending: false });
 
       if (error) {
@@ -341,15 +311,20 @@ export default function ContractPaymentHistoryDialog({
         return;
       }
 
-      // Map to SettlementRecord format - using contract-only amounts
+      if (!settlementData || settlementData.length === 0) {
+        setSettlements([]);
+        setLoading(false);
+        return;
+      }
+
+      // Map to SettlementRecord format - use settlement_groups.total_amount directly
       const mapped: SettlementRecord[] = (settlementData || []).map((sg: any) => {
-        const contractData = contractAmountsBySettlement.get(sg.id);
         return {
           id: sg.id,
           settlementReference: sg.settlement_reference,
           settlementDate: sg.settlement_date,
-          // Use contract-only amount instead of total_amount
-          totalAmount: contractData?.amount || 0,
+          // Use total_amount directly from settlement_groups (this is the actual transaction amount)
+          totalAmount: sg.total_amount || 0,
           paymentMode: sg.payment_mode,
           paymentChannel: sg.payment_channel,
           payerSource: sg.payer_source,
@@ -361,8 +336,7 @@ export default function ContractPaymentHistoryDialog({
           notes: sg.notes,
           createdBy: sg.created_by_name,
           createdAt: sg.created_at,
-          // Use contract-only laborer count
-          laborerCount: contractData?.laborerCount || 0,
+          laborerCount: sg.laborer_count || 0,
           weekAllocations: sg.week_allocations || [],
         };
       });
