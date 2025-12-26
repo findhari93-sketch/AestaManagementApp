@@ -245,12 +245,13 @@ export default function ContractWeeklyPaymentsTab({
         throw new Error(attendanceError.message);
       }
 
-      // Fetch labor payments
+      // Fetch labor payments (only those with settlement_group_id for consistency)
       const { data: paymentsData } = await supabase
         .from("labor_payments")
         .select("*")
         .eq("site_id", selectedSite.id)
-        .eq("is_under_contract", true);
+        .eq("is_under_contract", true)
+        .not("settlement_group_id", "is", null);
 
       // Fetch payment week allocations
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
