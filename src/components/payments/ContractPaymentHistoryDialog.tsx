@@ -269,14 +269,32 @@ export default function ContractPaymentHistoryDialog({
   const [screenshotViewerOpen, setScreenshotViewerOpen] = useState(false);
   const [viewerImages, setViewerImages] = useState<string[]>([]);
 
-  // Fetch settlement groups for contract payments (directly from settlement_groups, NOT labor_payments)
+  // Fetch settlement groups for contract payments
+  // Hybrid approach: Use labor_payments to IDENTIFY contract settlements, use settlement_groups for AMOUNTS
   const fetchSettlements = useCallback(async () => {
     if (!open || !selectedSite) return;
 
     setLoading(true);
     try {
-      // Fetch settlement_groups directly - contract settlements use settlement_type = 'date_wise'
-      // This is consistent with the weekly tab and avoids labor_payments which is inaccurate for contracts
+      // Step 1: Get settlement_group_ids that have contract labor_payments
+      // This ensures we only show settlements with contract laborers (is_under_contract = true)
+      const { data: contractPayments } = await supabase
+        .from("labor_payments")
+        .select("settlement_group_id")
+        .eq("site_id", selectedSite.id)
+        .eq("is_under_contract", true)
+        .not("settlement_group_id", "is", null);
+
+      if (!contractPayments || contractPayments.length === 0) {
+        setSettlements([]);
+        setLoading(false);
+        return;
+      }
+
+      // Get unique settlement_group_ids
+      const contractSettlementIds = [...new Set(contractPayments.map((p: any) => p.settlement_group_id))];
+
+      // Step 2: Fetch those settlement_groups with their total_amount (the actual transaction amount)
       const { data: settlementData, error } = await (supabase as any)
         .from("settlement_groups")
         .select(`
@@ -302,7 +320,7 @@ export default function ContractPaymentHistoryDialog({
         `)
         .eq("site_id", selectedSite.id)
         .eq("is_cancelled", false)
-        .or("settlement_type.eq.date_wise,settlement_type.is.null")
+        .in("id", contractSettlementIds)
         .order("settlement_date", { ascending: false });
 
       if (error) {

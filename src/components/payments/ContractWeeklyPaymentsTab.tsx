@@ -470,14 +470,30 @@ export default function ContractWeeklyPaymentsTab({
         });
       });
 
-      // Fetch ALL settlement_groups for contract payments (with total_amount and week_allocations)
-      // We identify contract settlements by settlement_type = 'date_wise' which is used for waterfall payments
-      const { data: settlementGroupsData } = await (supabase as any)
-        .from("settlement_groups")
-        .select("id, settlement_reference, settlement_date, total_amount, week_allocations, payment_type")
+      // Step 1: Get settlement_group_ids that have contract labor_payments
+      // This ensures we only include settlements with contract laborers (is_under_contract = true)
+      const { data: contractPaymentsForIds } = await supabase
+        .from("labor_payments")
+        .select("settlement_group_id")
         .eq("site_id", selectedSite.id)
-        .eq("is_cancelled", false)
-        .or("settlement_type.eq.date_wise,settlement_type.is.null");
+        .eq("is_under_contract", true)
+        .not("settlement_group_id", "is", null);
+
+      const contractSettlementIds = contractPaymentsForIds && contractPaymentsForIds.length > 0
+        ? [...new Set(contractPaymentsForIds.map((p: any) => p.settlement_group_id))]
+        : [];
+
+      // Step 2: Fetch settlement_groups for contract payments only (filtered by IDs from step 1)
+      let settlementGroupsData: any[] = [];
+      if (contractSettlementIds.length > 0) {
+        const { data: sgData } = await (supabase as any)
+          .from("settlement_groups")
+          .select("id, settlement_reference, settlement_date, total_amount, week_allocations, payment_type")
+          .eq("site_id", selectedSite.id)
+          .eq("is_cancelled", false)
+          .in("id", contractSettlementIds);
+        settlementGroupsData = sgData || [];
+      }
 
       // Calculate PAID per week from settlement_groups.week_allocations (NOT from labor_payments)
       // This is the key fix: use actual transaction amounts allocated to each week
