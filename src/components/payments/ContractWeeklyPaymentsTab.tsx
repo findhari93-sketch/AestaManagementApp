@@ -1,6 +1,12 @@
 "use client";
 
-import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import React, {
+  useState,
+  useEffect,
+  useMemo,
+  useCallback,
+  useRef,
+} from "react";
 import {
   Box,
   FormControl,
@@ -62,7 +68,6 @@ interface ContractWeeklyPaymentsTabProps {
   highlightRef?: string | null;
 }
 
-
 // Week row data for week-wise view
 interface WeekLaborerData {
   laborerId: string;
@@ -97,7 +102,10 @@ interface WeekRowData {
 }
 
 // Get week boundaries (Sunday to Saturday)
-function getWeekBoundaries(date: string): { weekStart: string; weekEnd: string } {
+function getWeekBoundaries(date: string): {
+  weekStart: string;
+  weekEnd: string;
+} {
   const d = dayjs(date);
   const dayOfWeek = d.day();
   const weekStart = d.subtract(dayOfWeek, "day").format("YYYY-MM-DD");
@@ -138,17 +146,21 @@ export default function ContractWeeklyPaymentsTab({
   const [totalAdvancesGiven, setTotalAdvancesGiven] = useState(0);
   const [advanceRecordCount, setAdvanceRecordCount] = useState(0);
   const [salaryRecordCount, setSalaryRecordCount] = useState(0);
-  const [totalSalaryPaid, setTotalSalaryPaid] = useState(0);
+  const [salarySettlementsTotal, setSalarySettlementsTotal] = useState(0);
 
   // Auto-scroll refs
   const tableContainerRef = useRef<HTMLDivElement>(null);
   const [hasScrolledToHighlight, setHasScrolledToHighlight] = useState(false);
 
   // Filters
-  const [filterStatus, setFilterStatus] = useState<"all" | "pending" | "completed">("all");
+  const [filterStatus, setFilterStatus] = useState<
+    "all" | "pending" | "completed"
+  >("all");
   const [filterSubcontract, setFilterSubcontract] = useState<string>("all");
   const [filterTeam, setFilterTeam] = useState<string>("all");
-  const [subcontracts, setSubcontracts] = useState<{ id: string; title: string }[]>([]);
+  const [subcontracts, setSubcontracts] = useState<
+    { id: string; title: string }[]
+  >([]);
   const [teams, setTeams] = useState<{ id: string; name: string }[]>([]);
 
   // Dialog states
@@ -158,14 +170,20 @@ export default function ContractWeeklyPaymentsTab({
   const [settlementRefDialogOpen, setSettlementRefDialogOpen] = useState(false);
   const [selectedRef, setSelectedRef] = useState<string | null>(null);
   const [weekDetailsDialogOpen, setWeekDetailsDialogOpen] = useState(false);
-  const [selectedWeekForDetails, setSelectedWeekForDetails] = useState<WeekRowData | null>(null);
+  const [selectedWeekForDetails, setSelectedWeekForDetails] =
+    useState<WeekRowData | null>(null);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
-  const [editingPaymentDetails, setEditingPaymentDetails] = useState<import("@/types/payment.types").PaymentDetails | null>(null);
+  const [editingPaymentDetails, setEditingPaymentDetails] = useState<
+    import("@/types/payment.types").PaymentDetails | null
+  >(null);
 
   // New date-wise settlement dialogs
-  const [editSettlementDialogOpen, setEditSettlementDialogOpen] = useState(false);
-  const [deleteSettlementDialogOpen, setDeleteSettlementDialogOpen] = useState(false);
-  const [selectedSettlement, setSelectedSettlement] = useState<DateWiseSettlement | null>(null);
+  const [editSettlementDialogOpen, setEditSettlementDialogOpen] =
+    useState(false);
+  const [deleteSettlementDialogOpen, setDeleteSettlementDialogOpen] =
+    useState(false);
+  const [selectedSettlement, setSelectedSettlement] =
+    useState<DateWiseSettlement | null>(null);
 
   // Date range
   const dateRange = useMemo(() => {
@@ -174,7 +192,10 @@ export default function ContractWeeklyPaymentsTab({
     }
     const today = dayjs();
     const toDate = today.format("YYYY-MM-DD");
-    const fromDate = today.subtract(weeksToShow, "week").startOf("week").format("YYYY-MM-DD");
+    const fromDate = today
+      .subtract(weeksToShow, "week")
+      .startOf("week")
+      .format("YYYY-MM-DD");
     return { fromDate, toDate };
   }, [propDateFrom, propDateTo, weeksToShow]);
 
@@ -204,7 +225,8 @@ export default function ContractWeeklyPaymentsTab({
       // Fetch contract laborers' attendance
       const { data: attendanceData, error: attendanceError } = await supabase
         .from("daily_attendance")
-        .select(`
+        .select(
+          `
           id,
           date,
           laborer_id,
@@ -221,7 +243,8 @@ export default function ContractWeeklyPaymentsTab({
             labor_roles(name)
           ),
           subcontracts(id, title)
-        `)
+        `
+        )
         .eq("site_id", selectedSite.id)
         .eq("laborers.laborer_type", "contract")
         .gte("date", fromDate)
@@ -247,12 +270,15 @@ export default function ContractWeeklyPaymentsTab({
         .eq("site_id", selectedSite.id);
 
       // Group by laborer
-      const laborerMap = new Map<string, {
-        info: any;
-        attendance: any[];
-        payments: any[];
-        allocations: any[];
-      }>();
+      const laborerMap = new Map<
+        string,
+        {
+          info: any;
+          attendance: any[];
+          payments: any[];
+          allocations: any[];
+        }
+      >();
 
       // Process attendance
       (attendanceData || []).forEach((att: any) => {
@@ -261,7 +287,9 @@ export default function ContractWeeklyPaymentsTab({
           laborerMap.set(laborerId, {
             info: {
               ...att.laborers,
-              teamName: att.laborers?.team_id ? teamsMap.get(att.laborers.team_id) : null,
+              teamName: att.laborers?.team_id
+                ? teamsMap.get(att.laborers.team_id)
+                : null,
               subcontractId: att.subcontract_id,
               subcontractTitle: att.subcontracts?.title,
             },
@@ -300,7 +328,8 @@ export default function ContractWeeklyPaymentsTab({
           0
         );
         const outstanding = totalEarned - totalPaid;
-        const paymentProgress = totalEarned > 0 ? (totalPaid / totalEarned) * 100 : 0;
+        const paymentProgress =
+          totalEarned > 0 ? (totalPaid / totalEarned) * 100 : 0;
 
         // Calculate status
         let status: PaymentStatus = "pending";
@@ -313,10 +342,13 @@ export default function ContractWeeklyPaymentsTab({
         // Build weekly breakdown using waterfall logic from labor_payments
         // Instead of relying on stored payment_week_allocations, calculate on-the-fly
         const weeklyBreakdown: WeekBreakdownEntry[] = [];
-        const weekEarningsMap = new Map<string, {
-          attendance: any[];
-          earned: number;
-        }>();
+        const weekEarningsMap = new Map<
+          string,
+          {
+            attendance: any[];
+            earned: number;
+          }
+        >();
 
         // Group attendance by week and calculate earned per week
         data.attendance.forEach((att: any) => {
@@ -338,7 +370,10 @@ export default function ContractWeeklyPaymentsTab({
             daysWorked: data.attendance.length,
             paid: 0, // Will be calculated via waterfall
           }))
-          .sort((a, b) => new Date(a.weekStart).getTime() - new Date(b.weekStart).getTime());
+          .sort(
+            (a, b) =>
+              new Date(a.weekStart).getTime() - new Date(b.weekStart).getTime()
+          );
 
         // Apply waterfall allocation: oldest week gets paid first
         // Use totalPaid from labor_payments (already calculated above)
@@ -355,7 +390,9 @@ export default function ContractWeeklyPaymentsTab({
           weeklyBreakdown.push({
             weekStart: week.weekStart,
             weekEnd: week.weekEnd,
-            weekLabel: `${dayjs(week.weekStart).format("MMM D")} - ${dayjs(week.weekEnd).format("MMM D, YYYY")}`,
+            weekLabel: `${dayjs(week.weekStart).format("MMM D")} - ${dayjs(
+              week.weekEnd
+            ).format("MMM D, YYYY")}`,
             earned: week.earned,
             paid: week.paid,
             balance: week.earned - week.paid,
@@ -366,13 +403,18 @@ export default function ContractWeeklyPaymentsTab({
         }
 
         // Get last payment date
-        const lastPayment = data.payments
-          .sort((a: any, b: any) => new Date(b.actual_payment_date).getTime() - new Date(a.actual_payment_date).getTime())[0];
+        const lastPayment = data.payments.sort(
+          (a: any, b: any) =>
+            new Date(b.actual_payment_date).getTime() -
+            new Date(a.actual_payment_date).getTime()
+        )[0];
 
         // Collect all payment references from payments for highlighting
         const settlementReferences = data.payments
           .map((p: any) => p.payment_reference)
-          .filter((ref: string | null): ref is string => ref != null && ref !== "");
+          .filter(
+            (ref: string | null): ref is string => ref != null && ref !== ""
+          );
 
         laborerViews.push({
           laborerId,
@@ -396,12 +438,15 @@ export default function ContractWeeklyPaymentsTab({
       setLaborers(laborerViews);
 
       // Build week-wise data from laborer views
-      const weekDataMap = new Map<string, {
-        laborers: WeekLaborerData[];
-        totalSalary: number;
-        totalPaid: number;
-        settlementRefs: Set<string>;
-      }>();
+      const weekDataMap = new Map<
+        string,
+        {
+          laborers: WeekLaborerData[];
+          totalSalary: number;
+          totalPaid: number;
+          settlementRefs: Set<string>;
+        }
+      >();
 
       laborerViews.forEach((laborer) => {
         laborer.weeklyBreakdown.forEach((week) => {
@@ -434,7 +479,9 @@ export default function ContractWeeklyPaymentsTab({
           weekData.totalPaid += week.paid;
 
           // Add settlement references
-          laborer.settlementReferences.forEach((ref) => weekData.settlementRefs.add(ref));
+          laborer.settlementReferences.forEach((ref) =>
+            weekData.settlementRefs.add(ref)
+          );
         });
       });
 
@@ -443,7 +490,8 @@ export default function ContractWeeklyPaymentsTab({
       weekDataMap.forEach((data, weekStart) => {
         const weekEnd = dayjs(weekStart).add(6, "day").format("YYYY-MM-DD");
         const totalDue = data.totalSalary - data.totalPaid;
-        const paymentProgress = data.totalSalary > 0 ? (data.totalPaid / data.totalSalary) * 100 : 0;
+        const paymentProgress =
+          data.totalSalary > 0 ? (data.totalPaid / data.totalSalary) * 100 : 0;
 
         let status: PaymentStatus = "pending";
         if (totalDue <= 0) {
@@ -456,7 +504,9 @@ export default function ContractWeeklyPaymentsTab({
           id: weekStart,
           weekStart,
           weekEnd,
-          weekLabel: `${dayjs(weekStart).format("MMM D")} - ${dayjs(weekEnd).format("MMM D, YYYY")}`,
+          weekLabel: `${dayjs(weekStart).format("MMM D")} - ${dayjs(
+            weekEnd
+          ).format("MMM D, YYYY")}`,
           laborerCount: data.laborers.length,
           totalSalary: data.totalSalary,
           totalPaid: data.totalPaid,
@@ -479,31 +529,58 @@ export default function ContractWeeklyPaymentsTab({
         .eq("is_under_contract", true)
         .not("settlement_group_id", "is", null);
 
-      const contractSettlementIds = contractPaymentsForIds && contractPaymentsForIds.length > 0
-        ? [...new Set(contractPaymentsForIds.map((p: any) => p.settlement_group_id))]
-        : [];
+      const contractSettlementIds =
+        contractPaymentsForIds && contractPaymentsForIds.length > 0
+          ? [
+              ...new Set(
+                contractPaymentsForIds.map((p: any) => p.settlement_group_id)
+              ),
+            ]
+          : [];
 
-      // Step 2: Fetch settlement_groups for contract payments only (filtered by IDs from step 1)
+      // Step 2: Fetch settlement_groups for contract payments
+      // Include both:
+      // - Salary settlements (by IDs from labor_payments)
+      // - Advance/other payments (by payment_type, no labor_payments)
       let settlementGroupsData: any[] = [];
+
+      let sgQuery = (supabase as any)
+        .from("settlement_groups")
+        .select(
+          "id, settlement_reference, settlement_date, total_amount, week_allocations, payment_type"
+        )
+        .eq("site_id", selectedSite.id)
+        .eq("is_cancelled", false);
+
+      // Use OR to include both salary settlements and advance/other payments
       if (contractSettlementIds.length > 0) {
-        const { data: sgData } = await (supabase as any)
-          .from("settlement_groups")
-          .select("id, settlement_reference, settlement_date, total_amount, week_allocations, payment_type")
-          .eq("site_id", selectedSite.id)
-          .eq("is_cancelled", false)
-          .in("id", contractSettlementIds);
-        settlementGroupsData = sgData || [];
+        sgQuery = sgQuery.or(`id.in.(${contractSettlementIds.join(",")}),payment_type.in.(advance,other)`);
+      } else {
+        // No salary settlements, just fetch advances/other
+        sgQuery = sgQuery.in("payment_type", ["advance", "other"]);
       }
+
+      const { data: sgData } = await sgQuery;
+      settlementGroupsData = sgData || [];
 
       // Calculate PAID per week using WATERFALL allocation
       // Sort weeks by date (oldest first) for waterfall calculation
       const sortedWeeksForWaterfall = [...weekRows].sort(
-        (a, b) => new Date(a.weekStart).getTime() - new Date(b.weekStart).getTime()
+        (a, b) =>
+          new Date(a.weekStart).getTime() - new Date(b.weekStart).getTime()
+      );
+
+      // ONLY include salary-type settlements in waterfall (NOT advances)
+      // Advances are tracked separately and should not be allocated to weeks
+      const salarySettlementsOnly = (settlementGroupsData || []).filter(
+        (sg: any) => sg.payment_type !== "advance"
       );
 
       // Sort settlements by date (oldest first) for waterfall
-      const sortedSettlements = [...(settlementGroupsData || [])].sort(
-        (a: any, b: any) => new Date(a.settlement_date).getTime() - new Date(b.settlement_date).getTime()
+      const sortedSettlements = [...salarySettlementsOnly].sort(
+        (a: any, b: any) =>
+          new Date(a.settlement_date).getTime() -
+          new Date(b.settlement_date).getTime()
       );
 
       // Track paid amounts per week and which settlements apply to each week
@@ -541,8 +618,12 @@ export default function ContractWeeklyPaymentsTab({
           const allocation = Math.min(remainingAmount, weekDue);
           if (allocation > 0) {
             // Update paid amount for this week
-            const currentPaid = weekPaidFromSettlements.get(week.weekStart) || 0;
-            weekPaidFromSettlements.set(week.weekStart, currentPaid + allocation);
+            const currentPaid =
+              weekPaidFromSettlements.get(week.weekStart) || 0;
+            weekPaidFromSettlements.set(
+              week.weekStart,
+              currentPaid + allocation
+            );
 
             // Update remaining due for this week
             weekRemainingDue.set(week.weekStart, weekDue - allocation);
@@ -567,10 +648,14 @@ export default function ContractWeeklyPaymentsTab({
 
         // Update the totalPaid with the waterfall-calculated value
         weekRow.totalPaid = paidFromSettlements;
-        weekRow.totalDue = Math.max(0, weekRow.totalSalary - paidFromSettlements);
-        weekRow.paymentProgress = weekRow.totalSalary > 0
-          ? (paidFromSettlements / weekRow.totalSalary) * 100
-          : 0;
+        weekRow.totalDue = Math.max(
+          0,
+          weekRow.totalSalary - paidFromSettlements
+        );
+        weekRow.paymentProgress =
+          weekRow.totalSalary > 0
+            ? (paidFromSettlements / weekRow.totalSalary) * 100
+            : 0;
 
         // Update status based on new calculations
         if (weekRow.totalDue <= 0) {
@@ -591,7 +676,10 @@ export default function ContractWeeklyPaymentsTab({
       });
 
       // Sort by week start date descending (most recent first)
-      weekRows.sort((a, b) => new Date(b.weekStart).getTime() - new Date(a.weekStart).getTime());
+      weekRows.sort(
+        (a, b) =>
+          new Date(b.weekStart).getTime() - new Date(a.weekStart).getTime()
+      );
       setWeekGroups(weekRows);
 
       // Calculate settlement stats from settlement_groups directly (NOT labor_payments)
@@ -617,7 +705,7 @@ export default function ContractWeeklyPaymentsTab({
       setTotalAdvancesGiven(advanceTotal);
       setAdvanceRecordCount(advanceSettlementCount);
       setSalaryRecordCount(salarySettlementCount);
-      setTotalSalaryPaid(salaryTotal + advanceTotal); // Total paid = salary + advances
+      setSalarySettlementsTotal(salaryTotal); // Track salary settlements separately from advances
 
       // Fetch filter options
       const { data: subcontractsData } = await supabase
@@ -650,8 +738,13 @@ export default function ContractWeeklyPaymentsTab({
   useEffect(() => {
     if (!onSummaryChange) return;
 
-    const totalDue = laborers.reduce((sum, l) => sum + Math.max(0, l.outstanding), 0);
-    const totalPaid = laborers.reduce((sum, l) => sum + l.totalPaid, 0);
+    const totalSalaryEarned = laborers.reduce(
+      (sum, l) => sum + l.totalEarned,
+      0
+    );
+    // Remaining balance should consider only salary settlements (advances tracked separately)
+    const totalDue = Math.max(0, totalSalaryEarned - salarySettlementsTotal);
+    const totalPaid = salarySettlementsTotal + totalAdvancesGiven;
     const laborersWithDue = laborers.filter((l) => l.outstanding > 0).length;
 
     onSummaryChange({
@@ -668,49 +761,84 @@ export default function ContractWeeklyPaymentsTab({
       unlinkedTotal: 0,
       unlinkedCount: 0,
     });
-  }, [laborers, onSummaryChange]);
+  }, [laborers, onSummaryChange, salarySettlementsTotal, totalAdvancesGiven]);
 
   // Filter week groups
   const filteredWeekGroups = useMemo(() => {
-    return weekGroups.map((week) => {
-      // Filter laborers within each week
-      const filteredWeekLaborers = week.laborers.filter((l) => {
-        if (filterSubcontract !== "all" && l.subcontractId !== filterSubcontract) return false;
-        if (filterTeam !== "all" && l.teamId !== filterTeam) return false;
-        return true;
+    // Check if any filtering is active
+    const hasActiveFilters =
+      filterSubcontract !== "all" || filterTeam !== "all";
+
+    return weekGroups
+      .map((week) => {
+        // Filter laborers within each week
+        const filteredWeekLaborers = week.laborers.filter((l) => {
+          if (
+            filterSubcontract !== "all" &&
+            l.subcontractId !== filterSubcontract
+          )
+            return false;
+          if (filterTeam !== "all" && l.teamId !== filterTeam) return false;
+          return true;
+        });
+
+        // When no filters are active, use the original settlement-based totals
+        // to ensure consistency with the summary dashboard.
+        // Only recalculate when filtering by subcontract/team.
+        if (!hasActiveFilters) {
+          return {
+            ...week,
+            laborers: filteredWeekLaborers,
+            laborerCount: filteredWeekLaborers.length,
+            // Keep original settlement-based values
+          };
+        }
+
+        // Recalculate totals for filtered laborers
+        const totalSalary = filteredWeekLaborers.reduce(
+          (sum, l) => sum + l.earned,
+          0
+        );
+        const totalPaid = filteredWeekLaborers.reduce(
+          (sum, l) => sum + l.paid,
+          0
+        );
+        const totalDue = totalSalary - totalPaid;
+        const paymentProgress =
+          totalSalary > 0 ? (totalPaid / totalSalary) * 100 : 0;
+
+        let status: PaymentStatus = "pending";
+        if (totalDue <= 0) {
+          status = totalDue < 0 ? "advance" : "completed";
+        } else if (totalPaid > 0) {
+          status = "partial";
+        }
+
+        return {
+          ...week,
+          laborers: filteredWeekLaborers,
+          laborerCount: filteredWeekLaborers.length,
+          totalSalary,
+          totalPaid,
+          totalDue: Math.max(0, totalDue),
+          paymentProgress,
+          status,
+        };
+      })
+      .filter((week) => {
+        // Status filter
+        if (filterStatus === "pending" && week.status === "completed")
+          return false;
+        if (
+          filterStatus === "completed" &&
+          week.status !== "completed" &&
+          week.status !== "advance"
+        )
+          return false;
+
+        // Only include weeks with laborers after filtering
+        return week.laborerCount > 0;
       });
-
-      // Recalculate totals for filtered laborers
-      const totalSalary = filteredWeekLaborers.reduce((sum, l) => sum + l.earned, 0);
-      const totalPaid = filteredWeekLaborers.reduce((sum, l) => sum + l.paid, 0);
-      const totalDue = totalSalary - totalPaid;
-      const paymentProgress = totalSalary > 0 ? (totalPaid / totalSalary) * 100 : 0;
-
-      let status: PaymentStatus = "pending";
-      if (totalDue <= 0) {
-        status = totalDue < 0 ? "advance" : "completed";
-      } else if (totalPaid > 0) {
-        status = "partial";
-      }
-
-      return {
-        ...week,
-        laborers: filteredWeekLaborers,
-        laborerCount: filteredWeekLaborers.length,
-        totalSalary,
-        totalPaid,
-        totalDue: Math.max(0, totalDue),
-        paymentProgress,
-        status,
-      };
-    }).filter((week) => {
-      // Status filter
-      if (filterStatus === "pending" && week.status === "completed") return false;
-      if (filterStatus === "completed" && week.status !== "completed" && week.status !== "advance") return false;
-
-      // Only include weeks with laborers after filtering
-      return week.laborerCount > 0;
-    });
   }, [weekGroups, filterStatus, filterSubcontract, filterTeam]);
 
   // Auto-scroll to highlighted row when data loads
@@ -817,8 +945,12 @@ export default function ContractWeeklyPaymentsTab({
         header: "Progress",
         Cell: ({ row }) => (
           <Box sx={{ width: 100 }}>
-            <Box sx={{ display: "flex", justifyContent: "space-between", mb: 0.5 }}>
-              <Typography variant="caption">{row.original.paymentProgress.toFixed(0)}%</Typography>
+            <Box
+              sx={{ display: "flex", justifyContent: "space-between", mb: 0.5 }}
+            >
+              <Typography variant="caption">
+                {row.original.paymentProgress.toFixed(0)}%
+              </Typography>
             </Box>
             <LinearProgress
               variant="determinate"
@@ -827,8 +959,8 @@ export default function ContractWeeklyPaymentsTab({
                 row.original.paymentProgress >= 100
                   ? "success"
                   : row.original.paymentProgress > 50
-                    ? "warning"
-                    : "error"
+                  ? "warning"
+                  : "error"
               }
               sx={{ height: 6, borderRadius: 1 }}
             />
@@ -866,7 +998,11 @@ export default function ContractWeeklyPaymentsTab({
           const count = row.original.transactionCount || 0;
 
           if (count === 0) {
-            return <Typography variant="body2" color="text.secondary">No payments</Typography>;
+            return (
+              <Typography variant="body2" color="text.secondary">
+                No payments
+              </Typography>
+            );
           }
 
           // Build date-to-ref mapping for tooltip
@@ -878,12 +1014,20 @@ export default function ContractWeeklyPaymentsTab({
           // Tooltip content showing payment dates
           const TooltipContent = () => (
             <Box sx={{ p: 1 }}>
-              <Typography variant="caption" fontWeight={600} sx={{ display: "block", mb: 1 }}>
-                {count} Transaction{count > 1 ? "s" : ""} on {paymentDates.length} date{paymentDates.length > 1 ? "s" : ""}:
+              <Typography
+                variant="caption"
+                fontWeight={600}
+                sx={{ display: "block", mb: 1 }}
+              >
+                {count} Transaction{count > 1 ? "s" : ""} on{" "}
+                {paymentDates.length} date{paymentDates.length > 1 ? "s" : ""}:
               </Typography>
               <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
                 {dateRefPairs.map(({ date, ref }) => (
-                  <Box key={date} sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                  <Box
+                    key={date}
+                    sx={{ display: "flex", alignItems: "center", gap: 1 }}
+                  >
                     <Typography variant="caption" sx={{ minWidth: 80 }}>
                       {dayjs(date).format("MMM D")}
                     </Typography>
@@ -984,7 +1128,11 @@ export default function ContractWeeklyPaymentsTab({
   );
 
   // Render date-wise transactions detail panel for week-wise view
-  const renderWeekDetailPanel = ({ row }: { row: { original: WeekRowData } }) => {
+  const renderWeekDetailPanel = ({
+    row,
+  }: {
+    row: { original: WeekRowData };
+  }) => {
     const week = row.original;
 
     return (
@@ -1008,7 +1156,6 @@ export default function ContractWeeklyPaymentsTab({
     );
   };
 
-  
   const handlePaymentSuccess = () => {
     fetchData();
     onDataChange?.();
@@ -1027,7 +1174,14 @@ export default function ContractWeeklyPaymentsTab({
 
   if (loading) {
     return (
-      <Box sx={{ display: "flex", justifyContent: "center", alignItems: "center", py: 8 }}>
+      <Box
+        sx={{
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          py: 8,
+        }}
+      >
         <CircularProgress />
       </Box>
     );
@@ -1046,7 +1200,7 @@ export default function ContractWeeklyPaymentsTab({
       {/* Summary Dashboard with Advance Tracking */}
       <ContractSummaryDashboardV2
         totalSalaryEarned={laborers.reduce((sum, l) => sum + l.totalEarned, 0)}
-        totalSalarySettled={totalSalaryPaid}
+        totalSalarySettled={salarySettlementsTotal}
         totalAdvancesGiven={totalAdvancesGiven}
         laborerCount={laborers.length}
         laborersWithDue={laborers.filter((l) => l.outstanding > 0).length}
@@ -1083,7 +1237,9 @@ export default function ContractWeeklyPaymentsTab({
           <InputLabel>Status</InputLabel>
           <Select
             value={filterStatus}
-            onChange={(e) => setFilterStatus(e.target.value as "all" | "pending" | "completed")}
+            onChange={(e) =>
+              setFilterStatus(e.target.value as "all" | "pending" | "completed")
+            }
             label="Status"
           >
             <MenuItem value="all">All</MenuItem>
@@ -1224,7 +1380,9 @@ export default function ContractWeeklyPaymentsTab({
             totalAmount: details.totalAmount,
             weekAllocations: [],
             paymentMode: details.paymentMode as any,
-            paymentChannel: details.paymentChannel as "direct" | "engineer_wallet",
+            paymentChannel: details.paymentChannel as
+              | "direct"
+              | "engineer_wallet",
             payerSource: details.payerSource as any,
             payerName: details.payerName,
             proofUrls: details.proofUrls,
@@ -1248,7 +1406,9 @@ export default function ContractWeeklyPaymentsTab({
             totalAmount: details.totalAmount,
             weekAllocations: [],
             paymentMode: details.paymentMode as any,
-            paymentChannel: details.paymentChannel as "direct" | "engineer_wallet",
+            paymentChannel: details.paymentChannel as
+              | "direct"
+              | "engineer_wallet",
             payerSource: details.payerSource as any,
             payerName: details.payerName,
             proofUrls: details.proofUrls,

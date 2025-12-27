@@ -1542,17 +1542,20 @@ export async function processWaterfallContractPayment(
     const paymentIds: string[] = [];
     const weekAllocations: { weekLabel: string; weekStart: string; allocated: number; laborerCount: number }[] = [];
 
-    if (config.weeks.length === 0) {
+    // Only require weeks for salary payments - advance/other payments don't need week allocation
+    if (config.weeks.length === 0 && config.paymentType === "salary") {
       return { success: false, error: "No weeks to process" };
     }
 
-    // Count total laborers across all weeks
+    // Count total laborers across all weeks (0 for advance/other with no weeks)
     const totalLaborers = config.weeks.reduce((sum, w) => sum + w.laborers.length, 0);
 
     // Build description for settlement group
-    const weekRangeDesc = config.weeks.length === 1
-      ? config.weeks[0].weekLabel
-      : `${config.weeks[0].weekLabel} to ${config.weeks[config.weeks.length - 1].weekLabel}`;
+    const weekRangeDesc = config.weeks.length === 0
+      ? (config.paymentType === "advance" ? "Advance Payment" : "Other Payment")
+      : config.weeks.length === 1
+        ? config.weeks[0].weekLabel
+        : `${config.weeks[0].weekLabel} to ${config.weeks[config.weeks.length - 1].weekLabel}`;
 
     // 1. If via engineer wallet, create engineer transaction first
     if (config.paymentChannel === "engineer_wallet" && config.engineerId) {
@@ -1611,8 +1614,8 @@ export async function processWaterfallContractPayment(
           : null,
         proof_url: config.proofUrl || null,
         notes: config.notes
-          ? `Waterfall (${weekRangeDesc}): ${config.notes}`
-          : `Contract payment covering ${config.weeks.length} week(s): ${weekRangeDesc}`,
+          ? (config.weeks.length === 0 ? `${weekRangeDesc}: ${config.notes}` : `Waterfall (${weekRangeDesc}): ${config.notes}`)
+          : (config.weeks.length === 0 ? weekRangeDesc : `Contract payment covering ${config.weeks.length} week(s): ${weekRangeDesc}`),
         subcontract_id: config.subcontractId || null,
         engineer_transaction_id: engineerTransactionId,
         created_by: config.userId,

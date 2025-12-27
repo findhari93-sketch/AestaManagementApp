@@ -55,6 +55,7 @@ interface SettlementRecord {
   totalAmount: number;
   paymentMode: string | null;
   paymentChannel: string;
+  paymentType: string | null;
   payerSource: string | null;
   payerName: string | null;
   subcontractId: string | null;
@@ -270,14 +271,14 @@ export default function ContractPaymentHistoryDialog({
   const [viewerImages, setViewerImages] = useState<string[]>([]);
 
   // Fetch settlement groups for contract payments
-  // Hybrid approach: Use labor_payments to IDENTIFY contract settlements, use settlement_groups for AMOUNTS
+  // Hybrid approach: Use labor_payments to IDENTIFY salary settlements,
+  // but also include advance/other payments that don't have labor_payments
   const fetchSettlements = useCallback(async () => {
     if (!open || !selectedSite) return;
 
     setLoading(true);
     try {
-      // Step 1: Get settlement_group_ids that have contract labor_payments
-      // This ensures we only show settlements with contract laborers (is_under_contract = true)
+      // Step 1: Get settlement_group_ids that have contract labor_payments (salary payments)
       const { data: contractPayments } = await supabase
         .from("labor_payments")
         .select("settlement_group_id")
@@ -285,17 +286,16 @@ export default function ContractPaymentHistoryDialog({
         .eq("is_under_contract", true)
         .not("settlement_group_id", "is", null);
 
-      if (!contractPayments || contractPayments.length === 0) {
-        setSettlements([]);
-        setLoading(false);
-        return;
-      }
+      // Get unique settlement_group_ids from labor_payments
+      const contractSettlementIds = contractPayments
+        ? [...new Set(contractPayments.map((p: any) => p.settlement_group_id))]
+        : [];
 
-      // Get unique settlement_group_ids
-      const contractSettlementIds = [...new Set(contractPayments.map((p: any) => p.settlement_group_id))];
-
-      // Step 2: Fetch those settlement_groups with their total_amount (the actual transaction amount)
-      const { data: settlementData, error } = await (supabase as any)
+      // Step 2: Fetch settlement_groups - both salary settlements (by IDs) AND advance/other payments
+      // Build OR query to include both:
+      // - Settlements with labor_payments (salary)
+      // - Settlements with payment_type = 'advance' or 'other' (no labor_payments)
+      let query = (supabase as any)
         .from("settlement_groups")
         .select(`
           id,
@@ -304,6 +304,7 @@ export default function ContractPaymentHistoryDialog({
           total_amount,
           payment_mode,
           payment_channel,
+          payment_type,
           payer_source,
           payer_name,
           subcontract_id,
@@ -320,8 +321,17 @@ export default function ContractPaymentHistoryDialog({
         `)
         .eq("site_id", selectedSite.id)
         .eq("is_cancelled", false)
-        .in("id", contractSettlementIds)
         .order("settlement_date", { ascending: false });
+
+      // If we have salary settlements, use OR to include them plus advances
+      // If no salary settlements, just fetch advances/other
+      if (contractSettlementIds.length > 0) {
+        query = query.or(`id.in.(${contractSettlementIds.join(",")}),payment_type.in.(advance,other)`);
+      } else {
+        query = query.in("payment_type", ["advance", "other"]);
+      }
+
+      const { data: settlementData, error } = await query;
 
       if (error) {
         console.error("Error fetching settlements:", error);
@@ -345,6 +355,7 @@ export default function ContractPaymentHistoryDialog({
           totalAmount: sg.total_amount || 0,
           paymentMode: sg.payment_mode,
           paymentChannel: sg.payment_channel,
+          paymentType: sg.payment_type,
           payerSource: sg.payer_source,
           payerName: sg.payer_name,
           subcontractId: sg.subcontract_id,
@@ -443,17 +454,54 @@ export default function ContractPaymentHistoryDialog({
         ),
       },
       {
+        accessorKey: "paymentType",
+        header: "Type",
+        size: 100,
+        filterVariant: "select",
+        filterSelectOptions: [
+          { value: "salary", label: "Salary" },
+          { value: "advance", label: "Advance" },
+          { value: "other", label: "Other" },
+        ],
+        Cell: ({ cell }) => {
+          const type = cell.getValue<string | null>();
+          const isAdvance = type === "advance";
+          const isOther = type === "other";
+          return (
+            <Chip
+              size="small"
+              label={isAdvance ? "Advance" : isOther ? "Other" : "Salary"}
+              color={isAdvance ? "warning" : isOther ? "info" : "success"}
+              variant="outlined"
+              sx={{ fontSize: "0.7rem" }}
+            />
+          );
+        },
+      },
+      {
         accessorKey: "laborerCount",
         header: "Laborers",
         size: 90,
-        Cell: ({ cell }) => (
-          <Chip
-            size="small"
-            label={`${cell.getValue<number>()} laborers`}
-            variant="outlined"
-            sx={{ fontSize: "0.7rem" }}
-          />
-        ),
+        Cell: ({ row }) => {
+          const count = row.original.laborerCount;
+          const type = row.original.paymentType;
+          // For advance/other payments, show "-" since no laborers are linked
+          if ((type === "advance" || type === "other") && count === 0) {
+            return (
+              <Typography variant="body2" color="text.secondary">
+                -
+              </Typography>
+            );
+          }
+          return (
+            <Chip
+              size="small"
+              label={`${count} laborers`}
+              variant="outlined"
+              sx={{ fontSize: "0.7rem" }}
+            />
+          );
+        },
       },
       {
         accessorKey: "paymentMode",
@@ -676,7 +724,7 @@ export default function ContractPaymentHistoryDialog({
             data={settlements}
             isLoading={loading}
             enableSelection={false}
-            pageSize={50}
+            pageSize={100}
             maxHeight="calc(90vh - 260px)"
             mobileHiddenColumns={["laborerCount", "subcontractTitle", "notes"]}
             muiTableBodyRowProps={({ row }) => ({
@@ -695,6 +743,10 @@ export default function ContractPaymentHistoryDialog({
             )}
             initialState={{
               sorting: [{ id: "settlementDate", desc: true }],
+              pagination: {
+                pageSize: 100,
+                pageIndex: 0,
+              },
             }}
             muiPaginationProps={{
               rowsPerPageOptions: [10, 25, 50, 100],
