@@ -387,6 +387,7 @@ export default function PaymentDialog({
           paid_via: paymentChannel === "direct" ? "direct" : "engineer_wallet",
           engineer_transaction_id: engineerTransactionId,
           payment_proof_url: proofUrl,
+          payment_notes: notes || null,
           subcontract_id: subcontractId,
         })
         .in("id", dailyIds);
@@ -405,6 +406,7 @@ export default function PaymentDialog({
           paid_via: paymentChannel === "direct" ? "direct" : "engineer_wallet",
           engineer_transaction_id: engineerTransactionId,
           payment_proof_url: proofUrl,
+          payment_notes: notes || null,
         })
         .in("id", marketIds);
 

@@ -336,7 +336,8 @@ export default function DailySettlementEditDialog({
           <TextField
             fullWidth
             size="small"
-            label="Notes"
+            label="Notes (Optional)"
+            placeholder="Add any notes about this settlement..."
             multiline
             rows={2}
             value={notes}
