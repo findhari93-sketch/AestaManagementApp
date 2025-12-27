@@ -28,6 +28,7 @@ import {
 } from "@mui/material";
 import {
   Visibility as ViewIcon,
+  VisibilityOff as VisibilityOffIcon,
   Edit as EditIcon,
   Delete as DeleteIcon,
   Cancel as CancelIcon,
@@ -1123,24 +1124,50 @@ export default function SalarySettlementTable({
         positionActionsColumn="last"
         renderTopToolbarCustomActions={() => (
           <Box sx={{ display: "flex", gap: 1, alignItems: "center", ml: 1 }}>
-            <Chip
-              icon={<HolidayIcon sx={{ fontSize: 14 }} />}
-              label={showHolidays ? "Holidays" : "Holidays Hidden"}
-              size="small"
-              color="warning"
-              variant={showHolidays ? "outlined" : "filled"}
-              onClick={() => setShowHolidays(!showHolidays)}
-              sx={{ cursor: "pointer", fontSize: "0.7rem" }}
-            />
-            <Chip
-              icon={<ContractIcon sx={{ fontSize: 14 }} />}
-              label={showContractOnly ? "Contract Only" : "Contract Only Hidden"}
-              size="small"
-              color="info"
-              variant={showContractOnly ? "outlined" : "filled"}
-              onClick={() => setShowContractOnly(!showContractOnly)}
-              sx={{ cursor: "pointer", fontSize: "0.7rem" }}
-            />
+            <Tooltip title={showHolidays ? "Click to hide holidays" : "Click to show holidays"}>
+              <Chip
+                icon={showHolidays ? <HolidayIcon sx={{ fontSize: 14 }} /> : <VisibilityOffIcon sx={{ fontSize: 14 }} />}
+                label="Holidays"
+                size="small"
+                color={showHolidays ? "warning" : "default"}
+                variant={showHolidays ? "filled" : "outlined"}
+                onClick={() => setShowHolidays(!showHolidays)}
+                sx={{
+                  cursor: "pointer",
+                  fontSize: "0.75rem",
+                  fontWeight: showHolidays ? 600 : 400,
+                  opacity: showHolidays ? 1 : 0.6,
+                  textDecoration: showHolidays ? "none" : "line-through",
+                  transition: "all 0.2s ease",
+                  "&:hover": {
+                    opacity: 1,
+                    transform: "scale(1.02)",
+                  },
+                }}
+              />
+            </Tooltip>
+            <Tooltip title={showContractOnly ? "Click to hide contract-only dates" : "Click to show contract-only dates"}>
+              <Chip
+                icon={showContractOnly ? <ContractIcon sx={{ fontSize: 14 }} /> : <VisibilityOffIcon sx={{ fontSize: 14 }} />}
+                label="Contract Only"
+                size="small"
+                color={showContractOnly ? "info" : "default"}
+                variant={showContractOnly ? "filled" : "outlined"}
+                onClick={() => setShowContractOnly(!showContractOnly)}
+                sx={{
+                  cursor: "pointer",
+                  fontSize: "0.75rem",
+                  fontWeight: showContractOnly ? 600 : 400,
+                  opacity: showContractOnly ? 1 : 0.6,
+                  textDecoration: showContractOnly ? "none" : "line-through",
+                  transition: "all 0.2s ease",
+                  "&:hover": {
+                    opacity: 1,
+                    transform: "scale(1.02)",
+                  },
+                }}
+              />
+            </Tooltip>
           </Box>
         )}
         renderRowActions={({ row }) => (
