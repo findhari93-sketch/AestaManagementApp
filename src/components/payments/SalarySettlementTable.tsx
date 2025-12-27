@@ -145,6 +145,10 @@ export default function SalarySettlementTable({
     type: "company" | "engineer";
   } | null>(null);
 
+  // Quick filter states for hiding holidays and contract-only dates
+  const [showHolidays, setShowHolidays] = useState(true);
+  const [showContractOnly, setShowContractOnly] = useState(true);
+
   // Redirect dialog state for delete prevention
   const [deleteRedirectDialog, setDeleteRedirectDialog] = useState<{
     open: boolean;
@@ -392,6 +396,21 @@ export default function SalarySettlementTable({
       (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
     );
   }, [dateGroups, contractOnlyDates, holidays]);
+
+  // Apply quick filters to tableData
+  const filteredTableData = useMemo(() => {
+    return tableData.filter((row) => {
+      // Filter out pure holiday rows (status === "holiday") when showHolidays is false
+      if (!showHolidays && row.status === "holiday") {
+        return false;
+      }
+      // Filter out contract-only rows when showContractOnly is false
+      if (!showContractOnly && row.isContractOnly) {
+        return false;
+      }
+      return true;
+    });
+  }, [tableData, showHolidays, showContractOnly]);
 
   // Auto-scroll to highlighted row when data loads
   useEffect(() => {
@@ -1096,12 +1115,34 @@ export default function SalarySettlementTable({
       <Box ref={tableContainerRef}>
       <DataTable<DateRowData>
         columns={columns}
-        data={tableData}
+        data={filteredTableData}
         isLoading={loading}
         enableExpanding
         renderDetailPanel={renderDetailPanel}
         enableRowActions
         positionActionsColumn="last"
+        renderTopToolbarCustomActions={() => (
+          <Box sx={{ display: "flex", gap: 1, alignItems: "center", ml: 1 }}>
+            <Chip
+              icon={<HolidayIcon sx={{ fontSize: 14 }} />}
+              label={showHolidays ? "Holidays" : "Holidays Hidden"}
+              size="small"
+              color="warning"
+              variant={showHolidays ? "outlined" : "filled"}
+              onClick={() => setShowHolidays(!showHolidays)}
+              sx={{ cursor: "pointer", fontSize: "0.7rem" }}
+            />
+            <Chip
+              icon={<ContractIcon sx={{ fontSize: 14 }} />}
+              label={showContractOnly ? "Contract Only" : "Contract Only Hidden"}
+              size="small"
+              color="info"
+              variant={showContractOnly ? "outlined" : "filled"}
+              onClick={() => setShowContractOnly(!showContractOnly)}
+              sx={{ cursor: "pointer", fontSize: "0.7rem" }}
+            />
+          </Box>
+        )}
         renderRowActions={({ row }) => (
           <Box sx={{ display: "flex", gap: 0.5 }}>
             {/* Confirm Settlement - for admin when records are awaiting approval */}
@@ -1150,9 +1191,13 @@ export default function SalarySettlementTable({
         )}
         initialState={{
           sorting: [{ id: "date", desc: true }],
+          pagination: {
+            pageSize: 100,
+            pageIndex: 0,
+          },
         }}
-        enablePagination={tableData.length > 20}
-        pageSize={20}
+        enablePagination={filteredTableData.length > 20}
+        pageSize={100}
         muiExpandButtonProps={({ row }) => ({
           sx: {
             color:
