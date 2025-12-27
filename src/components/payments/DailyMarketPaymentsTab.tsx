@@ -60,6 +60,7 @@ import DateSettlementsEditDialog from "./DateSettlementsEditDialog";
 import SettlementRefDetailDialog, { type SettlementDetails } from "./SettlementRefDetailDialog";
 import DailySettlementEditDialog from "./DailySettlementEditDialog";
 import DeleteDailySettlementDialog from "./DeleteDailySettlementDialog";
+import SettlementFormDialog from "@/components/settlement/SettlementFormDialog";
 
 interface DailyMarketPaymentsTabProps {
   dateFrom: string;
@@ -184,6 +185,10 @@ export default function DailyMarketPaymentsTab({
   const [deleteSettlementDialogOpen, setDeleteSettlementDialogOpen] = useState(false);
   const [settlementToDelete, setSettlementToDelete] = useState<SettlementDetails | null>(null);
 
+  // Engineer settlement dialog state (for Settle Now button)
+  const [engineerSettlementDialogOpen, setEngineerSettlementDialogOpen] = useState(false);
+  const [engineerSettlementTransactionId, setEngineerSettlementTransactionId] = useState<string | null>(null);
+
   // Fetch data
   const fetchData = useCallback(async () => {
     if (!selectedSite?.id) {
@@ -226,7 +231,8 @@ export default function DailyMarketPaymentsTab({
             settled_date,
             confirmed_at,
             money_source,
-            money_source_name
+            money_source_name,
+            user_id
           ),
           settlement_groups(id, settlement_reference)
         `
@@ -270,7 +276,8 @@ export default function DailyMarketPaymentsTab({
             settled_date,
             confirmed_at,
             money_source,
-            money_source_name
+            money_source_name,
+            user_id
           ),
           settlement_groups(id, settlement_reference)
         `
@@ -326,6 +333,7 @@ export default function DailyMarketPaymentsTab({
           paymentDate: r.payment_date,
           paymentMode: r.payment_mode,
           engineerTransactionId: r.engineer_transaction_id,
+          engineerUserId: r.site_engineer_transactions?.user_id || null,
           proofUrl: r.payment_proof_url,
           paymentNotes: r.payment_notes || null,
           subcontractId: r.subcontract_id,
@@ -366,6 +374,7 @@ export default function DailyMarketPaymentsTab({
           paymentDate: r.payment_date,
           paymentMode: r.payment_mode,
           engineerTransactionId: r.engineer_transaction_id,
+          engineerUserId: r.site_engineer_transactions?.user_id || null,
           proofUrl: r.payment_proof_url,
           paymentNotes: r.payment_notes || null,
           subcontractId: r.subcontract_id || null,
@@ -523,9 +532,9 @@ export default function DailyMarketPaymentsTab({
     const allRecords = dateGroups.flatMap((g) => [...g.dailyRecords, ...g.marketRecords]);
     const totalSalary = allRecords.reduce((sum, r) => sum + r.amount, 0);
     const totalPaid = allRecords.filter((r) => r.isPaid).reduce((sum, r) => sum + r.amount, 0);
-    const pendingWithEngineer = allRecords
-      .filter((r) => !r.isPaid && r.paidVia === "engineer_wallet")
-      .reduce((sum, r) => sum + r.amount, 0);
+    const pendingWithEngineerRecords = allRecords.filter((r) => !r.isPaid && r.paidVia === "engineer_wallet");
+    const pendingWithEngineer = pendingWithEngineerRecords.reduce((sum, r) => sum + r.amount, 0);
+    const pendingWithEngineerCount = pendingWithEngineerRecords.length;
     const totalDue = totalSalary - totalPaid;
     const progress = totalSalary > 0 ? (totalPaid / totalSalary) * 100 : 0;
     const recordCount = allRecords.length;
@@ -536,6 +545,7 @@ export default function DailyMarketPaymentsTab({
       totalPaid,
       totalDue,
       pendingWithEngineer,
+      pendingWithEngineerCount,
       progress,
       recordCount,
       paidCount,
@@ -595,24 +605,29 @@ export default function DailyMarketPaymentsTab({
       );
   }, [dateGroups, filterStatus, filterSubcontract]);
 
-  // Calculate money source summary from all records with engineer transactions
+  // Calculate money source summary from all paid/settled records
   const moneySourceSummaries = useMemo(() => {
     const summaryMap = new Map<string, MoneySourceSummary>();
 
     // Collect all records
     const allRecords = filteredDateGroups.flatMap(g => [...g.dailyRecords, ...g.marketRecords]);
 
-    // Only include records that went via engineer wallet (have money source)
+    // Include ALL records that are paid or sent to engineer wallet
     allRecords.forEach(record => {
-      if (record.moneySource && record.paidVia === "engineer_wallet") {
-        const key = record.moneySource === "other_site_money" || record.moneySource === "custom"
-          ? `${record.moneySource}:${record.moneySourceName || ""}`
-          : record.moneySource;
+      const isPaidOrSettled = record.isPaid || record.paidVia === "engineer_wallet";
+      if (isPaidOrSettled) {
+        // Use "unspecified" for records without money source
+        const source = record.moneySource || "unspecified";
+        const key = (source === "other_site_money" || source === "custom")
+          ? `${source}:${record.moneySourceName || ""}`
+          : source;
 
         if (!summaryMap.has(key)) {
           summaryMap.set(key, {
-            source: record.moneySource as PayerSource,
-            displayName: getPayerSourceLabel(record.moneySource as PayerSource, record.moneySourceName || undefined),
+            source: source as PayerSource,
+            displayName: source === "unspecified"
+              ? "Unspecified"
+              : getPayerSourceLabel(source as PayerSource, record.moneySourceName || undefined),
             totalAmount: 0,
             transactionCount: 0,
             laborerCount: 0,
@@ -1141,6 +1156,20 @@ export default function DailyMarketPaymentsTab({
     onDataChange?.();
   };
 
+  // Handle engineer clicking "Settle Now" button
+  const handleEngineerSettle = (transactionId: string) => {
+    setEngineerSettlementTransactionId(transactionId);
+    setEngineerSettlementDialogOpen(true);
+  };
+
+  // Handle successful engineer settlement
+  const handleEngineerSettlementSuccess = () => {
+    setEngineerSettlementDialogOpen(false);
+    setEngineerSettlementTransactionId(null);
+    fetchData();
+    onDataChange?.();
+  };
+
   if (loading) {
     return (
       <Box
@@ -1286,7 +1315,7 @@ export default function DailyMarketPaymentsTab({
                   </Typography>
                   {dashboardSummary.pendingWithEngineer > 0 && (
                     <Chip
-                      label={`Rs.${dashboardSummary.pendingWithEngineer.toLocaleString()} with engineer`}
+                      label={`Rs.${dashboardSummary.pendingWithEngineer.toLocaleString()} with engineer (${dashboardSummary.pendingWithEngineerCount} records)`}
                       size="small"
                       color="warning"
                       variant="outlined"
@@ -1468,7 +1497,10 @@ export default function DailyMarketPaymentsTab({
 
       {/* Money Source Summary Card */}
       {moneySourceSummaries.length > 0 && (
-        <MoneySourceSummaryCard summaries={moneySourceSummaries} />
+        <MoneySourceSummaryCard
+          summaries={moneySourceSummaries}
+          allRecords={filteredDateGroups.flatMap(g => [...g.dailyRecords, ...g.marketRecords])}
+        />
       )}
 
       {/* Salary Settlement Table */}
@@ -1484,6 +1516,7 @@ export default function DailyMarketPaymentsTab({
           loading={loading}
           disabled={!canEdit}
           isAdmin={isAdmin}
+          currentUserId={userProfile?.id}
           onPayDate={(date, records) => openPaymentDialog(records)}
           onViewDate={(date, group) => {
             setViewDialogDate(date);
@@ -1520,6 +1553,7 @@ export default function DailyMarketPaymentsTab({
             setSelectedSettlementRef(ref);
             setSettlementRefDialogOpen(true);
           }}
+          onEngineerSettle={handleEngineerSettle}
           highlightRef={highlightRef}
         />
       )}
@@ -1681,6 +1715,19 @@ export default function DailyMarketPaymentsTab({
           onDataChange?.();
         }}
       />
+
+      {/* Engineer Settlement Dialog (for Settle Now button) */}
+      {engineerSettlementTransactionId && (
+        <SettlementFormDialog
+          open={engineerSettlementDialogOpen}
+          onClose={() => {
+            setEngineerSettlementDialogOpen(false);
+            setEngineerSettlementTransactionId(null);
+          }}
+          transactionId={engineerSettlementTransactionId}
+          onSuccess={handleEngineerSettlementSuccess}
+        />
+      )}
     </Box>
   );
 }

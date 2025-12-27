@@ -71,6 +71,7 @@ interface SalarySettlementTableProps {
   loading?: boolean;
   disabled?: boolean;
   isAdmin?: boolean;
+  currentUserId?: string;
   onPayDate: (date: string, records: DailyPaymentRecord[]) => void;
   onViewDate: (date: string, group: DateGroup) => void;
   onEditDate: (date: string, group: DateGroup) => void;
@@ -80,6 +81,7 @@ interface SalarySettlementTableProps {
   onConfirmSettlement?: (transactionId: string) => void;
   onEditSettlements?: (date: string, records: DailyPaymentRecord[]) => void;
   onViewSettlementRef?: (ref: string) => void;
+  onEngineerSettle?: (transactionId: string) => void;
   highlightRef?: string | null;
 }
 
@@ -109,12 +111,17 @@ interface DateRowData {
   marketRecords: DailyPaymentRecord[];
   // Settlement references for this date
   settlementReferences: string[];
+  // Payment sources for this date (unique sources)
+  paymentSources: Array<{ source: string; sourceName: string | null }>;
   // Original group for actions
   group: DateGroup;
   // New fields for indicators
   isContractOnly?: boolean;
   isHoliday?: boolean;
   holidayReason?: string | null;
+  // Engineer user ID for "With Engineer" records (for Settle Now button)
+  withEngineerUserId: string | null;
+  withEngineerTransactionId: string | null;
 }
 
 export default function SalarySettlementTable({
@@ -124,6 +131,7 @@ export default function SalarySettlementTable({
   loading = false,
   disabled = false,
   isAdmin = false,
+  currentUserId,
   onPayDate,
   onViewDate,
   onEditDate,
@@ -133,6 +141,7 @@ export default function SalarySettlementTable({
   onConfirmSettlement,
   onEditSettlements,
   onViewSettlementRef,
+  onEngineerSettle,
   highlightRef,
 }: SalarySettlementTableProps) {
   const theme = useTheme();
@@ -234,6 +243,19 @@ export default function SalarySettlementTable({
       );
       const paidRecords = allRecords.filter((r) => r.isPaid);
 
+      // "With Engineer" records - sent to engineer but NOT yet submitted (still pending_settlement)
+      const withEngineerRecords = sentToEngineerRecords.filter(
+        (r) => r.settlementStatus !== "pending_confirmation"
+      );
+
+      // Get engineer user ID and transaction ID from the first "With Engineer" record
+      const withEngineerUserId = withEngineerRecords.length > 0
+        ? withEngineerRecords[0].engineerUserId
+        : null;
+      const withEngineerTransactionId = withEngineerRecords.length > 0
+        ? withEngineerRecords[0].engineerTransactionId
+        : null;
+
       // Records awaiting admin approval (engineer submitted settlement)
       const awaitingApprovalRecords = allRecords.filter(
         (r) => r.settlementStatus === "pending_confirmation" && r.engineerTransactionId
@@ -313,10 +335,33 @@ export default function SalarySettlementTable({
           ...group.dailyRecords.map(r => r.settlementReference),
           ...group.marketRecords.map(r => r.settlementReference),
         ].filter((ref): ref is string => ref !== null && ref !== undefined))],
+        // Collect unique payment sources from paid/settled records
+        paymentSources: (() => {
+          const allRecs = [...group.dailyRecords, ...group.marketRecords];
+          const paidOrSettled = allRecs.filter(r => r.isPaid || r.paidVia === "engineer_wallet");
+          const sourceMap = new Map<string, { source: string; sourceName: string | null }>();
+          paidOrSettled.forEach(r => {
+            const key = r.moneySource
+              ? (r.moneySource === "other_site_money" || r.moneySource === "custom")
+                ? `${r.moneySource}:${r.moneySourceName || ""}`
+                : r.moneySource
+              : "unspecified";
+            if (!sourceMap.has(key)) {
+              sourceMap.set(key, {
+                source: r.moneySource || "unspecified",
+                sourceName: r.moneySourceName || null,
+              });
+            }
+          });
+          return Array.from(sourceMap.values());
+        })(),
         group,
         // Holiday indicator
         isHoliday: !!holiday,
         holidayReason: holiday?.reason || null,
+        // Engineer user ID for "With Engineer" records (for Settle Now button)
+        withEngineerUserId,
+        withEngineerTransactionId,
       };
     });
 
@@ -348,6 +393,7 @@ export default function SalarySettlementTable({
           dailyRecords: [],
           marketRecords: [],
           settlementReferences: [],
+          paymentSources: [],
           group: {
             date,
             dateLabel: dayjs(date).format("MMM DD, YYYY"),
@@ -371,6 +417,8 @@ export default function SalarySettlementTable({
           isContractOnly: true,
           isHoliday: !!holiday,
           holidayReason: holiday?.reason || null,
+          withEngineerUserId: null,
+          withEngineerTransactionId: null,
         };
       });
 
@@ -405,6 +453,7 @@ export default function SalarySettlementTable({
         dailyRecords: [],
         marketRecords: [],
         settlementReferences: [],
+        paymentSources: [],
         group: {
           date: holiday.date,
           dateLabel: dayjs(holiday.date).format("MMM DD, YYYY"),
@@ -428,6 +477,8 @@ export default function SalarySettlementTable({
         isContractOnly: false,
         isHoliday: true,
         holidayReason: holiday.reason,
+        withEngineerUserId: null,
+        withEngineerTransactionId: null,
       }));
 
     // Merge and sort all rows by date descending
@@ -541,7 +592,7 @@ export default function SalarySettlementTable({
       {
         accessorKey: "date",
         header: "Date",
-        size: 180,
+        size: 120,
         Cell: ({ row }) => (
           <Box>
             <Box
@@ -600,32 +651,27 @@ export default function SalarySettlementTable({
       },
       {
         accessorKey: "dailyLaborers",
-        header: "Daily",
-        size: 80,
+        header: "DM Labor",
+        size: 110,
         Cell: ({ row }) => (
-          <Chip
-            icon={<PersonIcon sx={{ fontSize: 14 }} />}
-            label={row.original.dailyLaborers}
-            size="small"
-            variant="outlined"
-            color="primary"
-            sx={{ minWidth: 60 }}
-          />
-        ),
-      },
-      {
-        accessorKey: "marketLaborers",
-        header: "Market",
-        size: 80,
-        Cell: ({ row }) => (
-          <Chip
-            icon={<GroupsIcon sx={{ fontSize: 14 }} />}
-            label={row.original.marketLaborers}
-            size="small"
-            variant="outlined"
-            color="secondary"
-            sx={{ minWidth: 60 }}
-          />
+          <Box sx={{ display: "flex", gap: 0.5, alignItems: "center" }}>
+            <Chip
+              icon={<PersonIcon sx={{ fontSize: 12 }} />}
+              label={row.original.dailyLaborers}
+              size="small"
+              variant="outlined"
+              color="primary"
+              sx={{ minWidth: 45, height: 22, fontSize: "0.7rem", "& .MuiChip-icon": { ml: 0.3 } }}
+            />
+            <Chip
+              icon={<GroupsIcon sx={{ fontSize: 12 }} />}
+              label={row.original.marketLaborers}
+              size="small"
+              variant="outlined"
+              color="secondary"
+              sx={{ minWidth: 45, height: 22, fontSize: "0.7rem", "& .MuiChip-icon": { ml: 0.3 } }}
+            />
+          </Box>
         ),
       },
       {
@@ -637,6 +683,53 @@ export default function SalarySettlementTable({
             {formatCurrency(row.original.totalAmount)}
           </Typography>
         ),
+      },
+      {
+        accessorKey: "paymentSources",
+        header: "Paid By",
+        size: 120,
+        filterVariant: "select",
+        filterSelectOptions: [
+          { value: "own_money", label: "Own Money" },
+          { value: "amma_money", label: "Amma Money" },
+          { value: "client_money", label: "Client Money" },
+          { value: "trust_account", label: "Trust Account" },
+          { value: "other_site_money", label: "Other Site" },
+          { value: "custom", label: "Custom" },
+          { value: "unspecified", label: "Unspecified" },
+        ],
+        filterFn: (row, _columnId, filterValue) => {
+          const sources = row.original.paymentSources;
+          if (!filterValue) return true;
+          return sources.some(s => s.source === filterValue);
+        },
+        Cell: ({ row }) => {
+          const sources = row.original.paymentSources;
+          if (sources.length === 0) {
+            return (
+              <Typography variant="body2" color="text.disabled">
+                —
+              </Typography>
+            );
+          }
+          return (
+            <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
+              {sources.map((s, idx) => (
+                <Chip
+                  key={`${s.source}-${idx}`}
+                  label={s.source === "unspecified"
+                    ? "Unspecified"
+                    : getPayerSourceLabel(s.source as PayerSource, s.sourceName || undefined)
+                  }
+                  size="small"
+                  color={s.source === "unspecified" ? "default" : getPayerSourceColor(s.source as PayerSource)}
+                  variant="outlined"
+                  sx={{ height: 20, fontSize: "0.65rem" }}
+                />
+              ))}
+            </Box>
+          );
+        },
       },
       {
         accessorKey: "settlementReferences",
@@ -713,13 +806,40 @@ export default function SalarySettlementTable({
                 />
               )}
               {withEngineerAmount > 0 && (
-                <Chip
-                  icon={<SentIcon sx={{ fontSize: 12 }} />}
-                  label={`With Engr: ${formatCurrency(withEngineerAmount)}`}
-                  size="small"
-                  color="info"
-                  sx={{ height: 20, fontSize: "0.65rem" }}
-                />
+                // Check if current user is the assigned engineer
+                currentUserId && row.original.withEngineerUserId === currentUserId && row.original.withEngineerTransactionId ? (
+                  // Show "Settle Now" button for the assigned engineer
+                  <Chip
+                    icon={<SentIcon sx={{ fontSize: 12 }} />}
+                    label={`Settle Now: ${formatCurrency(withEngineerAmount)}`}
+                    size="small"
+                    color="primary"
+                    variant="filled"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (onEngineerSettle && row.original.withEngineerTransactionId) {
+                        onEngineerSettle(row.original.withEngineerTransactionId);
+                      }
+                    }}
+                    sx={{
+                      height: 20,
+                      fontSize: "0.65rem",
+                      cursor: "pointer",
+                      "&:hover": {
+                        bgcolor: "primary.dark"
+                      }
+                    }}
+                  />
+                ) : (
+                  // Show read-only chip for admin/other users
+                  <Chip
+                    icon={<SentIcon sx={{ fontSize: 12 }} />}
+                    label={`With Engr: ${formatCurrency(withEngineerAmount)}`}
+                    size="small"
+                    color="info"
+                    sx={{ height: 20, fontSize: "0.65rem" }}
+                  />
+                )
               )}
               {awaitingApprovalAmount > 0 && (
                 <Chip

@@ -17,8 +17,9 @@ import {
   ExpandLess as CollapseIcon,
   AccountBalanceWallet as WalletIcon,
 } from "@mui/icons-material";
-import type { MoneySourceSummary } from "@/types/payment.types";
+import type { MoneySourceSummary, DailyPaymentRecord } from "@/types/payment.types";
 import { getPayerSourceColor } from "@/components/settlement/PayerSourceSelector";
+import MoneySourceDetailDialog from "./MoneySourceDetailDialog";
 
 // Helper to get valid LinearProgress color
 function getProgressColor(source: MoneySourceSummary["source"]): "primary" | "secondary" | "success" | "warning" | "info" | "error" {
@@ -28,16 +29,48 @@ function getProgressColor(source: MoneySourceSummary["source"]): "primary" | "se
 
 interface MoneySourceSummaryCardProps {
   summaries: MoneySourceSummary[];
+  allRecords?: DailyPaymentRecord[];
   onSourceClick?: (source: string) => void;
   selectedSource?: string | null;
 }
 
 export default function MoneySourceSummaryCard({
   summaries,
+  allRecords = [],
   onSourceClick,
   selectedSource,
 }: MoneySourceSummaryCardProps) {
   const [expanded, setExpanded] = useState(true);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [selectedSummary, setSelectedSummary] = useState<MoneySourceSummary | null>(null);
+  const [dialogRecords, setDialogRecords] = useState<DailyPaymentRecord[]>([]);
+
+  // Handle clicking on a source to open detail dialog
+  const handleSourceClick = (summary: MoneySourceSummary) => {
+    // Filter records for this source
+    const filteredRecords = allRecords.filter(record => {
+      const isPaidOrSettled = record.isPaid || record.paidVia === "engineer_wallet";
+      if (!isPaidOrSettled) return false;
+
+      const recordSource = record.moneySource || "unspecified";
+
+      // Handle special sources with custom names
+      if (summary.source === "other_site_money" || summary.source === "custom") {
+        const recordKey = `${recordSource}:${record.moneySourceName || ""}`;
+        const summaryKey = `${summary.source}:${summary.displayName.replace(/^(Site: |)/, "")}`;
+        return recordKey === summaryKey || recordSource === summary.source;
+      }
+
+      return recordSource === summary.source;
+    });
+
+    setSelectedSummary(summary);
+    setDialogRecords(filteredRecords);
+    setDialogOpen(true);
+
+    // Also call parent callback if provided
+    onSourceClick?.(summary.source);
+  };
 
   // Calculate total
   const totalAmount = summaries.reduce((sum, s) => sum + s.totalAmount, 0);
@@ -92,11 +125,11 @@ export default function MoneySourceSummaryCard({
                     mb: 1.5,
                     p: 1,
                     borderRadius: 1,
-                    cursor: onSourceClick ? "pointer" : "default",
+                    cursor: allRecords.length > 0 ? "pointer" : "default",
                     bgcolor: isSelected ? "action.selected" : "transparent",
-                    "&:hover": onSourceClick ? { bgcolor: "action.hover" } : {},
+                    "&:hover": allRecords.length > 0 ? { bgcolor: "action.hover" } : {},
                   }}
-                  onClick={() => onSourceClick?.(summary.source)}
+                  onClick={() => allRecords.length > 0 && handleSourceClick(summary)}
                 >
                   <Box
                     sx={{
@@ -167,6 +200,18 @@ export default function MoneySourceSummaryCard({
           </Box>
         </Collapse>
       </CardContent>
+
+      {/* Money Source Detail Dialog */}
+      <MoneySourceDetailDialog
+        open={dialogOpen}
+        onClose={() => {
+          setDialogOpen(false);
+          setSelectedSummary(null);
+          setDialogRecords([]);
+        }}
+        sourceName={selectedSummary?.displayName || ""}
+        records={dialogRecords}
+      />
     </Card>
   );
 }

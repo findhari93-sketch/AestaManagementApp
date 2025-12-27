@@ -43,6 +43,7 @@ export interface DailyPaymentRecord {
   paymentDate: string | null;
   paymentMode: PaymentMode | null;
   engineerTransactionId: string | null;
+  engineerUserId: string | null; // The engineer's user_id from site_engineer_transactions
   proofUrl: string | null;
   paymentNotes: string | null;
   settlementStatus: "pending_settlement" | "pending_confirmation" | "confirmed" | "disputed" | null;
