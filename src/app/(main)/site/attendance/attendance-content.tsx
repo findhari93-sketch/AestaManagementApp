@@ -1394,6 +1394,7 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
       paymentDate: null,
       paymentMode: null,
       engineerTransactionId: null,
+      engineerUserId: null,
       proofUrl: null,
       paymentNotes: record.payment_notes || null,
       subcontractId: null,
