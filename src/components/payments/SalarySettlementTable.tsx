@@ -147,8 +147,46 @@ export default function SalarySettlementTable({
   } | null>(null);
 
   // Quick filter states for hiding holidays and contract-only dates
-  const [showHolidays, setShowHolidays] = useState(true);
-  const [showContractOnly, setShowContractOnly] = useState(true);
+  // Initialize from sessionStorage to persist across page refreshes/data changes
+  const [showHolidays, setShowHolidays] = useState(() => {
+    if (typeof window === "undefined") return true;
+    try {
+      const stored = sessionStorage.getItem("salarySettlement_showHolidays");
+      return stored === null ? true : stored === "true";
+    } catch {
+      return true;
+    }
+  });
+  const [showContractOnly, setShowContractOnly] = useState(() => {
+    if (typeof window === "undefined") return true;
+    try {
+      const stored = sessionStorage.getItem("salarySettlement_showContractOnly");
+      return stored === null ? true : stored === "true";
+    } catch {
+      return true;
+    }
+  });
+
+  // Persist filter preferences to sessionStorage
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      try {
+        sessionStorage.setItem("salarySettlement_showHolidays", String(showHolidays));
+      } catch {
+        // Ignore storage errors
+      }
+    }
+  }, [showHolidays]);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      try {
+        sessionStorage.setItem("salarySettlement_showContractOnly", String(showContractOnly));
+      } catch {
+        // Ignore storage errors
+      }
+    }
+  }, [showContractOnly]);
 
   // Redirect dialog state for delete prevention
   const [deleteRedirectDialog, setDeleteRedirectDialog] = useState<{
