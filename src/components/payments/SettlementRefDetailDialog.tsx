@@ -51,7 +51,7 @@ interface LaborerPayment {
   paymentType: string;
 }
 
-interface SettlementDetails {
+export interface SettlementDetails {
   settlementGroupId: string;
   settlementReference: string;
   settlementDate: string;

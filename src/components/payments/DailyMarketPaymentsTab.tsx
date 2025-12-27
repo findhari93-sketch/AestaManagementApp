@@ -57,7 +57,9 @@ import { generateWhatsAppUrl, generatePaymentReminderMessage } from "@/lib/forma
 import SettlementDetailsDialog from "@/components/settlement/SettlementDetailsDialog";
 import DateViewDetailsDialog from "./DateViewDetailsDialog";
 import DateSettlementsEditDialog from "./DateSettlementsEditDialog";
-import SettlementRefDetailDialog from "./SettlementRefDetailDialog";
+import SettlementRefDetailDialog, { type SettlementDetails } from "./SettlementRefDetailDialog";
+import DailySettlementEditDialog from "./DailySettlementEditDialog";
+import DeleteDailySettlementDialog from "./DeleteDailySettlementDialog";
 
 interface DailyMarketPaymentsTabProps {
   dateFrom: string;
@@ -173,6 +175,14 @@ export default function DailyMarketPaymentsTab({
   // Settlement ref detail dialog state
   const [settlementRefDialogOpen, setSettlementRefDialogOpen] = useState(false);
   const [selectedSettlementRef, setSelectedSettlementRef] = useState<string | null>(null);
+
+  // Daily settlement edit dialog state
+  const [dailySettlementEditOpen, setDailySettlementEditOpen] = useState(false);
+  const [editingSettlement, setEditingSettlement] = useState<SettlementDetails | null>(null);
+
+  // Delete confirmation state for settlements
+  const [deleteSettlementDialogOpen, setDeleteSettlementDialogOpen] = useState(false);
+  const [settlementToDelete, setSettlementToDelete] = useState<SettlementDetails | null>(null);
 
   // Fetch data
   const fetchData = useCallback(async () => {
@@ -1619,6 +1629,57 @@ export default function DailyMarketPaymentsTab({
           setSelectedSettlementRef(null);
         }}
         settlementReference={selectedSettlementRef}
+        canEdit={canEdit}
+        onEdit={(details) => {
+          setEditingSettlement(details);
+          setDailySettlementEditOpen(true);
+        }}
+        onDelete={(details) => {
+          setSettlementToDelete(details);
+          setDeleteSettlementDialogOpen(true);
+        }}
+      />
+
+      {/* Daily Settlement Edit Dialog */}
+      <DailySettlementEditDialog
+        open={dailySettlementEditOpen}
+        onClose={() => {
+          setDailySettlementEditOpen(false);
+          setEditingSettlement(null);
+        }}
+        settlement={editingSettlement}
+        onSuccess={() => {
+          setDailySettlementEditOpen(false);
+          setEditingSettlement(null);
+          setSettlementRefDialogOpen(false);
+          setSelectedSettlementRef(null);
+          fetchData();
+          onDataChange?.();
+        }}
+        onDelete={(details) => {
+          setSettlementToDelete(details);
+          setDeleteSettlementDialogOpen(true);
+        }}
+      />
+
+      {/* Delete Daily Settlement Confirmation Dialog */}
+      <DeleteDailySettlementDialog
+        open={deleteSettlementDialogOpen}
+        onClose={() => {
+          setDeleteSettlementDialogOpen(false);
+          setSettlementToDelete(null);
+        }}
+        settlement={settlementToDelete}
+        onSuccess={() => {
+          setDeleteSettlementDialogOpen(false);
+          setSettlementToDelete(null);
+          setDailySettlementEditOpen(false);
+          setEditingSettlement(null);
+          setSettlementRefDialogOpen(false);
+          setSelectedSettlementRef(null);
+          fetchData();
+          onDataChange?.();
+        }}
       />
     </Box>
   );
