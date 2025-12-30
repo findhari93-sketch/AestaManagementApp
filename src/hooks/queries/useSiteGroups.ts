@@ -63,7 +63,6 @@ export function useSiteGroupsWithSites() {
       const { data: sites, error: sitesError } = await (supabase as any)
         .from("sites")
         .select("id, name, site_group_id")
-        .eq("is_active", true)
         .not("site_group_id", "is", null);
 
       if (sitesError) throw sitesError;
@@ -109,8 +108,7 @@ export function useSiteGroup(id: string | undefined) {
       const { data: sites, error: sitesError } = await (supabase as any)
         .from("sites")
         .select("id, name")
-        .eq("site_group_id", id)
-        .eq("is_active", true);
+        .eq("site_group_id", id);
 
       if (sitesError) throw sitesError;
 
@@ -140,7 +138,6 @@ export function useSiteGroupSites(groupId: string | undefined) {
         .from("sites")
         .select("id, name, address, city")
         .eq("site_group_id", groupId)
-        .eq("is_active", true)
         .order("name");
 
       if (error) throw error;

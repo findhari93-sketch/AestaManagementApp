@@ -71,7 +71,6 @@ export default function CreateSiteGroupDialog({
         .from('sites')
         .select('id, name, address, city')
         .is('site_group_id', null)
-        .eq('status', 'active')
         .order('name')
 
       if (error) throw error
