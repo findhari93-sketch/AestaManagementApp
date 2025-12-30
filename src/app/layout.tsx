@@ -6,6 +6,7 @@ import { SiteProvider } from "@/contexts/SiteContext";
 import { DateRangeProvider } from "@/contexts/DateRangeContext";
 import { NotificationProvider } from "@/contexts/NotificationContext";
 import QueryProvider from "@/providers/QueryProvider";
+import { TabProvider } from "@/providers/TabProvider";
 
 export const dynamic = 'force-dynamic';
 
@@ -35,17 +36,19 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning>
       <body suppressHydrationWarning>
         <ThemeProvider>
-          <AuthProvider>
-            <SiteProvider>
-              <DateRangeProvider>
-                <QueryProvider>
-                  <NotificationProvider>
-                    {children}
-                  </NotificationProvider>
-                </QueryProvider>
-              </DateRangeProvider>
-            </SiteProvider>
-          </AuthProvider>
+          <TabProvider>
+            <AuthProvider>
+              <SiteProvider>
+                <DateRangeProvider>
+                  <QueryProvider>
+                    <NotificationProvider>
+                      {children}
+                    </NotificationProvider>
+                  </QueryProvider>
+                </DateRangeProvider>
+              </SiteProvider>
+            </AuthProvider>
+          </TabProvider>
         </ThemeProvider>
       </body>
     </html>

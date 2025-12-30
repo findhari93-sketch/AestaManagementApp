@@ -249,16 +249,25 @@ export default function LaborersContent({ initialData }: LaborersContentProps) {
         accessorKey: "category_name",
         header: isMobile ? "Cat" : "Category",
         size: isMobile ? 60 : 130,
+        filterVariant: "select",
+        filterSelectOptions: categories.map((c) => ({ value: c.name, label: c.name })),
       },
       {
         accessorKey: "role_name",
         header: "Role",
         size: isMobile ? 70 : 150,
+        filterVariant: "select",
+        filterSelectOptions: roles.map((r) => ({ value: r.name, label: r.name })),
       },
       {
         accessorKey: "laborer_type",
         header: isMobile ? "Type" : "Laborer Type",
         size: isMobile ? 50 : 140,
+        filterVariant: "select",
+        filterSelectOptions: [
+          { value: "daily_market", label: "Daily/Market" },
+          { value: "contract", label: "Contract" },
+        ],
         Cell: ({ cell }) => {
           const type = cell.getValue<string>() || "daily_market";
           return (
@@ -283,6 +292,11 @@ export default function LaborersContent({ initialData }: LaborersContentProps) {
         accessorKey: "language",
         header: isMobile ? "Lang" : "Language",
         size: isMobile ? 45 : 90,
+        filterVariant: "select",
+        filterSelectOptions: [
+          { value: "Tamil", label: "Tamil" },
+          { value: "Hindi", label: "Hindi" },
+        ],
         Cell: ({ cell }) => {
           const lang = cell.getValue<string>() || "Tamil";
           return (
@@ -299,6 +313,12 @@ export default function LaborersContent({ initialData }: LaborersContentProps) {
         accessorKey: "employment_type",
         header: isMobile ? "Emp" : "Employment",
         size: isMobile ? 70 : 120,
+        filterVariant: "select",
+        filterSelectOptions: [
+          { value: "daily_wage", label: "Daily Wage" },
+          { value: "contract", label: "Contract" },
+          { value: "specialist", label: "Specialist" },
+        ],
         Cell: ({ cell }) => (
           <Chip
             label={
@@ -327,18 +347,27 @@ export default function LaborersContent({ initialData }: LaborersContentProps) {
         accessorKey: "associated_team_name",
         header: isMobile ? "Mesthri" : "Mesthri Team",
         size: isMobile ? 70 : 140,
+        filterVariant: "select",
+        filterSelectOptions: teams.map((t) => ({ value: t.name, label: t.name })),
         Cell: ({ cell }) => cell.getValue<string>() || "-",
       },
       {
         accessorKey: "team_name",
         header: isMobile ? "Team" : "Work Team",
         size: isMobile ? 70 : 130,
+        filterVariant: "select",
+        filterSelectOptions: teams.map((t) => ({ value: t.name, label: t.name })),
         Cell: ({ cell }) => cell.getValue<string>() || "-",
       },
       {
         accessorKey: "status",
         header: isMobile ? "St" : "Status",
         size: isMobile ? 45 : 100,
+        filterVariant: "select",
+        filterSelectOptions: [
+          { value: "active", label: "Active" },
+          { value: "inactive", label: "Inactive" },
+        ],
         Cell: ({ cell }) => (
           <Chip
             label={
@@ -386,7 +415,7 @@ export default function LaborersContent({ initialData }: LaborersContentProps) {
         ),
       },
     ],
-    [canEdit, handleDeactivate, isMobile]
+    [canEdit, handleDeactivate, isMobile, categories, roles, teams]
   );
 
   return (
@@ -425,6 +454,7 @@ export default function LaborersContent({ initialData }: LaborersContentProps) {
         data={laborers}
         isLoading={loading}
         pageSize={20}
+        showRecordCount
         pinnedColumns={{
           left: ["name"],
           right: ["mrt-row-actions"],

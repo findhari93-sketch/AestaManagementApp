@@ -41,7 +41,7 @@ export async function generateBatchCode(
     console.error("Error generating batch code:", error);
     // Fallback: generate client-side
     const prefix = getPayerSourcePrefix(payerSource);
-    const month = dayjs().format("YYYYMM");
+    const month = dayjs().format("YYMMDD");
     const random = Math.floor(Math.random() * 1000).toString().padStart(3, "0");
     return `${prefix}-${month}-${random}`;
   }

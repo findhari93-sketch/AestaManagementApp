@@ -23,8 +23,17 @@ import {
   Paper,
   Divider,
   Checkbox,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableRow,
+  Chip,
 } from "@mui/material";
-import { Close as CloseIcon } from "@mui/icons-material";
+import {
+  Close as CloseIcon,
+  QrCode2 as QrCodeIcon,
+} from "@mui/icons-material";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSite } from "@/contexts/SiteContext";
@@ -52,6 +61,22 @@ interface SubcontractOption {
   team_name?: string;
 }
 
+interface AllocationPreview {
+  entryId: string;
+  date: string;
+  entryAmount: number;
+  previouslyPaid: number;
+  allocatedAmount: number;
+  isFullyPaid: boolean;
+}
+
+// Generate settlement reference in TSS-YYMMDD-NNN format
+const generateSettlementRef = (): string => {
+  const date = dayjs().format("YYMMDD");
+  const random = Math.random().toString(36).substring(2, 5).toUpperCase();
+  return `TSS-${date}-${random}`;
+};
+
 export default function TeaShopSettlementDialog({
   open,
   onClose,
@@ -70,8 +95,6 @@ export default function TeaShopSettlementDialog({
   const [error, setError] = useState<string | null>(null);
 
   // Form state
-  const [periodStart, setPeriodStart] = useState(dayjs().subtract(7, "days").format("YYYY-MM-DD"));
-  const [periodEnd, setPeriodEnd] = useState(dayjs().format("YYYY-MM-DD"));
   const [amountPaying, setAmountPaying] = useState(pendingBalance);
   const [paymentDate, setPaymentDate] = useState(dayjs().format("YYYY-MM-DD"));
   const [paymentMode, setPaymentMode] = useState<PaymentMode>("cash");
@@ -87,16 +110,19 @@ export default function TeaShopSettlementDialog({
   const [subcontracts, setSubcontracts] = useState<SubcontractOption[]>([]);
   const [selectedSubcontractId, setSelectedSubcontractId] = useState<string>("");
 
+  // Unsettled entries for waterfall (fetched fresh)
+  const [unsettledEntries, setUnsettledEntries] = useState<TeaShopEntry[]>([]);
+  const [loadingEntries, setLoadingEntries] = useState(false);
+
   useEffect(() => {
     if (open) {
       // Fetch site engineers and subcontracts
       fetchEngineers();
       fetchSubcontracts();
+      fetchUnsettledEntries();
 
       if (isEditMode && settlement) {
         // Edit mode - populate from settlement
-        setPeriodStart(settlement.period_start);
-        setPeriodEnd(settlement.period_end);
         setAmountPaying(settlement.amount_paid || 0);
         setPaymentDate(settlement.payment_date);
         setPaymentMode((settlement.payment_mode as PaymentMode) || "cash");
@@ -107,8 +133,6 @@ export default function TeaShopSettlementDialog({
         setSelectedSubcontractId(settlement.subcontract_id || "");
       } else {
         // New settlement - reset form
-        setPeriodStart(dayjs().subtract(7, "days").format("YYYY-MM-DD"));
-        setPeriodEnd(dayjs().format("YYYY-MM-DD"));
         setAmountPaying(pendingBalance);
         setPaymentDate(dayjs().format("YYYY-MM-DD"));
         setPaymentMode("cash");
@@ -168,20 +192,61 @@ export default function TeaShopSettlementDialog({
     }
   };
 
-  // Calculate entries total for the period
-  const entriesInPeriod = useMemo(() => {
-    return entries.filter(
-      (e) => e.date >= periodStart && e.date <= periodEnd
-    );
-  }, [entries, periodStart, periodEnd]);
+  // Fetch unsettled entries (oldest first for waterfall)
+  const fetchUnsettledEntries = async () => {
+    setLoadingEntries(true);
+    try {
+      const { data } = await (supabase
+        .from("tea_shop_entries") as any)
+        .select("*")
+        .eq("tea_shop_id", shop.id)
+        .or("is_fully_paid.is.null,is_fully_paid.eq.false")
+        .order("date", { ascending: true }); // Oldest first
 
-  const entriesTotalInPeriod = useMemo(() => {
-    return entriesInPeriod.reduce((sum, e) => sum + (e.total_amount || 0), 0);
-  }, [entriesInPeriod]);
+      setUnsettledEntries((data || []) as TeaShopEntry[]);
+    } catch (err) {
+      console.error("Error fetching unsettled entries:", err);
+    } finally {
+      setLoadingEntries(false);
+    }
+  };
 
-  const previousBalance = pendingBalance - entriesTotalInPeriod;
-  const totalDue = pendingBalance;
-  const balanceRemaining = Math.max(0, totalDue - amountPaying);
+  // Calculate waterfall allocation preview
+  const allocationPreview = useMemo((): AllocationPreview[] => {
+    if (amountPaying <= 0 || unsettledEntries.length === 0) return [];
+
+    let remaining = amountPaying;
+    const allocations: AllocationPreview[] = [];
+
+    for (const entry of unsettledEntries) {
+      if (remaining <= 0) break;
+
+      const entryAmount = entry.total_amount || 0;
+      const previouslyPaid = (entry as any).amount_paid || 0;
+      const entryRemaining = entryAmount - previouslyPaid;
+
+      if (entryRemaining <= 0) continue;
+
+      const toAllocate = Math.min(remaining, entryRemaining);
+
+      allocations.push({
+        entryId: entry.id,
+        date: entry.date,
+        entryAmount,
+        previouslyPaid,
+        allocatedAmount: toAllocate,
+        isFullyPaid: toAllocate >= entryRemaining,
+      });
+
+      remaining -= toAllocate;
+    }
+
+    return allocations;
+  }, [amountPaying, unsettledEntries]);
+
+  // Calculate totals
+  const totalAllocated = allocationPreview.reduce((sum, a) => sum + a.allocatedAmount, 0);
+  const balanceRemaining = Math.max(0, pendingBalance - amountPaying);
 
   const handleSave = async () => {
     if (amountPaying <= 0) {
@@ -201,7 +266,7 @@ export default function TeaShopSettlementDialog({
       let engineerTransactionId: string | null = null;
 
       // If site engineer is paying, create wallet transaction
-      if (payerType === "site_engineer" && createWalletTransaction) {
+      if (payerType === "site_engineer" && createWalletTransaction && !isEditMode) {
         const transactionData = {
           user_id: selectedEngineerId,
           site_id: selectedSite?.id,
@@ -227,14 +292,20 @@ export default function TeaShopSettlementDialog({
         engineerTransactionId = txData?.id || null;
       }
 
+      // Generate settlement reference for new settlements
+      const settlementRef = isEditMode
+        ? (settlement as any)?.settlement_reference || generateSettlementRef()
+        : generateSettlementRef();
+
       // Settlement record data
       const settlementData = {
         tea_shop_id: shop.id,
-        period_start: periodStart,
-        period_end: periodEnd,
-        entries_total: entriesTotalInPeriod,
-        previous_balance: previousBalance > 0 ? previousBalance : 0,
-        total_due: totalDue,
+        settlement_reference: settlementRef,
+        period_start: allocationPreview.length > 0 ? allocationPreview[0].date : paymentDate,
+        period_end: allocationPreview.length > 0 ? allocationPreview[allocationPreview.length - 1].date : paymentDate,
+        entries_total: totalAllocated,
+        previous_balance: 0, // Not using period-based anymore
+        total_due: pendingBalance,
         amount_paid: amountPaying,
         balance_remaining: balanceRemaining,
         payment_date: paymentDate,
@@ -250,6 +321,8 @@ export default function TeaShopSettlementDialog({
         subcontract_id: selectedSubcontractId || null,
       };
 
+      let settlementId: string;
+
       if (isEditMode && settlement) {
         // Update existing settlement
         const { error: settlementError } = await (supabase
@@ -258,13 +331,43 @@ export default function TeaShopSettlementDialog({
           .eq("id", settlement.id);
 
         if (settlementError) throw settlementError;
+        settlementId = settlement.id;
+
+        // Delete old allocations
+        await (supabase.from as any)("tea_shop_settlement_allocations")
+          .delete()
+          .eq("settlement_id", settlement.id);
       } else {
         // Create new settlement
-        const { error: settlementError } = await (supabase
+        const { data: newSettlement, error: settlementError } = await (supabase
           .from("tea_shop_settlements") as any)
-          .insert(settlementData);
+          .insert(settlementData)
+          .select()
+          .single();
 
         if (settlementError) throw settlementError;
+        settlementId = newSettlement.id;
+      }
+
+      // Create allocation records and update entries
+      for (const alloc of allocationPreview) {
+        // Insert allocation record
+        await (supabase.from as any)("tea_shop_settlement_allocations")
+          .insert({
+            settlement_id: settlementId,
+            entry_id: alloc.entryId,
+            allocated_amount: alloc.allocatedAmount,
+          });
+
+        // Update entry with new payment info
+        const newPaid = alloc.previouslyPaid + alloc.allocatedAmount;
+        await (supabase
+          .from("tea_shop_entries") as any)
+          .update({
+            amount_paid: newPaid,
+            is_fully_paid: alloc.isFullyPaid,
+          })
+          .eq("id", alloc.entryId);
       }
 
       onSuccess?.();
@@ -276,12 +379,16 @@ export default function TeaShopSettlementDialog({
     }
   };
 
+  // Get shop's QR code and UPI ID
+  const shopQrCodeUrl = (shop as any).qr_code_url;
+  const shopUpiId = (shop as any).upi_id;
+
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
       <DialogTitle>
         <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <Typography variant="h6" fontWeight={700}>
-            {isEditMode ? "Edit Settlement" : "Record Settlement"}
+            {isEditMode ? "Edit Settlement" : "Pay Shop"}
           </Typography>
           <IconButton onClick={onClose} size="small">
             <CloseIcon />
@@ -296,62 +403,54 @@ export default function TeaShopSettlementDialog({
           </Alert>
         )}
 
-        {/* Shop Info */}
-        <Alert severity="info" sx={{ mb: 3 }}>
-          <Typography variant="body2">
-            <strong>Shop:</strong> {shop.shop_name}
-          </Typography>
-        </Alert>
-
-        {/* Period Selection */}
-        <Box sx={{ display: "flex", gap: 2, mb: 3 }}>
-          <TextField
-            label="Period From"
-            type="date"
-            value={periodStart}
-            onChange={(e) => setPeriodStart(e.target.value)}
-            fullWidth
-            size="small"
-            slotProps={{ inputLabel: { shrink: true } }}
-          />
-          <TextField
-            label="Period To"
-            type="date"
-            value={periodEnd}
-            onChange={(e) => setPeriodEnd(e.target.value)}
-            fullWidth
-            size="small"
-            slotProps={{ inputLabel: { shrink: true } }}
-          />
-        </Box>
-
-        {/* Amounts Summary */}
+        {/* Shop Info with QR Code */}
         <Paper variant="outlined" sx={{ p: 2, mb: 3 }}>
-          <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>
-            AMOUNTS
-          </Typography>
+          <Box sx={{ display: "flex", gap: 2, alignItems: "flex-start" }}>
+            {/* QR Code Display */}
+            {shopQrCodeUrl && (
+              <Box sx={{ textAlign: "center", flexShrink: 0 }}>
+                <Box
+                  component="img"
+                  src={shopQrCodeUrl}
+                  alt="Payment QR"
+                  sx={{
+                    width: 120,
+                    height: 120,
+                    objectFit: "contain",
+                    borderRadius: 1,
+                    border: "1px solid",
+                    borderColor: "divider",
+                  }}
+                />
+                <Typography variant="caption" color="text.secondary" display="block">
+                  Scan to Pay
+                </Typography>
+              </Box>
+            )}
 
-          <Box sx={{ display: "flex", justifyContent: "space-between", mb: 1 }}>
-            <Typography variant="body2">Entries in Period ({entriesInPeriod.length}):</Typography>
-            <Typography variant="body2">₹{entriesTotalInPeriod.toLocaleString()}</Typography>
-          </Box>
-
-          {previousBalance > 0 && (
-            <Box sx={{ display: "flex", justifyContent: "space-between", mb: 1 }}>
-              <Typography variant="body2">Previous Balance:</Typography>
-              <Typography variant="body2">+ ₹{previousBalance.toLocaleString()}</Typography>
+            {/* Shop Details */}
+            <Box sx={{ flex: 1 }}>
+              <Typography variant="subtitle1" fontWeight={600}>
+                {shop.shop_name}
+              </Typography>
+              {shopUpiId && (
+                <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                  UPI: <strong>{shopUpiId}</strong>
+                </Typography>
+              )}
+              <Box sx={{ mt: 1, p: 1, bgcolor: "error.50", borderRadius: 1 }}>
+                <Typography variant="body2" color="error.main">
+                  Pending Balance: <strong>₹{pendingBalance.toLocaleString()}</strong>
+                </Typography>
+              </Box>
             </Box>
-          )}
 
-          <Divider sx={{ my: 1 }} />
-
-          <Box sx={{ display: "flex", justifyContent: "space-between" }}>
-            <Typography variant="subtitle1" fontWeight={700}>
-              TOTAL DUE:
-            </Typography>
-            <Typography variant="subtitle1" fontWeight={700} color="error.main">
-              ₹{totalDue.toLocaleString()}
-            </Typography>
+            {/* QR Icon if no QR code */}
+            {!shopQrCodeUrl && (
+              <Box sx={{ p: 2, bgcolor: "grey.100", borderRadius: 1 }}>
+                <QrCodeIcon sx={{ fontSize: 48, color: "text.disabled" }} />
+              </Box>
+            )}
           </Box>
         </Paper>
 
@@ -369,6 +468,73 @@ export default function TeaShopSettlementDialog({
             input: { startAdornment: <Typography sx={{ mr: 0.5 }}>₹</Typography> },
           }}
         />
+
+        {/* Waterfall Allocation Preview */}
+        {allocationPreview.length > 0 && (
+          <Paper variant="outlined" sx={{ p: 2, mb: 3 }}>
+            <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1.5 }}>
+              ALLOCATION PREVIEW (Oldest First)
+            </Typography>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell sx={{ fontWeight: 600, fontSize: "0.75rem" }}>Date</TableCell>
+                  <TableCell align="right" sx={{ fontWeight: 600, fontSize: "0.75rem" }}>Entry</TableCell>
+                  <TableCell align="right" sx={{ fontWeight: 600, fontSize: "0.75rem" }}>Paying</TableCell>
+                  <TableCell align="center" sx={{ fontWeight: 600, fontSize: "0.75rem" }}>Status</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {allocationPreview.map((alloc, idx) => (
+                  <TableRow key={alloc.entryId}>
+                    <TableCell sx={{ py: 0.75 }}>
+                      <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                        {idx === 0 && (
+                          <Chip label="Oldest" size="small" color="warning" sx={{ height: 18, fontSize: "0.6rem" }} />
+                        )}
+                        <Typography variant="body2" fontSize="0.8rem">
+                          {dayjs(alloc.date).format("DD MMM")}
+                        </Typography>
+                      </Box>
+                    </TableCell>
+                    <TableCell align="right" sx={{ py: 0.75 }}>
+                      <Typography variant="body2" fontSize="0.8rem">
+                        ₹{alloc.entryAmount.toLocaleString()}
+                      </Typography>
+                    </TableCell>
+                    <TableCell align="right" sx={{ py: 0.75 }}>
+                      <Typography variant="body2" fontSize="0.8rem" fontWeight={600} color="success.main">
+                        ₹{alloc.allocatedAmount.toLocaleString()}
+                      </Typography>
+                    </TableCell>
+                    <TableCell align="center" sx={{ py: 0.75 }}>
+                      <Chip
+                        label={alloc.isFullyPaid ? "Full" : "Partial"}
+                        size="small"
+                        color={alloc.isFullyPaid ? "success" : "warning"}
+                        sx={{ height: 20, fontSize: "0.65rem" }}
+                      />
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+            <Box sx={{ mt: 1.5, display: "flex", justifyContent: "space-between" }}>
+              <Typography variant="body2" color="text.secondary">
+                Entries covered: {allocationPreview.length}
+              </Typography>
+              <Typography variant="body2" fontWeight={600}>
+                Total: ₹{totalAllocated.toLocaleString()}
+              </Typography>
+            </Box>
+          </Paper>
+        )}
+
+        {loadingEntries && (
+          <Box sx={{ display: "flex", justifyContent: "center", py: 2 }}>
+            <CircularProgress size={24} />
+          </Box>
+        )}
 
         <Box sx={{ display: "flex", justifyContent: "space-between", mb: 3 }}>
           <Typography variant="body2" color="text.secondary">
@@ -434,22 +600,24 @@ export default function TeaShopSettlementDialog({
                 </Select>
               </FormControl>
 
-              <FormControlLabel
-                control={
-                  <Checkbox
-                    checked={createWalletTransaction}
-                    onChange={(e) => setCreateWalletTransaction(e.target.checked)}
-                  />
-                }
-                label={
-                  <Box>
-                    <Typography variant="body2">Create wallet transaction</Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      Records as &quot;Spent on Behalf&quot; in engineer wallet
-                    </Typography>
-                  </Box>
-                }
-              />
+              {!isEditMode && (
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={createWalletTransaction}
+                      onChange={(e) => setCreateWalletTransaction(e.target.checked)}
+                    />
+                  }
+                  label={
+                    <Box>
+                      <Typography variant="body2">Create wallet transaction</Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        Records as &quot;Spent on Behalf&quot; in engineer wallet
+                      </Typography>
+                    </Box>
+                  }
+                />
+              )}
             </Box>
           )}
         </Paper>

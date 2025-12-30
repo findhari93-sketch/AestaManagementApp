@@ -53,6 +53,7 @@ import type {
   PaymentMode,
   PaymentType,
 } from "@/types/database.types";
+import { calculateSubcontractTotals } from "@/lib/services/subcontractService";
 import dayjs from "dayjs";
 
 interface SubcontractWithDetails extends Subcontract {
@@ -62,6 +63,7 @@ interface SubcontractWithDetails extends Subcontract {
   total_paid?: number;
   balance_due?: number;
   completion_percentage?: number;
+  record_count?: number;
 }
 
 export default function CompanyContractsPage() {
@@ -146,7 +148,7 @@ export default function CompanyContractsPage() {
     fetchOptions();
   }, []);
 
-  // Fetch subcontracts
+  // Fetch subcontracts using shared service for consistent calculations
   const fetchSubcontracts = async () => {
     setLoading(true);
     try {
@@ -165,33 +167,16 @@ export default function CompanyContractsPage() {
 
       if (error) throw error;
 
-      // Get all subcontract IDs for batch payment fetch
+      // Use shared service for consistent calculation across all pages
+      // totalPaid = subcontract_payments + labor_payments + cleared expenses
       const subcontractIds = (data || []).map((s: any) => s.id);
-
-      // Fetch ALL payments in a single query (fixes N+1 problem)
-      let paymentsMap: Record<string, number> = {};
-      if (subcontractIds.length > 0) {
-        const { data: allPayments } = await supabase
-          .from("subcontract_payments")
-          .select("subcontract_id, amount")
-          .in("subcontract_id", subcontractIds);
-
-        // Aggregate payments by subcontract_id
-        (allPayments || []).forEach((p: any) => {
-          paymentsMap[p.subcontract_id] = (paymentsMap[p.subcontract_id] || 0) + p.amount;
-        });
-      }
+      const totalsMap = await calculateSubcontractTotals(supabase, subcontractIds);
 
       // Map subcontracts with their payment totals
       // Use already-fetched teams, laborers, sites arrays to look up names (avoids FK join ambiguity)
       const subcontractsWithDetails: SubcontractWithDetails[] = (data || []).map(
         (subcontract: any) => {
-          const totalPaid = paymentsMap[subcontract.id] || 0;
-          const balanceDue = subcontract.total_value - totalPaid;
-          const completionPercentage =
-            subcontract.total_value > 0
-              ? (totalPaid / subcontract.total_value) * 100
-              : 0;
+          const totals = totalsMap.get(subcontract.id);
 
           // Look up names from already-fetched arrays
           const team = teams.find((t) => t.id === subcontract.team_id);
@@ -203,9 +188,13 @@ export default function CompanyContractsPage() {
             team_name: team?.name,
             laborer_name: laborer?.name,
             site_name: site?.name,
-            total_paid: totalPaid,
-            balance_due: balanceDue,
-            completion_percentage: completionPercentage,
+            total_paid: totals?.totalPaid || 0,
+            balance_due: totals?.balance || subcontract.total_value || 0,
+            completion_percentage:
+              subcontract.total_value > 0
+                ? ((totals?.totalPaid || 0) / subcontract.total_value) * 100
+                : 0,
+            record_count: totals?.totalRecordCount || 0,
           };
         }
       );
@@ -622,8 +611,12 @@ export default function CompanyContractsPage() {
     const due = subcontracts.reduce((sum, c) => sum + (c.balance_due || 0), 0);
     const active = subcontracts.filter((c) => c.status === "active").length;
     const completed = subcontracts.filter((c) => c.status === "completed").length;
+    const recordCount = subcontracts.reduce(
+      (sum, c) => sum + (c.record_count || 0),
+      0
+    );
 
-    return { total, paid, due, active, completed, count: subcontracts.length };
+    return { total, paid, due, active, completed, count: subcontracts.length, recordCount };
   }, [subcontracts]);
 
   return (
@@ -703,6 +696,18 @@ export default function CompanyContractsPage() {
           <Card>
             <CardContent>
               <Typography variant="body2" color="text.secondary">
+                Payment Records
+              </Typography>
+              <Typography variant="h5" fontWeight={700} color="info.main">
+                {stats.recordCount}
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid size={{ xs: 12, sm: 6, md: 2.4 }}>
+          <Card>
+            <CardContent>
+              <Typography variant="body2" color="text.secondary">
                 Active / Completed
               </Typography>
               <Typography variant="h5" fontWeight={700}>
@@ -730,7 +735,7 @@ export default function CompanyContractsPage() {
         </CardContent>
       </Card>
 
-      <DataTable columns={columns} data={subcontracts} isLoading={loading} />
+      <DataTable columns={columns} data={subcontracts} isLoading={loading} showRecordCount />
 
       {/* Add/Edit Dialog */}
       <Dialog

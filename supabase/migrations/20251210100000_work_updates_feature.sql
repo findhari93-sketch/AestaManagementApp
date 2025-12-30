@@ -1,13 +1,25 @@
 -- Work Updates Feature Migration
 -- Adds work_updates JSONB column for morning/evening photo documentation
 -- Creates work-updates storage bucket for site photos
+-- NOTE: Wrapped in IF EXISTS check for local development
 
--- Add work_updates JSONB column to daily_work_summary
-ALTER TABLE daily_work_summary
-ADD COLUMN IF NOT EXISTS work_updates JSONB DEFAULT NULL;
+-- Add work_updates JSONB column to daily_work_summary (if table exists)
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'daily_work_summary' AND table_schema = 'public') THEN
+    RAISE NOTICE 'Table daily_work_summary does not exist yet, skipping work_updates column';
+    RETURN;
+  END IF;
 
--- Add comment explaining the structure
-COMMENT ON COLUMN daily_work_summary.work_updates IS 'JSON structure for morning/evening work updates with photos. Structure: { photoCount: number, morning: { description, photos[], timestamp }, evening: { completionPercent, summary, photos[], timestamp } }';
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'daily_work_summary' AND column_name = 'work_updates') THEN
+    ALTER TABLE daily_work_summary ADD COLUMN work_updates JSONB DEFAULT NULL;
+  END IF;
+
+  -- Add comment explaining the structure
+  COMMENT ON COLUMN daily_work_summary.work_updates IS 'JSON structure for morning/evening work updates with photos. Structure: { photoCount: number, morning: { description, photos[], timestamp }, evening: { completionPercent, summary, photos[], timestamp } }';
+
+  RAISE NOTICE 'Work updates column applied successfully';
+END $$;
 
 -- Create work-updates storage bucket
 INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)

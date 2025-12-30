@@ -49,6 +49,11 @@ interface PurchaseOrderDialogProps {
   onClose: () => void;
   purchaseOrder: PurchaseOrderWithDetails | null;
   siteId: string;
+  // Prefilled data from navigation (e.g., from material-search)
+  prefilledVendorId?: string;
+  prefilledMaterialId?: string;
+  prefilledMaterialName?: string;
+  prefilledUnit?: string;
 }
 
 interface POItemRow extends PurchaseOrderItemFormData {
@@ -62,6 +67,10 @@ export default function PurchaseOrderDialog({
   onClose,
   purchaseOrder,
   siteId,
+  prefilledVendorId,
+  prefilledMaterialId,
+  prefilledMaterialName,
+  prefilledUnit,
 }: PurchaseOrderDialogProps) {
   const isMobile = useIsMobile();
   const isEdit = !!purchaseOrder;
@@ -112,7 +121,25 @@ export default function PurchaseOrderDialog({
         })) || [];
       setItems(existingItems);
     } else {
-      setSelectedVendor(null);
+      // Handle prefilled data from navigation (e.g., material-search)
+      if (prefilledVendorId) {
+        const prefillVendor = vendors.find((v) => v.id === prefilledVendorId);
+        setSelectedVendor(prefillVendor || null);
+      } else {
+        setSelectedVendor(null);
+      }
+
+      // Pre-select material for adding (not add to items yet)
+      if (prefilledMaterialId && materials.length > 0) {
+        const prefillMaterial = materials.find((m) => m.id === prefilledMaterialId);
+        if (prefillMaterial) {
+          setSelectedMaterial(prefillMaterial);
+          if (prefillMaterial.gst_rate) {
+            setNewItemTaxRate(prefillMaterial.gst_rate.toString());
+          }
+        }
+      }
+
       setExpectedDeliveryDate("");
       setDeliveryAddress("");
       setPaymentTerms("");
@@ -120,11 +147,14 @@ export default function PurchaseOrderDialog({
       setItems([]);
     }
     setError("");
-    setSelectedMaterial(null);
+    // Only reset these if no prefilled material
+    if (!prefilledMaterialId) {
+      setSelectedMaterial(null);
+      setNewItemTaxRate("");
+    }
     setNewItemQty("");
     setNewItemPrice("");
-    setNewItemTaxRate("");
-  }, [purchaseOrder, vendors, open]);
+  }, [purchaseOrder, vendors, materials, open, prefilledVendorId, prefilledMaterialId]);
 
   // Calculate totals
   const totals = useMemo(() => {

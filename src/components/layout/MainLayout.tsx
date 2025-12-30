@@ -66,6 +66,8 @@ import {
   Error as ErrorIcon,
   CalendarMonth as CalendarIcon,
   LocalShipping as DeliveryIcon,
+  AccountBalance as AccountBalanceIcon,
+  TrendingUp as TrendingUpIcon,
 } from "@mui/icons-material";
 import { useRouter, usePathname } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
@@ -174,7 +176,7 @@ const siteNavCategories: NavCategory[] = [
         path: "/site/stock",
       },
       {
-        text: "Material Usage",
+        text: "Daily Usage",
         icon: <ConstructionIcon />,
         path: "/site/material-usage",
       },
@@ -197,6 +199,11 @@ const siteNavCategories: NavCategory[] = [
         text: "Local Purchases",
         icon: <StoreIcon />,
         path: "/site/local-purchases",
+      },
+      {
+        text: "Inter-Site Settlement",
+        icon: <AccountBalanceIcon />,
+        path: "/site/inter-site-settlement",
       },
     ],
   },
@@ -261,14 +268,19 @@ const companyNavCategories: NavCategory[] = [
         path: "/company/materials",
       },
       {
-        text: "Material Search",
-        icon: <ShoppingCartIcon />,
+        text: "Price Comparison",
+        icon: <TrendingUpIcon />,
         path: "/company/material-search",
       },
       {
-        text: "Vendors",
+        text: "Vendor Directory",
         icon: <StoreIcon />,
         path: "/company/vendors",
+      },
+      {
+        text: "Site Groups",
+        icon: <GroupsIcon />,
+        path: "/company/site-groups",
       },
     ],
   },

@@ -27,7 +27,10 @@ import {
   Email as EmailIcon,
   CalendarToday as CalendarIcon,
   Warning as WarningIcon,
+  Cached as CachedIcon,
+  Build as BuildIcon,
 } from "@mui/icons-material";
+import { forceResetAllCache } from "@/lib/cache/persistor";
 import { useAuth } from "@/contexts/AuthContext";
 import { useRouter } from "next/navigation";
 
@@ -40,7 +43,9 @@ export default function AccountTab({ onSuccess, onError }: AccountTabProps) {
   const { userProfile, signOut } = useAuth();
   const router = useRouter();
   const [showLogoutDialog, setShowLogoutDialog] = useState(false);
+  const [showClearCacheDialog, setShowClearCacheDialog] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [clearingCache, setClearingCache] = useState(false);
 
   const handleSignOut = async () => {
     setLoading(true);
@@ -52,6 +57,27 @@ export default function AccountTab({ onSuccess, onError }: AccountTabProps) {
     } finally {
       setLoading(false);
       setShowLogoutDialog(false);
+    }
+  };
+
+  const handleClearCache = async () => {
+    setClearingCache(true);
+    try {
+      const success = await forceResetAllCache();
+      if (success) {
+        onSuccess?.("Cache cleared successfully. Reloading page...");
+        // Reload the page to apply changes
+        setTimeout(() => {
+          window.location.reload();
+        }, 1000);
+      } else {
+        onError?.("Failed to clear cache. Please try again.");
+      }
+    } catch (error) {
+      onError?.(error instanceof Error ? error.message : "Failed to clear cache");
+    } finally {
+      setClearingCache(false);
+      setShowClearCacheDialog(false);
     }
   };
 
@@ -210,6 +236,32 @@ export default function AccountTab({ onSuccess, onError }: AccountTabProps) {
         </Button>
       </Paper>
 
+      {/* Troubleshooting */}
+      <Paper sx={{ p: 3, mt: 3, borderRadius: 3 }}>
+        <Typography
+          variant="h6"
+          fontWeight={600}
+          sx={{ display: "flex", alignItems: "center", mb: 2 }}
+        >
+          <BuildIcon sx={{ mr: 1 }} />
+          Troubleshooting
+        </Typography>
+
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          If you are experiencing issues like frozen screens, data not loading, or operations getting stuck,
+          try clearing the local cache. This will remove locally stored data and refresh the application.
+        </Typography>
+
+        <Button
+          variant="outlined"
+          color="primary"
+          onClick={() => setShowClearCacheDialog(true)}
+          startIcon={<CachedIcon />}
+        >
+          Clear Local Cache
+        </Button>
+      </Paper>
+
       {/* Danger Zone */}
       <Paper
         sx={{
@@ -270,6 +322,36 @@ export default function AccountTab({ onSuccess, onError }: AccountTabProps) {
             startIcon={loading ? <CircularProgress size={20} /> : <LogoutIcon />}
           >
             {loading ? "Signing Out..." : "Sign Out"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Clear Cache Confirmation Dialog */}
+      <Dialog
+        open={showClearCacheDialog}
+        onClose={() => setShowClearCacheDialog(false)}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>Clear Local Cache?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            This will clear all locally cached data including session storage and cached queries.
+            The page will reload after clearing. You will remain logged in.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowClearCacheDialog(false)} color="inherit">
+            Cancel
+          </Button>
+          <Button
+            onClick={handleClearCache}
+            color="primary"
+            variant="contained"
+            disabled={clearingCache}
+            startIcon={clearingCache ? <CircularProgress size={20} /> : <CachedIcon />}
+          >
+            {clearingCache ? "Clearing..." : "Clear Cache"}
           </Button>
         </DialogActions>
       </Dialog>

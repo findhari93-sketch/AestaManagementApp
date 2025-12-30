@@ -219,6 +219,8 @@ export default function DailyMarketPaymentsTab({
           subcontract_id,
           expense_id,
           settlement_group_id,
+          payer_source,
+          payer_name,
           laborers!inner(name, laborer_type, labor_categories(name), labor_roles(name)),
           subcontracts(title),
           site_engineer_transactions!engineer_transaction_id(
@@ -264,6 +266,8 @@ export default function DailyMarketPaymentsTab({
           expense_id,
           subcontract_id,
           settlement_group_id,
+          payer_source,
+          payer_name,
           labor_roles(name),
           subcontracts(title),
           site_engineer_transactions!engineer_transaction_id(
@@ -348,9 +352,9 @@ export default function DailyMarketPaymentsTab({
           confirmedAt: r.site_engineer_transactions?.confirmed_at || null,
           settlementMode: r.site_engineer_transactions?.settlement_mode || null,
           cashReason: r.site_engineer_transactions?.notes || null,
-          // Money source tracking
-          moneySource: r.site_engineer_transactions?.money_source || null,
-          moneySourceName: r.site_engineer_transactions?.money_source_name || null,
+          // Money source tracking (fallback to payer_source for direct settlements)
+          moneySource: r.site_engineer_transactions?.money_source || r.payer_source || null,
+          moneySourceName: r.site_engineer_transactions?.money_source_name || r.payer_name || null,
           // Settlement group tracking (new architecture)
           settlementGroupId: r.settlement_group_id || null,
           settlementReference: r.settlement_groups?.settlement_reference || null,
@@ -389,9 +393,9 @@ export default function DailyMarketPaymentsTab({
           confirmedAt: r.site_engineer_transactions?.confirmed_at || null,
           settlementMode: r.site_engineer_transactions?.settlement_mode || null,
           cashReason: r.site_engineer_transactions?.notes || null,
-          // Money source tracking
-          moneySource: r.site_engineer_transactions?.money_source || null,
-          moneySourceName: r.site_engineer_transactions?.money_source_name || null,
+          // Money source tracking (fallback to payer_source for direct settlements)
+          moneySource: r.site_engineer_transactions?.money_source || r.payer_source || null,
+          moneySourceName: r.site_engineer_transactions?.money_source_name || r.payer_name || null,
           // Settlement group tracking (new architecture)
           settlementGroupId: r.settlement_group_id || null,
           settlementReference: r.settlement_groups?.settlement_reference || null,
@@ -537,8 +541,12 @@ export default function DailyMarketPaymentsTab({
     const pendingWithEngineerCount = pendingWithEngineerRecords.length;
     const totalDue = totalSalary - totalPaid;
     const progress = totalSalary > 0 ? (totalPaid / totalSalary) * 100 : 0;
-    const recordCount = allRecords.length;
-    const paidCount = allRecords.filter((r) => r.isPaid).length;
+    // Count unique settlement dates, not individual laborers (date-wise counting)
+    const recordCount = dateGroups.length;
+    const paidCount = dateGroups.filter(g =>
+      [...g.dailyRecords, ...g.marketRecords].length > 0 &&
+      [...g.dailyRecords, ...g.marketRecords].every(r => r.isPaid)
+    ).length;
 
     return {
       totalSalary,
@@ -606,39 +614,38 @@ export default function DailyMarketPaymentsTab({
   }, [dateGroups, filterStatus, filterSubcontract]);
 
   // Calculate money source summary from all paid/settled records
+  // Uses laborer-wise counting: transactionCount = individual laborer records
   const moneySourceSummaries = useMemo(() => {
     const summaryMap = new Map<string, MoneySourceSummary>();
 
-    // Collect all records
-    const allRecords = filteredDateGroups.flatMap(g => [...g.dailyRecords, ...g.marketRecords]);
+    // Get all paid/settled records across all date groups
+    const allPaidRecords = filteredDateGroups.flatMap(group =>
+      [...group.dailyRecords, ...group.marketRecords].filter(r => r.isPaid || r.paidVia === "engineer_wallet")
+    );
 
-    // Include ALL records that are paid or sent to engineer wallet
-    allRecords.forEach(record => {
-      const isPaidOrSettled = record.isPaid || record.paidVia === "engineer_wallet";
-      if (isPaidOrSettled) {
-        // Use "unspecified" for records without money source
-        const source = record.moneySource || "unspecified";
-        const key = (source === "other_site_money" || source === "custom")
-          ? `${source}:${record.moneySourceName || ""}`
-          : source;
+    // Aggregate by source
+    allPaidRecords.forEach(record => {
+      const source = record.moneySource || "unspecified";
+      const key = (source === "other_site_money" || source === "custom")
+        ? `${source}:${record.moneySourceName || ""}`
+        : source;
 
-        if (!summaryMap.has(key)) {
-          summaryMap.set(key, {
-            source: source as PayerSource,
-            displayName: source === "unspecified"
-              ? "Unspecified"
-              : getPayerSourceLabel(source as PayerSource, record.moneySourceName || undefined),
-            totalAmount: 0,
-            transactionCount: 0,
-            laborerCount: 0,
-          });
-        }
-
-        const summary = summaryMap.get(key)!;
-        summary.totalAmount += record.amount;
-        summary.transactionCount += 1;
-        summary.laborerCount += record.count || 1;
+      if (!summaryMap.has(key)) {
+        summaryMap.set(key, {
+          source: source as PayerSource,
+          displayName: source === "unspecified"
+            ? "Unspecified"
+            : getPayerSourceLabel(source as PayerSource, record.moneySourceName || undefined),
+          totalAmount: 0,
+          transactionCount: 0,
+          laborerCount: 0,
+        });
       }
+
+      const summary = summaryMap.get(key)!;
+      summary.totalAmount += record.amount;
+      summary.transactionCount += 1; // Count each laborer record
+      summary.laborerCount += record.count || 1;
     });
 
     // Sort by amount descending

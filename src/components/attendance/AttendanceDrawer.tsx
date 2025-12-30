@@ -3410,25 +3410,6 @@ export default function AttendanceDrawer({
           entry={existingTeaEntry}
           onSuccess={handleTeaShopDialogSuccess}
           initialDate={selectedDate}
-          preSelectedLaborers={Array.from(selectedLaborers.values())
-            .map((sel) => {
-              const lab = laborers.find((l) => l.id === sel.laborerId);
-              return lab
-                ? {
-                    id: lab.id,
-                    name: lab.name,
-                    laborer_type: lab.laborer_type || "daily",
-                  }
-                : null;
-            })
-            .filter(
-              (l): l is { id: string; name: string; laborer_type: string } =>
-                l !== null
-            )}
-          initialMarketCount={marketLaborers.reduce(
-            (sum, m) => sum + m.count,
-            0
-          )}
         />
       )}
 

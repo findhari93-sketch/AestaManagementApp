@@ -147,6 +147,95 @@ export function useMaterials(categoryId?: string | null) {
 }
 
 /**
+ * Pagination parameters for server-side pagination
+ */
+export interface PaginationParams {
+  pageIndex: number;
+  pageSize: number;
+}
+
+/**
+ * Paginated result with total count
+ */
+export interface PaginatedResult<T> {
+  data: T[];
+  totalCount: number;
+  pageCount: number;
+}
+
+/**
+ * Fetch materials with server-side pagination
+ * Use this for large datasets where client-side pagination is not efficient
+ */
+export function usePaginatedMaterials(
+  pagination: PaginationParams,
+  categoryId?: string | null,
+  searchTerm?: string
+) {
+  const supabase = createClient();
+  const { pageIndex, pageSize } = pagination;
+  const offset = pageIndex * pageSize;
+
+  return useQuery({
+    queryKey: ["materials", "paginated", { pageIndex, pageSize, categoryId, searchTerm }],
+    queryFn: async (): Promise<PaginatedResult<MaterialWithDetails>> => {
+      // First, get total count
+      let countQuery = supabase
+        .from("materials")
+        .select("*", { count: "exact", head: true })
+        .eq("is_active", true);
+
+      if (categoryId) {
+        countQuery = countQuery.eq("category_id", categoryId);
+      }
+
+      if (searchTerm && searchTerm.length >= 2) {
+        countQuery = countQuery.or(
+          `name.ilike.%${searchTerm}%,code.ilike.%${searchTerm}%,local_name.ilike.%${searchTerm}%`
+        );
+      }
+
+      const { count: totalCount, error: countError } = await countQuery;
+      if (countError) throw countError;
+
+      // Then, get paginated data
+      let dataQuery = supabase
+        .from("materials")
+        .select(
+          `
+          *,
+          category:material_categories(id, name, code),
+          brands:material_brands(id, brand_name, is_preferred, quality_rating, is_active)
+        `
+        )
+        .eq("is_active", true)
+        .order("name")
+        .range(offset, offset + pageSize - 1);
+
+      if (categoryId) {
+        dataQuery = dataQuery.eq("category_id", categoryId);
+      }
+
+      if (searchTerm && searchTerm.length >= 2) {
+        dataQuery = dataQuery.or(
+          `name.ilike.%${searchTerm}%,code.ilike.%${searchTerm}%,local_name.ilike.%${searchTerm}%`
+        );
+      }
+
+      const { data, error: dataError } = await dataQuery;
+      if (dataError) throw dataError;
+
+      return {
+        data: data as MaterialWithDetails[],
+        totalCount: totalCount || 0,
+        pageCount: Math.ceil((totalCount || 0) / pageSize),
+      };
+    },
+    placeholderData: (previousData) => previousData, // Keep previous data while loading
+  });
+}
+
+/**
  * Fetch a single material by ID
  */
 export function useMaterial(id: string | undefined) {

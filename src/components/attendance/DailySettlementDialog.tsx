@@ -44,6 +44,9 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useSite } from "@/contexts/SiteContext";
 import FileUploader, { UploadedFile } from "@/components/common/FileUploader";
 import dayjs from "dayjs";
+import { processSettlement } from "@/lib/services/settlementService";
+import type { SettlementRecord, PayerSource } from "@/types/settlement.types";
+import type { PaymentMode as ServicePaymentMode, PaymentChannel } from "@/types/payment.types";
 
 interface LaborerRecord {
   id: string;
@@ -194,36 +197,68 @@ export default function DailySettlementDialog({
     setError(null);
 
     try {
-      // Update daily_attendance records as paid
-      const laborerIds = Array.from(selectedLaborers);
-      if (laborerIds.length > 0) {
-        const { error: laborerUpdateError } = await supabase
-          .from("daily_attendance")
-          .update({
-            is_paid: true,
-            payment_mode: paymentMode === "bank" ? "bank_transfer" : paymentMode,
-            payment_proof_url: proofFile?.url || null,
-            payment_notes: notes || null,
-          })
-          .in("id", laborerIds);
-        if (laborerUpdateError) throw laborerUpdateError;
+      // Build SettlementRecord array from selected laborers
+      const settlementRecords: SettlementRecord[] = [];
+
+      // Add selected daily laborers
+      for (const laborerId of selectedLaborers) {
+        const laborer = pendingLaborers.find((l) => l.id === laborerId);
+        if (laborer) {
+          settlementRecords.push({
+            id: `daily-${laborer.id}`,
+            sourceType: "daily",
+            sourceId: laborer.id,
+            laborerName: laborer.laborer_name,
+            laborerType: laborer.laborer_type === "daily_wage" ? "daily" : "daily",
+            amount: laborer.daily_earnings,
+            date: dateSummary.date,
+            isPaid: false,
+          });
+        }
       }
 
-      // Update market_laborer_attendance records as paid
-      const marketIds = Array.from(selectedMarket)
-        .map((id) => pendingMarket.find((m) => m.id === id)?.originalDbId)
-        .filter((id): id is string => Boolean(id));
-      if (marketIds.length > 0) {
-        const { error: marketUpdateError } = await supabase
-          .from("market_laborer_attendance")
-          .update({
-            is_paid: true,
-            payment_mode: paymentMode === "bank" ? "bank_transfer" : paymentMode,
-            payment_proof_url: proofFile?.url || null,
-            payment_notes: notes || null,
-          })
-          .in("id", marketIds);
-        if (marketUpdateError) throw marketUpdateError;
+      // Add selected market laborers
+      for (const marketId of selectedMarket) {
+        const market = pendingMarket.find((m) => m.id === marketId);
+        if (market) {
+          settlementRecords.push({
+            id: `market-${market.originalDbId}`,
+            sourceType: "market",
+            sourceId: market.originalDbId,
+            laborerName: market.roleName,
+            laborerType: "market",
+            amount: market.dailyEarnings,
+            date: dateSummary.date,
+            isPaid: false,
+            role: market.roleName,
+          });
+        }
+      }
+
+      // Map payment mode to service format
+      const servicePaymentMode: ServicePaymentMode =
+        paymentMode === "bank" ? "net_banking" : paymentMode;
+
+      // Map payer type to payer source
+      const payerSource: PayerSource =
+        payerType === "company" ? "client_money" : "own_money";
+
+      // Use processSettlement to properly create settlement_group and update records
+      const result = await processSettlement(supabase, {
+        siteId: selectedSite.id,
+        records: settlementRecords,
+        totalAmount: totalSelectedAmount,
+        paymentMode: servicePaymentMode,
+        paymentChannel: "direct" as PaymentChannel,
+        payerSource: payerSource,
+        proofUrl: proofFile?.url,
+        notes: notes || undefined,
+        userId: userProfile.id,
+        userName: userProfile.name || userProfile.email || "Unknown",
+      });
+
+      if (!result.success) {
+        throw new Error(result.error || "Settlement failed");
       }
 
       onSuccess?.();

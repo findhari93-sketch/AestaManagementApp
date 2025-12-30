@@ -8,6 +8,7 @@
 import { QueryClient } from "@tanstack/react-query";
 import { queryKeys, cacheTTL } from "./keys";
 import { cleanupPersistedCache } from "./persistor";
+import { getTabCoordinator, TabMessage } from "@/lib/tab/coordinator";
 
 type SyncConfig = {
   enabled: boolean;
@@ -393,6 +394,9 @@ export class BackgroundSyncOrchestrator {
 // Singleton instance
 let syncOrchestratorInstance: BackgroundSyncOrchestrator | null = null;
 
+// Subscription cleanup for follower tabs
+let tabMessageUnsubscribe: (() => void) | null = null;
+
 /**
  * Get or create sync orchestrator instance
  */
@@ -413,11 +417,47 @@ export function getSyncOrchestrator(
 
 /**
  * Initialize background sync
+ * Only the leader tab runs active sync; followers listen for broadcasts
  */
 export function initBackgroundSync(
   queryClient: QueryClient,
   siteId?: string
 ): void {
+  const coordinator = getTabCoordinator();
+
+  // Clean up any existing tab message subscription
+  if (tabMessageUnsubscribe) {
+    tabMessageUnsubscribe();
+    tabMessageUnsubscribe = null;
+  }
+
+  // Check if this tab is the leader
+  if (coordinator && !coordinator.isLeader) {
+    // Follower tab: Listen for cache invalidation broadcasts from leader
+    console.log("[Sync] Not leader tab - listening for broadcasts only");
+
+    tabMessageUnsubscribe = coordinator.subscribe((message: TabMessage) => {
+      if (message.type === "CACHE_INVALIDATE" && message.queryKeys) {
+        // Invalidate the specified queries
+        message.queryKeys.forEach((queryKey) => {
+          queryClient.invalidateQueries({
+            queryKey: queryKey as unknown[],
+            refetchType: "active",
+          });
+        });
+      } else if (message.type === "SITE_CHANGED" && message.siteId !== siteId) {
+        // Site changed in another tab - clear our cache
+        console.log("[Sync] Site changed in leader tab, clearing cache");
+        queryClient.cancelQueries();
+        queryClient.clear();
+      }
+    });
+
+    return;
+  }
+
+  // Leader tab: Run active background sync
+  console.log("[Sync] Leader tab - starting active sync");
   const orchestrator = getSyncOrchestrator(queryClient);
   orchestrator?.start(siteId);
 }
@@ -426,6 +466,13 @@ export function initBackgroundSync(
  * Stop background sync
  */
 export function stopBackgroundSync(): void {
+  // Clean up tab message subscription if we're a follower
+  if (tabMessageUnsubscribe) {
+    tabMessageUnsubscribe();
+    tabMessageUnsubscribe = null;
+  }
+
+  // Stop the orchestrator if we're the leader
   syncOrchestratorInstance?.stop();
 }
 

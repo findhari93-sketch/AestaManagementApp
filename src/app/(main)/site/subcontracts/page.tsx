@@ -56,6 +56,8 @@ import type {
   PaymentType,
   PaymentChannel,
 } from "@/types/database.types";
+import { calculateSubcontractTotals } from "@/lib/services/subcontractService";
+import { withTimeout, TIMEOUTS } from "@/lib/utils/timeout";
 import dayjs from "dayjs";
 
 interface SubcontractWithDetails extends Subcontract {
@@ -64,6 +66,7 @@ interface SubcontractWithDetails extends Subcontract {
   total_paid?: number;
   balance_due?: number;
   completion_percentage?: number;
+  record_count?: number;
 }
 
 export default function SiteSubcontractsPage() {
@@ -157,7 +160,7 @@ export default function SiteSubcontractsPage() {
     fetchOptions();
   }, []);
 
-  // Fetch subcontracts for selected site
+  // Fetch subcontracts for selected site using shared service
   const fetchSubcontracts = async () => {
     if (!selectedSite) return;
 
@@ -179,74 +182,38 @@ export default function SiteSubcontractsPage() {
 
       if (error) throw error;
 
-      // Fetch payments for each subcontract (including labor payments and cleared expenses)
-      const subcontractsWithDetails: SubcontractWithDetails[] =
-        await Promise.all(
-          (data || []).map(async (subcontract: any) => {
-            // 1. Get direct subcontract_payments
-            const { data: payments } = await supabase
-              .from("subcontract_payments")
-              .select("amount")
-              .eq("subcontract_id", subcontract.id);
+      // Use shared service for consistent calculation across all pages
+      // totalPaid = subcontract_payments + labor_payments + cleared expenses
+      const subcontractIds = (data || []).map((s: any) => s.id);
+      const totalsMap = await calculateSubcontractTotals(supabase, subcontractIds);
 
-            const directPaid =
-              (payments as { amount: number }[] | null)?.reduce(
-                (sum, p) => sum + p.amount,
-                0
-              ) || 0;
+      // Merge with subcontract data
+      const subcontractsWithDetails: SubcontractWithDetails[] = (data || []).map(
+        (subcontract: any) => {
+          const totals = totalsMap.get(subcontract.id);
 
-            // 2. Get labor_payments linked to this subcontract
-            const { data: laborPaymentsData } = await supabase
-              .from("labor_payments")
-              .select("amount")
-              .eq("subcontract_id", subcontract.id);
+          // Lookup team and laborer names from already-fetched data
+          const teamName = subcontract.team_id
+            ? teams.find((t) => t.id === subcontract.team_id)?.name
+            : undefined;
+          const laborerName = subcontract.laborer_id
+            ? laborers.find((l) => l.id === subcontract.laborer_id)?.name
+            : undefined;
 
-            const laborPaid =
-              (laborPaymentsData as { amount: number }[] | null)?.reduce(
-                (sum, p) => sum + p.amount,
-                0
-              ) || 0;
-
-            // 3. Get cleared expenses linked to this subcontract
-            const { data: expensesData } = await supabase
-              .from("expenses")
-              .select("amount")
-              .eq("contract_id", subcontract.id)
-              .eq("is_deleted", false)
-              .eq("is_cleared", true);
-
-            const expensesPaid =
-              (expensesData as { amount: number }[] | null)?.reduce(
-                (sum, e) => sum + e.amount,
-                0
-              ) || 0;
-
-            // Total = all three sources
-            const totalPaid = directPaid + laborPaid + expensesPaid;
-            const balanceDue = subcontract.total_value - totalPaid;
-            const completionPercentage =
+          return {
+            ...subcontract,
+            team_name: teamName,
+            laborer_name: laborerName,
+            total_paid: totals?.totalPaid || 0,
+            balance_due: totals?.balance || subcontract.total_value || 0,
+            completion_percentage:
               subcontract.total_value > 0
-                ? (totalPaid / subcontract.total_value) * 100
-                : 0;
-
-            // Lookup team and laborer names from already-fetched data
-            const teamName = subcontract.team_id
-              ? teams.find((t) => t.id === subcontract.team_id)?.name
-              : undefined;
-            const laborerName = subcontract.laborer_id
-              ? laborers.find((l) => l.id === subcontract.laborer_id)?.name
-              : undefined;
-
-            return {
-              ...subcontract,
-              team_name: teamName,
-              laborer_name: laborerName,
-              total_paid: totalPaid,
-              balance_due: balanceDue,
-              completion_percentage: completionPercentage,
-            };
-          })
-        );
+                ? ((totals?.totalPaid || 0) / subcontract.total_value) * 100
+                : 0,
+            record_count: totals?.totalRecordCount || 0,
+          };
+        }
+      );
 
       setSubcontracts(subcontractsWithDetails);
     } catch (err: any) {
@@ -365,17 +332,23 @@ export default function SiteSubcontractsPage() {
       };
 
       if (editingSubcontract) {
-        const { error } = await (supabase.from("subcontracts") as any)
-          .update(subcontractData)
-          .eq("id", editingSubcontract.id);
+        const result = await withTimeout(
+          (supabase.from("subcontracts") as any)
+            .update(subcontractData)
+            .eq("id", editingSubcontract.id),
+          TIMEOUTS.DATABASE_OPERATION,
+          "Update operation timed out. Please check your connection and try again."
+        ) as { error: any };
 
-        if (error) throw error;
+        if (result.error) throw result.error;
       } else {
-        const { error } = await (supabase.from("subcontracts") as any).insert(
-          subcontractData
-        );
+        const result = await withTimeout(
+          (supabase.from("subcontracts") as any).insert(subcontractData),
+          TIMEOUTS.DATABASE_OPERATION,
+          "Save operation timed out. Please check your connection and try again."
+        ) as { error: any };
 
-        if (error) throw error;
+        if (result.error) throw result.error;
       }
 
       await fetchSubcontracts();
@@ -393,11 +366,15 @@ export default function SiteSubcontractsPage() {
 
     setLoading(true);
     try {
-      const { error } = await (supabase.from("subcontracts") as any)
-        .delete()
-        .eq("id", id);
+      const result = await withTimeout(
+        (supabase.from("subcontracts") as any)
+          .delete()
+          .eq("id", id),
+        TIMEOUTS.DATABASE_OPERATION,
+        "Delete operation timed out. Please check your connection and try again."
+      ) as { error: any };
 
-      if (error) throw error;
+      if (result.error) throw result.error;
       await fetchSubcontracts();
     } catch (err: any) {
       console.error("Error deleting subcontract:", err);
@@ -453,27 +430,29 @@ export default function SiteSubcontractsPage() {
 
       // If payment is via site engineer, create a wallet transaction first
       if (paymentForm.payment_channel === "via_site_engineer" && selectedSiteEngineer) {
-        const { data: txData, error: txError } = await (
-          supabase.from("site_engineer_transactions") as any
-        ).insert({
-          user_id: selectedSiteEngineer,
-          transaction_type: "spent_on_behalf",
-          amount: paymentForm.amount,
-          transaction_date: paymentForm.payment_date,
-          site_id: selectedSite.id,
-          description: `Payment to Mesthri - ${selectedSubcontract.title}`,
-          recipient_type: "mesthri",
-          recipient_id: selectedSubcontract.team_id,
-          payment_mode: paymentForm.payment_mode,
-          related_subcontract_id: selectedSubcontract.id,
-          is_settled: false,
-          notes: paymentForm.notes || null,
-          recorded_by: userProfile.name || userProfile.email,
-          recorded_by_user_id: userProfile.id,
-        }).select("id").single();
+        const txResult = await withTimeout(
+          (supabase.from("site_engineer_transactions") as any).insert({
+            user_id: selectedSiteEngineer,
+            transaction_type: "spent_on_behalf",
+            amount: paymentForm.amount,
+            transaction_date: paymentForm.payment_date,
+            site_id: selectedSite.id,
+            description: `Payment to Mesthri - ${selectedSubcontract.title}`,
+            recipient_type: "mesthri",
+            recipient_id: selectedSubcontract.team_id,
+            payment_mode: paymentForm.payment_mode,
+            related_subcontract_id: selectedSubcontract.id,
+            is_settled: false,
+            notes: paymentForm.notes || null,
+            recorded_by: userProfile.name || userProfile.email,
+            recorded_by_user_id: userProfile.id,
+          }).select("id").single(),
+          TIMEOUTS.DATABASE_OPERATION,
+          "Transaction creation timed out. Please check your connection and try again."
+        ) as { data: { id: string } | null; error: any };
 
-        if (txError) throw txError;
-        siteEngineerTransactionId = txData?.id || null;
+        if (txResult.error) throw txResult.error;
+        siteEngineerTransactionId = txResult.data?.id || null;
       }
 
       // Get the payer name based on channel
@@ -491,35 +470,41 @@ export default function SiteSubcontractsPage() {
       const balanceAfterPayment = (selectedSubcontract.balance_due || 0) - paymentForm.amount;
 
       // Record the payment with enhanced fields
-      const { error } = await (
-        supabase.from("subcontract_payments") as any
-      ).insert({
-        subcontract_id: selectedSubcontract.id,
-        payment_type: paymentForm.payment_type,
-        amount: paymentForm.amount,
-        payment_date: paymentForm.payment_date,
-        payment_mode: paymentForm.payment_mode,
-        payment_channel: paymentForm.payment_channel,
-        paid_by: paidByName,
-        paid_by_user_id: paymentForm.payment_channel === "via_site_engineer" ? selectedSiteEngineer : userProfile.id,
-        period_from_date: paymentForm.period_from_date,
-        period_to_date: paymentForm.period_to_date,
-        balance_after_payment: balanceAfterPayment,
-        site_engineer_transaction_id: siteEngineerTransactionId,
-        recorded_by: userProfile.name || userProfile.email,
-        recorded_by_user_id: userProfile.id,
-        notes: paymentForm.notes || null,
-      });
+      const paymentResult = await withTimeout(
+        (supabase.from("subcontract_payments") as any).insert({
+          subcontract_id: selectedSubcontract.id,
+          payment_type: paymentForm.payment_type,
+          amount: paymentForm.amount,
+          payment_date: paymentForm.payment_date,
+          payment_mode: paymentForm.payment_mode,
+          payment_channel: paymentForm.payment_channel,
+          paid_by: paidByName,
+          paid_by_user_id: paymentForm.payment_channel === "via_site_engineer" ? selectedSiteEngineer : userProfile.id,
+          period_from_date: paymentForm.period_from_date,
+          period_to_date: paymentForm.period_to_date,
+          balance_after_payment: balanceAfterPayment,
+          site_engineer_transaction_id: siteEngineerTransactionId,
+          recorded_by: userProfile.name || userProfile.email,
+          recorded_by_user_id: userProfile.id,
+          notes: paymentForm.notes || null,
+        }),
+        TIMEOUTS.DATABASE_OPERATION,
+        "Payment recording timed out. Please check your connection and try again."
+      ) as { error: any };
 
-      if (error) throw error;
+      if (paymentResult.error) throw paymentResult.error;
 
       // Update subcontract status if fully paid
       const newTotalPaid =
         (selectedSubcontract.total_paid || 0) + paymentForm.amount;
       if (newTotalPaid >= selectedSubcontract.total_value) {
-        await (supabase.from("subcontracts") as any)
-          .update({ status: "completed" })
-          .eq("id", selectedSubcontract.id);
+        await withTimeout(
+          (supabase.from("subcontracts") as any)
+            .update({ status: "completed" })
+            .eq("id", selectedSubcontract.id),
+          TIMEOUTS.DATABASE_OPERATION,
+          "Status update timed out."
+        );
       }
 
       await fetchSubcontracts();
@@ -584,7 +569,7 @@ export default function SiteSubcontractsPage() {
         size: isMobile ? 80 : 150,
         Cell: ({ cell }) => (
           <Typography variant="body2" fontWeight={700} sx={{ fontSize: isMobile ? '0.7rem' : 'inherit' }}>
-            ₹{cell.getValue<number>().toLocaleString()}
+            ₹{cell.getValue<number>().toLocaleString('en-IN')}
           </Typography>
         ),
       },
@@ -594,7 +579,7 @@ export default function SiteSubcontractsPage() {
         size: isMobile ? 70 : 120,
         Cell: ({ cell }) => (
           <Typography variant="body2" fontWeight={600} color="success.main" sx={{ fontSize: isMobile ? '0.7rem' : 'inherit' }}>
-            ₹{(cell.getValue<number>() || 0).toLocaleString()}
+            ₹{(cell.getValue<number>() || 0).toLocaleString('en-IN')}
           </Typography>
         ),
       },
@@ -604,7 +589,7 @@ export default function SiteSubcontractsPage() {
         size: isMobile ? 70 : 120,
         Cell: ({ cell }) => (
           <Typography variant="body2" fontWeight={600} color="error.main" sx={{ fontSize: isMobile ? '0.7rem' : 'inherit' }}>
-            ₹{(cell.getValue<number>() || 0).toLocaleString()}
+            ₹{(cell.getValue<number>() || 0).toLocaleString('en-IN')}
           </Typography>
         ),
       },
@@ -718,8 +703,12 @@ export default function SiteSubcontractsPage() {
     const completed = subcontracts.filter(
       (c) => c.status === "completed"
     ).length;
+    const recordCount = subcontracts.reduce(
+      (sum, c) => sum + (c.record_count || 0),
+      0
+    );
 
-    return { total, paid, due, active, completed, count: subcontracts.length };
+    return { total, paid, due, active, completed, count: subcontracts.length, recordCount };
   }, [subcontracts]);
 
   // Show message if no site selected
@@ -784,7 +773,7 @@ export default function SiteSubcontractsPage() {
                 Subcontract Value
               </Typography>
               <Typography variant="h5" fontWeight={700}>
-                ₹{stats.total.toLocaleString()}
+                ₹{stats.total.toLocaleString('en-IN')}
               </Typography>
             </CardContent>
           </Card>
@@ -796,7 +785,7 @@ export default function SiteSubcontractsPage() {
                 Total Paid
               </Typography>
               <Typography variant="h5" fontWeight={700} color="success.main">
-                ₹{stats.paid.toLocaleString()}
+                ₹{stats.paid.toLocaleString('en-IN')}
               </Typography>
             </CardContent>
           </Card>
@@ -808,7 +797,19 @@ export default function SiteSubcontractsPage() {
                 Balance Due
               </Typography>
               <Typography variant="h5" fontWeight={700} color="error.main">
-                ₹{stats.due.toLocaleString()}
+                ₹{stats.due.toLocaleString('en-IN')}
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid size={{ xs: 12, sm: 6, md: 2.4 }}>
+          <Card>
+            <CardContent>
+              <Typography variant="body2" color="text.secondary">
+                Payment Records
+              </Typography>
+              <Typography variant="h5" fontWeight={700} color="info.main">
+                {stats.recordCount}
               </Typography>
             </CardContent>
           </Card>
@@ -848,6 +849,7 @@ export default function SiteSubcontractsPage() {
         columns={columns}
         data={subcontracts}
         isLoading={loading}
+        showRecordCount
         enableExpanding={!isMobile}
         pinnedColumns={{
           left: ["title"],
@@ -1112,8 +1114,8 @@ export default function SiteSubcontractsPage() {
                       >
                         {form.rate_per_unit > 0 && form.total_units > 0 ? (
                           <>
-                            ₹{form.rate_per_unit.toLocaleString()} ×{" "}
-                            {form.total_units.toLocaleString()}{" "}
+                            ₹{form.rate_per_unit.toLocaleString('en-IN')} ×{" "}
+                            {form.total_units.toLocaleString('en-IN')}{" "}
                             {form.measurement_unit}
                           </>
                         ) : (
@@ -1126,7 +1128,7 @@ export default function SiteSubcontractsPage() {
                       fontWeight={700}
                       color="primary.main"
                     >
-                      ₹{form.total_value.toLocaleString()}
+                      ₹{form.total_value.toLocaleString('en-IN')}
                     </Typography>
                   </Box>
                 </Paper>
@@ -1277,7 +1279,7 @@ export default function SiteSubcontractsPage() {
                     Subcontract Value
                   </Typography>
                   <Typography variant="h6" fontWeight={700}>
-                    ₹{selectedSubcontract.total_value.toLocaleString()}
+                    ₹{selectedSubcontract.total_value.toLocaleString('en-IN')}
                   </Typography>
                 </Grid>
                 <Grid size={{ xs: 12, sm: 4 }}>
@@ -1285,7 +1287,7 @@ export default function SiteSubcontractsPage() {
                     Paid
                   </Typography>
                   <Typography variant="h6" color="success.main">
-                    ₹{(selectedSubcontract.total_paid || 0).toLocaleString()}
+                    ₹{(selectedSubcontract.total_paid || 0).toLocaleString('en-IN')}
                   </Typography>
                 </Grid>
                 <Grid size={{ xs: 12, sm: 4 }}>
@@ -1293,7 +1295,7 @@ export default function SiteSubcontractsPage() {
                     Balance
                   </Typography>
                   <Typography variant="h6" color="error.main">
-                    ₹{(selectedSubcontract.balance_due || 0).toLocaleString()}
+                    ₹{(selectedSubcontract.balance_due || 0).toLocaleString('en-IN')}
                   </Typography>
                 </Grid>
               </Grid>
@@ -1355,9 +1357,9 @@ export default function SiteSubcontractsPage() {
                   )}
                 </Typography>
                 <Typography variant="caption">
-                  Contract Value: ₹{selectedSubcontract.total_value.toLocaleString()} |
-                  Paid: ₹{(selectedSubcontract.total_paid || 0).toLocaleString()} |
-                  Balance Due: ₹{(selectedSubcontract.balance_due || 0).toLocaleString()}
+                  Contract Value: ₹{selectedSubcontract.total_value.toLocaleString('en-IN')} |
+                  Paid: ₹{(selectedSubcontract.total_paid || 0).toLocaleString('en-IN')} |
+                  Balance Due: ₹{(selectedSubcontract.balance_due || 0).toLocaleString('en-IN')}
                 </Typography>
               </Alert>
 
@@ -1411,7 +1413,7 @@ export default function SiteSubcontractsPage() {
               {paymentForm.payment_channel === "via_site_engineer" && (
                 <Alert severity="warning" sx={{ py: 0.5 }}>
                   <Typography variant="caption">
-                    This will automatically deduct ₹{paymentForm.amount.toLocaleString() || 0} from the selected engineer&apos;s wallet balance.
+                    This will automatically deduct ₹{paymentForm.amount.toLocaleString('en-IN') || 0} from the selected engineer&apos;s wallet balance.
                   </Typography>
                 </Alert>
               )}
@@ -1553,7 +1555,7 @@ export default function SiteSubcontractsPage() {
                         Current Balance
                       </Typography>
                       <Typography variant="body1" fontWeight={600} color="error.main">
-                        ₹{(selectedSubcontract.balance_due || 0).toLocaleString()}
+                        ₹{(selectedSubcontract.balance_due || 0).toLocaleString('en-IN')}
                       </Typography>
                     </Grid>
                     <Grid size={{ xs: 6 }}>
@@ -1565,7 +1567,7 @@ export default function SiteSubcontractsPage() {
                         fontWeight={600}
                         color={(selectedSubcontract.balance_due || 0) - paymentForm.amount <= 0 ? "success.main" : "warning.main"}
                       >
-                        ₹{Math.max(0, (selectedSubcontract.balance_due || 0) - paymentForm.amount).toLocaleString()}
+                        ₹{Math.max(0, (selectedSubcontract.balance_due || 0) - paymentForm.amount).toLocaleString('en-IN')}
                       </Typography>
                     </Grid>
                   </Grid>

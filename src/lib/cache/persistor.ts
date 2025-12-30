@@ -11,10 +11,13 @@ import {
 } from "@tanstack/react-query-persist-client";
 import { get, set, del, clear } from "idb-keyval";
 import { getCacheTTL, shouldPersistQuery } from "./keys";
+import { getTabCoordinator } from "@/lib/tab/coordinator";
 
 const CACHE_VERSION = 1;
 const CACHE_KEY = `aesta-query-cache-v${CACHE_VERSION}`;
 const MAX_AGE = 90 * 24 * 60 * 60 * 1000; // 90 days max retention
+const RESTORE_TIMEOUT = 10000; // 10 seconds for restore (increased for multi-tab scenarios)
+const MAX_RESTORE_RETRIES = 3;
 
 /**
  * Create an IndexedDB persister with automatic cleanup
@@ -23,6 +26,13 @@ export function createIDBPersister(): Persister {
   return {
     persistClient: async (client: PersistedClient) => {
       try {
+        // Only leader tab should write to IndexedDB to prevent conflicts
+        const coordinator = getTabCoordinator();
+        if (coordinator && !coordinator.isLeader) {
+          // Follower tabs skip writes - leader will handle persistence
+          return;
+        }
+
         // Filter out queries that shouldn't be persisted
         const filteredClient: PersistedClient = {
           ...client,
@@ -54,10 +64,8 @@ export function createIDBPersister(): Persister {
     },
 
     restoreClient: async () => {
-      // Add timeout to prevent hanging if IndexedDB is slow/locked
-      const RESTORE_TIMEOUT = 5000; // 5 seconds max for slower connections
-
-      const restorePromise = (async () => {
+      // Retry logic for restore with exponential backoff
+      const attemptRestore = async (attempt: number): Promise<PersistedClient | undefined> => {
         try {
           const client = await get<PersistedClient>(CACHE_KEY);
 
@@ -111,15 +119,31 @@ export function createIDBPersister(): Persister {
 
           return filteredClient;
         } catch (error) {
-          console.error("Failed to restore query cache:", error);
+          // Retry on failure with exponential backoff
+          if (attempt < MAX_RESTORE_RETRIES) {
+            const delay = Math.min(1000 * Math.pow(2, attempt), 5000);
+            console.warn(`Cache restore attempt ${attempt + 1} failed, retrying in ${delay}ms...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+            return attemptRestore(attempt + 1);
+          }
+          console.error("Failed to restore query cache after retries:", error);
           return undefined;
         }
-      })();
+      };
+
+      const restorePromise = attemptRestore(0);
 
       // Race between restore and timeout
       const timeoutPromise = new Promise<undefined>((resolve) => {
-        setTimeout(() => {
-          console.warn("Cache restoration timed out, starting fresh");
+        setTimeout(async () => {
+          console.warn("Cache restoration timed out, clearing potentially corrupted cache and starting fresh");
+          try {
+            // Clear the potentially corrupted cache to prevent future timeouts
+            await clear();
+            console.log("Cache cleared due to restoration timeout");
+          } catch (clearError) {
+            console.error("Failed to clear cache after timeout:", clearError);
+          }
           resolve(undefined);
         }, RESTORE_TIMEOUT);
       });
@@ -146,6 +170,41 @@ export async function clearPersistedCache(): Promise<void> {
     console.log("Persisted cache cleared");
   } catch (error) {
     console.error("Failed to clear persisted cache:", error);
+  }
+}
+
+/**
+ * Force clear all application cache and storage
+ * Use this when users encounter persistent issues with stale/corrupted data
+ * Returns true if successful, false otherwise
+ */
+export async function forceResetAllCache(): Promise<boolean> {
+  try {
+    // Clear IndexedDB via idb-keyval
+    await clear();
+
+    // Clear sessionStorage (tab-specific data)
+    if (typeof window !== "undefined") {
+      sessionStorage.clear();
+    }
+
+    // Clear any local storage items related to the app
+    if (typeof window !== "undefined") {
+      const keysToRemove: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && (key.startsWith("aesta") || key.startsWith("sb-") || key.includes("supabase"))) {
+          keysToRemove.push(key);
+        }
+      }
+      keysToRemove.forEach(key => localStorage.removeItem(key));
+    }
+
+    console.log("All application cache has been cleared");
+    return true;
+  } catch (error) {
+    console.error("Failed to force reset cache:", error);
+    return false;
   }
 }
 

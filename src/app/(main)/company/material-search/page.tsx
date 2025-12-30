@@ -37,7 +37,10 @@ import {
   ShoppingCart as OrderIcon,
   FilterList as FilterIcon,
 } from "@mui/icons-material";
+import { useRouter } from "next/navigation";
 import PageHeader from "@/components/layout/PageHeader";
+import Breadcrumbs from "@/components/layout/Breadcrumbs";
+import RelatedPages from "@/components/layout/RelatedPages";
 import { useAuth } from "@/contexts/AuthContext";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import {
@@ -276,6 +279,7 @@ export default function MaterialSearchPage() {
 
   const { userProfile } = useAuth();
   const isMobile = useIsMobile();
+  const router = useRouter();
 
   // Fetch data
   const { data: materials = [], isLoading: materialsLoading } = useMaterials(
@@ -336,9 +340,20 @@ export default function MaterialSearchPage() {
   }, []);
 
   const handleOrder = useCallback((vendorId: string) => {
-    // TODO: Navigate to create PO page with vendor pre-selected
-    console.log("Create order for vendor:", vendorId);
-  }, []);
+    if (!selectedMaterial) return;
+
+    // Build URL params for pre-filling the PO page
+    const params = new URLSearchParams({
+      new: "true",
+      vendorId,
+      materialId: selectedMaterial.id,
+      materialName: selectedMaterial.name,
+      unit: selectedMaterial.unit,
+      source: "material-search",
+    });
+
+    router.push(`/site/purchase-orders?${params.toString()}`);
+  }, [selectedMaterial, router]);
 
   // Get parent categories only
   const parentCategories = useMemo(
@@ -348,10 +363,14 @@ export default function MaterialSearchPage() {
 
   return (
     <Box>
+      <Breadcrumbs />
+
       <PageHeader
-        title="Material Search"
-        subtitle="Search materials and compare vendor prices"
+        title="Price Comparison"
+        subtitle="Search materials and compare vendor prices across suppliers"
       />
+
+      <RelatedPages />
 
       <Grid container spacing={3}>
         {/* Search & Filters Panel */}

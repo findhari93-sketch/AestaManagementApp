@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "audit:settlements": "node scripts/audit-contract-settlements.mjs --site \"Srinivasan\" --from 2025-11-01 --to 2025-12-31"
   },
   "dependencies": {
     "@emotion/cache": "^11.14.0",

@@ -247,6 +247,12 @@ export default function UsersManagement() {
         accessorKey: "role",
         header: "Role",
         size: 130,
+        filterVariant: "select",
+        filterSelectOptions: [
+          { value: "admin", label: "ADMIN" },
+          { value: "office", label: "OFFICE" },
+          { value: "site_engineer", label: "SITE ENGINEER" },
+        ],
         Cell: ({ cell }) => {
           const role = cell.getValue<string>();
           const colorMap: Record<string, any> = {
@@ -325,6 +331,12 @@ export default function UsersManagement() {
         accessorKey: "status",
         header: "Status",
         size: 100,
+        filterVariant: "select",
+        filterSelectOptions: [
+          { value: "active", label: "ACTIVE" },
+          { value: "inactive", label: "INACTIVE" },
+          { value: "suspended", label: "SUSPENDED" },
+        ],
         Cell: ({ cell }) => (
           <Chip
             label={cell.getValue<string>().toUpperCase()}

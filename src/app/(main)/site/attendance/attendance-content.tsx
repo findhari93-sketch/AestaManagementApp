@@ -4590,6 +4590,7 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
           columns={detailedColumns}
           data={attendanceRecords}
           isLoading={loading}
+          showRecordCount
         />
       )}
 

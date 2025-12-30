@@ -55,20 +55,15 @@ import {
   AccountBalance as BalanceIcon,
   Link as LinkIcon,
 } from "@mui/icons-material";
+import {
+  getSiteSubcontractTotals,
+  type SubcontractTotals,
+} from "@/lib/services/subcontractService";
 
 interface SitePayer {
   id: string;
   name: string;
   is_active: boolean;
-}
-
-interface SubcontractSummary {
-  id: string;
-  title: string;
-  totalValue: number;
-  totalPaid: number;
-  balance: number;
-  status: string;
 }
 
 interface ExpenseWithCategory extends Expense {
@@ -103,7 +98,7 @@ export default function ExpensesPage() {
   const [sitePayers, setSitePayers] = useState<SitePayer[]>([]);
 
   // Subcontract summary state
-  const [subcontracts, setSubcontracts] = useState<SubcontractSummary[]>([]);
+  const [subcontracts, setSubcontracts] = useState<SubcontractTotals[]>([]);
   const [subcontractsLoading, setSubcontractsLoading] = useState(false);
 
   // Redirect dialog state for salary expenses that can't be deleted directly
@@ -138,7 +133,7 @@ export default function ExpensesPage() {
     fetchCategories();
   }, []);
 
-  // Fetch subcontracts with payment totals
+  // Fetch subcontracts with payment totals using shared service
   const fetchSubcontracts = async () => {
     if (!selectedSite?.id) {
       setSubcontracts([]);
@@ -147,51 +142,14 @@ export default function ExpensesPage() {
 
     setSubcontractsLoading(true);
     try {
-      // Fetch active/on_hold subcontracts
-      const { data: subcontractsData, error: scError } = await supabase
-        .from("subcontracts")
-        .select("id, title, total_value, status")
-        .eq("site_id", selectedSite.id)
-        .in("status", ["active", "on_hold"])
-        .order("title");
-
-      if (scError) throw scError;
-
-      // Calculate paid amounts for each subcontract
-      const summaries: SubcontractSummary[] = await Promise.all(
-        (subcontractsData || []).map(async (sc: any) => {
-          // Get all expenses linked to this subcontract from v_all_expenses
-          // This includes:
-          // - Salary settlements (from settlement_groups) which represent labor payments
-          // - Material, machinery, and other expenses linked to the subcontract
-          // NOTE: We removed the is_cleared filter because salary settlements should count
-          // as "paid" even if the engineer hasn't been reimbursed yet
-          const { data: expensesData } = await (supabase as any)
-            .from("v_all_expenses")
-            .select("amount")
-            .eq("contract_id", sc.id)
-            .eq("is_deleted", false);
-
-          const expensesPaid =
-            expensesData?.reduce(
-              (sum: number, e: any) => sum + (e.amount || 0),
-              0
-            ) || 0;
-
-          // Total paid = all expenses linked to this subcontract (includes salary settlements)
-          const totalPaid = expensesPaid;
-
-          return {
-            id: sc.id,
-            title: sc.title,
-            totalValue: sc.total_value || 0,
-            totalPaid,
-            balance: (sc.total_value || 0) - totalPaid,
-            status: sc.status,
-          };
-        })
+      // Use shared service for consistent calculation across all pages
+      // totalPaid = subcontract_payments + settlement_groups + cleared expenses
+      // Include ALL subcontract statuses to match payments page totals
+      const summaries = await getSiteSubcontractTotals(
+        supabase,
+        selectedSite.id,
+        ["active", "on_hold", "completed", "draft", "cancelled"]
       );
-
       setSubcontracts(summaries);
     } catch (err) {
       console.error("Error fetching subcontracts:", err);
@@ -390,10 +348,17 @@ export default function ExpensesPage() {
 
   const stats = useMemo(() => {
     const total = expenses.reduce((s, e) => s + e.amount, 0);
-    const cleared = expenses
-      .filter((e) => e.is_cleared)
-      .reduce((s, e) => s + e.amount, 0);
-    return { total, cleared, pending: total - cleared };
+    const clearedExpenses = expenses.filter((e) => e.is_cleared);
+    const cleared = clearedExpenses.reduce((s, e) => s + e.amount, 0);
+    const pendingExpenses = expenses.filter((e) => !e.is_cleared);
+    return {
+      total,
+      cleared,
+      pending: total - cleared,
+      totalCount: expenses.length,
+      clearedCount: clearedExpenses.length,
+      pendingCount: pendingExpenses.length,
+    };
   }, [expenses]);
 
   const columns = useMemo<MRT_ColumnDef<ExpenseWithCategory>[]>(() => {
@@ -461,6 +426,12 @@ export default function ExpensesPage() {
         accessorKey: "module",
         header: "Module",
         size: 100,
+        filterVariant: "select",
+        filterSelectOptions: [
+          { value: "salary", label: "SALARY" },
+          { value: "material", label: "MATERIAL" },
+          { value: "general", label: "GENERAL" },
+        ],
         Cell: ({ cell }) => (
           <Chip label={cell.getValue<string>().toUpperCase()} size="small" />
         ),
@@ -498,7 +469,7 @@ export default function ExpensesPage() {
         size: 120,
         Cell: ({ cell }) => (
           <Typography fontWeight={600} color="error.main">
-            ₹{cell.getValue<number>().toLocaleString()}
+            ₹{cell.getValue<number>().toLocaleString('en-IN')}
           </Typography>
         ),
       },
@@ -553,6 +524,11 @@ export default function ExpensesPage() {
         accessorKey: "is_cleared",
         header: "Status",
         size: 150,
+        filterVariant: "select",
+        filterSelectOptions: [
+          { value: "true", label: "Cleared" },
+          { value: "false", label: "Pending" },
+        ],
         Cell: ({ cell, row }) => {
           const isCleared = cell.getValue<boolean>();
           const description = row.original.description || "";
@@ -635,7 +611,10 @@ export default function ExpensesPage() {
                 </Typography>
               </Box>
               <Typography variant="h4" fontWeight={700}>
-                ₹{stats.total.toLocaleString()}
+                ₹{stats.total.toLocaleString('en-IN')}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                ({stats.totalCount} records)
               </Typography>
             </CardContent>
           </Card>
@@ -647,7 +626,10 @@ export default function ExpensesPage() {
                 Cleared
               </Typography>
               <Typography variant="h4" fontWeight={700} color="success.main">
-                ₹{stats.cleared.toLocaleString()}
+                ₹{stats.cleared.toLocaleString('en-IN')}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                ({stats.clearedCount} records)
               </Typography>
             </CardContent>
           </Card>
@@ -659,7 +641,10 @@ export default function ExpensesPage() {
                 Pending
               </Typography>
               <Typography variant="h4" fontWeight={700} color="warning.main">
-                ₹{stats.pending.toLocaleString()}
+                ₹{stats.pending.toLocaleString('en-IN')}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                ({stats.pendingCount} records)
               </Typography>
             </CardContent>
           </Card>
@@ -705,13 +690,14 @@ export default function ExpensesPage() {
                       <th>Subcontract</th>
                       <th style={{ textAlign: "right" }}>Total Value</th>
                       <th style={{ textAlign: "right" }}>Paid</th>
+                      <th style={{ textAlign: "right" }}>Records</th>
                       <th style={{ textAlign: "right" }}>Balance</th>
                       <th>Status</th>
                     </tr>
                   </thead>
                   <tbody>
                     {subcontracts.map((sc) => (
-                      <tr key={sc.id}>
+                      <tr key={sc.subcontractId}>
                         <td>
                           <Typography variant="body2" fontWeight={500}>
                             {sc.title}
@@ -719,12 +705,17 @@ export default function ExpensesPage() {
                         </td>
                         <td style={{ textAlign: "right" }}>
                           <Typography variant="body2">
-                            Rs.{sc.totalValue.toLocaleString()}
+                            Rs.{sc.totalValue.toLocaleString('en-IN')}
                           </Typography>
                         </td>
                         <td style={{ textAlign: "right" }}>
                           <Typography variant="body2" color="success.main" fontWeight={500}>
-                            Rs.{sc.totalPaid.toLocaleString()}
+                            Rs.{sc.totalPaid.toLocaleString('en-IN')}
+                          </Typography>
+                        </td>
+                        <td style={{ textAlign: "right" }}>
+                          <Typography variant="body2" color="text.secondary">
+                            {sc.totalRecordCount}
                           </Typography>
                         </td>
                         <td style={{ textAlign: "right" }}>
@@ -733,7 +724,7 @@ export default function ExpensesPage() {
                             color={sc.balance > 0 ? "warning.main" : "success.main"}
                             fontWeight={600}
                           >
-                            Rs.{sc.balance.toLocaleString()}
+                            Rs.{sc.balance.toLocaleString('en-IN')}
                           </Typography>
                         </td>
                         <td>
@@ -755,17 +746,22 @@ export default function ExpensesPage() {
                       </td>
                       <td style={{ textAlign: "right" }}>
                         <Typography variant="body2" fontWeight={700}>
-                          Rs.{subcontracts.reduce((sum, sc) => sum + sc.totalValue, 0).toLocaleString()}
+                          Rs.{subcontracts.reduce((sum, sc) => sum + sc.totalValue, 0).toLocaleString('en-IN')}
                         </Typography>
                       </td>
                       <td style={{ textAlign: "right" }}>
                         <Typography variant="body2" fontWeight={700} color="success.main">
-                          Rs.{subcontracts.reduce((sum, sc) => sum + sc.totalPaid, 0).toLocaleString()}
+                          Rs.{subcontracts.reduce((sum, sc) => sum + sc.totalPaid, 0).toLocaleString('en-IN')}
+                        </Typography>
+                      </td>
+                      <td style={{ textAlign: "right" }}>
+                        <Typography variant="body2" fontWeight={700} color="text.secondary">
+                          {subcontracts.reduce((sum, sc) => sum + sc.totalRecordCount, 0)}
                         </Typography>
                       </td>
                       <td style={{ textAlign: "right" }}>
                         <Typography variant="body2" fontWeight={700} color="warning.main">
-                          Rs.{subcontracts.reduce((sum, sc) => sum + sc.balance, 0).toLocaleString()}
+                          Rs.{subcontracts.reduce((sum, sc) => sum + sc.balance, 0).toLocaleString('en-IN')}
                         </Typography>
                       </td>
                       <td></td>
@@ -798,6 +794,7 @@ export default function ExpensesPage() {
         data={expenses}
         isLoading={loading}
         enableColumnPinning
+        showRecordCount
         initialState={{
           columnPinning: { left: ["settlement_reference", "date"] },
         }}

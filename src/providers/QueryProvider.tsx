@@ -10,6 +10,7 @@ import {
   stopRealtimeListeners,
 } from "@/lib/supabase/realtime";
 import { useSite } from "@/contexts/SiteContext";
+import { useTab } from "@/providers/TabProvider";
 
 export default function QueryProvider({
   children,
@@ -65,13 +66,20 @@ const PRESERVED_QUERY_PREFIXES = ["user", "auth", "sites", "profile", "notificat
 
 /**
  * Component to initialize background sync
- * Separated to access SiteContext
+ * Separated to access SiteContext and TabProvider
+ * Waits for tab coordination to be ready before initializing
  */
 function SyncInitializer({ queryClient }: { queryClient: QueryClient }) {
   const { selectedSite } = useSite();
+  const { isReady: isTabReady, isLeader } = useTab();
   const previousSiteIdRef = useRef<string | undefined>(undefined);
 
   useEffect(() => {
+    // Wait for tab coordination to be ready
+    if (!isTabReady) {
+      return;
+    }
+
     const currentSiteId = selectedSite?.id;
     const previousSiteId = previousSiteIdRef.current;
 
@@ -120,18 +128,22 @@ function SyncInitializer({ queryClient }: { queryClient: QueryClient }) {
     previousSiteIdRef.current = currentSiteId;
 
     // Initialize/re-initialize background sync for current site
+    // The sync module will handle leader/follower behavior internally
     initBackgroundSync(queryClient, currentSiteId);
 
     // Stop old listeners and start new ones for current site
+    // The realtime module will handle leader/follower behavior internally
     stopRealtimeListeners();
     startRealtimeListeners(queryClient, currentSiteId);
+
+    console.log(`[SyncInitializer] Initialized - isLeader: ${isLeader}, siteId: ${currentSiteId}`);
 
     // Cleanup on unmount
     return () => {
       stopBackgroundSync();
       stopRealtimeListeners();
     };
-  }, [queryClient, selectedSite?.id]);
+  }, [queryClient, selectedSite?.id, isTabReady, isLeader]);
 
   return null;
 }

@@ -47,6 +47,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSite } from "@/contexts/SiteContext";
 import { processWaterfallContractPayment } from "@/lib/services/settlementService";
+import { withTimeout, TIMEOUTS } from "@/lib/utils/timeout";
 import FileUploader, { UploadedFile } from "@/components/common/FileUploader";
 import SubcontractLinkSelector from "./SubcontractLinkSelector";
 import PayerSourceSelector from "@/components/settlement/PayerSourceSelector";
@@ -303,26 +304,30 @@ export default function ContractPaymentRecordDialog({
               };
             });
 
-      const result = await processWaterfallContractPayment(supabase, {
-        siteId: selectedSite.id,
-        weeks: weeksToProcess,
-        totalAmount: amount,
-        paymentType: paymentType,
-        actualPaymentDate: actualPaymentDate.format("YYYY-MM-DD"),
-        paymentMode: paymentMode,
-        paymentChannel: paymentChannel,
-        payerSource: moneySource,
-        customPayerName:
-          moneySource === "other_site_money" || moneySource === "custom"
-            ? moneySourceName
-            : undefined,
-        engineerId: paymentChannel === "engineer_wallet" ? selectedEngineerId : undefined,
-        proofUrl: proofUrl || undefined,
-        notes: notes || undefined,
-        subcontractId: subcontractId || undefined,
-        userId: userProfile.id,
-        userName: userProfile.name || "Unknown",
-      });
+      const result = await withTimeout(
+        processWaterfallContractPayment(supabase, {
+          siteId: selectedSite.id,
+          weeks: weeksToProcess,
+          totalAmount: amount,
+          paymentType: paymentType,
+          actualPaymentDate: actualPaymentDate.format("YYYY-MM-DD"),
+          paymentMode: paymentMode,
+          paymentChannel: paymentChannel,
+          payerSource: moneySource,
+          customPayerName:
+            moneySource === "other_site_money" || moneySource === "custom"
+              ? moneySourceName
+              : undefined,
+          engineerId: paymentChannel === "engineer_wallet" ? selectedEngineerId : undefined,
+          proofUrl: proofUrl || undefined,
+          notes: notes || undefined,
+          subcontractId: subcontractId || undefined,
+          userId: userProfile.id,
+          userName: userProfile.name || "Unknown",
+        }),
+        TIMEOUTS.SETTLEMENT,
+        "Payment processing timed out. Please check your connection and try again."
+      );
 
       if (!result.success) {
         throw new Error(result.error || "Failed to process payment");

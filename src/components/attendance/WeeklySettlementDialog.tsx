@@ -44,6 +44,9 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useSite } from "@/contexts/SiteContext";
 import FileUploader, { UploadedFile } from "@/components/common/FileUploader";
 import dayjs from "dayjs";
+import { processWeeklySettlement } from "@/lib/services/settlementService";
+import type { PayerSource } from "@/types/settlement.types";
+import type { PaymentMode as ServicePaymentMode, PaymentChannel } from "@/types/payment.types";
 
 interface WeeklySummaryForSettlement {
   weekStart: string;
@@ -141,53 +144,32 @@ export default function WeeklySettlementDialog({
     setError(null);
 
     try {
-      // Update attendance records based on settlement type
-      const updatePaymentData = {
-        is_paid: true,
-        payment_mode: paymentMode === "bank" ? "bank_transfer" : paymentMode,
-        payment_proof_url: proofFile?.url || null,
-        payment_notes: notes || null,
-      };
+      // Map payment mode to service format
+      const servicePaymentMode: ServicePaymentMode =
+        paymentMode === "bank" ? "net_banking" : paymentMode;
 
-      // Settle daily laborers
-      if (settlementType === "daily" || settlementType === "all") {
-        const { error: dailyError } = await supabase
-          .from("daily_attendance")
-          .update(updatePaymentData)
-          .eq("site_id", selectedSite.id)
-          .gte("date", weeklySummary.weekStart)
-          .lte("date", weeklySummary.weekEnd)
-          .eq("is_paid", false)
-          .neq("laborer_type", "contract");
+      // Map payer type to payer source
+      const payerSource: PayerSource =
+        payerType === "company" ? "client_money" : "own_money";
 
-        if (dailyError) throw dailyError;
-      }
+      // Use processWeeklySettlement to properly create settlement_group
+      const result = await processWeeklySettlement(supabase, {
+        siteId: selectedSite.id,
+        dateFrom: weeklySummary.weekStart,
+        dateTo: weeklySummary.weekEnd,
+        settlementType: settlementType,
+        totalAmount: selectedAmount,
+        paymentMode: servicePaymentMode,
+        paymentChannel: "direct" as PaymentChannel,
+        payerSource: payerSource,
+        proofUrl: proofFile?.url,
+        notes: notes || undefined,
+        userId: userProfile.id,
+        userName: userProfile.name || userProfile.email || "Unknown",
+      });
 
-      // Settle contract laborers
-      if (settlementType === "contract" || settlementType === "all") {
-        const { error: contractError } = await supabase
-          .from("daily_attendance")
-          .update(updatePaymentData)
-          .eq("site_id", selectedSite.id)
-          .gte("date", weeklySummary.weekStart)
-          .lte("date", weeklySummary.weekEnd)
-          .eq("is_paid", false)
-          .eq("laborer_type", "contract");
-
-        if (contractError) throw contractError;
-      }
-
-      // Settle market laborers
-      if (settlementType === "market" || settlementType === "all") {
-        const { error: marketError } = await supabase
-          .from("market_laborer_attendance")
-          .update(updatePaymentData)
-          .eq("site_id", selectedSite.id)
-          .gte("date", weeklySummary.weekStart)
-          .lte("date", weeklySummary.weekEnd)
-          .eq("is_paid", false);
-
-        if (marketError) throw marketError;
+      if (!result.success) {
+        throw new Error(result.error || "Settlement failed");
       }
 
       onSuccess?.();

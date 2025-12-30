@@ -73,8 +73,9 @@ export async function processSettlement(
 
     if (refError) {
       console.warn("Could not generate settlement reference:", refError);
-      // Fallback reference
-      settlementReference = `SET-${dayjs().format("YYMMDD")}-${Date.now().toString().slice(-4)}`;
+      // Fallback reference with UUID-based suffix for uniqueness
+      const uniqueSuffix = crypto.randomUUID().slice(0, 8).toUpperCase();
+      settlementReference = `SET-${dayjs().format("YYMMDD")}-${uniqueSuffix}`;
     } else {
       settlementReference = refData as string;
     }
@@ -277,7 +278,8 @@ export async function processWeeklySettlement(
 
     if (refError) {
       console.warn("Could not generate settlement reference:", refError);
-      settlementReference = `SET-${dayjs().format("YYMMDD")}-${Date.now().toString().slice(-4)}`;
+      const uniqueSuffix = crypto.randomUUID().slice(0, 8).toUpperCase();
+      settlementReference = `SET-${dayjs().format("YYMMDD")}-${uniqueSuffix}`;
     } else {
       settlementReference = refData as string;
     }
@@ -736,7 +738,8 @@ export async function processContractPayment(
 
     if (refError) {
       console.warn("Could not generate settlement reference:", refError);
-      settlementReference = `SET-${dayjs().format("YYMMDD")}-${Date.now().toString().slice(-4)}`;
+      const uniqueSuffix = crypto.randomUUID().slice(0, 8).toUpperCase();
+      settlementReference = `SET-${dayjs().format("YYMMDD")}-${uniqueSuffix}`;
     } else {
       settlementReference = refData as string;
     }
@@ -749,7 +752,8 @@ export async function processContractPayment(
 
     if (payRefError) {
       console.warn("Could not generate payment reference:", payRefError);
-      paymentReference = `PAY-${dayjs().format("YYMMDD")}-${Date.now().toString().slice(-4)}`;
+      const uniqueSuffix = crypto.randomUUID().slice(0, 8).toUpperCase();
+      paymentReference = `PAY-${dayjs().format("YYMMDD")}-${uniqueSuffix}`;
     } else {
       paymentReference = payRefData as string;
     }
@@ -1590,7 +1594,8 @@ export async function processWaterfallContractPayment(
 
     if (refError) {
       console.warn("Could not generate settlement reference:", refError);
-      settlementReference = `SET-${dayjs().format("YYMMDD")}-${Date.now().toString().slice(-4)}`;
+      const uniqueSuffix = crypto.randomUUID().slice(0, 8).toUpperCase();
+      settlementReference = `SET-${dayjs().format("YYMMDD")}-${uniqueSuffix}`;
     } else {
       settlementReference = refData as string;
     }
@@ -1677,7 +1682,8 @@ export async function processWaterfallContractPayment(
 
         let paymentReference: string;
         if (payRefError) {
-          paymentReference = `PAY-${dayjs().format("YYMMDD")}-${Date.now().toString().slice(-4)}-${laborer.laborerId.slice(0, 4)}`;
+          const uniqueSuffix = crypto.randomUUID().slice(0, 8).toUpperCase();
+          paymentReference = `PAY-${dayjs().format("YYMMDD")}-${uniqueSuffix}`;
         } else {
           paymentReference = payRefData as string;
         }
@@ -1944,7 +1950,8 @@ export async function processDateWiseContractSettlement(
 
     if (refError) {
       console.warn("Could not generate settlement reference:", refError);
-      settlementReference = `SET-${dayjs().format("YYMMDD")}-${Date.now().toString().slice(-4)}`;
+      const uniqueSuffix = crypto.randomUUID().slice(0, 8).toUpperCase();
+      settlementReference = `SET-${dayjs().format("YYMMDD")}-${uniqueSuffix}`;
     } else {
       settlementReference = refData as string;
     }
@@ -2053,7 +2060,8 @@ export async function processDateWiseContractSettlement(
 
         let paymentReference: string;
         if (payRefError) {
-          paymentReference = `PAY-${dayjs().format("YYMMDD")}-${Date.now().toString().slice(-4)}`;
+          const uniqueSuffix = crypto.randomUUID().slice(0, 8).toUpperCase();
+          paymentReference = `PAY-${dayjs().format("YYMMDD")}-${uniqueSuffix}`;
         } else {
           paymentReference = payRefData as string;
         }

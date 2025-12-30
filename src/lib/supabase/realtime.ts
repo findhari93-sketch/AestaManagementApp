@@ -1,11 +1,15 @@
 /**
  * Supabase Realtime subscriptions for critical data
  * With automatic retry on connection failures
+ *
+ * Multi-tab support: Only the leader tab maintains Supabase realtime connections.
+ * Followers receive updates via BroadcastChannel.
  */
 
 import { QueryClient } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase/client";
 import { queryKeys } from "@/lib/cache/keys";
+import { getTabCoordinator, TabMessage } from "@/lib/tab/coordinator";
 
 // Store the client instance used for subscriptions to ensure proper cleanup
 let supabaseClient: ReturnType<typeof createClient> | null = null;
@@ -25,6 +29,9 @@ const INITIAL_RETRY_DELAY = 2000; // 2 seconds
 let attendanceRetryCount = 0;
 let clientPaymentsRetryCount = 0;
 let retryTimeouts: NodeJS.Timeout[] = [];
+
+// Tab message subscription for follower tabs
+let tabMessageUnsubscribe: (() => void) | null = null;
 
 /**
  * Subscribe to a channel with retry logic
@@ -68,12 +75,22 @@ function subscribeWithRetry(
 
 /**
  * Start realtime listeners for the given site
+ * Only leader tab creates Supabase realtime connections.
+ * Followers receive updates via BroadcastChannel.
  */
 export function startRealtimeListeners(
   queryClient: QueryClient,
   siteId?: string
 ) {
-  // Don't restart if same site
+  const coordinator = getTabCoordinator();
+
+  // Clean up existing tab message subscription
+  if (tabMessageUnsubscribe) {
+    tabMessageUnsubscribe();
+    tabMessageUnsubscribe = null;
+  }
+
+  // Don't restart if same site (for leader tabs)
   if (siteId === currentSiteId && attendanceChannel && clientPaymentsChannel) {
     return;
   }
@@ -82,6 +99,52 @@ export function startRealtimeListeners(
   stopRealtimeListeners();
 
   if (!siteId) return;
+
+  // Check if this tab is a follower
+  if (coordinator && !coordinator.isLeader) {
+    // Follower tab: Listen for realtime updates via BroadcastChannel
+    console.log("[Realtime] Not leader tab - listening for broadcasts only");
+
+    tabMessageUnsubscribe = coordinator.subscribe((message: TabMessage) => {
+      if (message.type === "REALTIME_UPDATE") {
+        // Handle realtime updates from leader
+        const { table, payload } = message;
+        if (table === "daily_attendance") {
+          queryClient.invalidateQueries({
+            queryKey: queryKeys.attendance.today(siteId),
+            refetchType: "active",
+          });
+          queryClient.invalidateQueries({
+            queryKey: queryKeys.attendance.active(siteId),
+            refetchType: "active",
+          });
+        } else if (table === "client_payments") {
+          queryClient.invalidateQueries({
+            queryKey: queryKeys.clientPayments.pending(siteId),
+            refetchType: "active",
+          });
+          queryClient.invalidateQueries({
+            queryKey: queryKeys.clientPayments.bySite(siteId),
+            refetchType: "active",
+          });
+        }
+      } else if (message.type === "CACHE_INVALIDATE" && message.queryKeys) {
+        // Handle cache invalidation from leader
+        message.queryKeys.forEach((queryKey) => {
+          queryClient.invalidateQueries({
+            queryKey: queryKey as unknown[],
+            refetchType: "active",
+          });
+        });
+      }
+    });
+
+    currentSiteId = siteId;
+    return;
+  }
+
+  // Leader tab: Create Supabase realtime connections
+  console.log("[Realtime] Leader tab - creating Supabase connections");
 
   // Create and store client for later cleanup
   supabaseClient = createClient();
@@ -104,6 +167,7 @@ export function startRealtimeListeners(
         filter: `site_id=eq.${siteId}`,
       },
       () => {
+        // Invalidate local queries
         queryClient.invalidateQueries({
           queryKey: queryKeys.attendance.today(siteId),
           refetchType: "active",
@@ -115,6 +179,13 @@ export function startRealtimeListeners(
         queryClient.invalidateQueries({
           queryKey: queryKeys.attendance.active(siteId),
           refetchType: "active",
+        });
+
+        // Broadcast to follower tabs
+        coordinator?.broadcast({
+          type: "REALTIME_UPDATE",
+          table: "daily_attendance",
+          payload: null,
         });
       }
     );
@@ -138,6 +209,7 @@ export function startRealtimeListeners(
         filter: `site_id=eq.${siteId}`,
       },
       () => {
+        // Invalidate local queries
         queryClient.invalidateQueries({
           queryKey: queryKeys.clientPayments.pending(siteId),
           refetchType: "active",
@@ -145,6 +217,13 @@ export function startRealtimeListeners(
         queryClient.invalidateQueries({
           queryKey: queryKeys.clientPayments.bySite(siteId),
           refetchType: "active",
+        });
+
+        // Broadcast to follower tabs
+        coordinator?.broadcast({
+          type: "REALTIME_UPDATE",
+          table: "client_payments",
+          payload: null,
         });
       }
     );
@@ -163,6 +242,12 @@ export function startRealtimeListeners(
  */
 export function stopRealtimeListeners() {
   try {
+    // Clean up tab message subscription for follower tabs
+    if (tabMessageUnsubscribe) {
+      tabMessageUnsubscribe();
+      tabMessageUnsubscribe = null;
+    }
+
     // Clear any pending retry timeouts
     retryTimeouts.forEach((timeout) => clearTimeout(timeout));
     retryTimeouts = [];

@@ -222,8 +222,9 @@ export default function ContractWeeklyPaymentsTab({
       const teamsMap = new Map<string, string>();
       (teamsLookup || []).forEach((t: any) => teamsMap.set(t.id, t.name));
 
-      // Fetch contract laborers' attendance
-      const { data: attendanceData, error: attendanceError } = await supabase
+      // Fetch ALL contract laborers' attendance (NO date filter)
+      // This is needed for accurate waterfall calculation across ALL weeks
+      const { data: allAttendanceData, error: allAttendanceError } = await supabase
         .from("daily_attendance")
         .select(
           `
@@ -247,13 +248,16 @@ export default function ContractWeeklyPaymentsTab({
         )
         .eq("site_id", selectedSite.id)
         .eq("laborers.laborer_type", "contract")
-        .gte("date", fromDate)
-        .lte("date", toDate)
         .order("date", { ascending: true });
 
-      if (attendanceError) {
-        throw new Error(attendanceError.message);
+      if (allAttendanceError) {
+        throw new Error(allAttendanceError.message);
       }
+
+      // Filter attendance for display (within date range)
+      const attendanceData = (allAttendanceData || []).filter((att: any) => {
+        return att.date >= fromDate && att.date <= toDate;
+      });
 
       // Fetch labor payments
       const { data: paymentsData } = await supabase
@@ -563,12 +567,23 @@ export default function ContractWeeklyPaymentsTab({
       const { data: sgData } = await sgQuery;
       settlementGroupsData = sgData || [];
 
-      // Calculate PAID per week using WATERFALL allocation
-      // Sort weeks by date (oldest first) for waterfall calculation
-      const sortedWeeksForWaterfall = [...weekRows].sort(
-        (a, b) =>
-          new Date(a.weekStart).getTime() - new Date(b.weekStart).getTime()
-      );
+      // ========================================================================
+      // WATERFALL CALCULATION using ALL weeks (not filtered)
+      // This ensures consistent payment attribution regardless of date filter
+      // ========================================================================
+
+      // Build complete week salary map from ALL attendance (not filtered)
+      const allWeekSalaryMap = new Map<string, number>();
+      (allAttendanceData || []).forEach((att: any) => {
+        const { weekStart } = getWeekBoundaries(att.date);
+        const currentSalary = allWeekSalaryMap.get(weekStart) || 0;
+        allWeekSalaryMap.set(weekStart, currentSalary + (att.daily_earnings || 0));
+      });
+
+      // Sort ALL weeks by date (oldest first) for waterfall calculation
+      const allWeeksSorted = Array.from(allWeekSalaryMap.entries())
+        .map(([weekStart, totalSalary]) => ({ weekStart, totalSalary }))
+        .sort((a, b) => new Date(a.weekStart).getTime() - new Date(b.weekStart).getTime());
 
       // ONLY include salary-type settlements in waterfall (NOT advances)
       // Advances are tracked separately and should not be allocated to weeks
@@ -588,8 +603,8 @@ export default function ContractWeeklyPaymentsTab({
       const weekSettlementRefs = new Map<string, Set<string>>();
       const weekPaymentDates = new Map<string, Set<string>>();
 
-      // Initialize maps
-      sortedWeeksForWaterfall.forEach((week) => {
+      // Initialize maps for ALL weeks
+      allWeeksSorted.forEach((week) => {
         weekPaidFromSettlements.set(week.weekStart, 0);
         weekSettlementRefs.set(week.weekStart, new Set());
         weekPaymentDates.set(week.weekStart, new Set());
@@ -597,18 +612,19 @@ export default function ContractWeeklyPaymentsTab({
 
       // Track remaining due per week (will be updated as we allocate payments)
       const weekRemainingDue = new Map<string, number>();
-      sortedWeeksForWaterfall.forEach((week) => {
+      allWeeksSorted.forEach((week) => {
         weekRemainingDue.set(week.weekStart, week.totalSalary);
       });
 
       // Process each settlement in date order and allocate using waterfall
+      // Uses ALL weeks (not filtered) to ensure consistent allocation
       sortedSettlements.forEach((sg: any) => {
         let remainingAmount = sg.total_amount || 0;
         const settlementRef = sg.settlement_reference;
         const settlementDate = sg.settlement_date;
 
         // Allocate to weeks in order (oldest first) until amount is exhausted
-        for (const week of sortedWeeksForWaterfall) {
+        for (const week of allWeeksSorted) {
           if (remainingAmount <= 0) break;
 
           const weekDue = weekRemainingDue.get(week.weekStart) || 0;

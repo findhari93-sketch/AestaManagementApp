@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState, useCallback } from "react";
+import { useMemo, useState, useCallback, useEffect } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import {
   Box,
   Button,
@@ -18,6 +19,7 @@ import {
   Grid,
   Stack,
   Drawer,
+  Alert,
 } from "@mui/material";
 import {
   Add as AddIcon,
@@ -32,6 +34,8 @@ import {
 } from "@mui/icons-material";
 import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
 import PageHeader from "@/components/layout/PageHeader";
+import Breadcrumbs from "@/components/layout/Breadcrumbs";
+import RelatedPages from "@/components/layout/RelatedPages";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSite } from "@/contexts/SiteContext";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -77,6 +81,15 @@ const STATUS_LABELS: Record<POStatus, string> = {
 
 type TabValue = "all" | "draft" | "pending" | "active" | "delivered";
 
+// Prefilled data from URL params (e.g., from material-search)
+interface PrefilledPOData {
+  vendorId?: string;
+  materialId?: string;
+  materialName?: string;
+  unit?: string;
+  source?: string;
+}
+
 export default function PurchaseOrdersPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [deliveryDialogOpen, setDeliveryDialogOpen] = useState(false);
@@ -85,12 +98,41 @@ export default function PurchaseOrdersPage() {
   const [selectedPO, setSelectedPO] = useState<PurchaseOrderWithDetails | null>(null);
   const [currentTab, setCurrentTab] = useState<TabValue>("all");
   const [searchTerm, setSearchTerm] = useState("");
+  const [prefilledData, setPrefilledData] = useState<PrefilledPOData | null>(null);
 
+  const searchParams = useSearchParams();
+  const router = useRouter();
   const { userProfile, user } = useAuth();
   const { selectedSite } = useSite();
   const isMobile = useIsMobile();
   const canEdit = hasEditPermission(userProfile?.role);
   const isAdmin = hasAdminPermission(userProfile?.role);
+
+  // Handle URL params for prefilled data (from material-search)
+  useEffect(() => {
+    const isNew = searchParams.get("new") === "true";
+    const vendorId = searchParams.get("vendorId");
+    const materialId = searchParams.get("materialId");
+    const materialName = searchParams.get("materialName");
+    const unit = searchParams.get("unit");
+    const source = searchParams.get("source");
+
+    if (isNew && (vendorId || materialId)) {
+      setPrefilledData({
+        vendorId: vendorId || undefined,
+        materialId: materialId || undefined,
+        materialName: materialName || undefined,
+        unit: unit || undefined,
+        source: source || undefined,
+      });
+
+      // Auto-open the dialog
+      setDialogOpen(true);
+
+      // Clean up URL params after reading
+      router.replace("/site/purchase-orders", { scroll: false });
+    }
+  }, [searchParams, router]);
 
   const { data: allPOs = [], isLoading } = usePurchaseOrders(selectedSite?.id);
   const { data: summary } = usePOSummary(selectedSite?.id);
@@ -144,6 +186,7 @@ export default function PurchaseOrdersPage() {
   const handleCloseDialog = useCallback(() => {
     setDialogOpen(false);
     setEditingPO(null);
+    setPrefilledData(null); // Clear prefilled data on close
   }, []);
 
   const handleOpenDeliveryDialog = useCallback((po: PurchaseOrderWithDetails) => {
@@ -417,6 +460,8 @@ export default function PurchaseOrdersPage() {
 
   return (
     <Box>
+      <Breadcrumbs />
+
       <PageHeader
         title="Purchase Orders"
         actions={
@@ -431,6 +476,15 @@ export default function PurchaseOrdersPage() {
           ) : null
         }
       />
+
+      <RelatedPages />
+
+      {/* Show info when coming from material-search */}
+      {prefilledData?.source === "material-search" && dialogOpen && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          Creating purchase order from Price Comparison. Vendor and material will be pre-filled.
+        </Alert>
+      )}
 
       {/* Summary Cards */}
       <Grid container spacing={2} sx={{ mb: 2 }}>
@@ -548,6 +602,10 @@ export default function PurchaseOrdersPage() {
         onClose={handleCloseDialog}
         purchaseOrder={editingPO}
         siteId={selectedSite.id}
+        prefilledVendorId={prefilledData?.vendorId}
+        prefilledMaterialId={prefilledData?.materialId}
+        prefilledMaterialName={prefilledData?.materialName}
+        prefilledUnit={prefilledData?.unit}
       />
 
       {/* Delivery Dialog */}

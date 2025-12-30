@@ -23,6 +23,9 @@ import {
   Select,
   MenuItem,
   Grid,
+  Tabs,
+  Tab,
+  Paper,
 } from "@mui/material";
 import {
   Add as AddIcon,
@@ -31,9 +34,16 @@ import {
   Warning as WarningIcon,
   TrendingDown as TrendingDownIcon,
   SwapHoriz as TransferIcon,
+  Lock as DedicatedIcon,
+  LockOpen as SharedIcon,
+  Inventory as InventoryIcon,
+  Groups as GroupsIcon,
+  Domain as SiteIcon,
 } from "@mui/icons-material";
 import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
 import PageHeader from "@/components/layout/PageHeader";
+import Breadcrumbs from "@/components/layout/Breadcrumbs";
+import RelatedPages from "@/components/layout/RelatedPages";
 import { useSite } from "@/contexts/SiteContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -70,6 +80,8 @@ const UNIT_LABELS: Record<MaterialUnit, string> = {
   set: "Set",
 };
 
+type StockTabType = "site" | "shared" | "all";
+
 export default function StockPage() {
   const { selectedSite } = useSite();
   const { userProfile } = useAuth();
@@ -77,6 +89,7 @@ export default function StockPage() {
   const canEdit = hasEditPermission(userProfile?.role);
 
   const [searchTerm, setSearchTerm] = useState("");
+  const [stockTab, setStockTab] = useState<StockTabType>("all");
   const [adjustmentDialog, setAdjustmentDialog] = useState<{
     open: boolean;
     stock: StockInventoryWithDetails | null;
@@ -90,17 +103,40 @@ export default function StockPage() {
   const stockAdjustment = useStockAdjustment();
   const addInitialStock = useAddInitialStock();
 
-  // Filter stock by search term
+  // Filter stock by search term and tab
   const filteredStock = useMemo(() => {
-    if (!searchTerm) return stock;
-    const term = searchTerm.toLowerCase();
-    return stock.filter(
-      (s) =>
-        s.material?.name?.toLowerCase().includes(term) ||
-        s.material?.code?.toLowerCase().includes(term) ||
-        s.brand?.brand_name?.toLowerCase().includes(term)
-    );
-  }, [stock, searchTerm]);
+    let filtered = stock;
+
+    // Apply tab filter (placeholder - will use actual is_dedicated field when available)
+    // For now, treat all stock as "site" stock
+    if (stockTab === "site") {
+      // Site-specific stock (dedicated to this site or not shared)
+      filtered = filtered.filter((s) => !(s as StockInventoryWithDetails & { is_shared?: boolean }).is_shared);
+    } else if (stockTab === "shared") {
+      // Shared stock from site group
+      filtered = filtered.filter((s) => (s as StockInventoryWithDetails & { is_shared?: boolean }).is_shared);
+    }
+    // "all" shows everything
+
+    // Apply search filter
+    if (searchTerm) {
+      const term = searchTerm.toLowerCase();
+      filtered = filtered.filter(
+        (s) =>
+          s.material?.name?.toLowerCase().includes(term) ||
+          s.material?.code?.toLowerCase().includes(term) ||
+          s.brand?.brand_name?.toLowerCase().includes(term) ||
+          (s as StockInventoryWithDetails & { batch_code?: string }).batch_code?.toLowerCase().includes(term)
+      );
+    }
+
+    return filtered;
+  }, [stock, searchTerm, stockTab]);
+
+  // Calculate shared stock count (placeholder)
+  const sharedStockCount = useMemo(() => {
+    return stock.filter((s) => (s as StockInventoryWithDetails & { is_shared?: boolean }).is_shared).length;
+  }, [stock]);
 
   // Calculate total stock value
   const totalStockValue = useMemo(() => {
@@ -109,6 +145,14 @@ export default function StockPage() {
       0
     );
   }, [stock]);
+
+  // Extended stock type for batch/shared info
+  type ExtendedStock = StockInventoryWithDetails & {
+    batch_code?: string;
+    is_shared?: boolean;
+    is_dedicated?: boolean;
+    paid_by_site_name?: string;
+  };
 
   // Table columns
   const columns = useMemo<MRT_ColumnDef<StockInventoryWithDetails>[]>(
@@ -137,6 +181,32 @@ export default function StockPage() {
             )}
           </Box>
         ),
+      },
+      {
+        id: "batch_code",
+        header: "Batch",
+        size: 120,
+        Cell: ({ row }) => {
+          const batchCode = (row.original as ExtendedStock).batch_code;
+          return batchCode ? (
+            <Typography
+              variant="caption"
+              sx={{
+                fontFamily: "monospace",
+                bgcolor: "action.hover",
+                px: 1,
+                py: 0.5,
+                borderRadius: 1,
+              }}
+            >
+              {batchCode}
+            </Typography>
+          ) : (
+            <Typography variant="caption" color="text.disabled">
+              -
+            </Typography>
+          );
+        },
       },
       {
         accessorKey: "current_qty",
@@ -198,13 +268,78 @@ export default function StockPage() {
         },
       },
       {
+        id: "paid_by",
+        header: "Paid By",
+        size: 120,
+        Cell: ({ row }) => {
+          const paidBy = (row.original as ExtendedStock).paid_by_site_name;
+          return paidBy ? (
+            <Chip
+              icon={<SiteIcon />}
+              label={paidBy}
+              size="small"
+              variant="outlined"
+              color="primary"
+            />
+          ) : (
+            <Chip
+              label={selectedSite?.name || "This Site"}
+              size="small"
+              variant="outlined"
+            />
+          );
+        },
+      },
+      {
+        id: "stock_type",
+        header: "Type",
+        size: 100,
+        Cell: ({ row }) => {
+          const isShared = (row.original as ExtendedStock).is_shared;
+          const isDedicated = (row.original as ExtendedStock).is_dedicated;
+          if (isDedicated) {
+            return (
+              <Tooltip title="Dedicated to this site only">
+                <Chip
+                  icon={<DedicatedIcon />}
+                  label="Dedicated"
+                  size="small"
+                  color="warning"
+                  variant="outlined"
+                />
+              </Tooltip>
+            );
+          }
+          if (isShared) {
+            return (
+              <Tooltip title="Shared across site group">
+                <Chip
+                  icon={<SharedIcon />}
+                  label="Shared"
+                  size="small"
+                  color="info"
+                  variant="outlined"
+                />
+              </Tooltip>
+            );
+          }
+          return (
+            <Chip
+              label="Site"
+              size="small"
+              variant="outlined"
+            />
+          );
+        },
+      },
+      {
         accessorKey: "location.name",
         header: "Location",
         size: 120,
         Cell: ({ row }) => row.original.location?.name || "Default",
       },
     ],
-    [lowStockAlerts]
+    [lowStockAlerts, selectedSite?.name]
   );
 
   // Row actions
@@ -250,6 +385,8 @@ export default function StockPage() {
 
   return (
     <Box>
+      <Breadcrumbs />
+
       <PageHeader
         title="Stock Inventory"
         actions={
@@ -265,14 +402,19 @@ export default function StockPage() {
         }
       />
 
+      <RelatedPages />
+
       {/* Summary Cards */}
       <Grid container spacing={2} sx={{ mb: 2 }}>
         <Grid size={{ xs: 6, md: 3 }}>
           <Card>
             <CardContent sx={{ py: 1.5, "&:last-child": { pb: 1.5 } }}>
-              <Typography variant="caption" color="text.secondary">
-                Total Items
-              </Typography>
+              <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.5 }}>
+                <InventoryIcon fontSize="small" color="primary" />
+                <Typography variant="caption" color="text.secondary">
+                  Total Items
+                </Typography>
+              </Box>
               <Typography variant="h5" fontWeight={600}>
                 {stock.length}
               </Typography>
@@ -303,6 +445,21 @@ export default function StockPage() {
             </CardContent>
           </Card>
         </Grid>
+        <Grid size={{ xs: 6, md: 3 }}>
+          <Card sx={{ borderLeft: 3, borderColor: "info.main" }}>
+            <CardContent sx={{ py: 1.5, "&:last-child": { pb: 1.5 } }}>
+              <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.5 }}>
+                <GroupsIcon fontSize="small" color="info" />
+                <Typography variant="caption" color="text.secondary">
+                  Shared Stock
+                </Typography>
+              </Box>
+              <Typography variant="h5" fontWeight={600} color="info.main">
+                {sharedStockCount}
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
       </Grid>
 
       {/* Low Stock Alert */}
@@ -329,11 +486,39 @@ export default function StockPage() {
         </Alert>
       )}
 
+      {/* Stock Type Tabs */}
+      <Paper sx={{ mb: 2 }}>
+        <Tabs
+          value={stockTab}
+          onChange={(_, newValue) => setStockTab(newValue as StockTabType)}
+          sx={{ borderBottom: 1, borderColor: "divider" }}
+        >
+          <Tab
+            label="All Stock"
+            value="all"
+            icon={<InventoryIcon />}
+            iconPosition="start"
+          />
+          <Tab
+            label="Site Stock"
+            value="site"
+            icon={<SiteIcon />}
+            iconPosition="start"
+          />
+          <Tab
+            label={`Shared Stock${sharedStockCount > 0 ? ` (${sharedStockCount})` : ""}`}
+            value="shared"
+            icon={<GroupsIcon />}
+            iconPosition="start"
+          />
+        </Tabs>
+      </Paper>
+
       {/* Search */}
       <Box sx={{ mb: 2 }}>
         <TextField
           size="small"
-          placeholder="Search materials..."
+          placeholder="Search materials, batch codes..."
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
           slotProps={{
@@ -345,7 +530,7 @@ export default function StockPage() {
               ),
             },
           }}
-          sx={{ minWidth: 250 }}
+          sx={{ minWidth: 300 }}
         />
       </Box>
 
@@ -356,7 +541,7 @@ export default function StockPage() {
         isLoading={isLoading}
         enableRowActions={canEdit}
         renderRowActions={renderRowActions}
-        mobileHiddenColumns={["avg_unit_cost", "value", "location.name"]}
+        mobileHiddenColumns={["batch_code", "avg_unit_cost", "value", "paid_by", "stock_type", "location.name"]}
         initialState={{
           sorting: [{ id: "material.name", desc: false }],
         }}

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   Drawer,
   Box,
@@ -12,8 +12,15 @@ import {
   CircularProgress,
   FormControlLabel,
   Switch,
+  Paper,
+  Divider,
 } from "@mui/material";
-import { Close as CloseIcon } from "@mui/icons-material";
+import {
+  Close as CloseIcon,
+  QrCode2 as QrCodeIcon,
+  CloudUpload as CloudUploadIcon,
+  Delete as DeleteIcon,
+} from "@mui/icons-material";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import type { TeaShopAccount } from "@/types/database.types";
@@ -38,6 +45,8 @@ export default function TeaShopDrawer({
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [uploadingQr, setUploadingQr] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Form state
   const [shopName, setShopName] = useState("");
@@ -46,6 +55,10 @@ export default function TeaShopDrawer({
   const [address, setAddress] = useState("");
   const [notes, setNotes] = useState("");
   const [isActive, setIsActive] = useState(true);
+
+  // Payment info state
+  const [upiId, setUpiId] = useState("");
+  const [qrCodeUrl, setQrCodeUrl] = useState<string | null>(null);
 
   useEffect(() => {
     if (open) {
@@ -56,6 +69,9 @@ export default function TeaShopDrawer({
         setAddress(shop.address || "");
         setNotes(shop.notes || "");
         setIsActive(shop.is_active);
+        // Load payment info
+        setUpiId((shop as any).upi_id || "");
+        setQrCodeUrl((shop as any).qr_code_url || null);
       } else {
         // Reset for new shop
         setShopName("");
@@ -64,10 +80,67 @@ export default function TeaShopDrawer({
         setAddress("");
         setNotes("");
         setIsActive(true);
+        setUpiId("");
+        setQrCodeUrl(null);
       }
       setError(null);
     }
   }, [open, shop]);
+
+  // Handle QR code image upload
+  const handleQrCodeUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type
+    if (!file.type.startsWith("image/")) {
+      setError("Please upload an image file");
+      return;
+    }
+
+    // Validate file size (max 2MB)
+    if (file.size > 2 * 1024 * 1024) {
+      setError("Image size should be less than 2MB");
+      return;
+    }
+
+    setUploadingQr(true);
+    setError(null);
+
+    try {
+      // Generate unique file name
+      const fileExt = file.name.split(".").pop();
+      const fileName = `tea-shop-qr/${siteId}/${Date.now()}.${fileExt}`;
+
+      // Upload to Supabase Storage
+      const { data, error: uploadError } = await supabase.storage
+        .from("public")
+        .upload(fileName, file, {
+          cacheControl: "3600",
+          upsert: true,
+        });
+
+      if (uploadError) throw uploadError;
+
+      // Get public URL
+      const { data: urlData } = supabase.storage.from("public").getPublicUrl(fileName);
+      setQrCodeUrl(urlData.publicUrl);
+    } catch (err: any) {
+      console.error("Error uploading QR code:", err);
+      setError("Failed to upload QR code image");
+    } finally {
+      setUploadingQr(false);
+      // Reset file input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    }
+  };
+
+  // Remove QR code
+  const handleRemoveQrCode = () => {
+    setQrCodeUrl(null);
+  };
 
   const handleSave = async () => {
     if (!shopName.trim()) {
@@ -87,6 +160,8 @@ export default function TeaShopDrawer({
         address: address.trim() || null,
         notes: notes.trim() || null,
         is_active: isActive,
+        upi_id: upiId.trim() || null,
+        qr_code_url: qrCodeUrl || null,
       };
 
       if (shop) {
@@ -188,6 +263,97 @@ export default function TeaShopDrawer({
             rows={2}
             placeholder="Any special arrangements or notes"
           />
+
+          <Divider sx={{ my: 1 }} />
+
+          {/* Payment Information Section */}
+          <Typography variant="subtitle2" color="text.secondary" sx={{ mt: 1 }}>
+            Payment Information
+          </Typography>
+
+          <TextField
+            label="UPI ID"
+            value={upiId}
+            onChange={(e) => setUpiId(e.target.value)}
+            fullWidth
+            placeholder="e.g., shopname@upi or 9876543210@paytm"
+            helperText="Enter the shop's UPI ID for quick payments"
+          />
+
+          {/* QR Code Upload */}
+          <Paper
+            variant="outlined"
+            sx={{
+              p: 2,
+              textAlign: "center",
+              bgcolor: "grey.50",
+              borderStyle: "dashed",
+            }}
+          >
+            <input
+              type="file"
+              accept="image/*"
+              ref={fileInputRef}
+              onChange={handleQrCodeUpload}
+              style={{ display: "none" }}
+              id="qr-code-upload"
+            />
+
+            {qrCodeUrl ? (
+              <Box>
+                <Box
+                  component="img"
+                  src={qrCodeUrl}
+                  alt="Payment QR Code"
+                  sx={{
+                    maxWidth: 150,
+                    maxHeight: 150,
+                    objectFit: "contain",
+                    mb: 1,
+                    borderRadius: 1,
+                  }}
+                />
+                <Box sx={{ display: "flex", gap: 1, justifyContent: "center" }}>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploadingQr}
+                  >
+                    Change
+                  </Button>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    color="error"
+                    startIcon={<DeleteIcon />}
+                    onClick={handleRemoveQrCode}
+                  >
+                    Remove
+                  </Button>
+                </Box>
+              </Box>
+            ) : (
+              <Box>
+                <QrCodeIcon sx={{ fontSize: 48, color: "text.disabled", mb: 1 }} />
+                <Typography variant="body2" color="text.secondary" gutterBottom>
+                  Upload Payment QR Code
+                </Typography>
+                <Button
+                  variant="outlined"
+                  startIcon={uploadingQr ? <CircularProgress size={16} /> : <CloudUploadIcon />}
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploadingQr}
+                  size="small"
+                >
+                  {uploadingQr ? "Uploading..." : "Choose Image"}
+                </Button>
+                <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 1 }}>
+                  Max 2MB, JPG/PNG
+                </Typography>
+              </Box>
+            )}
+          </Paper>
 
           {shop && (
             <FormControlLabel
