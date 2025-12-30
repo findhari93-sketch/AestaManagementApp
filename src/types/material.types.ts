@@ -319,6 +319,7 @@ export interface Material {
   code: string | null;
   local_name: string | null;
   category_id: string | null;
+  parent_id: string | null; // For material variants
   description: string | null;
   unit: MaterialUnit;
   secondary_unit: MaterialUnit | null;
@@ -653,6 +654,9 @@ export interface MaterialCategoryWithChildren extends MaterialCategory {
 export interface MaterialWithDetails extends Material {
   category?: MaterialCategory | null;
   brands?: MaterialBrand[];
+  parent_material?: { id: string; name: string; code: string | null } | null;
+  variants?: MaterialWithDetails[];
+  variant_count?: number;
 }
 
 export interface MaterialVendorWithDetails extends MaterialVendor {
@@ -837,6 +841,7 @@ export interface MaterialFormData {
   code?: string;
   local_name?: string;
   category_id?: string;
+  parent_id?: string | null; // For material variants
   description?: string;
   unit: MaterialUnit;
   secondary_unit?: MaterialUnit;

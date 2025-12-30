@@ -17,6 +17,9 @@ import {
   Fab,
   Tooltip,
   Link,
+  Collapse,
+  ToggleButtonGroup,
+  ToggleButton,
 } from "@mui/material";
 import {
   Add as AddIcon,
@@ -24,6 +27,11 @@ import {
   Delete as DeleteIcon,
   Search as SearchIcon,
   Store as StoreIcon,
+  ExpandMore as ExpandMoreIcon,
+  ExpandLess as ExpandLessIcon,
+  AccountTree as VariantIcon,
+  List as ListIcon,
+  ViewModule as GroupIcon,
 } from "@mui/icons-material";
 import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
 import PageHeader from "@/components/layout/PageHeader";
@@ -32,6 +40,7 @@ import { useIsMobile } from "@/hooks/useIsMobile";
 import { hasEditPermission } from "@/lib/permissions";
 import {
   useMaterials,
+  useMaterialsGrouped,
   useMaterialCategories,
   useDeleteMaterial,
 } from "@/hooks/queries/useMaterials";
@@ -70,19 +79,39 @@ export default function MaterialsPage() {
     useState<MaterialWithDetails | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<string>("");
   const [searchTerm, setSearchTerm] = useState("");
+  const [viewMode, setViewMode] = useState<"list" | "grouped">("grouped");
+  const [expandedParents, setExpandedParents] = useState<Set<string>>(new Set());
 
   const { userProfile } = useAuth();
   const isMobile = useIsMobile();
   const canEdit = hasEditPermission(userProfile?.role);
 
-  const { data: materials = [], isLoading } = useMaterials(
+  const { data: materials = [], isLoading: isLoadingFlat } = useMaterials(
+    categoryFilter || null
+  );
+  const { data: groupedMaterials = [], isLoading: isLoadingGrouped } = useMaterialsGrouped(
     categoryFilter || null
   );
   const { data: categories = [] } = useMaterialCategories();
   const { data: vendorCounts = {} } = useMaterialVendorCounts();
   const deleteMaterial = useDeleteMaterial();
 
-  // Filter materials by search term
+  const isLoading = viewMode === "grouped" ? isLoadingGrouped : isLoadingFlat;
+
+  // Toggle expanded state for a parent material
+  const toggleExpanded = useCallback((id: string) => {
+    setExpandedParents((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }, []);
+
+  // Filter materials by search term (flat list)
   const filteredMaterials = useMemo(() => {
     if (!searchTerm) return materials;
     const term = searchTerm.toLowerCase();
@@ -93,6 +122,47 @@ export default function MaterialsPage() {
         m.category?.name?.toLowerCase().includes(term)
     );
   }, [materials, searchTerm]);
+
+  // Filter grouped materials by search term
+  const filteredGroupedMaterials = useMemo(() => {
+    if (!searchTerm) return groupedMaterials;
+    const term = searchTerm.toLowerCase();
+    return groupedMaterials.filter((m) => {
+      // Check if parent matches
+      const parentMatches =
+        m.name.toLowerCase().includes(term) ||
+        m.code?.toLowerCase().includes(term) ||
+        m.category?.name?.toLowerCase().includes(term);
+
+      // Check if any variant matches
+      const variantMatches = m.variants?.some(
+        (v) =>
+          v.name.toLowerCase().includes(term) ||
+          v.code?.toLowerCase().includes(term)
+      );
+
+      return parentMatches || variantMatches;
+    });
+  }, [groupedMaterials, searchTerm]);
+
+  // Flatten grouped materials for display (parents + expanded variants)
+  const displayMaterials = useMemo(() => {
+    if (viewMode === "list") {
+      return filteredMaterials;
+    }
+
+    // For grouped view, create a flat list with parents and their variants
+    const result: (MaterialWithDetails & { _isVariant?: boolean; _parentName?: string })[] = [];
+    for (const parent of filteredGroupedMaterials) {
+      result.push(parent);
+      if (expandedParents.has(parent.id) && parent.variants) {
+        for (const variant of parent.variants) {
+          result.push({ ...variant, _isVariant: true, _parentName: parent.name });
+        }
+      }
+    }
+    return result;
+  }, [viewMode, filteredMaterials, filteredGroupedMaterials, expandedParents]);
 
   const handleOpenDialog = useCallback(
     (material?: MaterialWithDetails) => {
@@ -124,30 +194,67 @@ export default function MaterialsPage() {
   );
 
   // Table columns
-  const columns = useMemo<MRT_ColumnDef<MaterialWithDetails>[]>(
+  const columns = useMemo<MRT_ColumnDef<MaterialWithDetails & { _isVariant?: boolean; _parentName?: string }>[]>(
     () => [
       {
         accessorKey: "name",
         header: "Material Name",
-        size: 200,
-        Cell: ({ row }) => (
-          <Box>
-            <Link
-              component="button"
-              variant="body2"
-              fontWeight={500}
-              onClick={() => router.push(`/company/materials/${row.original.id}`)}
-              sx={{ textAlign: "left", cursor: "pointer" }}
-            >
-              {row.original.name}
-            </Link>
-            {row.original.code && (
-              <Typography variant="caption" color="text.secondary" display="block">
-                {row.original.code}
-              </Typography>
-            )}
-          </Box>
-        ),
+        size: 250,
+        Cell: ({ row }) => {
+          const isVariant = (row.original as any)._isVariant;
+          const hasVariants = (row.original.variant_count || 0) > 0;
+          const isExpanded = expandedParents.has(row.original.id);
+
+          return (
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+              {/* Expand/Collapse button for parents with variants (grouped view only) */}
+              {viewMode === "grouped" && hasVariants && (
+                <IconButton
+                  size="small"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleExpanded(row.original.id);
+                  }}
+                  sx={{ p: 0.5 }}
+                >
+                  {isExpanded ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
+                </IconButton>
+              )}
+              {/* Indent for variants */}
+              {isVariant && <Box sx={{ width: 24, ml: 2 }} />}
+              <Box>
+                <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                  {isVariant && (
+                    <VariantIcon fontSize="small" color="action" sx={{ opacity: 0.6 }} />
+                  )}
+                  <Link
+                    component="button"
+                    variant="body2"
+                    fontWeight={500}
+                    onClick={() => router.push(`/company/materials/${row.original.id}`)}
+                    sx={{ textAlign: "left", cursor: "pointer" }}
+                  >
+                    {row.original.name}
+                  </Link>
+                  {hasVariants && (
+                    <Chip
+                      label={`${row.original.variant_count} variant${row.original.variant_count === 1 ? "" : "s"}`}
+                      size="small"
+                      color="info"
+                      variant="outlined"
+                      sx={{ ml: 1, height: 20, fontSize: "0.7rem" }}
+                    />
+                  )}
+                </Box>
+                {row.original.code && (
+                  <Typography variant="caption" color="text.secondary" display="block">
+                    {row.original.code}
+                  </Typography>
+                )}
+              </Box>
+            </Box>
+          );
+        },
       },
       {
         accessorKey: "category.name",
@@ -237,7 +344,7 @@ export default function MaterialsPage() {
         },
       },
     ],
-    [vendorCounts, router]
+    [vendorCounts, router, viewMode, expandedParents, toggleExpanded]
   );
 
   // Row actions
@@ -292,6 +399,8 @@ export default function MaterialsPage() {
           gap: 2,
           mb: 2,
           flexDirection: isMobile ? "column" : "row",
+          alignItems: isMobile ? "stretch" : "center",
+          flexWrap: "wrap",
         }}
       >
         <TextField
@@ -327,19 +436,38 @@ export default function MaterialsPage() {
               ))}
           </Select>
         </FormControl>
+        <Box sx={{ flex: 1 }} />
+        <ToggleButtonGroup
+          value={viewMode}
+          exclusive
+          onChange={(_, value) => value && setViewMode(value)}
+          size="small"
+        >
+          <ToggleButton value="grouped">
+            <Tooltip title="Grouped View (with variants)">
+              <GroupIcon fontSize="small" />
+            </Tooltip>
+          </ToggleButton>
+          <ToggleButton value="list">
+            <Tooltip title="Flat List">
+              <ListIcon fontSize="small" />
+            </Tooltip>
+          </ToggleButton>
+        </ToggleButtonGroup>
       </Box>
 
       {/* Data Table */}
       <DataTable
         columns={columns}
-        data={filteredMaterials}
+        data={displayMaterials}
         isLoading={isLoading}
         enableRowActions={canEdit}
         renderRowActions={renderRowActions}
         mobileHiddenColumns={["gst_rate", "reorder_level", "brands"]}
         initialState={{
-          sorting: [{ id: "name", desc: false }],
+          sorting: viewMode === "list" ? [{ id: "name", desc: false }] : [],
         }}
+        enableSorting={viewMode === "list"}
       />
 
       {/* Mobile FAB */}

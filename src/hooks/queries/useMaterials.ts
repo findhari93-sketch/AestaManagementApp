@@ -114,6 +114,7 @@ export function useCreateMaterialCategory() {
 
 /**
  * Fetch all materials with optional category filter
+ * Includes parent material info for variants
  */
 export function useMaterials(categoryId?: string | null) {
   const supabase = createClient();
@@ -129,7 +130,8 @@ export function useMaterials(categoryId?: string | null) {
           `
           *,
           category:material_categories(id, name, code),
-          brands:material_brands(id, brand_name, is_preferred, quality_rating, is_active)
+          brands:material_brands(id, brand_name, is_preferred, quality_rating, is_active),
+          parent_material:materials!materials_parent_id_fkey(id, name, code)
         `
         )
         .eq("is_active", true)
@@ -141,7 +143,107 @@ export function useMaterials(categoryId?: string | null) {
 
       const { data, error } = await query;
       if (error) throw error;
-      return data as MaterialWithDetails[];
+      return data as unknown as MaterialWithDetails[];
+    },
+  });
+}
+
+/**
+ * Fetch materials grouped by parent (for hierarchical display)
+ * Returns parent materials with variant_count and parent-first sorting
+ */
+export function useMaterialsGrouped(categoryId?: string | null) {
+  const supabase = createClient();
+
+  return useQuery({
+    queryKey: categoryId
+      ? ["materials", "grouped", categoryId]
+      : ["materials", "grouped"],
+    queryFn: async () => {
+      let query = supabase
+        .from("materials")
+        .select(
+          `
+          *,
+          category:material_categories(id, name, code),
+          brands:material_brands(id, brand_name, is_preferred, quality_rating, is_active),
+          parent_material:materials!materials_parent_id_fkey(id, name, code)
+        `
+        )
+        .eq("is_active", true);
+
+      if (categoryId) {
+        query = query.eq("category_id", categoryId);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+
+      const materials = data as unknown as MaterialWithDetails[];
+
+      // Group variants under their parents
+      const parentMaterialsMap = new Map<string, MaterialWithDetails>();
+      const standalones: MaterialWithDetails[] = [];
+      const variantsByParent = new Map<string, MaterialWithDetails[]>();
+
+      // First pass: identify parents and variants
+      for (const material of materials) {
+        if (material.parent_id) {
+          // This is a variant
+          const variants = variantsByParent.get(material.parent_id) || [];
+          variants.push(material);
+          variantsByParent.set(material.parent_id, variants);
+        } else {
+          // This is a parent or standalone
+          parentMaterialsMap.set(material.id, material);
+        }
+      }
+
+      // Second pass: attach variants to parents and identify standalones
+      for (const [id, material] of parentMaterialsMap) {
+        const variants = variantsByParent.get(id);
+        if (variants && variants.length > 0) {
+          // This is a parent with variants
+          material.variants = variants.sort((a, b) => a.name.localeCompare(b.name));
+          material.variant_count = variants.length;
+        }
+        standalones.push(material);
+      }
+
+      // Sort: parents with variants first, then standalones, alphabetically
+      return standalones.sort((a, b) => {
+        // Sort by whether they have variants (parents with variants first)
+        const aHasVariants = (a.variant_count || 0) > 0;
+        const bHasVariants = (b.variant_count || 0) > 0;
+        if (aHasVariants !== bHasVariants) {
+          return aHasVariants ? -1 : 1;
+        }
+        // Then by name
+        return a.name.localeCompare(b.name);
+      });
+    },
+  });
+}
+
+/**
+ * Fetch parent materials (materials that can have variants)
+ * Excludes materials that are already variants
+ */
+export function useParentMaterials() {
+  const supabase = createClient();
+
+  return useQuery({
+    queryKey: ["materials", "parents"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("materials")
+        .select("id, name, code, unit, category_id")
+        .eq("is_active", true)
+        .is("parent_id", null) // Only materials that are not variants
+        .order("name");
+
+      if (error) throw error;
+      return data as Pick<Material, "id" | "name" | "code" | "unit" | "category_id">[];
     },
   });
 }
@@ -254,14 +356,15 @@ export function useMaterial(id: string | undefined) {
           `
           *,
           category:material_categories(id, name, code),
-          brands:material_brands(id, brand_name, is_preferred, quality_rating, notes, is_active)
+          brands:material_brands(id, brand_name, is_preferred, quality_rating, notes, is_active),
+          parent_material:materials!materials_parent_id_fkey(id, name, code)
         `
         )
         .eq("id", id)
         .single();
 
       if (error) throw error;
-      return data as MaterialWithDetails;
+      return data as unknown as MaterialWithDetails;
     },
     enabled: !!id,
   });
@@ -344,6 +447,7 @@ export function useCreateMaterial() {
         code,
         local_name: data.local_name?.trim() || null,
         category_id: data.category_id?.trim() || null,
+        parent_id: data.parent_id?.trim() || null,
         description: data.description?.trim() || null,
         hsn_code: data.hsn_code?.trim() || null,
       };
@@ -387,6 +491,7 @@ export function useUpdateMaterial() {
       if ("code" in data) cleanData.code = data.code?.trim() || null;
       if ("local_name" in data) cleanData.local_name = data.local_name?.trim() || null;
       if ("category_id" in data) cleanData.category_id = data.category_id?.trim() || null;
+      if ("parent_id" in data) cleanData.parent_id = data.parent_id?.trim() || null;
       if ("description" in data) cleanData.description = data.description?.trim() || null;
       if ("hsn_code" in data) cleanData.hsn_code = data.hsn_code?.trim() || null;
 

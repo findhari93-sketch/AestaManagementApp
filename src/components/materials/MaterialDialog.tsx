@@ -22,6 +22,9 @@ import {
   Accordion,
   AccordionSummary,
   AccordionDetails,
+  FormControlLabel,
+  Switch,
+  Autocomplete,
 } from "@mui/material";
 import {
   Close as CloseIcon,
@@ -37,6 +40,7 @@ import {
   useCreateMaterialBrand,
   useDeleteMaterialBrand,
   useUpdateMaterialBrand,
+  useParentMaterials,
 } from "@/hooks/queries/useMaterials";
 import type {
   MaterialWithDetails,
@@ -86,14 +90,17 @@ export default function MaterialDialog({
   const createBrand = useCreateMaterialBrand();
   const updateBrand = useUpdateMaterialBrand();
   const deleteBrand = useDeleteMaterialBrand();
+  const { data: parentMaterials = [] } = useParentMaterials();
 
   const [error, setError] = useState("");
   const [newBrandName, setNewBrandName] = useState("");
+  const [isVariant, setIsVariant] = useState(false);
   const [formData, setFormData] = useState<MaterialFormData>({
     name: "",
     code: "",
     local_name: "",
     category_id: "",
+    parent_id: "",
     description: "",
     unit: "piece",
     hsn_code: "",
@@ -110,6 +117,7 @@ export default function MaterialDialog({
         code: material.code || "",
         local_name: material.local_name || "",
         category_id: material.category_id || "",
+        parent_id: material.parent_id || "",
         description: material.description || "",
         unit: material.unit,
         hsn_code: material.hsn_code || "",
@@ -117,12 +125,14 @@ export default function MaterialDialog({
         reorder_level: material.reorder_level || 10,
         min_order_qty: material.min_order_qty || 1,
       });
+      setIsVariant(!!material.parent_id);
     } else {
       setFormData({
         name: "",
         code: "",
         local_name: "",
         category_id: "",
+        parent_id: "",
         description: "",
         unit: "piece",
         hsn_code: "",
@@ -130,6 +140,7 @@ export default function MaterialDialog({
         reorder_level: 10,
         min_order_qty: 1,
       });
+      setIsVariant(false);
     }
     setError("");
     setNewBrandName("");
@@ -153,6 +164,30 @@ export default function MaterialDialog({
     return [];
   }, [categories, parentCategories, formData.category_id]);
 
+  // Get available parent materials (exclude current material and materials that already have variants)
+  const availableParentMaterials = useMemo(() => {
+    if (isEdit && material) {
+      // Exclude the current material from being its own parent
+      return parentMaterials.filter((m) => m.id !== material.id);
+    }
+    return parentMaterials;
+  }, [parentMaterials, isEdit, material]);
+
+  // When parent material changes, inherit properties
+  const handleParentChange = (parentId: string) => {
+    handleChange("parent_id", parentId);
+    if (parentId) {
+      const parent = parentMaterials.find((m) => m.id === parentId);
+      if (parent) {
+        // Inherit category and unit from parent
+        if (parent.category_id) {
+          handleChange("category_id", parent.category_id);
+        }
+        handleChange("unit", parent.unit);
+      }
+    }
+  };
+
   const handleChange = (field: keyof MaterialFormData, value: unknown) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
     setError("");
@@ -164,14 +199,24 @@ export default function MaterialDialog({
       return;
     }
 
+    if (isVariant && !formData.parent_id) {
+      setError("Please select a parent material for this variant");
+      return;
+    }
+
     try {
+      const dataToSubmit = {
+        ...formData,
+        parent_id: isVariant ? formData.parent_id : null,
+      };
+
       if (isEdit) {
         await updateMaterial.mutateAsync({
           id: material.id,
-          data: formData,
+          data: dataToSubmit,
         });
       } else {
-        await createMaterial.mutateAsync(formData);
+        await createMaterial.mutateAsync(dataToSubmit);
       }
       onClose();
     } catch (err: unknown) {
@@ -295,6 +340,7 @@ export default function MaterialDialog({
                 value={formData.category_id}
                 onChange={(e) => handleChange("category_id", e.target.value)}
                 label="Category"
+                disabled={isVariant && !!formData.parent_id}
               >
                 <MenuItem value="">No Category</MenuItem>
                 {parentCategories.map((cat) => (
@@ -311,6 +357,71 @@ export default function MaterialDialog({
               </Select>
             </FormControl>
           </Grid>
+
+          {/* Variant Section */}
+          <Grid size={12}>
+            <Divider sx={{ my: 1 }}>
+              <Typography variant="caption" color="text.secondary">
+                Material Variant
+              </Typography>
+            </Divider>
+          </Grid>
+
+          <Grid size={12}>
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={isVariant}
+                  onChange={(e) => {
+                    setIsVariant(e.target.checked);
+                    if (!e.target.checked) {
+                      handleChange("parent_id", "");
+                    }
+                  }}
+                  disabled={isEdit && (material?.variant_count || 0) > 0}
+                />
+              }
+              label={
+                <Box>
+                  <Typography variant="body2">
+                    This is a variant of another material
+                  </Typography>
+                  {isEdit && (material?.variant_count || 0) > 0 && (
+                    <Typography variant="caption" color="text.secondary">
+                      Cannot convert to variant: this material has {material?.variant_count} variants
+                    </Typography>
+                  )}
+                </Box>
+              }
+            />
+          </Grid>
+
+          {isVariant && (
+            <Grid size={12}>
+              <Autocomplete
+                options={availableParentMaterials}
+                getOptionLabel={(option) =>
+                  `${option.name}${option.code ? ` (${option.code})` : ""}`
+                }
+                value={
+                  availableParentMaterials.find((m) => m.id === formData.parent_id) || null
+                }
+                onChange={(_, newValue) => {
+                  handleParentChange(newValue?.id || "");
+                }}
+                renderInput={(params) => (
+                  <TextField
+                    {...params}
+                    label="Parent Material"
+                    placeholder="Search parent material..."
+                    helperText="Select the parent material this variant belongs to"
+                    required
+                  />
+                )}
+                isOptionEqualToValue={(option, value) => option.id === value.id}
+              />
+            </Grid>
+          )}
 
           <Grid size={{ xs: 12 }}>
             <TextField
