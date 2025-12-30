@@ -8,6 +8,7 @@ import type {
   VendorWithCategories,
   VendorFormData,
   MaterialCategory,
+  VendorType,
 } from "@/types/material.types";
 
 // ============================================
@@ -59,6 +60,113 @@ export function useVendors(categoryId?: string | null) {
 
       return vendors;
     },
+  });
+}
+
+/**
+ * Pagination parameters for server-side pagination
+ */
+export interface PaginationParams {
+  pageIndex: number;
+  pageSize: number;
+}
+
+/**
+ * Paginated result with total count
+ */
+export interface PaginatedResult<T> {
+  data: T[];
+  totalCount: number;
+  pageCount: number;
+}
+
+/**
+ * Fetch vendors with server-side pagination
+ * Use this for large datasets where client-side pagination is not efficient
+ */
+export function usePaginatedVendors(
+  pagination: PaginationParams,
+  categoryId?: string | null,
+  searchTerm?: string,
+  vendorType?: VendorType
+) {
+  const supabase = createClient();
+  const { pageIndex, pageSize } = pagination;
+  const offset = pageIndex * pageSize;
+
+  return useQuery({
+    queryKey: ["vendors", "paginated", { pageIndex, pageSize, categoryId, searchTerm, vendorType }],
+    queryFn: async (): Promise<PaginatedResult<VendorWithCategories>> => {
+      // First, get total count
+      let countQuery = supabase
+        .from("vendors")
+        .select("*", { count: "exact", head: true })
+        .eq("is_active", true);
+
+      if (vendorType) {
+        countQuery = countQuery.eq("vendor_type", vendorType);
+      }
+
+      if (searchTerm && searchTerm.length >= 2) {
+        countQuery = countQuery.or(
+          `name.ilike.%${searchTerm}%,code.ilike.%${searchTerm}%,city.ilike.%${searchTerm}%`
+        );
+      }
+
+      const { count: totalCount, error: countError } = await countQuery;
+      if (countError) throw countError;
+
+      // Then, get paginated data
+      let dataQuery = supabase
+        .from("vendors")
+        .select(
+          `
+          *,
+          vendor_material_categories(
+            category_id,
+            is_primary,
+            category:material_categories(id, name, code)
+          )
+        `
+        )
+        .eq("is_active", true)
+        .order("name")
+        .range(offset, offset + pageSize - 1);
+
+      if (vendorType) {
+        dataQuery = dataQuery.eq("vendor_type", vendorType);
+      }
+
+      if (searchTerm && searchTerm.length >= 2) {
+        dataQuery = dataQuery.or(
+          `name.ilike.%${searchTerm}%,code.ilike.%${searchTerm}%,city.ilike.%${searchTerm}%`
+        );
+      }
+
+      const { data, error: dataError } = await dataQuery;
+      if (dataError) throw dataError;
+
+      // Transform to include categories array
+      let vendors = data.map((v: any) => ({
+        ...v,
+        categories:
+          v.vendor_material_categories?.map((vc: any) => vc.category) || [],
+      })) as VendorWithCategories[];
+
+      // Filter by category if specified (done in-memory for simplicity)
+      if (categoryId) {
+        vendors = vendors.filter((v) =>
+          v.categories?.some((c) => c?.id === categoryId)
+        );
+      }
+
+      return {
+        data: vendors,
+        totalCount: totalCount || 0,
+        pageCount: Math.ceil((totalCount || 0) / pageSize),
+      };
+    },
+    placeholderData: (previousData) => previousData, // Keep previous data while loading
   });
 }
 

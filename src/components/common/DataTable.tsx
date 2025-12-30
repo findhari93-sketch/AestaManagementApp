@@ -7,7 +7,7 @@ import {
   type MRT_RowData,
   type MRT_TableOptions,
 } from "material-react-table";
-import { Box, useTheme } from "@mui/material";
+import { Box, Chip, useTheme } from "@mui/material";
 import { useIsMobile, useIsTablet } from "@/hooks/useIsMobile";
 
 // Default table configuration - centralized for entire app
@@ -69,9 +69,15 @@ export const tableDefaults = {
   },
 };
 
+// Pagination state type for server-side pagination
+export interface PaginationState {
+  pageIndex: number;
+  pageSize: number;
+}
+
 // Props interface for DataTable component
 interface DataTableProps<TData extends MRT_RowData>
-  extends Partial<MRT_TableOptions<TData>> {
+  extends Omit<Partial<MRT_TableOptions<TData>>, 'onPaginationChange'> {
   columns: MRT_ColumnDef<TData>[];
   data: TData[];
   isLoading?: boolean;
@@ -92,6 +98,13 @@ interface DataTableProps<TData extends MRT_RowData>
   compactMode?: boolean;
   // Columns to hide on mobile (by accessorKey)
   mobileHiddenColumns?: string[];
+  // Show total record count in toolbar
+  showRecordCount?: boolean;
+  // Server-side pagination props
+  manualPagination?: boolean;
+  rowCount?: number;
+  pagination?: PaginationState;
+  onPaginationChange?: (pagination: PaginationState) => void;
 }
 
 export default function DataTable<TData extends MRT_RowData>({
@@ -106,6 +119,12 @@ export default function DataTable<TData extends MRT_RowData>({
   pinnedColumns,
   compactMode = true, // Default to compact on mobile
   mobileHiddenColumns = [],
+  showRecordCount = true, // Show record count by default
+  // Server-side pagination props
+  manualPagination = false,
+  rowCount,
+  pagination: controlledPagination,
+  onPaginationChange,
   ...otherProps
 }: DataTableProps<TData>) {
   const theme = useTheme();
@@ -365,11 +384,21 @@ export default function DataTable<TData extends MRT_RowData>({
       data={data}
       // Spread all defaults
       {...tableDefaults}
-      // State
+      // State - include controlled pagination when using server-side
       state={{
         isLoading,
+        ...(manualPagination && controlledPagination ? { pagination: controlledPagination } : {}),
         ...(otherProps.state || {}),
       }}
+      // Server-side pagination props
+      manualPagination={manualPagination}
+      rowCount={rowCount}
+      onPaginationChange={onPaginationChange ? (updater) => {
+        const newPagination = typeof updater === 'function'
+          ? updater(controlledPagination || { pageIndex: 0, pageSize: pageSize || 50 })
+          : updater;
+        onPaginationChange(newPagination);
+      } : undefined}
       // Merged initial state
       initialState={initialState}
       // Row selection if enabled
@@ -388,6 +417,53 @@ export default function DataTable<TData extends MRT_RowData>({
       muiBottomToolbarProps={muiBottomToolbarProps}
       muiSearchTextFieldProps={muiSearchTextFieldProps}
       muiPaginationProps={muiPaginationProps}
+      // Show record count in footer (left side)
+      renderBottomToolbarCustomActions={showRecordCount ? ({ table }) => {
+        // For server-side pagination, use rowCount; otherwise use local counts
+        const totalCount = manualPagination ? (rowCount || 0) : data.length;
+        const filteredCount = manualPagination
+          ? totalCount
+          : table.getFilteredRowModel().rows.length;
+        const isFiltered = !manualPagination && filteredCount !== totalCount;
+
+        return (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, height: '100%' }}>
+            {isFiltered ? (
+              <>
+                <Chip
+                  label={`${filteredCount} filtered`}
+                  size="small"
+                  color="primary"
+                  variant="filled"
+                  sx={{
+                    fontWeight: 600,
+                    fontSize: useCompact ? '0.65rem' : '0.75rem',
+                  }}
+                />
+                <Chip
+                  label={`${totalCount} total`}
+                  size="small"
+                  variant="outlined"
+                  sx={{
+                    fontWeight: 500,
+                    fontSize: useCompact ? '0.65rem' : '0.75rem',
+                  }}
+                />
+              </>
+            ) : (
+              <Chip
+                label={`${totalCount} records`}
+                size="small"
+                variant="outlined"
+                sx={{
+                  fontWeight: 500,
+                  fontSize: useCompact ? '0.65rem' : '0.75rem',
+                }}
+              />
+            )}
+          </Box>
+        );
+      } : undefined}
       // Spread any additional props (allows full customization)
       {...otherProps}
     />

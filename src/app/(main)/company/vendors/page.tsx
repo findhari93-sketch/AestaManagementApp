@@ -3,6 +3,7 @@
 export const dynamic = 'force-dynamic';
 
 import { useMemo, useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import {
   Box,
   Button,
@@ -14,6 +15,7 @@ import {
   Fab,
   Tooltip,
   Rating,
+  Link,
 } from "@mui/material";
 import {
   Add as AddIcon,
@@ -22,6 +24,7 @@ import {
   Search as SearchIcon,
   Phone as PhoneIcon,
   WhatsApp as WhatsAppIcon,
+  Inventory as InventoryIcon,
 } from "@mui/icons-material";
 import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
 import PageHeader from "@/components/layout/PageHeader";
@@ -33,10 +36,12 @@ import {
   useDeleteVendor,
 } from "@/hooks/queries/useVendors";
 import { useMaterialCategories } from "@/hooks/queries/useMaterials";
+import { useVendorMaterialCounts } from "@/hooks/queries/useVendorInventory";
 import VendorDialog from "@/components/materials/VendorDialog";
 import type { VendorWithCategories } from "@/types/material.types";
 
 export default function VendorsPage() {
+  const router = useRouter();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingVendor, setEditingVendor] = useState<VendorWithCategories | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
@@ -47,6 +52,7 @@ export default function VendorsPage() {
 
   const { data: vendors = [], isLoading } = useVendors();
   const { data: categories = [] } = useMaterialCategories();
+  const { data: materialCounts = {} } = useVendorMaterialCounts();
   const deleteVendor = useDeleteVendor();
 
   // Filter vendors by search term
@@ -98,11 +104,17 @@ export default function VendorsPage() {
         size: 200,
         Cell: ({ row }) => (
           <Box>
-            <Typography variant="body2" fontWeight={500}>
+            <Link
+              component="button"
+              variant="body2"
+              fontWeight={500}
+              onClick={() => router.push(`/company/vendors/${row.original.id}`)}
+              sx={{ textAlign: "left", cursor: "pointer" }}
+            >
               {row.original.name}
-            </Typography>
+            </Link>
             {row.original.code && (
-              <Typography variant="caption" color="text.secondary">
+              <Typography variant="caption" color="text.secondary" display="block">
                 {row.original.code}
               </Typography>
             )}
@@ -142,6 +154,30 @@ export default function VendorsPage() {
         header: "Location",
         size: 120,
         Cell: ({ row }) => row.original.city || "-",
+      },
+      {
+        id: "materials",
+        header: "Materials",
+        size: 100,
+        enableSorting: false,
+        Cell: ({ row }) => {
+          const count = materialCounts[row.original.id] || 0;
+          return count > 0 ? (
+            <Chip
+              icon={<InventoryIcon />}
+              label={count}
+              size="small"
+              color="primary"
+              variant="outlined"
+              onClick={() => router.push(`/company/vendors/${row.original.id}?tab=materials`)}
+              clickable
+            />
+          ) : (
+            <Typography variant="caption" color="text.secondary">
+              None
+            </Typography>
+          );
+        },
       },
       {
         accessorKey: "categories",
@@ -191,7 +227,7 @@ export default function VendorsPage() {
         Cell: ({ row }) => row.original.gst_number || "-",
       },
     ],
-    []
+    [materialCounts, router]
   );
 
   // Row actions

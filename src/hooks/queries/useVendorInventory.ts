@@ -568,3 +568,324 @@ export function usePriceTrend(
     enabled: !!materialId,
   });
 }
+
+// ============================================
+// VENDOR INVENTORY CRUD OPERATIONS
+// ============================================
+
+/**
+ * Create a new vendor inventory item
+ * Use this when adding a material to a vendor's catalog
+ */
+export function useAddVendorInventory() {
+  const queryClient = useQueryClient();
+  const supabase = createClient();
+
+  return useMutation({
+    mutationFn: async (data: VendorInventoryFormData) => {
+      const { data: result, error } = await (supabase as any)
+        .from("vendor_inventory")
+        .insert({
+          ...data,
+          last_price_update: new Date().toISOString(),
+          is_available: data.is_available ?? true,
+          is_active: true,
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+      return result as VendorInventory;
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.vendorInventory.byVendor(variables.vendor_id),
+      });
+      if (variables.material_id) {
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.vendorInventory.byMaterial(variables.material_id),
+        });
+      }
+      queryClient.invalidateQueries({
+        queryKey: ["vendorInventory", "counts"],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["vendorInventory", "materialCounts"],
+      });
+    },
+  });
+}
+
+/**
+ * Update an existing vendor inventory item by ID
+ */
+export function useUpdateVendorInventory() {
+  const queryClient = useQueryClient();
+  const supabase = createClient();
+
+  return useMutation({
+    mutationFn: async ({
+      id,
+      data,
+    }: {
+      id: string;
+      data: Partial<VendorInventoryFormData>;
+    }) => {
+      const { data: result, error } = await (supabase as any)
+        .from("vendor_inventory")
+        .update({
+          ...data,
+          last_price_update: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", id)
+        .select()
+        .single();
+
+      if (error) throw error;
+      return result as VendorInventory;
+    },
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.vendorInventory.byVendor(result.vendor_id),
+      });
+      if (result.material_id) {
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.vendorInventory.byMaterial(result.material_id),
+        });
+      }
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.vendorInventory.all,
+      });
+    },
+  });
+}
+
+/**
+ * Delete (soft delete) a vendor inventory item
+ * Sets is_active to false instead of hard delete
+ */
+export function useDeleteVendorInventory() {
+  const queryClient = useQueryClient();
+  const supabase = createClient();
+
+  return useMutation({
+    mutationFn: async ({
+      id,
+      vendorId,
+      materialId,
+    }: {
+      id: string;
+      vendorId: string;
+      materialId?: string;
+    }) => {
+      const { error } = await (supabase as any)
+        .from("vendor_inventory")
+        .update({
+          is_active: false,
+          is_available: false,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", id);
+
+      if (error) throw error;
+      return { id, vendorId, materialId };
+    },
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.vendorInventory.byVendor(result.vendorId),
+      });
+      if (result.materialId) {
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.vendorInventory.byMaterial(result.materialId),
+        });
+      }
+      queryClient.invalidateQueries({
+        queryKey: ["vendorInventory", "counts"],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["vendorInventory", "materialCounts"],
+      });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.vendorInventory.all,
+      });
+    },
+  });
+}
+
+// ============================================
+// BATCH COUNT QUERIES (for list views)
+// ============================================
+
+/**
+ * Get material counts for all vendors (batch query for list view)
+ * Returns a map of vendorId -> count
+ */
+export function useVendorMaterialCounts() {
+  const supabase = createClient();
+
+  return useQuery({
+    queryKey: ["vendorInventory", "counts"],
+    queryFn: async () => {
+      const { data, error } = await (supabase as any)
+        .from("vendor_inventory")
+        .select("vendor_id")
+        .eq("is_active", true)
+        .eq("is_available", true);
+
+      if (error) throw error;
+
+      // Group by vendor_id and count
+      const counts: Record<string, number> = {};
+      (data || []).forEach((item: { vendor_id: string }) => {
+        counts[item.vendor_id] = (counts[item.vendor_id] || 0) + 1;
+      });
+      return counts;
+    },
+  });
+}
+
+/**
+ * Get vendor counts for all materials (batch query for list view)
+ * Returns a map of materialId -> count
+ */
+export function useMaterialVendorCounts() {
+  const supabase = createClient();
+
+  return useQuery({
+    queryKey: ["vendorInventory", "materialCounts"],
+    queryFn: async () => {
+      const { data, error } = await (supabase as any)
+        .from("vendor_inventory")
+        .select("material_id")
+        .eq("is_active", true)
+        .eq("is_available", true)
+        .not("material_id", "is", null);
+
+      if (error) throw error;
+
+      // Group by material_id and count
+      const counts: Record<string, number> = {};
+      (data || []).forEach((item: { material_id: string | null }) => {
+        if (item.material_id) {
+          counts[item.material_id] = (counts[item.material_id] || 0) + 1;
+        }
+      });
+      return counts;
+    },
+  });
+}
+
+// ============================================
+// ORPHAN DETECTION QUERIES
+// ============================================
+
+/**
+ * Get vendors without any materials assigned
+ * Useful for dashboard alerts and data quality checks
+ */
+export function useOrphanedVendors() {
+  const supabase = createClient();
+
+  return useQuery({
+    queryKey: ["vendors", "orphaned"],
+    queryFn: async () => {
+      // Get all active vendors
+      const { data: vendors, error: vendorError } = await supabase
+        .from("vendors")
+        .select("id, name, code, vendor_type")
+        .eq("is_active", true);
+
+      if (vendorError) throw vendorError;
+
+      // Get vendors with active inventory
+      const { data: inventory, error: invError } = await (supabase as any)
+        .from("vendor_inventory")
+        .select("vendor_id")
+        .eq("is_active", true)
+        .eq("is_available", true);
+
+      if (invError) throw invError;
+
+      const vendorsWithMaterials = new Set(
+        (inventory || []).map((i: { vendor_id: string }) => i.vendor_id)
+      );
+      return (vendors || []).filter((v) => !vendorsWithMaterials.has(v.id));
+    },
+  });
+}
+
+/**
+ * Get materials without any vendor pricing
+ * Useful for dashboard alerts and data quality checks
+ */
+export function useMaterialsWithoutVendors() {
+  const supabase = createClient();
+
+  return useQuery({
+    queryKey: ["materials", "noVendors"],
+    queryFn: async () => {
+      // Get all active materials
+      const { data: materials, error: matError } = await supabase
+        .from("materials")
+        .select("id, name, code, unit")
+        .eq("is_active", true);
+
+      if (matError) throw matError;
+
+      // Get materials with vendor inventory
+      const { data: inventory, error: invError } = await (supabase as any)
+        .from("vendor_inventory")
+        .select("material_id")
+        .eq("is_active", true)
+        .eq("is_available", true)
+        .not("material_id", "is", null);
+
+      if (invError) throw invError;
+
+      const materialsWithVendors = new Set(
+        (inventory || []).map((i: { material_id: string | null }) => i.material_id)
+      );
+      return (materials || []).filter((m) => !materialsWithVendors.has(m.id));
+    },
+  });
+}
+
+/**
+ * Get a single vendor inventory item by ID
+ */
+export function useVendorInventoryItem(id: string | undefined) {
+  const supabase = createClient();
+
+  return useQuery({
+    queryKey: ["vendorInventory", "item", id],
+    queryFn: async () => {
+      if (!id) return null;
+
+      const { data, error } = await (supabase as any)
+        .from("vendor_inventory")
+        .select(
+          `
+          *,
+          vendor:vendors(id, name, vendor_type, shop_name),
+          material:materials(id, name, code, unit, category_id),
+          brand:material_brands(id, brand_name)
+        `
+        )
+        .eq("id", id)
+        .single();
+
+      if (error) throw error;
+
+      return {
+        ...data,
+        total_landed_cost:
+          (data.current_price || 0) +
+          (data.price_includes_transport ? 0 : data.transport_cost || 0) +
+          (data.loading_cost || 0) +
+          (data.unloading_cost || 0),
+      } as VendorInventoryWithDetails;
+    },
+    enabled: !!id,
+  });
+}

@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import {
   Box,
   Button,
@@ -15,12 +16,14 @@ import {
   InputAdornment,
   Fab,
   Tooltip,
+  Link,
 } from "@mui/material";
 import {
   Add as AddIcon,
   Edit as EditIcon,
   Delete as DeleteIcon,
   Search as SearchIcon,
+  Store as StoreIcon,
 } from "@mui/icons-material";
 import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
 import PageHeader from "@/components/layout/PageHeader";
@@ -32,6 +35,7 @@ import {
   useMaterialCategories,
   useDeleteMaterial,
 } from "@/hooks/queries/useMaterials";
+import { useMaterialVendorCounts } from "@/hooks/queries/useVendorInventory";
 import MaterialDialog from "@/components/materials/MaterialDialog";
 import type {
   MaterialWithDetails,
@@ -60,6 +64,7 @@ const UNIT_LABELS: Record<MaterialUnit, string> = {
 };
 
 export default function MaterialsPage() {
+  const router = useRouter();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingMaterial, setEditingMaterial] =
     useState<MaterialWithDetails | null>(null);
@@ -74,6 +79,7 @@ export default function MaterialsPage() {
     categoryFilter || null
   );
   const { data: categories = [] } = useMaterialCategories();
+  const { data: vendorCounts = {} } = useMaterialVendorCounts();
   const deleteMaterial = useDeleteMaterial();
 
   // Filter materials by search term
@@ -126,11 +132,17 @@ export default function MaterialsPage() {
         size: 200,
         Cell: ({ row }) => (
           <Box>
-            <Typography variant="body2" fontWeight={500}>
+            <Link
+              component="button"
+              variant="body2"
+              fontWeight={500}
+              onClick={() => router.push(`/company/materials/${row.original.id}`)}
+              sx={{ textAlign: "left", cursor: "pointer" }}
+            >
               {row.original.name}
-            </Typography>
+            </Link>
             {row.original.code && (
-              <Typography variant="caption" color="text.secondary">
+              <Typography variant="caption" color="text.secondary" display="block">
                 {row.original.code}
               </Typography>
             )}
@@ -157,6 +169,30 @@ export default function MaterialsPage() {
         header: "Unit",
         size: 80,
         Cell: ({ row }) => UNIT_LABELS[row.original.unit] || row.original.unit,
+      },
+      {
+        id: "vendors",
+        header: "Vendors",
+        size: 100,
+        enableSorting: false,
+        Cell: ({ row }) => {
+          const count = vendorCounts[row.original.id] || 0;
+          return count > 0 ? (
+            <Chip
+              icon={<StoreIcon />}
+              label={count}
+              size="small"
+              color="primary"
+              variant="outlined"
+              onClick={() => router.push(`/company/materials/${row.original.id}?tab=vendors`)}
+              clickable
+            />
+          ) : (
+            <Typography variant="caption" color="text.secondary">
+              None
+            </Typography>
+          );
+        },
       },
       {
         accessorKey: "gst_rate",
@@ -201,7 +237,7 @@ export default function MaterialsPage() {
         },
       },
     ],
-    []
+    [vendorCounts, router]
   );
 
   // Row actions

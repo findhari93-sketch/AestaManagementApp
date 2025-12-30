@@ -41,6 +41,52 @@ export function useSiteGroups() {
 }
 
 /**
+ * Fetch all site groups with their sites
+ */
+export function useSiteGroupsWithSites() {
+  const supabase = createClient();
+
+  return useQuery({
+    queryKey: [...queryKeys.siteGroups.list(), "with-sites"],
+    queryFn: async () => {
+      // Get all groups
+      const { data: groups, error: groupsError } = await (supabase as any)
+        .from("site_groups")
+        .select("*")
+        .eq("is_active", true)
+        .order("name");
+
+      if (groupsError) throw groupsError;
+      if (!groups || groups.length === 0) return [] as SiteGroupWithSites[];
+
+      // Get all sites with their group assignments
+      const { data: sites, error: sitesError } = await (supabase as any)
+        .from("sites")
+        .select("id, name, site_group_id")
+        .eq("is_active", true)
+        .not("site_group_id", "is", null);
+
+      if (sitesError) throw sitesError;
+
+      // Map sites to their groups
+      const sitesByGroup: Record<string, Array<{ id: string; name: string }>> = {};
+      (sites || []).forEach((site: { id: string; name: string; site_group_id: string }) => {
+        if (!sitesByGroup[site.site_group_id]) {
+          sitesByGroup[site.site_group_id] = [];
+        }
+        sitesByGroup[site.site_group_id].push({ id: site.id, name: site.name });
+      });
+
+      // Combine groups with their sites
+      return groups.map((group: SiteGroup) => ({
+        ...group,
+        sites: sitesByGroup[group.id] || [],
+      })) as SiteGroupWithSites[];
+    },
+  });
+}
+
+/**
  * Fetch a single site group with its sites
  */
 export function useSiteGroup(id: string | undefined) {
