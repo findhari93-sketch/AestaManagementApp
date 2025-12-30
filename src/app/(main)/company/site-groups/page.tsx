@@ -33,11 +33,13 @@ import {
 import PageHeader from '@/components/layout/PageHeader'
 import Breadcrumbs from '@/components/layout/Breadcrumbs'
 import RelatedPages from '@/components/layout/RelatedPages'
+import CreateSiteGroupDialog from '@/components/site-groups/CreateSiteGroupDialog'
 import { useSiteGroupsWithSites } from '@/hooks/queries/useSiteGroups'
 import { formatCurrency } from '@/lib/formatters'
 
 export default function SiteGroupsPage() {
-  const { data: siteGroups, isLoading, error } = useSiteGroupsWithSites()
+  const [createDialogOpen, setCreateDialogOpen] = useState(false)
+  const { data: siteGroups, isLoading, error, refetch } = useSiteGroupsWithSites()
 
   return (
     <Box>
@@ -49,7 +51,7 @@ export default function SiteGroupsPage() {
           <Button
             variant="contained"
             startIcon={<AddIcon />}
-            disabled
+            onClick={() => setCreateDialogOpen(true)}
           >
             Create Group
           </Button>
@@ -237,6 +239,13 @@ export default function SiteGroupsPage() {
           on a weekly basis.
         </Typography>
       </Alert>
+
+      {/* Create Site Group Dialog */}
+      <CreateSiteGroupDialog
+        open={createDialogOpen}
+        onClose={() => setCreateDialogOpen(false)}
+        onSuccess={() => refetch()}
+      />
     </Box>
   )
 }
