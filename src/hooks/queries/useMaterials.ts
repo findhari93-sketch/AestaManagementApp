@@ -130,8 +130,7 @@ export function useMaterials(categoryId?: string | null) {
           `
           *,
           category:material_categories(id, name, code),
-          brands:material_brands(id, brand_name, is_preferred, quality_rating, is_active),
-          parent_material:materials!materials_parent_id_fkey(id, name, code)
+          brands:material_brands(id, brand_name, is_preferred, quality_rating, is_active)
         `
         )
         .eq("is_active", true)
@@ -143,7 +142,26 @@ export function useMaterials(categoryId?: string | null) {
 
       const { data, error } = await query;
       if (error) throw error;
-      return data as unknown as MaterialWithDetails[];
+
+      // Fetch parent material names for variants
+      const materials = data as unknown as MaterialWithDetails[];
+      const parentIds = [...new Set(materials.filter(m => m.parent_id).map(m => m.parent_id!))];
+
+      if (parentIds.length > 0) {
+        const { data: parents } = await supabase
+          .from("materials")
+          .select("id, name, code")
+          .in("id", parentIds);
+
+        const parentMap = new Map(parents?.map(p => [p.id, p]) || []);
+        for (const m of materials) {
+          if (m.parent_id) {
+            m.parent_material = parentMap.get(m.parent_id) || null;
+          }
+        }
+      }
+
+      return materials;
     },
   });
 }
@@ -166,8 +184,7 @@ export function useMaterialsGrouped(categoryId?: string | null) {
           `
           *,
           category:material_categories(id, name, code),
-          brands:material_brands(id, brand_name, is_preferred, quality_rating, is_active),
-          parent_material:materials!materials_parent_id_fkey(id, name, code)
+          brands:material_brands(id, brand_name, is_preferred, quality_rating, is_active)
         `
         )
         .eq("is_active", true);
@@ -356,15 +373,28 @@ export function useMaterial(id: string | undefined) {
           `
           *,
           category:material_categories(id, name, code),
-          brands:material_brands(id, brand_name, is_preferred, quality_rating, notes, is_active),
-          parent_material:materials!materials_parent_id_fkey(id, name, code)
+          brands:material_brands(id, brand_name, is_preferred, quality_rating, notes, is_active)
         `
         )
         .eq("id", id)
         .single();
 
       if (error) throw error;
-      return data as unknown as MaterialWithDetails;
+
+      const material = data as unknown as MaterialWithDetails;
+
+      // Fetch parent material if this is a variant
+      if (material.parent_id) {
+        const { data: parent } = await supabase
+          .from("materials")
+          .select("id, name, code")
+          .eq("id", material.parent_id)
+          .single();
+
+        material.parent_material = parent || null;
+      }
+
+      return material;
     },
     enabled: !!id,
   });
