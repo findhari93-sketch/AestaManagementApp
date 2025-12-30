@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   Dialog,
   DialogTitle,
@@ -21,10 +21,21 @@ import {
   Skeleton,
   Alert,
   Stack,
+  Tabs,
+  Tab,
+  Divider,
 } from "@mui/material";
-import { Close as CloseIcon } from "@mui/icons-material";
+import {
+  Close as CloseIcon,
+  TrendingUp as TrendingUpIcon,
+  TrendingDown as TrendingDownIcon,
+  TrendingFlat as TrendingFlatIcon,
+  TableChart as TableIcon,
+  ShowChart as ChartIcon,
+} from "@mui/icons-material";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { usePriceHistory } from "@/hooks/queries/useVendorInventory";
+import PriceHistoryChart from "./PriceHistoryChart";
 import type { PriceSource } from "@/types/material.types";
 import { PRICE_SOURCE_LABELS } from "@/types/material.types";
 
@@ -34,7 +45,10 @@ interface PriceHistoryDialogProps {
   materialId: string;
   vendorId: string;
   materialName: string;
+  materialUnit?: string;
 }
+
+type ViewMode = "chart" | "table";
 
 // Format currency
 const formatCurrency = (amount: number | null | undefined) => {
@@ -77,13 +91,26 @@ export default function PriceHistoryDialog({
   materialId,
   vendorId,
   materialName,
+  materialUnit = "unit",
 }: PriceHistoryDialogProps) {
   const isMobile = useIsMobile();
+  const [viewMode, setViewMode] = useState<ViewMode>("chart");
 
   const { data: priceHistory = [], isLoading } = usePriceHistory(
     vendorId,
     materialId
   );
+
+  // Transform data for chart
+  const chartData = useMemo(() => {
+    return priceHistory.map((record) => ({
+      id: record.id,
+      effective_date: record.recorded_date,
+      price: record.price,
+      change_percentage: undefined, // Will be calculated by chart component
+      change_reason: undefined,
+    }));
+  }, [priceHistory]);
 
   // Calculate stats
   const stats = useMemo(() => {
@@ -142,113 +169,167 @@ export default function PriceHistoryDialog({
             No price history found for this material from this vendor.
           </Alert>
         ) : (
-          <Stack spacing={3}>
-            {/* Summary Stats */}
-            <Box
-              sx={{
-                display: "flex",
-                gap: 2,
-                flexWrap: "wrap",
-              }}
-            >
-              <Paper variant="outlined" sx={{ p: 2, flex: 1, minWidth: 120 }}>
-                <Typography variant="caption" color="text.secondary">
-                  Average Price
-                </Typography>
-                <Typography variant="h6">
-                  {formatCurrency(stats.avgPrice)}
-                </Typography>
-              </Paper>
-              <Paper variant="outlined" sx={{ p: 2, flex: 1, minWidth: 120 }}>
-                <Typography variant="caption" color="text.secondary">
-                  Min Price
-                </Typography>
-                <Typography variant="h6" color="success.main">
-                  {formatCurrency(stats.minPrice)}
-                </Typography>
-              </Paper>
-              <Paper variant="outlined" sx={{ p: 2, flex: 1, minWidth: 120 }}>
-                <Typography variant="caption" color="text.secondary">
-                  Max Price
-                </Typography>
-                <Typography variant="h6" color="error.main">
-                  {formatCurrency(stats.maxPrice)}
-                </Typography>
-              </Paper>
-              <Paper variant="outlined" sx={{ p: 2, flex: 1, minWidth: 120 }}>
-                <Typography variant="caption" color="text.secondary">
-                  Trend (Last 30 days)
-                </Typography>
-                <Typography
-                  variant="h6"
-                  color={
-                    stats.trend.direction === "up"
-                      ? "error.main"
-                      : stats.trend.direction === "down"
-                      ? "success.main"
-                      : "text.primary"
-                  }
-                >
-                  {stats.trend.direction === "up"
-                    ? `+${stats.trend.change.toFixed(1)}%`
-                    : stats.trend.direction === "down"
-                    ? `${stats.trend.change.toFixed(1)}%`
-                    : "Stable"}
-                </Typography>
-              </Paper>
+          <Stack spacing={2}>
+            {/* View Mode Tabs */}
+            <Box sx={{ borderBottom: 1, borderColor: "divider" }}>
+              <Tabs
+                value={viewMode}
+                onChange={(_, newValue) => setViewMode(newValue)}
+                aria-label="price history view mode"
+              >
+                <Tab
+                  value="chart"
+                  label="Chart View"
+                  icon={<ChartIcon />}
+                  iconPosition="start"
+                  sx={{ minHeight: 48 }}
+                />
+                <Tab
+                  value="table"
+                  label="Table View"
+                  icon={<TableIcon />}
+                  iconPosition="start"
+                  sx={{ minHeight: 48 }}
+                />
+              </Tabs>
             </Box>
 
-            {/* Price Records Table */}
-            <TableContainer component={Paper} variant="outlined">
-              <Table size="small">
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Date</TableCell>
-                    <TableCell align="right">Price</TableCell>
-                    <TableCell align="right">Transport</TableCell>
-                    <TableCell align="right">Total</TableCell>
-                    <TableCell>Source</TableCell>
-                    <TableCell>Reference</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {priceHistory.map((record) => (
-                    <TableRow key={record.id}>
-                      <TableCell>{formatDate(record.recorded_date)}</TableCell>
-                      <TableCell align="right">
-                        {formatCurrency(record.price)}
-                      </TableCell>
-                      <TableCell align="right">
-                        {record.transport_cost
-                          ? formatCurrency(record.transport_cost)
-                          : "-"}
-                      </TableCell>
-                      <TableCell align="right">
-                        {formatCurrency(record.total_landed_cost)}
-                      </TableCell>
-                      <TableCell>
-                        <Chip
-                          label={
-                            PRICE_SOURCE_LABELS[record.source as PriceSource] ||
-                            record.source
-                          }
-                          size="small"
-                          variant="outlined"
-                        />
-                      </TableCell>
-                      <TableCell>
-                        {record.source_reference || "-"}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
+            {/* Chart View */}
+            {viewMode === "chart" && (
+              <Box>
+                <PriceHistoryChart
+                  data={chartData}
+                  height={300}
+                  showAverage
+                  materialUnit={materialUnit}
+                />
+              </Box>
+            )}
 
-            {/* Total records */}
-            <Typography variant="caption" color="text.secondary">
-              Showing {priceHistory.length} price records
-            </Typography>
+            {/* Table View */}
+            {viewMode === "table" && (
+              <>
+                {/* Summary Stats */}
+                <Box
+                  sx={{
+                    display: "flex",
+                    gap: 2,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <Paper variant="outlined" sx={{ p: 2, flex: 1, minWidth: 120 }}>
+                    <Typography variant="caption" color="text.secondary">
+                      Average Price
+                    </Typography>
+                    <Typography variant="h6">
+                      {formatCurrency(stats.avgPrice)}
+                    </Typography>
+                  </Paper>
+                  <Paper variant="outlined" sx={{ p: 2, flex: 1, minWidth: 120 }}>
+                    <Typography variant="caption" color="text.secondary">
+                      Min Price
+                    </Typography>
+                    <Typography variant="h6" color="success.main">
+                      {formatCurrency(stats.minPrice)}
+                    </Typography>
+                  </Paper>
+                  <Paper variant="outlined" sx={{ p: 2, flex: 1, minWidth: 120 }}>
+                    <Typography variant="caption" color="text.secondary">
+                      Max Price
+                    </Typography>
+                    <Typography variant="h6" color="error.main">
+                      {formatCurrency(stats.maxPrice)}
+                    </Typography>
+                  </Paper>
+                  <Paper variant="outlined" sx={{ p: 2, flex: 1, minWidth: 120 }}>
+                    <Typography variant="caption" color="text.secondary">
+                      Trend
+                    </Typography>
+                    <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                      {stats.trend.direction === "up" && (
+                        <TrendingUpIcon color="error" fontSize="small" />
+                      )}
+                      {stats.trend.direction === "down" && (
+                        <TrendingDownIcon color="success" fontSize="small" />
+                      )}
+                      {stats.trend.direction === "flat" && (
+                        <TrendingFlatIcon color="disabled" fontSize="small" />
+                      )}
+                      <Typography
+                        variant="h6"
+                        color={
+                          stats.trend.direction === "up"
+                            ? "error.main"
+                            : stats.trend.direction === "down"
+                            ? "success.main"
+                            : "text.primary"
+                        }
+                      >
+                        {stats.trend.direction === "up"
+                          ? `+${stats.trend.change.toFixed(1)}%`
+                          : stats.trend.direction === "down"
+                          ? `${stats.trend.change.toFixed(1)}%`
+                          : "Stable"}
+                      </Typography>
+                    </Box>
+                  </Paper>
+                </Box>
+
+                <Divider />
+
+                {/* Price Records Table */}
+                <TableContainer component={Paper} variant="outlined">
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Date</TableCell>
+                        <TableCell align="right">Price</TableCell>
+                        <TableCell align="right">Transport</TableCell>
+                        <TableCell align="right">Total</TableCell>
+                        <TableCell>Source</TableCell>
+                        <TableCell>Reference</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {priceHistory.map((record) => (
+                        <TableRow key={record.id}>
+                          <TableCell>{formatDate(record.recorded_date)}</TableCell>
+                          <TableCell align="right">
+                            {formatCurrency(record.price)}
+                          </TableCell>
+                          <TableCell align="right">
+                            {record.transport_cost
+                              ? formatCurrency(record.transport_cost)
+                              : "-"}
+                          </TableCell>
+                          <TableCell align="right">
+                            {formatCurrency(record.total_landed_cost)}
+                          </TableCell>
+                          <TableCell>
+                            <Chip
+                              label={
+                                PRICE_SOURCE_LABELS[record.source as PriceSource] ||
+                                record.source
+                              }
+                              size="small"
+                              variant="outlined"
+                            />
+                          </TableCell>
+                          <TableCell>
+                            {record.source_reference || "-"}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+
+                {/* Total records */}
+                <Typography variant="caption" color="text.secondary">
+                  Showing {priceHistory.length} price records
+                </Typography>
+              </>
+            )}
           </Stack>
         )}
       </DialogContent>
