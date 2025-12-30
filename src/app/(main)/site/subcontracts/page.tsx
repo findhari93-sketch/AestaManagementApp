@@ -309,6 +309,11 @@ export default function SiteSubcontractsPage() {
       return;
     }
 
+    if (form.is_rate_based && (form.rate_per_unit <= 0 || form.total_units <= 0)) {
+      setError("Please enter valid rate per unit and total units for rate-based contracts");
+      return;
+    }
+
     setLoading(true);
     try {
       const subcontractData = {
@@ -322,7 +327,7 @@ export default function SiteSubcontractsPage() {
         scope_of_work: form.scope_of_work || null,
         total_value: form.total_value,
         is_rate_based: form.is_rate_based,
-        measurement_unit: form.measurement_unit,
+        measurement_unit: form.is_rate_based ? form.measurement_unit : null,
         rate_per_unit: form.rate_per_unit || null,
         total_units: form.total_units || null,
         weekly_advance_rate: form.weekly_advance_rate || null,
