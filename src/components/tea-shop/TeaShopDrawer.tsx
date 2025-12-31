@@ -110,11 +110,11 @@ export default function TeaShopDrawer({
     try {
       // Generate unique file name
       const fileExt = file.name.split(".").pop();
-      const fileName = `tea-shop-qr/${siteId}/${Date.now()}.${fileExt}`;
+      const fileName = `${siteId}/${Date.now()}.${fileExt}`;
 
       // Upload to Supabase Storage
       const { data, error: uploadError } = await supabase.storage
-        .from("public")
+        .from("tea-shop-qr")
         .upload(fileName, file, {
           cacheControl: "3600",
           upsert: true,
@@ -123,7 +123,7 @@ export default function TeaShopDrawer({
       if (uploadError) throw uploadError;
 
       // Get public URL
-      const { data: urlData } = supabase.storage.from("public").getPublicUrl(fileName);
+      const { data: urlData } = supabase.storage.from("tea-shop-qr").getPublicUrl(fileName);
       setQrCodeUrl(urlData.publicUrl);
     } catch (err: any) {
       console.error("Error uploading QR code:", err);

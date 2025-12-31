@@ -35,6 +35,7 @@ import {
   QrCode2 as QrCodeIcon,
 } from "@mui/icons-material";
 import { createClient } from "@/lib/supabase/client";
+import FileUploader, { UploadedFile } from "@/components/common/FileUploader";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSite } from "@/contexts/SiteContext";
 import type { TeaShopAccount, TeaShopEntry, TeaShopSettlement, PaymentMode, Subcontract } from "@/types/database.types";
@@ -102,6 +103,7 @@ export default function TeaShopSettlementDialog({
   const [selectedEngineerId, setSelectedEngineerId] = useState("");
   const [createWalletTransaction, setCreateWalletTransaction] = useState(true);
   const [notes, setNotes] = useState("");
+  const [proofUrl, setProofUrl] = useState<string | null>(null);
 
   // Site engineers list
   const [engineers, setEngineers] = useState<SiteEngineer[]>([]);
@@ -131,6 +133,7 @@ export default function TeaShopSettlementDialog({
         setCreateWalletTransaction(false); // Don't create new transaction when editing
         setNotes(settlement.notes || "");
         setSelectedSubcontractId(settlement.subcontract_id || "");
+        setProofUrl((settlement as any).proof_url || null);
       } else {
         // New settlement - reset form
         setAmountPaying(pendingBalance);
@@ -141,6 +144,7 @@ export default function TeaShopSettlementDialog({
         setCreateWalletTransaction(true);
         setNotes("");
         setSelectedSubcontractId("");
+        setProofUrl(null);
       }
       setError(null);
     }
@@ -275,10 +279,9 @@ export default function TeaShopSettlementDialog({
           transaction_date: paymentDate,
           description: `Tea shop payment - ${shop.shop_name}`,
           recipient_type: "vendor",
-          recipient_name: shop.shop_name,
           payment_mode: paymentMode,
           is_settled: false,
-          recorded_by: userProfile?.name || null,
+          recorded_by: userProfile?.name || "System",
           recorded_by_user_id: userProfile?.id || null,
         };
 
@@ -319,6 +322,7 @@ export default function TeaShopSettlementDialog({
         recorded_by: userProfile?.name || null,
         recorded_by_user_id: userProfile?.id || null,
         subcontract_id: selectedSubcontractId || null,
+        proof_url: proofUrl,
       };
 
       let settlementId: string;
@@ -655,6 +659,26 @@ export default function TeaShopSettlementDialog({
             <MenuItem value="cheque">Cheque</MenuItem>
           </Select>
         </FormControl>
+
+        {/* Payment Proof Uploader for UPI payments */}
+        {paymentMode === "upi" && (
+          <Box sx={{ mb: 3 }}>
+            <FileUploader
+              supabase={supabase}
+              bucketName="settlement-proofs"
+              folderPath={`tea-shop/${shop.id}`}
+              fileNamePrefix="tea-settlement"
+              accept="image"
+              label="Payment Screenshot (Required for UPI)"
+              helperText="Upload screenshot of UPI payment confirmation"
+              compact
+              uploadOnSelect
+              value={proofUrl ? { name: "Payment Proof", size: 0, url: proofUrl } : null}
+              onUpload={(file: UploadedFile) => setProofUrl(file.url)}
+              onRemove={() => setProofUrl(null)}
+            />
+          </Box>
+        )}
 
         {/* Notes */}
         <TextField

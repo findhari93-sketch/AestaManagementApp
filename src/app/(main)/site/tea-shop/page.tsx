@@ -36,6 +36,8 @@ import {
   CallSplit as SplitIcon,
   BeachAccess as BeachAccessIcon,
   EventBusy as NoEntryIcon,
+  Visibility as ViewIcon,
+  CheckCircle as CheckCircleIcon,
 } from "@mui/icons-material";
 import { createClient } from "@/lib/supabase/client";
 import { useSite } from "@/contexts/SiteContext";
@@ -231,10 +233,10 @@ export default function TeaShopPage() {
 
         setEntries((entriesData || []) as TeaShopEntry[]);
 
-        // Fetch settlements
+        // Fetch settlements with subcontract info
         const { data: settlementsData } = await (supabase
           .from("tea_shop_settlements") as any)
-          .select("*")
+          .select("*, subcontracts(id, title)")
           .eq("tea_shop_id", typedShopData.id)
           .order("payment_date", { ascending: false });
 
@@ -750,92 +752,149 @@ export default function TeaShopPage() {
               <Table size="small" sx={{ minWidth: 800 }}>
                 <TableHead>
                   <TableRow sx={{ bgcolor: "action.selected" }}>
+                    <TableCell sx={{ fontWeight: 700, fontSize: { xs: '0.7rem', sm: '0.875rem' } }}>Ref</TableCell>
                     <TableCell sx={{ fontWeight: 700, fontSize: { xs: '0.7rem', sm: '0.875rem' } }}>Payment Date</TableCell>
-                    <TableCell sx={{ fontWeight: 700, fontSize: { xs: '0.7rem', sm: '0.875rem' } }}>Period</TableCell>
-                    <TableCell sx={{ fontWeight: 700, fontSize: { xs: '0.7rem', sm: '0.875rem' } }} align="right">Total Due</TableCell>
-                    <TableCell sx={{ fontWeight: 700, fontSize: { xs: '0.7rem', sm: '0.875rem' } }} align="right">Amount Paid</TableCell>
-                    <TableCell sx={{ fontWeight: 700, fontSize: { xs: '0.7rem', sm: '0.875rem' } }} align="right">Balance</TableCell>
+                    <TableCell sx={{ fontWeight: 700, fontSize: { xs: '0.7rem', sm: '0.875rem' } }} align="right">Amount</TableCell>
                     <TableCell sx={{ fontWeight: 700, fontSize: { xs: '0.7rem', sm: '0.875rem' } }} align="center">Paid By</TableCell>
                     <TableCell sx={{ fontWeight: 700, fontSize: { xs: '0.7rem', sm: '0.875rem' } }} align="center">Mode</TableCell>
-                    <TableCell sx={{ fontWeight: 700, display: { xs: 'none', md: 'table-cell' } }}>Notes</TableCell>
+                    <TableCell sx={{ fontWeight: 700, fontSize: { xs: '0.7rem', sm: '0.875rem' }, display: { xs: 'none', md: 'table-cell' } }}>Subcontract</TableCell>
+                    <TableCell sx={{ fontWeight: 700, fontSize: { xs: '0.7rem', sm: '0.875rem' } }} align="center">Reimbursed</TableCell>
+                    <TableCell sx={{ fontWeight: 700, fontSize: { xs: '0.7rem', sm: '0.875rem' } }} align="center">Proof</TableCell>
                     <TableCell sx={{ fontWeight: 700, fontSize: { xs: '0.7rem', sm: '0.875rem' } }} align="center">Actions</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {settlements.map((settlement) => (
-                    <TableRow key={settlement.id} hover>
-                      <TableCell>
-                        <Typography variant="body2" fontWeight={600} sx={{ fontSize: { xs: '0.7rem', sm: '0.875rem' } }}>
-                          {dayjs(settlement.payment_date).format("DD MMM YYYY")}
-                        </Typography>
-                      </TableCell>
-                      <TableCell sx={{ fontSize: { xs: '0.7rem', sm: '0.875rem' } }}>
-                        {dayjs(settlement.period_start).format("DD MMM")} -{" "}
-                        {dayjs(settlement.period_end).format("DD MMM")}
-                      </TableCell>
-                      <TableCell align="right" sx={{ fontSize: { xs: '0.7rem', sm: '0.875rem' } }}>₹{settlement.total_due.toLocaleString()}</TableCell>
-                      <TableCell align="right">
-                        <Typography fontWeight={600} color="success.main" sx={{ fontSize: { xs: '0.7rem', sm: '0.875rem' } }}>
-                          ₹{(settlement.amount_paid || 0).toLocaleString()}
-                        </Typography>
-                      </TableCell>
-                      <TableCell align="right">
-                        {(settlement.balance_remaining || 0) > 0 ? (
-                          <Typography color="error.main" sx={{ fontSize: { xs: '0.7rem', sm: '0.875rem' } }}>
-                            ₹{(settlement.balance_remaining || 0).toLocaleString()}
+                  {settlements.map((settlement) => {
+                    const settlementAny = settlement as any;
+                    const proofUrl = settlementAny.proof_url;
+                    const subcontract = settlementAny.subcontracts;
+                    const isEngineerSettled = settlementAny.is_engineer_settled;
+                    const settlementRef = settlementAny.settlement_reference;
+
+                    return (
+                      <TableRow key={settlement.id} hover>
+                        {/* Reference Code */}
+                        <TableCell>
+                          <Tooltip title={settlementRef || "No ref"}>
+                            <Typography
+                              variant="body2"
+                              fontWeight={600}
+                              sx={{
+                                fontSize: { xs: '0.65rem', sm: '0.75rem' },
+                                fontFamily: 'monospace',
+                                color: 'text.secondary'
+                              }}
+                            >
+                              {settlementRef ? settlementRef.slice(-7) : "-"}
+                            </Typography>
+                          </Tooltip>
+                        </TableCell>
+
+                        {/* Payment Date */}
+                        <TableCell>
+                          <Typography variant="body2" fontWeight={600} sx={{ fontSize: { xs: '0.7rem', sm: '0.875rem' } }}>
+                            {dayjs(settlement.payment_date).format("DD MMM YYYY")}
                           </Typography>
-                        ) : (
-                          <Typography color="success.main" sx={{ fontSize: { xs: '0.7rem', sm: '0.875rem' } }}>₹0</Typography>
-                        )}
-                      </TableCell>
-                      <TableCell align="center">
-                        <Chip
-                          label={settlement.payer_type === "site_engineer" ? "Eng" : "Co"}
-                          size="small"
-                          color={settlement.payer_type === "site_engineer" ? "info" : "primary"}
-                          variant="outlined"
-                        />
-                      </TableCell>
-                      <TableCell align="center">
-                        <Chip
-                          label={settlement.payment_mode}
-                          size="small"
-                          variant="outlined"
-                        />
-                      </TableCell>
-                      <TableCell sx={{ display: { xs: 'none', md: 'table-cell' } }}>
-                        <Tooltip title={settlement.notes || ""}>
-                          <Typography
-                            variant="caption"
-                            sx={{ maxWidth: 150, display: "block" }}
-                            noWrap
-                          >
-                            {settlement.notes || "-"}
+                        </TableCell>
+
+                        {/* Amount Paid */}
+                        <TableCell align="right">
+                          <Typography fontWeight={600} color="success.main" sx={{ fontSize: { xs: '0.7rem', sm: '0.875rem' } }}>
+                            ₹{(settlement.amount_paid || 0).toLocaleString()}
                           </Typography>
-                        </Tooltip>
-                      </TableCell>
-                      <TableCell align="center">
-                        <Box sx={{ display: "flex", gap: 0.5, justifyContent: "center" }}>
-                          <IconButton
+                        </TableCell>
+
+                        {/* Paid By */}
+                        <TableCell align="center">
+                          <Chip
+                            label={settlement.payer_type === "site_engineer" ? "Eng" : "Co"}
                             size="small"
-                            onClick={() => handleEditSettlement(settlement)}
-                            disabled={!canEdit}
-                          >
-                            <Edit fontSize="small" />
-                          </IconButton>
-                          <IconButton
+                            color={settlement.payer_type === "site_engineer" ? "info" : "primary"}
+                            variant="outlined"
+                          />
+                        </TableCell>
+
+                        {/* Payment Mode */}
+                        <TableCell align="center">
+                          <Chip
+                            label={settlement.payment_mode}
                             size="small"
-                            color="error"
-                            onClick={() => handleDeleteSettlement(settlement.id)}
-                            disabled={!canEdit}
-                            sx={{ display: { xs: 'none', sm: 'inline-flex' } }}
-                          >
-                            <Delete fontSize="small" />
-                          </IconButton>
-                        </Box>
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                            variant="outlined"
+                          />
+                        </TableCell>
+
+                        {/* Subcontract */}
+                        <TableCell sx={{ display: { xs: 'none', md: 'table-cell' } }}>
+                          {subcontract ? (
+                            <Tooltip title={subcontract.title}>
+                              <Chip
+                                label={subcontract.title.length > 15 ? subcontract.title.slice(0, 15) + "..." : subcontract.title}
+                                size="small"
+                                variant="outlined"
+                                color="secondary"
+                              />
+                            </Tooltip>
+                          ) : (
+                            <Typography variant="caption" color="text.disabled">-</Typography>
+                          )}
+                        </TableCell>
+
+                        {/* Reimbursed (is_engineer_settled) */}
+                        <TableCell align="center">
+                          {settlement.payer_type === "site_engineer" ? (
+                            isEngineerSettled ? (
+                              <Tooltip title="Engineer has been reimbursed">
+                                <CheckCircleIcon fontSize="small" color="success" />
+                              </Tooltip>
+                            ) : (
+                              <Tooltip title="Not yet reimbursed to engineer">
+                                <Chip label="Pending" size="small" color="warning" variant="outlined" />
+                              </Tooltip>
+                            )
+                          ) : (
+                            <Typography variant="caption" color="text.disabled">N/A</Typography>
+                          )}
+                        </TableCell>
+
+                        {/* Proof */}
+                        <TableCell align="center">
+                          {proofUrl ? (
+                            <IconButton
+                              size="small"
+                              onClick={() => window.open(proofUrl, "_blank")}
+                              color="primary"
+                            >
+                              <ViewIcon fontSize="small" />
+                            </IconButton>
+                          ) : (
+                            <Typography variant="caption" color="text.disabled">-</Typography>
+                          )}
+                        </TableCell>
+
+                        {/* Actions */}
+                        <TableCell align="center">
+                          <Box sx={{ display: "flex", gap: 0.5, justifyContent: "center" }}>
+                            <IconButton
+                              size="small"
+                              onClick={() => handleEditSettlement(settlement)}
+                              disabled={!canEdit}
+                            >
+                              <Edit fontSize="small" />
+                            </IconButton>
+                            <IconButton
+                              size="small"
+                              color="error"
+                              onClick={() => handleDeleteSettlement(settlement.id)}
+                              disabled={!canEdit}
+                              sx={{ display: { xs: 'none', sm: 'inline-flex' } }}
+                            >
+                              <Delete fontSize="small" />
+                            </IconButton>
+                          </Box>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
                   {settlements.length === 0 && (
                     <TableRow>
                       <TableCell colSpan={9} align="center" sx={{ py: 4 }}>
