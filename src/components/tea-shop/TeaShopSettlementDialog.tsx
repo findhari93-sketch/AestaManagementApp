@@ -200,6 +200,8 @@ export default function TeaShopSettlementDialog({
   const fetchUnsettledEntries = async () => {
     setLoadingEntries(true);
     try {
+      // Fetch entries that are not fully paid
+      // is_fully_paid = NULL (new entry) or FALSE (partially paid)
       const { data } = await (supabase
         .from("tea_shop_entries") as any)
         .select("*")
@@ -207,7 +209,14 @@ export default function TeaShopSettlementDialog({
         .or("is_fully_paid.is.null,is_fully_paid.eq.false")
         .order("date", { ascending: true }); // Oldest first
 
-      setUnsettledEntries((data || []) as TeaShopEntry[]);
+      // Filter out entries that are actually fully paid (amount_paid >= total_amount)
+      const filteredData = (data || []).filter((entry: any) => {
+        const totalAmount = entry.total_amount || 0;
+        const amountPaid = entry.amount_paid || 0;
+        return amountPaid < totalAmount;
+      });
+
+      setUnsettledEntries(filteredData as TeaShopEntry[]);
     } catch (err) {
       console.error("Error fetching unsettled entries:", err);
     } finally {
