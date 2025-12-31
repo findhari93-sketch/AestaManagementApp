@@ -295,17 +295,27 @@ export default function HolidaysPage() {
     setLoading(true);
     try {
       if (editingGroup) {
-        // Update all holidays in the group with the new reason
-        const ids = editingGroup.holidays.map((h) => h.id);
-        const { error } = await supabase
-          .from("site_holidays")
-          .update({ reason: form.reason })
-          .in("id", ids);
-        if (error) throw error;
-        showSnackbar(
-          `Updated ${editingGroup.dayCount} holiday${editingGroup.dayCount > 1 ? "s" : ""}`,
-          "success"
-        );
+        if (editingGroup.dayCount === 1) {
+          // Single holiday - update both date and reason
+          const { error } = await supabase
+            .from("site_holidays")
+            .update({ date: form.date, reason: form.reason })
+            .eq("id", editingGroup.holidays[0].id);
+          if (error) throw error;
+          showSnackbar("Holiday updated", "success");
+        } else {
+          // Multi-day group - update only reason for all
+          const ids = editingGroup.holidays.map((h) => h.id);
+          const { error } = await supabase
+            .from("site_holidays")
+            .update({ reason: form.reason })
+            .in("id", ids);
+          if (error) throw error;
+          showSnackbar(
+            `Updated ${editingGroup.dayCount} holidays`,
+            "success"
+          );
+        }
       } else if (bulkMode) {
         // Generate array of dates and bulk insert
         const dates: string[] = [];
@@ -712,13 +722,29 @@ export default function HolidaysPage() {
 
             {/* Date inputs */}
             {editingGroup ? (
-              // Edit mode - show info about the group
-              <Alert severity="info">
-                Editing {editingGroup.dayCount} holiday
-                {editingGroup.dayCount > 1 ? "s" : ""} from{" "}
-                {dayjs(editingGroup.startDate).format("DD MMM")} to{" "}
-                {dayjs(editingGroup.endDate).format("DD MMM YYYY")}
-              </Alert>
+              // Edit mode
+              editingGroup.dayCount === 1 ? (
+                // Single day - allow editing date
+                <TextField
+                  fullWidth
+                  label="Date"
+                  type="date"
+                  value={form.date}
+                  onChange={(e) => setForm({ ...form, date: e.target.value })}
+                  slotProps={{ inputLabel: { shrink: true } }}
+                  required
+                />
+              ) : (
+                // Multi-day group - show info (editing dates for range is complex)
+                <Alert severity="info">
+                  Editing {editingGroup.dayCount} holidays from{" "}
+                  {dayjs(editingGroup.startDate).format("DD MMM")} to{" "}
+                  {dayjs(editingGroup.endDate).format("DD MMM YYYY")}
+                  <Typography variant="caption" display="block" sx={{ mt: 0.5 }}>
+                    To change dates, expand the group and delete/add individual days
+                  </Typography>
+                </Alert>
+              )
             ) : bulkMode ? (
               // Bulk mode - show date range
               <>
