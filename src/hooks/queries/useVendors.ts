@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { createClient } from "@/lib/supabase/client";
+import { createClient, ensureFreshSession } from "@/lib/supabase/client";
 import { queryKeys } from "@/lib/cache/keys";
 import type {
   Vendor,
@@ -272,6 +272,9 @@ export function useCreateVendor() {
 
   return useMutation({
     mutationFn: async (data: VendorFormData) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
       const { category_ids, ...vendorData } = data;
 
       // Auto-generate code if not provided
@@ -327,6 +330,9 @@ export function useUpdateVendor() {
       id: string;
       data: Partial<VendorFormData>;
     }) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
       const { category_ids, ...vendorData } = data;
 
       // Update vendor
@@ -381,6 +387,9 @@ export function useDeleteVendor() {
 
   return useMutation({
     mutationFn: async (id: string) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
       const { error } = await supabase
         .from("vendors")
         .update({ is_active: false, updated_at: new Date().toISOString() })

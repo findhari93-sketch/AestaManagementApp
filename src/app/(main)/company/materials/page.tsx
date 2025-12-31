@@ -1,25 +1,26 @@
 "use client";
 
 import { useMemo, useState, useCallback } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   Box,
   Button,
   Chip,
   IconButton,
   Typography,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
   TextField,
   InputAdornment,
   Fab,
   Tooltip,
   Link,
-  Collapse,
-  ToggleButtonGroup,
-  ToggleButton,
+  Tabs,
+  Tab,
+  FormControl,
+  Select,
+  MenuItem,
+  InputLabel,
+  Snackbar,
+  Alert,
 } from "@mui/material";
 import {
   Add as AddIcon,
@@ -27,30 +28,31 @@ import {
   Delete as DeleteIcon,
   Search as SearchIcon,
   Store as StoreIcon,
-  ExpandMore as ExpandMoreIcon,
-  ExpandLess as ExpandLessIcon,
-  AccountTree as VariantIcon,
-  List as ListIcon,
-  ViewModule as GroupIcon,
+  Whatshot as FireIcon,
 } from "@mui/icons-material";
 import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
 import PageHeader from "@/components/layout/PageHeader";
 import { useAuth } from "@/contexts/AuthContext";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { hasEditPermission } from "@/lib/permissions";
+import { formatCurrency, formatDate } from "@/lib/formatters";
 import {
   useMaterials,
-  useMaterialsGrouped,
   useMaterialCategories,
   useDeleteMaterial,
 } from "@/hooks/queries/useMaterials";
 import { useMaterialVendorCounts } from "@/hooks/queries/useVendorInventory";
+import {
+  useMaterialOrderStats,
+  useMaterialBestPrices,
+  useMaterialAuditInfo,
+} from "@/hooks/queries/useMaterialOrderStats";
 import MaterialDialog from "@/components/materials/MaterialDialog";
+import VendorDrawer from "@/components/materials/VendorDrawer";
+import ConfirmDialog from "@/components/common/ConfirmDialog";
 import type {
   MaterialWithDetails,
-  MaterialCategory,
   MaterialUnit,
-  MATERIAL_UNIT_LABELS,
 } from "@/types/material.types";
 
 const UNIT_LABELS: Record<MaterialUnit, string> = {
@@ -72,160 +74,280 @@ const UNIT_LABELS: Record<MaterialUnit, string> = {
   set: "Set",
 };
 
+// Category tab mapping - which category codes belong to which tab
+const CATEGORY_TAB_MAPPING: Record<string, string[]> = {
+  civil: ["CEM", "STL", "AGG", "BRK"],
+  electrical: ["ELC"],
+  plumbing: ["PLB"],
+  painting: ["PNT", "WPF"],
+  doors_windows: ["WOD", "GLS"],
+  hardware: ["HRD", "MSC"],
+  tiles: ["TIL"],
+  all: [], // All categories
+};
+
+const CATEGORY_TABS = [
+  { id: "all", label: "All" },
+  { id: "civil", label: "Civil" },
+  { id: "electrical", label: "Electrical" },
+  { id: "plumbing", label: "Plumbing" },
+  { id: "painting", label: "Painting" },
+  { id: "doors_windows", label: "Doors & Windows" },
+  { id: "hardware", label: "Hardware" },
+  { id: "tiles", label: "Tiles" },
+];
+
+type SortOption = "frequently_used" | "alphabetical" | "recently_added" | "most_vendors" | "lowest_price";
+
+const SORT_OPTIONS: { value: SortOption; label: string }[] = [
+  { value: "frequently_used", label: "Frequently Used" },
+  { value: "alphabetical", label: "Alphabetical" },
+  { value: "recently_added", label: "Recently Added" },
+  { value: "most_vendors", label: "Most Vendors" },
+  { value: "lowest_price", label: "Lowest Price" },
+];
+
 export default function MaterialsPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [editingMaterial, setEditingMaterial] =
-    useState<MaterialWithDetails | null>(null);
-  const [categoryFilter, setCategoryFilter] = useState<string>("");
+  const [editingMaterial, setEditingMaterial] = useState<MaterialWithDetails | null>(null);
+  const [selectedTab, setSelectedTab] = useState<string>(searchParams.get("tab") || "all");
   const [searchTerm, setSearchTerm] = useState("");
-  const [viewMode, setViewMode] = useState<"list" | "grouped">("grouped");
-  const [expandedParents, setExpandedParents] = useState<Set<string>>(new Set());
+  const [sortBy, setSortBy] = useState<SortOption>("frequently_used");
+  const [vendorDrawerMaterial, setVendorDrawerMaterial] = useState<MaterialWithDetails | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<{ open: boolean; material: MaterialWithDetails | null }>({
+    open: false,
+    material: null,
+  });
+  const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: "success" | "error" }>({
+    open: false,
+    message: "",
+    severity: "success",
+  });
 
   const { userProfile } = useAuth();
   const isMobile = useIsMobile();
   const canEdit = hasEditPermission(userProfile?.role);
 
-  const { data: materials = [], isLoading: isLoadingFlat } = useMaterials(
-    categoryFilter || null
-  );
-  const { data: groupedMaterials = [], isLoading: isLoadingGrouped } = useMaterialsGrouped(
-    categoryFilter || null
-  );
+  // Fetch data
+  const { data: materials = [], isLoading } = useMaterials(null);
   const { data: categories = [] } = useMaterialCategories();
   const { data: vendorCounts = {} } = useMaterialVendorCounts();
+  const { data: orderStats } = useMaterialOrderStats();
+  const { data: bestPrices } = useMaterialBestPrices();
+  const { data: auditInfo } = useMaterialAuditInfo();
   const deleteMaterial = useDeleteMaterial();
 
-  const isLoading = viewMode === "grouped" ? isLoadingGrouped : isLoadingFlat;
+  // Get category IDs for selected tab
+  const tabCategoryIds = useMemo(() => {
+    if (selectedTab === "all") return null;
 
-  // Toggle expanded state for a parent material
-  const toggleExpanded = useCallback((id: string) => {
-    setExpandedParents((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
-  }, []);
+    const categoryCodes = CATEGORY_TAB_MAPPING[selectedTab] || [];
+    return categories
+      .filter((c) => categoryCodes.includes(c.code || "") || categoryCodes.some((code) => c.code?.startsWith(code + "-")))
+      .map((c) => c.id);
+  }, [selectedTab, categories]);
 
-  // Filter materials by search term (flat list)
+  // Filter materials by tab and search
   const filteredMaterials = useMemo(() => {
-    if (!searchTerm) return materials;
-    const term = searchTerm.toLowerCase();
-    return materials.filter(
-      (m) =>
-        m.name.toLowerCase().includes(term) ||
-        m.code?.toLowerCase().includes(term) ||
-        m.category?.name?.toLowerCase().includes(term)
-    );
-  }, [materials, searchTerm]);
+    let filtered = materials;
 
-  // Filter grouped materials by search term
-  const filteredGroupedMaterials = useMemo(() => {
-    if (!searchTerm) return groupedMaterials;
-    const term = searchTerm.toLowerCase();
-    return groupedMaterials.filter((m) => {
-      // Check if parent matches
-      const parentMatches =
-        m.name.toLowerCase().includes(term) ||
-        m.code?.toLowerCase().includes(term) ||
-        m.category?.name?.toLowerCase().includes(term);
+    // Filter by category tab
+    if (tabCategoryIds && tabCategoryIds.length > 0) {
+      filtered = filtered.filter((m) => m.category_id && tabCategoryIds.includes(m.category_id));
+    }
 
-      // Check if any variant matches
-      const variantMatches = m.variants?.some(
-        (v) =>
-          v.name.toLowerCase().includes(term) ||
-          v.code?.toLowerCase().includes(term)
+    // Filter by search term
+    if (searchTerm) {
+      const term = searchTerm.toLowerCase();
+      filtered = filtered.filter(
+        (m) =>
+          m.name.toLowerCase().includes(term) ||
+          m.code?.toLowerCase().includes(term) ||
+          m.category?.name?.toLowerCase().includes(term) ||
+          m.local_name?.toLowerCase().includes(term)
       );
-
-      return parentMatches || variantMatches;
-    });
-  }, [groupedMaterials, searchTerm]);
-
-  // Flatten grouped materials for display (parents + expanded variants)
-  const displayMaterials = useMemo(() => {
-    if (viewMode === "list") {
-      return filteredMaterials;
     }
 
-    // For grouped view, create a flat list with parents and their variants
-    const result: (MaterialWithDetails & { _isVariant?: boolean; _parentName?: string })[] = [];
-    for (const parent of filteredGroupedMaterials) {
-      result.push(parent);
-      if (expandedParents.has(parent.id) && parent.variants) {
-        for (const variant of parent.variants) {
-          result.push({ ...variant, _isVariant: true, _parentName: parent.name });
+    // Sort materials
+    return [...filtered].sort((a, b) => {
+      switch (sortBy) {
+        case "frequently_used": {
+          const aOrders = orderStats?.get(a.id)?.order_count || 0;
+          const bOrders = orderStats?.get(b.id)?.order_count || 0;
+          if (bOrders !== aOrders) return bOrders - aOrders;
+          return a.name.localeCompare(b.name);
         }
+        case "alphabetical":
+          return a.name.localeCompare(b.name);
+        case "recently_added":
+          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+        case "most_vendors": {
+          const aVendors = vendorCounts[a.id] || 0;
+          const bVendors = vendorCounts[b.id] || 0;
+          if (bVendors !== aVendors) return bVendors - aVendors;
+          return a.name.localeCompare(b.name);
+        }
+        case "lowest_price": {
+          const aPrice = bestPrices?.get(a.id)?.unit_price || 999999;
+          const bPrice = bestPrices?.get(b.id)?.unit_price || 999999;
+          if (aPrice !== bPrice) return aPrice - bPrice;
+          return a.name.localeCompare(b.name);
+        }
+        default:
+          return a.name.localeCompare(b.name);
+      }
+    });
+  }, [materials, tabCategoryIds, searchTerm, sortBy, orderStats, vendorCounts, bestPrices]);
+
+  // Group materials by base name to show variants as text
+  const materialsWithVariantText = useMemo(() => {
+    // Find materials that are variants (have parent_id)
+    const variantsByParent = new Map<string, MaterialWithDetails[]>();
+    const parentMaterials: MaterialWithDetails[] = [];
+
+    for (const m of filteredMaterials) {
+      if (m.parent_id) {
+        const variants = variantsByParent.get(m.parent_id) || [];
+        variants.push(m);
+        variantsByParent.set(m.parent_id, variants);
+      } else {
+        parentMaterials.push(m);
       }
     }
-    return result;
-  }, [viewMode, filteredMaterials, filteredGroupedMaterials, expandedParents]);
 
-  const handleOpenDialog = useCallback(
-    (material?: MaterialWithDetails) => {
-      if (material) {
-        setEditingMaterial(material);
-      } else {
-        setEditingMaterial(null);
-      }
-      setDialogOpen(true);
-    },
-    []
-  );
+    // Attach variant text to parents
+    return parentMaterials.map((parent) => {
+      const variants = variantsByParent.get(parent.id) || [];
+      const variantNames = variants.map((v) => {
+        // Extract just the size/variant part from the name
+        const sizePart = v.name.replace(parent.name, "").trim();
+        return sizePart || v.name;
+      });
+
+      return {
+        ...parent,
+        _variantText: variantNames.length > 0 ? variantNames.join(", ") : null,
+        _variantCount: variants.length,
+      };
+    });
+  }, [filteredMaterials]);
+
+  const handleOpenDialog = useCallback((material?: MaterialWithDetails) => {
+    if (material) {
+      setEditingMaterial(material);
+    } else {
+      setEditingMaterial(null);
+    }
+    setDialogOpen(true);
+  }, []);
 
   const handleCloseDialog = useCallback(() => {
     setDialogOpen(false);
     setEditingMaterial(null);
   }, []);
 
-  const handleDelete = useCallback(
-    async (id: string) => {
-      if (!confirm("Are you sure you want to delete this material?")) return;
-      try {
-        await deleteMaterial.mutateAsync(id);
-      } catch (error) {
-        console.error("Failed to delete material:", error);
-      }
-    },
-    [deleteMaterial]
-  );
+  const handleDeleteClick = useCallback((material: MaterialWithDetails) => {
+    setDeleteConfirm({ open: true, material });
+  }, []);
+
+  const handleDeleteConfirm = useCallback(async () => {
+    if (!deleteConfirm.material) return;
+    const materialName = deleteConfirm.material.name;
+    try {
+      await deleteMaterial.mutateAsync(deleteConfirm.material.id);
+      setDeleteConfirm({ open: false, material: null });
+      setSnackbar({
+        open: true,
+        message: `"${materialName}" deleted successfully`,
+        severity: "success",
+      });
+    } catch (error) {
+      console.error("Failed to delete material:", error);
+      setDeleteConfirm({ open: false, material: null });
+      setSnackbar({
+        open: true,
+        message: `Failed to delete material: ${error instanceof Error ? error.message : "Unknown error"}`,
+        severity: "error",
+      });
+    }
+  }, [deleteConfirm.material, deleteMaterial]);
+
+  const handleDeleteCancel = useCallback(() => {
+    setDeleteConfirm({ open: false, material: null });
+  }, []);
+
+  const handleSnackbarClose = useCallback(() => {
+    setSnackbar((prev) => ({ ...prev, open: false }));
+  }, []);
+
+  const handleTabChange = useCallback((event: React.SyntheticEvent, newValue: string) => {
+    setSelectedTab(newValue);
+    // Update URL without navigation
+    const params = new URLSearchParams(window.location.search);
+    if (newValue === "all") {
+      params.delete("tab");
+    } else {
+      params.set("tab", newValue);
+    }
+    const newUrl = params.toString() ? `?${params.toString()}` : window.location.pathname;
+    window.history.replaceState({}, "", newUrl);
+  }, []);
+
+  const handleOpenVendorDrawer = useCallback((material: MaterialWithDetails) => {
+    setVendorDrawerMaterial(material);
+  }, []);
+
+  const handleCloseVendorDrawer = useCallback(() => {
+    setVendorDrawerMaterial(null);
+  }, []);
+
+  const handleCreatePO = useCallback((vendorId: string, materialId: string) => {
+    // Navigate to PO creation with pre-selected vendor and material
+    router.push(`/company/purchase-orders/new?vendor=${vendorId}&material=${materialId}`);
+  }, [router]);
 
   // Table columns
-  const columns = useMemo<MRT_ColumnDef<MaterialWithDetails & { _isVariant?: boolean; _parentName?: string }>[]>(
+  const columns = useMemo<MRT_ColumnDef<MaterialWithDetails & { _variantText?: string | null; _variantCount?: number }>[]>(
     () => [
       {
         accessorKey: "name",
-        header: "Material Name",
-        size: 250,
+        header: "Material",
+        size: 280,
         Cell: ({ row }) => {
-          const isVariant = (row.original as any)._isVariant;
-          const hasVariants = (row.original.variant_count || 0) > 0;
-          const isExpanded = expandedParents.has(row.original.id);
+          const isFrequent = (orderStats?.get(row.original.id)?.order_count || 0) >= 3;
+          const audit = auditInfo?.get(row.original.id);
 
           return (
-            <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-              {/* Expand/Collapse button for parents with variants (grouped view only) */}
-              {viewMode === "grouped" && hasVariants && (
-                <IconButton
-                  size="small"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    toggleExpanded(row.original.id);
-                  }}
-                  sx={{ p: 0.5 }}
-                >
-                  {isExpanded ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
-                </IconButton>
-              )}
-              {/* Indent for variants */}
-              {isVariant && <Box sx={{ width: 24, ml: 2 }} />}
+            <Tooltip
+              title={
+                audit ? (
+                  <Box>
+                    <Typography variant="caption" display="block">
+                      Created by: {audit.created_by_name || "Unknown"}
+                    </Typography>
+                    <Typography variant="caption" display="block">
+                      Created: {formatDate(audit.created_at)}
+                    </Typography>
+                    <Typography variant="caption" display="block">
+                      Last edited: {formatDate(audit.updated_at)}
+                    </Typography>
+                  </Box>
+                ) : (
+                  ""
+                )
+              }
+              arrow
+              placement="top"
+            >
               <Box>
                 <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-                  {isVariant && (
-                    <VariantIcon fontSize="small" color="action" sx={{ opacity: 0.6 }} />
+                  {isFrequent && (
+                    <FireIcon
+                      fontSize="small"
+                      sx={{ color: "warning.main", fontSize: "1rem" }}
+                    />
                   )}
                   <Link
                     component="button"
@@ -236,15 +358,6 @@ export default function MaterialsPage() {
                   >
                     {row.original.name}
                   </Link>
-                  {hasVariants && (
-                    <Chip
-                      label={`${row.original.variant_count} variant${row.original.variant_count === 1 ? "" : "s"}`}
-                      size="small"
-                      color="info"
-                      variant="outlined"
-                      sx={{ ml: 1, height: 20, fontSize: "0.7rem" }}
-                    />
-                  )}
                 </Box>
                 {row.original.code && (
                   <Typography variant="caption" color="text.secondary" display="block">
@@ -252,38 +365,54 @@ export default function MaterialsPage() {
                   </Typography>
                 )}
               </Box>
-            </Box>
+            </Tooltip>
           );
         },
       },
       {
-        accessorKey: "category.name",
-        header: "Category",
-        size: 150,
-        Cell: ({ row }) =>
-          row.original.category?.name ? (
-            <Chip
-              label={row.original.category.name}
-              size="small"
-              variant="outlined"
-            />
-          ) : (
-            "-"
-          ),
-      },
-      {
         accessorKey: "unit",
         header: "Unit",
-        size: 80,
+        size: 70,
         Cell: ({ row }) => UNIT_LABELS[row.original.unit] || row.original.unit,
+      },
+      {
+        id: "variants",
+        header: "Sizes/Variants",
+        size: 160,
+        enableSorting: false,
+        Cell: ({ row }) => {
+          const variantText = row.original._variantText;
+          const variantCount = row.original._variantCount || 0;
+
+          if (!variantText && variantCount === 0) {
+            return <Typography variant="caption" color="text.secondary">-</Typography>;
+          }
+
+          return (
+            <Tooltip title={variantText || ""} placement="top">
+              <Typography
+                variant="body2"
+                sx={{
+                  maxWidth: 150,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {variantText || `${variantCount} variant${variantCount !== 1 ? "s" : ""}`}
+              </Typography>
+            </Tooltip>
+          );
+        },
       },
       {
         id: "vendors",
         header: "Vendors",
-        size: 100,
+        size: 90,
         enableSorting: false,
         Cell: ({ row }) => {
           const count = vendorCounts[row.original.id] || 0;
+
           return count > 0 ? (
             <Chip
               icon={<StoreIcon />}
@@ -291,43 +420,78 @@ export default function MaterialsPage() {
               size="small"
               color="primary"
               variant="outlined"
-              onClick={() => router.push(`/company/materials/${row.original.id}?tab=vendors`)}
+              onClick={(e) => {
+                e.stopPropagation();
+                handleOpenVendorDrawer(row.original);
+              }}
               clickable
             />
           ) : (
-            <Typography variant="caption" color="text.secondary">
-              None
-            </Typography>
+            <Button
+              size="small"
+              variant="text"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleOpenVendorDrawer(row.original);
+              }}
+              sx={{ minWidth: 0, p: 0.5, fontSize: "0.75rem" }}
+            >
+              Add
+            </Button>
           );
         },
       },
       {
-        accessorKey: "gst_rate",
-        header: "GST %",
-        size: 80,
-        Cell: ({ row }) =>
-          row.original.gst_rate ? `${row.original.gst_rate}%` : "-",
-      },
-      {
-        accessorKey: "reorder_level",
-        header: "Reorder Level",
-        size: 120,
-        Cell: ({ row }) =>
-          row.original.reorder_level
-            ? `${row.original.reorder_level} ${UNIT_LABELS[row.original.unit] || row.original.unit}`
-            : "-",
+        id: "best_price",
+        header: "Best Price",
+        size: 130,
+        enableSorting: false,
+        Cell: ({ row }) => {
+          const priceInfo = bestPrices?.get(row.original.id);
+
+          if (!priceInfo) {
+            return <Typography variant="caption" color="text.secondary">-</Typography>;
+          }
+
+          return (
+            <Tooltip title={`${priceInfo.vendor_name}${priceInfo.price_includes_gst ? " (incl. GST)" : ""}`}>
+              <Box>
+                <Typography variant="body2" fontWeight={500} color="success.main">
+                  {formatCurrency(priceInfo.unit_price)}
+                </Typography>
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  sx={{
+                    maxWidth: 100,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                    display: "block",
+                  }}
+                >
+                  {priceInfo.vendor_name}
+                </Typography>
+              </Box>
+            </Tooltip>
+          );
+        },
       },
       {
         accessorKey: "brands",
         header: "Brands",
-        size: 150,
+        size: 140,
         enableSorting: false,
         Cell: ({ row }) => {
           const brands = row.original.brands?.filter((b) => b.is_active) || [];
-          if (brands.length === 0) return "-";
+
+          if (brands.length === 0) {
+            return <Typography variant="caption" color="text.secondary">-</Typography>;
+          }
+
           return (
             <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
-              {brands.slice(0, 3).map((brand) => (
+              {brands.slice(0, 2).map((brand) => (
                 <Chip
                   key={brand.id}
                   label={brand.brand_name}
@@ -336,15 +500,15 @@ export default function MaterialsPage() {
                   variant={brand.is_preferred ? "filled" : "outlined"}
                 />
               ))}
-              {brands.length > 3 && (
-                <Chip label={`+${brands.length - 3}`} size="small" />
+              {brands.length > 2 && (
+                <Chip label={`+${brands.length - 2}`} size="small" />
               )}
             </Box>
           );
         },
       },
     ],
-    [vendorCounts, router, viewMode, expandedParents, toggleExpanded]
+    [vendorCounts, router, orderStats, bestPrices, auditInfo, handleOpenVendorDrawer]
   );
 
   // Row actions
@@ -363,7 +527,7 @@ export default function MaterialsPage() {
         <Tooltip title="Delete">
           <IconButton
             size="small"
-            onClick={() => handleDelete(row.original.id)}
+            onClick={() => handleDeleteClick(row.original)}
             disabled={!canEdit}
             color="error"
           >
@@ -372,7 +536,7 @@ export default function MaterialsPage() {
         </Tooltip>
       </Box>
     ),
-    [handleOpenDialog, handleDelete, canEdit]
+    [handleOpenDialog, handleDeleteClick, canEdit]
   );
 
   return (
@@ -392,7 +556,22 @@ export default function MaterialsPage() {
         }
       />
 
-      {/* Filters */}
+      {/* Category Tabs */}
+      <Box sx={{ borderBottom: 1, borderColor: "divider", mb: 2 }}>
+        <Tabs
+          value={selectedTab}
+          onChange={handleTabChange}
+          variant={isMobile ? "scrollable" : "standard"}
+          scrollButtons={isMobile ? "auto" : false}
+          allowScrollButtonsMobile
+        >
+          {CATEGORY_TABS.map((tab) => (
+            <Tab key={tab.id} value={tab.id} label={tab.label} />
+          ))}
+        </Tabs>
+      </Box>
+
+      {/* Search and Sort */}
       <Box
         sx={{
           display: "flex",
@@ -400,7 +579,6 @@ export default function MaterialsPage() {
           mb: 2,
           flexDirection: isMobile ? "column" : "row",
           alignItems: isMobile ? "stretch" : "center",
-          flexWrap: "wrap",
         }}
       >
         <TextField
@@ -417,57 +595,47 @@ export default function MaterialsPage() {
               ),
             },
           }}
-          sx={{ minWidth: 250 }}
+          sx={{ minWidth: 250, flex: 1 }}
         />
-        <FormControl size="small" sx={{ minWidth: 200 }}>
-          <InputLabel>Category</InputLabel>
+        <FormControl size="small" sx={{ minWidth: 180 }}>
+          <InputLabel>Sort by</InputLabel>
           <Select
-            value={categoryFilter}
-            onChange={(e) => setCategoryFilter(e.target.value)}
-            label="Category"
+            value={sortBy}
+            label="Sort by"
+            onChange={(e) => setSortBy(e.target.value as SortOption)}
           >
-            <MenuItem value="">All Categories</MenuItem>
-            {categories
-              .filter((c) => !c.parent_id)
-              .map((cat) => (
-                <MenuItem key={cat.id} value={cat.id}>
-                  {cat.name}
-                </MenuItem>
-              ))}
+            {SORT_OPTIONS.map((opt) => (
+              <MenuItem key={opt.value} value={opt.value}>
+                {opt.label}
+              </MenuItem>
+            ))}
           </Select>
         </FormControl>
-        <Box sx={{ flex: 1 }} />
-        <ToggleButtonGroup
-          value={viewMode}
-          exclusive
-          onChange={(_, value) => value && setViewMode(value)}
-          size="small"
-        >
-          <ToggleButton value="grouped">
-            <Tooltip title="Grouped View (with variants)">
-              <GroupIcon fontSize="small" />
-            </Tooltip>
-          </ToggleButton>
-          <ToggleButton value="list">
-            <Tooltip title="Flat List">
-              <ListIcon fontSize="small" />
-            </Tooltip>
-          </ToggleButton>
-        </ToggleButtonGroup>
+      </Box>
+
+      {/* Legend */}
+      <Box sx={{ display: "flex", gap: 2, mb: 1, alignItems: "center" }}>
+        <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+          <FireIcon fontSize="small" sx={{ color: "warning.main" }} />
+          <Typography variant="caption" color="text.secondary">
+            Frequently ordered
+          </Typography>
+        </Box>
+        <Typography variant="caption" color="text.secondary">
+          {filteredMaterials.length} material{filteredMaterials.length !== 1 ? "s" : ""}
+        </Typography>
       </Box>
 
       {/* Data Table */}
       <DataTable
         columns={columns}
-        data={displayMaterials}
+        data={materialsWithVariantText}
         isLoading={isLoading}
         enableRowActions={canEdit}
         renderRowActions={renderRowActions}
-        mobileHiddenColumns={["gst_rate", "reorder_level", "brands"]}
-        initialState={{
-          sorting: viewMode === "list" ? [{ id: "name", desc: false }] : [],
-        }}
-        enableSorting={viewMode === "list"}
+        mobileHiddenColumns={["variants", "best_price", "brands"]}
+        pageSize={100}
+        enableSorting={false}
       />
 
       {/* Mobile FAB */}
@@ -488,6 +656,43 @@ export default function MaterialsPage() {
         material={editingMaterial}
         categories={categories}
       />
+
+      {/* Vendor Drawer */}
+      <VendorDrawer
+        open={!!vendorDrawerMaterial}
+        onClose={handleCloseVendorDrawer}
+        material={vendorDrawerMaterial}
+        onCreatePO={handleCreatePO}
+      />
+
+      {/* Delete Confirmation Dialog */}
+      <ConfirmDialog
+        open={deleteConfirm.open}
+        title="Delete Material"
+        message={`Are you sure you want to delete "${deleteConfirm.material?.name}"? This action cannot be undone.`}
+        confirmText="Delete"
+        confirmColor="error"
+        isLoading={deleteMaterial.isPending}
+        onConfirm={handleDeleteConfirm}
+        onCancel={handleDeleteCancel}
+      />
+
+      {/* Feedback Snackbar */}
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={4000}
+        onClose={handleSnackbarClose}
+        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+      >
+        <Alert
+          onClose={handleSnackbarClose}
+          severity={snackbar.severity}
+          variant="filled"
+          sx={{ width: "100%" }}
+        >
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </Box>
   );
 }

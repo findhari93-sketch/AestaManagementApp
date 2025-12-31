@@ -38,3 +38,48 @@ export function createClient() {
 
   return client;
 }
+
+/**
+ * Ensures a fresh session before performing mutations.
+ * Call this before any write operation that might happen after
+ * the user has been idle (e.g., filling out a form in a dialog).
+ *
+ * This prevents the "spinner keeps spinning" issue when sessions
+ * expire while users are working on forms.
+ */
+export async function ensureFreshSession(): Promise<boolean> {
+  const supabase = createClient();
+
+  try {
+    const { data: { session }, error } = await supabase.auth.getSession();
+
+    if (error) {
+      console.error("Session check error:", error);
+      return false;
+    }
+
+    if (!session) {
+      console.warn("No active session found");
+      return false;
+    }
+
+    // Check if token is expired or about to expire (within 2 minutes)
+    const expiresAt = session.expires_at;
+    if (expiresAt) {
+      const twoMinutesFromNow = Math.floor(Date.now() / 1000) + 120;
+      if (expiresAt < twoMinutesFromNow) {
+        // Token is expired or about to expire, refresh it
+        const { error: refreshError } = await supabase.auth.refreshSession();
+        if (refreshError) {
+          console.error("Session refresh failed:", refreshError);
+          return false;
+        }
+      }
+    }
+
+    return true;
+  } catch (error) {
+    console.error("ensureFreshSession error:", error);
+    return false;
+  }
+}

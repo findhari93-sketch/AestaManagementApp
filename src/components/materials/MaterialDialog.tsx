@@ -32,6 +32,7 @@ import {
   Add as AddIcon,
   Star as StarIcon,
   StarBorder as StarBorderIcon,
+  AccountTree as AccountTreeIcon,
 } from "@mui/icons-material";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import {
@@ -41,6 +42,7 @@ import {
   useDeleteMaterialBrand,
   useUpdateMaterialBrand,
   useParentMaterials,
+  useCreateMaterialWithVariants,
 } from "@/hooks/queries/useMaterials";
 import type {
   MaterialWithDetails,
@@ -48,7 +50,9 @@ import type {
   MaterialFormData,
   MaterialUnit,
   MaterialBrand,
+  VariantFormData,
 } from "@/types/material.types";
+import VariantInlineTable from "./VariantInlineTable";
 
 const UNITS: { value: MaterialUnit; label: string }[] = [
   { value: "kg", label: "Kilogram (kg)" },
@@ -86,6 +90,7 @@ export default function MaterialDialog({
   const isEdit = !!material;
 
   const createMaterial = useCreateMaterial();
+  const createMaterialWithVariants = useCreateMaterialWithVariants();
   const updateMaterial = useUpdateMaterial();
   const createBrand = useCreateMaterialBrand();
   const updateBrand = useUpdateMaterialBrand();
@@ -95,6 +100,8 @@ export default function MaterialDialog({
   const [error, setError] = useState("");
   const [newBrandName, setNewBrandName] = useState("");
   const [isVariant, setIsVariant] = useState(false);
+  const [variants, setVariants] = useState<VariantFormData[]>([]);
+  const [showVariantSection, setShowVariantSection] = useState(false);
   const [formData, setFormData] = useState<MaterialFormData>({
     name: "",
     code: "",
@@ -107,6 +114,10 @@ export default function MaterialDialog({
     gst_rate: 18,
     reorder_level: 10,
     min_order_qty: 1,
+    weight_per_unit: null,
+    weight_unit: "kg",
+    length_per_piece: null,
+    length_unit: "m",
   });
 
   // Reset form when material changes
@@ -124,8 +135,14 @@ export default function MaterialDialog({
         gst_rate: material.gst_rate || 18,
         reorder_level: material.reorder_level || 10,
         min_order_qty: material.min_order_qty || 1,
+        weight_per_unit: material.weight_per_unit,
+        weight_unit: material.weight_unit || "kg",
+        length_per_piece: material.length_per_piece,
+        length_unit: material.length_unit || "m",
       });
       setIsVariant(!!material.parent_id);
+      setVariants([]);
+      setShowVariantSection(false);
     } else {
       setFormData({
         name: "",
@@ -139,8 +156,14 @@ export default function MaterialDialog({
         gst_rate: 18,
         reorder_level: 10,
         min_order_qty: 1,
+        weight_per_unit: null,
+        weight_unit: "kg",
+        length_per_piece: null,
+        length_unit: "m",
       });
       setIsVariant(false);
+      setVariants([]);
+      setShowVariantSection(false);
     }
     setError("");
     setNewBrandName("");
@@ -215,6 +238,12 @@ export default function MaterialDialog({
           id: material.id,
           data: dataToSubmit,
         });
+      } else if (variants.length > 0 && !isVariant) {
+        // Create material with variants
+        await createMaterialWithVariants.mutateAsync({
+          ...dataToSubmit,
+          variants,
+        });
       } else {
         await createMaterial.mutateAsync(dataToSubmit);
       }
@@ -266,7 +295,10 @@ export default function MaterialDialog({
     }
   };
 
-  const isSubmitting = createMaterial.isPending || updateMaterial.isPending;
+  const isSubmitting =
+    createMaterial.isPending ||
+    createMaterialWithVariants.isPending ||
+    updateMaterial.isPending;
   const activeBrands = material?.brands?.filter((b) => b.is_active) || [];
 
   return (
@@ -521,6 +553,116 @@ export default function MaterialDialog({
               }}
             />
           </Grid>
+
+          {/* Weight & Length Section */}
+          <Grid size={12}>
+            <Divider sx={{ my: 1 }}>
+              <Typography variant="caption" color="text.secondary">
+                Weight & Length (Optional)
+              </Typography>
+            </Divider>
+          </Grid>
+
+          <Grid size={{ xs: 6, md: 3 }}>
+            <TextField
+              fullWidth
+              label="Weight per Unit"
+              type="number"
+              value={formData.weight_per_unit ?? ""}
+              onChange={(e) =>
+                handleChange(
+                  "weight_per_unit",
+                  e.target.value ? parseFloat(e.target.value) : null
+                )
+              }
+              helperText="e.g., 0.395 kg for 8mm TMT"
+              slotProps={{
+                input: {
+                  inputProps: { min: 0, step: 0.001 },
+                },
+              }}
+            />
+          </Grid>
+
+          <Grid size={{ xs: 6, md: 3 }}>
+            <FormControl fullWidth>
+              <InputLabel>Weight Unit</InputLabel>
+              <Select
+                value={formData.weight_unit || "kg"}
+                onChange={(e) => handleChange("weight_unit", e.target.value)}
+                label="Weight Unit"
+              >
+                <MenuItem value="kg">Kilogram (kg)</MenuItem>
+                <MenuItem value="g">Gram (g)</MenuItem>
+                <MenuItem value="ton">Ton</MenuItem>
+              </Select>
+            </FormControl>
+          </Grid>
+
+          <Grid size={{ xs: 6, md: 3 }}>
+            <TextField
+              fullWidth
+              label="Length per Piece"
+              type="number"
+              value={formData.length_per_piece ?? ""}
+              onChange={(e) =>
+                handleChange(
+                  "length_per_piece",
+                  e.target.value ? parseFloat(e.target.value) : null
+                )
+              }
+              helperText="e.g., 12m for TMT bars"
+              slotProps={{
+                input: {
+                  inputProps: { min: 0, step: 0.1 },
+                },
+              }}
+            />
+          </Grid>
+
+          <Grid size={{ xs: 6, md: 3 }}>
+            <FormControl fullWidth>
+              <InputLabel>Length Unit</InputLabel>
+              <Select
+                value={formData.length_unit || "m"}
+                onChange={(e) => handleChange("length_unit", e.target.value)}
+                label="Length Unit"
+              >
+                <MenuItem value="m">Meter (m)</MenuItem>
+                <MenuItem value="ft">Feet (ft)</MenuItem>
+                <MenuItem value="mm">Millimeter (mm)</MenuItem>
+              </Select>
+            </FormControl>
+          </Grid>
+
+          {/* Inline Variants Section - Only for new parent materials (not editing, not variants) */}
+          {!isEdit && !isVariant && (
+            <Grid size={12}>
+              <Accordion
+                expanded={showVariantSection}
+                onChange={(_, expanded) => setShowVariantSection(expanded)}
+              >
+                <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                  <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                    <AccountTreeIcon fontSize="small" color="action" />
+                    <Typography>
+                      Add Variants{" "}
+                      {variants.length > 0 && `(${variants.length})`}
+                    </Typography>
+                  </Box>
+                </AccordionSummary>
+                <AccordionDetails>
+                  <VariantInlineTable
+                    parentName={formData.name}
+                    parentCode={formData.code}
+                    parentUnit={formData.unit}
+                    variants={variants}
+                    onVariantsChange={setVariants}
+                  />
+                </AccordionDetails>
+              </Accordion>
+            </Grid>
+          )}
 
           {/* Brands Section - Only show for existing materials */}
           {isEdit && (

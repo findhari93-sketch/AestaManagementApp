@@ -327,6 +327,11 @@ export interface Material {
   hsn_code: string | null;
   gst_rate: number | null;
   specifications: Record<string, unknown> | null;
+  weight_per_unit: number | null; // Weight per unit piece (e.g., 0.395 kg for 8mm TMT)
+  weight_unit: string | null; // Unit for weight measurement (kg, g, ton)
+  length_per_piece: number | null; // Standard length per piece (e.g., 12m for TMT bars)
+  length_unit: string | null; // Unit for length measurement (m, ft, mm)
+  rods_per_bundle: number | null; // Number of rods per bundle (e.g., 10 for 8mm TMT)
   min_order_qty: number | null;
   reorder_level: number | null;
   image_url: string | null;
@@ -849,9 +854,38 @@ export interface MaterialFormData {
   hsn_code?: string;
   gst_rate?: number;
   specifications?: Record<string, unknown>;
+  weight_per_unit?: number | null;
+  weight_unit?: string;
+  length_per_piece?: number | null;
+  length_unit?: string;
+  rods_per_bundle?: number | null; // Number of rods per bundle
   min_order_qty?: number;
   reorder_level?: number;
   image_url?: string;
+}
+
+// Variant creation form data for inline variant table
+export interface VariantFormData {
+  name: string;
+  code?: string;
+  local_name?: string;
+  weight_per_unit?: number | null;
+  length_per_piece?: number | null;
+  rods_per_bundle?: number | null; // Number of rods per bundle (e.g., 10 for 8mm TMT)
+}
+
+// Extended form data for creating a material with variants in one operation
+export interface CreateMaterialWithVariantsData extends MaterialFormData {
+  variants?: VariantFormData[];
+}
+
+// Weight calculation result
+export interface WeightCalculation {
+  pieces: number;
+  totalWeight: number;
+  weightUnit: string;
+  weightPerUnit: number;
+  displayText: string; // e.g., "100 pcs = 39.5 kg"
 }
 
 export interface MaterialBrandFormData {

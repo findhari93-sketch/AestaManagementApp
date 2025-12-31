@@ -17,6 +17,8 @@ import {
   DialogActions,
   TextField,
   FormControl,
+  FormControlLabel,
+  Switch,
   InputLabel,
   Select,
   MenuItem,
@@ -152,6 +154,9 @@ export default function CompanySitesPage() {
     address: "",
     city: "",
     status: "active" as Site["status"],
+    site_type: "single_client" as Site["site_type"],
+    start_date: "",
+    target_completion_date: "",
     construction_phase_id: null as string | null,
     client_name: "",
     client_contact: "",
@@ -167,6 +172,9 @@ export default function CompanySitesPage() {
     location_lng: "",
     location_google_maps_url: "",
   });
+
+  // Helper to check if current project is personal
+  const isPersonalProject = form.site_type === "personal";
 
   const canEdit = userProfile?.role === "admin";
 
@@ -338,6 +346,9 @@ export default function CompanySitesPage() {
           address: site.address || "",
           city: site.city || "",
           status: site.status as Site["status"],
+          site_type: site.site_type || "single_client",
+          start_date: site.start_date || "",
+          target_completion_date: site.target_completion_date || "",
           construction_phase_id: site.construction_phase_id || null,
           client_name: site.client_name || "",
           client_contact: site.client_contact || "",
@@ -411,6 +422,9 @@ export default function CompanySitesPage() {
           address: "",
           city: "",
           status: "active",
+          site_type: "single_client",
+          start_date: "",
+          target_completion_date: "",
           construction_phase_id: null,
           client_name: "",
           client_contact: "",
@@ -700,7 +714,8 @@ export default function CompanySitesPage() {
       return;
     }
 
-    if (form.client_name && !form.project_contract_value) {
+    // Only validate contract value if not a personal project and client name is provided
+    if (!isPersonalProject && form.client_name && !form.project_contract_value) {
       setSnackbar({
         open: true,
         message: "Please enter project contract value for client",
@@ -717,6 +732,9 @@ export default function CompanySitesPage() {
         address: form.address || undefined,
         city: form.city || undefined,
         status: form.status,
+        site_type: form.site_type,
+        start_date: form.start_date || null,
+        target_completion_date: form.target_completion_date || null,
         client_name: form.client_name || null,
         client_contact: form.client_contact || null,
         client_email: form.client_email || null,
@@ -737,10 +755,10 @@ export default function CompanySitesPage() {
         name: form.name,
         address: form.address || "",
         city: form.city || "",
-        site_type: editingSite?.site_type || "single_client",
+        site_type: form.site_type,
         status: form.status,
-        start_date: editingSite?.start_date || null,
-        target_completion_date: editingSite?.target_completion_date || null,
+        start_date: form.start_date || null,
+        target_completion_date: form.target_completion_date || null,
         nearby_tea_shop_name: editingSite?.nearby_tea_shop_name || null,
         client_name: form.client_name || null,
         client_contact: form.client_contact || null,
@@ -1452,6 +1470,30 @@ export default function CompanySitesPage() {
                     required
                   />
                 </Grid>
+                <Grid size={{ xs: 12 }}>
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        checked={form.site_type === "personal"}
+                        onChange={(e) =>
+                          setForm({
+                            ...form,
+                            site_type: e.target.checked ? "personal" : "single_client",
+                            // Clear contract fields when switching to personal
+                            ...(e.target.checked && {
+                              client_name: "",
+                              client_contact: "",
+                              client_email: "",
+                              project_contract_value: 0,
+                              payment_segments: null,
+                            }),
+                          })
+                        }
+                      />
+                    }
+                    label="This is a personal project (no client contract)"
+                  />
+                </Grid>
                 <Grid size={{ xs: 12, sm: 6 }}>
                   <TextField
                     fullWidth
@@ -1488,6 +1530,31 @@ export default function CompanySitesPage() {
                     rows={2}
                   />
                 </Grid>
+                <Grid size={{ xs: 12, sm: 6 }}>
+                  <TextField
+                    fullWidth
+                    label="Project Start Date"
+                    type="date"
+                    value={form.start_date}
+                    onChange={(e) =>
+                      setForm({ ...form, start_date: e.target.value })
+                    }
+                    InputLabelProps={{ shrink: true }}
+                  />
+                </Grid>
+                <Grid size={{ xs: 12, sm: 6 }}>
+                  <TextField
+                    fullWidth
+                    label="Expected End Date"
+                    type="date"
+                    value={form.target_completion_date}
+                    onChange={(e) =>
+                      setForm({ ...form, target_completion_date: e.target.value })
+                    }
+                    InputLabelProps={{ shrink: true }}
+                  />
+                </Grid>
+                {form.status !== "completed" && (
                 <Grid size={{ xs: 12 }}>
                   <Autocomplete
                     fullWidth
@@ -1577,9 +1644,12 @@ export default function CompanySitesPage() {
                     )}
                   />
                 </Grid>
+                )}
               </Grid>
             </Paper>
 
+            {!isPersonalProject && (
+            <>
             <Paper elevation={0} sx={{ p: 2, bgcolor: "primary.50" }}>
               <Typography variant="subtitle2" fontWeight={600} gutterBottom>
                 Client Contract Details
@@ -2175,6 +2245,8 @@ export default function CompanySitesPage() {
                 )}
               </Collapse>
             </Paper>
+            </>
+            )}
 
             <Paper elevation={0} sx={{ p: 2, bgcolor: "info.50" }}>
               <Typography variant="subtitle2" fontWeight={600} gutterBottom>

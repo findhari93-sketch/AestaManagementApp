@@ -43,8 +43,8 @@ export default function SitesManagement() {
     name: "",
     address: "",
     city: "",
-    site_type: "single_client" as "single_client" | "multi_client",
-    status: "planning" as "planning" | "active" | "on_hold" | "completed",
+    site_type: "single_client" as Site["site_type"],
+    status: "planning" as Site["status"],
     start_date: "",
     target_completion_date: "",
     nearby_tea_shop_name: "",
@@ -192,17 +192,21 @@ export default function SitesManagement() {
         accessorKey: "site_type",
         header: "Type",
         size: 120,
-        Cell: ({ cell }) => (
-          <Chip
-            label={cell.getValue<string>().replace("_", " ").toUpperCase()}
-            size="small"
-            color={
-              cell.getValue<string>() === "single_client"
-                ? "primary"
-                : "secondary"
-            }
-          />
-        ),
+        Cell: ({ cell }) => {
+          const siteType = cell.getValue<string>();
+          const colorMap: Record<string, "primary" | "secondary" | "info"> = {
+            single_client: "primary",
+            multi_client: "secondary",
+            personal: "info",
+          };
+          return (
+            <Chip
+              label={siteType.replace("_", " ").toUpperCase()}
+              size="small"
+              color={colorMap[siteType] || "default"}
+            />
+          );
+        },
       },
       {
         accessorKey: "status",
@@ -374,6 +378,7 @@ export default function SitesManagement() {
                 >
                   <MenuItem value="single_client">Single Client</MenuItem>
                   <MenuItem value="multi_client">Multi Client</MenuItem>
+                  <MenuItem value="personal">Personal</MenuItem>
                 </Select>
               </FormControl>
             </Grid>

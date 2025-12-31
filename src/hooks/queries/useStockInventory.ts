@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { createClient } from "@/lib/supabase/client";
+import { createClient, ensureFreshSession } from "@/lib/supabase/client";
 import { queryKeys } from "@/lib/cache/keys";
 import type {
   StockInventory,
@@ -52,6 +52,9 @@ export function useCreateStockLocation() {
 
   return useMutation({
     mutationFn: async (data: Partial<StockLocation>) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
       const { data: result, error } = await (
         supabase.from("stock_locations") as any
       )
@@ -201,6 +204,9 @@ export function useStockAdjustment() {
 
   return useMutation({
     mutationFn: async (data: StockAdjustmentFormData) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
       const { inventory_id, adjustment_qty, adjustment_type, notes } = data;
 
       // Get current inventory
@@ -346,6 +352,9 @@ export function useAddInitialStock() {
       quantity: number;
       unit_cost: number;
     }) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
       const {
         site_id,
         location_id,

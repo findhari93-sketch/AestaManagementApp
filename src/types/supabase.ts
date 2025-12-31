@@ -12,6 +12,31 @@ export type Database = {
   __InternalSupabase: {
     PostgrestVersion: "13.0.5"
   }
+  graphql_public: {
+    Tables: {
+      [_ in never]: never
+    }
+    Views: {
+      [_ in never]: never
+    }
+    Functions: {
+      graphql: {
+        Args: {
+          extensions?: Json
+          operationName?: string
+          query?: string
+          variables?: Json
+        }
+        Returns: Json
+      }
+    }
+    Enums: {
+      [_ in never]: never
+    }
+    CompositeTypes: {
+      [_ in never]: never
+    }
+  }
   public: {
     Tables: {
       advances: {
@@ -159,6 +184,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "attendance_expense_sync_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
+          },
+          {
             foreignKeyName: "attendance_expense_sync_synced_by_user_id_fkey"
             columns: ["synced_by_user_id"]
             isOneToOne: false
@@ -298,6 +330,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "building_sections_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
+          },
+          {
             foreignKeyName: "building_sections_updated_by_fkey"
             columns: ["updated_by"]
             isOneToOne: false
@@ -350,6 +389,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sites"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "client_payment_plans_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
           },
         ]
       }
@@ -416,6 +462,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sites"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "client_payments_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
           },
         ]
       }
@@ -801,6 +854,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "daily_attendance_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
+          },
+          {
             foreignKeyName: "daily_attendance_team_id_fkey"
             columns: ["team_id"]
             isOneToOne: false
@@ -884,6 +944,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sites"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "daily_logs_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
           },
         ]
       }
@@ -997,6 +1064,13 @@ export type Database = {
             foreignKeyName: "daily_material_usage_material_id_fkey"
             columns: ["material_id"]
             isOneToOne: false
+            referencedRelation: "v_materials_with_variants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "daily_material_usage_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
             referencedRelation: "v_site_stock_summary"
             referencedColumns: ["material_id"]
           },
@@ -1027,6 +1101,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sites"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "daily_material_usage_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
           },
           {
             foreignKeyName: "daily_material_usage_verified_by_fkey"
@@ -1123,6 +1204,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sites"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "daily_work_summary_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
           },
           {
             foreignKeyName: "daily_work_summary_updated_by_user_id_fkey"
@@ -1384,6 +1472,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "deliveries_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
+          },
+          {
             foreignKeyName: "deliveries_vendor_id_fkey"
             columns: ["vendor_id"]
             isOneToOne: false
@@ -1505,6 +1600,13 @@ export type Database = {
             foreignKeyName: "delivery_items_material_id_fkey"
             columns: ["material_id"]
             isOneToOne: false
+            referencedRelation: "v_materials_with_variants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "delivery_items_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
             referencedRelation: "v_site_stock_summary"
             referencedColumns: ["material_id"]
           },
@@ -1513,6 +1615,115 @@ export type Database = {
             columns: ["po_item_id"]
             isOneToOne: false
             referencedRelation: "purchase_order_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      engineer_reimbursements: {
+        Row: {
+          amount: number
+          created_at: string | null
+          engineer_id: string
+          expense_transaction_id: string
+          id: string
+          notes: string | null
+          payer_name: string | null
+          payer_source: string
+          payment_mode: string
+          proof_url: string | null
+          settled_by_name: string | null
+          settled_by_user_id: string | null
+          settled_date: string
+        }
+        Insert: {
+          amount: number
+          created_at?: string | null
+          engineer_id: string
+          expense_transaction_id: string
+          id?: string
+          notes?: string | null
+          payer_name?: string | null
+          payer_source: string
+          payment_mode: string
+          proof_url?: string | null
+          settled_by_name?: string | null
+          settled_by_user_id?: string | null
+          settled_date?: string
+        }
+        Update: {
+          amount?: number
+          created_at?: string | null
+          engineer_id?: string
+          expense_transaction_id?: string
+          id?: string
+          notes?: string | null
+          payer_name?: string | null
+          payer_source?: string
+          payment_mode?: string
+          proof_url?: string | null
+          settled_by_name?: string | null
+          settled_by_user_id?: string | null
+          settled_date?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "engineer_reimbursements_engineer_id_fkey"
+            columns: ["engineer_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "engineer_reimbursements_expense_transaction_id_fkey"
+            columns: ["expense_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "site_engineer_transactions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "engineer_reimbursements_settled_by_user_id_fkey"
+            columns: ["settled_by_user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      engineer_wallet_batch_usage: {
+        Row: {
+          amount_used: number
+          batch_transaction_id: string
+          created_at: string | null
+          id: string
+          transaction_id: string
+        }
+        Insert: {
+          amount_used: number
+          batch_transaction_id: string
+          created_at?: string | null
+          id?: string
+          transaction_id: string
+        }
+        Update: {
+          amount_used?: number
+          batch_transaction_id?: string
+          created_at?: string | null
+          id?: string
+          transaction_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "engineer_wallet_batch_usage_batch_transaction_id_fkey"
+            columns: ["batch_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "site_engineer_transactions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "engineer_wallet_batch_usage_transaction_id_fkey"
+            columns: ["transaction_id"]
+            isOneToOne: false
+            referencedRelation: "site_engineer_transactions"
             referencedColumns: ["id"]
           },
         ]
@@ -1732,6 +1943,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "expenses_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
+          },
+          {
             foreignKeyName: "expenses_site_payer_id_fkey"
             columns: ["site_payer_id"]
             isOneToOne: false
@@ -1765,10 +1983,14 @@ export type Database = {
         Row: {
           available_qty: number | null
           avg_unit_cost: number | null
+          batch_code: string | null
           brand_id: string | null
+          can_be_shared: boolean | null
           created_at: string | null
           current_qty: number
+          dedicated_site_id: string | null
           id: string
+          is_dedicated: boolean | null
           last_received_date: string | null
           last_used_date: string | null
           location_id: string | null
@@ -1783,10 +2005,14 @@ export type Database = {
         Insert: {
           available_qty?: number | null
           avg_unit_cost?: number | null
+          batch_code?: string | null
           brand_id?: string | null
+          can_be_shared?: boolean | null
           created_at?: string | null
           current_qty?: number
+          dedicated_site_id?: string | null
           id?: string
+          is_dedicated?: boolean | null
           last_received_date?: string | null
           last_used_date?: string | null
           location_id?: string | null
@@ -1801,10 +2027,14 @@ export type Database = {
         Update: {
           available_qty?: number | null
           avg_unit_cost?: number | null
+          batch_code?: string | null
           brand_id?: string | null
+          can_be_shared?: boolean | null
           created_at?: string | null
           current_qty?: number
+          dedicated_site_id?: string | null
           id?: string
+          is_dedicated?: boolean | null
           last_received_date?: string | null
           last_used_date?: string | null
           location_id?: string | null
@@ -1823,6 +2053,20 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "material_brands"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "group_stock_inventory_dedicated_site_id_fkey"
+            columns: ["dedicated_site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "group_stock_inventory_dedicated_site_id_fkey"
+            columns: ["dedicated_site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
           },
           {
             foreignKeyName: "group_stock_inventory_location_id_fkey"
@@ -1856,6 +2100,13 @@ export type Database = {
             foreignKeyName: "group_stock_inventory_material_id_fkey"
             columns: ["material_id"]
             isOneToOne: false
+            referencedRelation: "v_materials_with_variants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "group_stock_inventory_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
             referencedRelation: "v_site_stock_summary"
             referencedColumns: ["material_id"]
           },
@@ -1870,6 +2121,7 @@ export type Database = {
       }
       group_stock_transactions: {
         Row: {
+          batch_code: string | null
           brand_id: string | null
           created_at: string | null
           created_by: string | null
@@ -1891,6 +2143,7 @@ export type Database = {
           work_description: string | null
         }
         Insert: {
+          batch_code?: string | null
           brand_id?: string | null
           created_at?: string | null
           created_by?: string | null
@@ -1912,6 +2165,7 @@ export type Database = {
           work_description?: string | null
         }
         Update: {
+          batch_code?: string | null
           brand_id?: string | null
           created_at?: string | null
           created_by?: string | null
@@ -1955,6 +2209,20 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "group_stock_transactions_inventory_id_fkey"
+            columns: ["inventory_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["inventory_id"]
+          },
+          {
+            foreignKeyName: "group_stock_transactions_inventory_id_fkey"
+            columns: ["inventory_id"]
+            isOneToOne: false
+            referencedRelation: "v_stock_by_batch"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "group_stock_transactions_material_id_fkey"
             columns: ["material_id"]
             isOneToOne: false
@@ -1979,6 +2247,13 @@ export type Database = {
             foreignKeyName: "group_stock_transactions_material_id_fkey"
             columns: ["material_id"]
             isOneToOne: false
+            referencedRelation: "v_materials_with_variants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "group_stock_transactions_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
             referencedRelation: "v_site_stock_summary"
             referencedColumns: ["material_id"]
           },
@@ -1988,6 +2263,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sites"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "group_stock_transactions_payment_source_site_id_fkey"
+            columns: ["payment_source_site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
           },
           {
             foreignKeyName: "group_stock_transactions_site_group_id_fkey"
@@ -2002,6 +2284,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sites"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "group_stock_transactions_usage_site_id_fkey"
+            columns: ["usage_site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
           },
         ]
       }
@@ -2054,6 +2343,341 @@ export type Database = {
             columns: ["imported_by"]
             isOneToOne: false
             referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      inter_site_material_settlements: {
+        Row: {
+          approved_at: string | null
+          approved_by: string | null
+          cancellation_reason: string | null
+          cancelled_at: string | null
+          cancelled_by: string | null
+          created_at: string | null
+          created_by: string | null
+          from_site_id: string
+          id: string
+          notes: string | null
+          paid_amount: number | null
+          pending_amount: number | null
+          period_end: string
+          period_start: string
+          settled_at: string | null
+          settled_by: string | null
+          settlement_code: string
+          site_group_id: string
+          status:
+            | Database["public"]["Enums"]["inter_site_settlement_status"]
+            | null
+          to_site_id: string
+          total_amount: number
+          updated_at: string | null
+          week_number: number
+          year: number
+        }
+        Insert: {
+          approved_at?: string | null
+          approved_by?: string | null
+          cancellation_reason?: string | null
+          cancelled_at?: string | null
+          cancelled_by?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          from_site_id: string
+          id?: string
+          notes?: string | null
+          paid_amount?: number | null
+          pending_amount?: number | null
+          period_end: string
+          period_start: string
+          settled_at?: string | null
+          settled_by?: string | null
+          settlement_code: string
+          site_group_id: string
+          status?:
+            | Database["public"]["Enums"]["inter_site_settlement_status"]
+            | null
+          to_site_id: string
+          total_amount: number
+          updated_at?: string | null
+          week_number: number
+          year: number
+        }
+        Update: {
+          approved_at?: string | null
+          approved_by?: string | null
+          cancellation_reason?: string | null
+          cancelled_at?: string | null
+          cancelled_by?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          from_site_id?: string
+          id?: string
+          notes?: string | null
+          paid_amount?: number | null
+          pending_amount?: number | null
+          period_end?: string
+          period_start?: string
+          settled_at?: string | null
+          settled_by?: string | null
+          settlement_code?: string
+          site_group_id?: string
+          status?:
+            | Database["public"]["Enums"]["inter_site_settlement_status"]
+            | null
+          to_site_id?: string
+          total_amount?: number
+          updated_at?: string | null
+          week_number?: number
+          year?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "inter_site_material_settlements_approved_by_fkey"
+            columns: ["approved_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inter_site_material_settlements_cancelled_by_fkey"
+            columns: ["cancelled_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inter_site_material_settlements_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inter_site_material_settlements_from_site_id_fkey"
+            columns: ["from_site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inter_site_material_settlements_from_site_id_fkey"
+            columns: ["from_site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
+          },
+          {
+            foreignKeyName: "inter_site_material_settlements_settled_by_fkey"
+            columns: ["settled_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inter_site_material_settlements_site_group_id_fkey"
+            columns: ["site_group_id"]
+            isOneToOne: false
+            referencedRelation: "site_groups"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inter_site_material_settlements_to_site_id_fkey"
+            columns: ["to_site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inter_site_material_settlements_to_site_id_fkey"
+            columns: ["to_site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
+          },
+        ]
+      }
+      inter_site_settlement_items: {
+        Row: {
+          batch_code: string | null
+          brand_id: string | null
+          created_at: string | null
+          id: string
+          material_id: string
+          notes: string | null
+          quantity_used: number
+          settlement_id: string
+          total_cost: number
+          transaction_id: string | null
+          unit: string
+          unit_cost: number
+          usage_date: string
+        }
+        Insert: {
+          batch_code?: string | null
+          brand_id?: string | null
+          created_at?: string | null
+          id?: string
+          material_id: string
+          notes?: string | null
+          quantity_used: number
+          settlement_id: string
+          total_cost: number
+          transaction_id?: string | null
+          unit: string
+          unit_cost: number
+          usage_date: string
+        }
+        Update: {
+          batch_code?: string | null
+          brand_id?: string | null
+          created_at?: string | null
+          id?: string
+          material_id?: string
+          notes?: string | null
+          quantity_used?: number
+          settlement_id?: string
+          total_cost?: number
+          transaction_id?: string | null
+          unit?: string
+          unit_cost?: number
+          usage_date?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "inter_site_settlement_items_brand_id_fkey"
+            columns: ["brand_id"]
+            isOneToOne: false
+            referencedRelation: "material_brands"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inter_site_settlement_items_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "materials"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inter_site_settlement_items_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_group_stock_summary"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "inter_site_settlement_items_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_low_stock_alerts"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "inter_site_settlement_items_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_materials_with_variants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inter_site_settlement_items_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_stock_summary"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "inter_site_settlement_items_settlement_id_fkey"
+            columns: ["settlement_id"]
+            isOneToOne: false
+            referencedRelation: "inter_site_material_settlements"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inter_site_settlement_items_settlement_id_fkey"
+            columns: ["settlement_id"]
+            isOneToOne: false
+            referencedRelation: "v_pending_inter_site_settlements"
+            referencedColumns: ["settlement_id"]
+          },
+          {
+            foreignKeyName: "inter_site_settlement_items_settlement_id_fkey"
+            columns: ["settlement_id"]
+            isOneToOne: false
+            referencedRelation: "v_settlement_details"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inter_site_settlement_items_transaction_id_fkey"
+            columns: ["transaction_id"]
+            isOneToOne: false
+            referencedRelation: "group_stock_transactions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      inter_site_settlement_payments: {
+        Row: {
+          amount: number
+          created_at: string | null
+          id: string
+          notes: string | null
+          payment_date: string
+          payment_mode: string | null
+          recorded_by: string | null
+          reference_number: string | null
+          settlement_id: string
+        }
+        Insert: {
+          amount: number
+          created_at?: string | null
+          id?: string
+          notes?: string | null
+          payment_date?: string
+          payment_mode?: string | null
+          recorded_by?: string | null
+          reference_number?: string | null
+          settlement_id: string
+        }
+        Update: {
+          amount?: number
+          created_at?: string | null
+          id?: string
+          notes?: string | null
+          payment_date?: string
+          payment_mode?: string | null
+          recorded_by?: string | null
+          reference_number?: string | null
+          settlement_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "inter_site_settlement_payments_recorded_by_fkey"
+            columns: ["recorded_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inter_site_settlement_payments_settlement_id_fkey"
+            columns: ["settlement_id"]
+            isOneToOne: false
+            referencedRelation: "inter_site_material_settlements"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inter_site_settlement_payments_settlement_id_fkey"
+            columns: ["settlement_id"]
+            isOneToOne: false
+            referencedRelation: "v_pending_inter_site_settlements"
+            referencedColumns: ["settlement_id"]
+          },
+          {
+            foreignKeyName: "inter_site_settlement_payments_settlement_id_fkey"
+            columns: ["settlement_id"]
+            isOneToOne: false
+            referencedRelation: "v_settlement_details"
             referencedColumns: ["id"]
           },
         ]
@@ -2242,6 +2866,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "labor_payments_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
+          },
+          {
             foreignKeyName: "labor_payments_subcontract_id_fkey"
             columns: ["subcontract_id"]
             isOneToOne: false
@@ -2356,6 +2987,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sites"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "laborer_site_assignments_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
           },
         ]
       }
@@ -2616,6 +3254,13 @@ export type Database = {
             foreignKeyName: "local_purchase_items_material_id_fkey"
             columns: ["material_id"]
             isOneToOne: false
+            referencedRelation: "v_materials_with_variants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "local_purchase_items_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
             referencedRelation: "v_site_stock_summary"
             referencedColumns: ["material_id"]
           },
@@ -2740,6 +3385,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sites"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "local_purchases_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
           },
           {
             foreignKeyName: "local_purchases_vendor_id_fkey"
@@ -2952,6 +3604,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "market_laborer_attendance_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
+          },
+          {
             foreignKeyName: "market_laborer_attendance_subcontract_id_fkey"
             columns: ["subcontract_id"]
             isOneToOne: false
@@ -3019,6 +3678,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "v_low_stock_alerts"
             referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "material_brands_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_materials_with_variants"
+            referencedColumns: ["id"]
           },
           {
             foreignKeyName: "material_brands_material_id_fkey"
@@ -3146,6 +3812,13 @@ export type Database = {
             foreignKeyName: "material_request_items_material_id_fkey"
             columns: ["material_id"]
             isOneToOne: false
+            referencedRelation: "v_materials_with_variants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "material_request_items_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
             referencedRelation: "v_site_stock_summary"
             referencedColumns: ["material_id"]
           },
@@ -3263,6 +3936,13 @@ export type Database = {
             referencedRelation: "sites"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "material_requests_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
+          },
         ]
       }
       material_vendors: {
@@ -3344,6 +4024,13 @@ export type Database = {
             foreignKeyName: "material_vendors_material_id_fkey"
             columns: ["material_id"]
             isOneToOne: false
+            referencedRelation: "v_materials_with_variants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "material_vendors_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
             referencedRelation: "v_site_stock_summary"
             referencedColumns: ["material_id"]
           },
@@ -3369,14 +4056,20 @@ export type Database = {
           id: string
           image_url: string | null
           is_active: boolean | null
+          length_per_piece: number | null
+          length_unit: string | null
           local_name: string | null
           min_order_qty: number | null
           name: string
+          parent_id: string | null
           reorder_level: number | null
+          rods_per_bundle: number | null
           secondary_unit: Database["public"]["Enums"]["material_unit"] | null
           specifications: Json | null
           unit: Database["public"]["Enums"]["material_unit"]
           updated_at: string | null
+          weight_per_unit: number | null
+          weight_unit: string | null
         }
         Insert: {
           category_id?: string | null
@@ -3390,14 +4083,20 @@ export type Database = {
           id?: string
           image_url?: string | null
           is_active?: boolean | null
+          length_per_piece?: number | null
+          length_unit?: string | null
           local_name?: string | null
           min_order_qty?: number | null
           name: string
+          parent_id?: string | null
           reorder_level?: number | null
+          rods_per_bundle?: number | null
           secondary_unit?: Database["public"]["Enums"]["material_unit"] | null
           specifications?: Json | null
           unit?: Database["public"]["Enums"]["material_unit"]
           updated_at?: string | null
+          weight_per_unit?: number | null
+          weight_unit?: string | null
         }
         Update: {
           category_id?: string | null
@@ -3411,14 +4110,20 @@ export type Database = {
           id?: string
           image_url?: string | null
           is_active?: boolean | null
+          length_per_piece?: number | null
+          length_unit?: string | null
           local_name?: string | null
           min_order_qty?: number | null
           name?: string
+          parent_id?: string | null
           reorder_level?: number | null
+          rods_per_bundle?: number | null
           secondary_unit?: Database["public"]["Enums"]["material_unit"] | null
           specifications?: Json | null
           unit?: Database["public"]["Enums"]["material_unit"]
           updated_at?: string | null
+          weight_per_unit?: number | null
+          weight_unit?: string | null
         }
         Relationships: [
           {
@@ -3434,6 +4139,41 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "users"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "materials_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "materials"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "materials_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "v_group_stock_summary"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "materials_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "v_low_stock_alerts"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "materials_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "v_materials_with_variants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "materials_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_stock_summary"
+            referencedColumns: ["material_id"]
           },
         ]
       }
@@ -3606,11 +4346,54 @@ export type Database = {
             referencedRelation: "sites"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "payment_week_allocations_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
+          },
         ]
+      }
+      price_change_reasons: {
+        Row: {
+          created_at: string | null
+          description: string | null
+          id: string
+          is_active: boolean | null
+          is_increase: boolean | null
+          reason: string
+          sort_order: number | null
+        }
+        Insert: {
+          created_at?: string | null
+          description?: string | null
+          id?: string
+          is_active?: boolean | null
+          is_increase?: boolean | null
+          reason: string
+          sort_order?: number | null
+        }
+        Update: {
+          created_at?: string | null
+          description?: string | null
+          id?: string
+          is_active?: boolean | null
+          is_increase?: boolean | null
+          reason?: string
+          sort_order?: number | null
+        }
+        Relationships: []
       }
       price_history: {
         Row: {
+          bill_date: string | null
+          bill_number: string | null
+          bill_url: string | null
           brand_id: string | null
+          change_percentage: number | null
+          change_reason_id: string | null
+          change_reason_text: string | null
           created_at: string | null
           gst_rate: number | null
           id: string
@@ -3631,7 +4414,13 @@ export type Database = {
           vendor_id: string
         }
         Insert: {
+          bill_date?: string | null
+          bill_number?: string | null
+          bill_url?: string | null
           brand_id?: string | null
+          change_percentage?: number | null
+          change_reason_id?: string | null
+          change_reason_text?: string | null
           created_at?: string | null
           gst_rate?: number | null
           id?: string
@@ -3652,7 +4441,13 @@ export type Database = {
           vendor_id: string
         }
         Update: {
+          bill_date?: string | null
+          bill_number?: string | null
+          bill_url?: string | null
           brand_id?: string | null
+          change_percentage?: number | null
+          change_reason_id?: string | null
+          change_reason_text?: string | null
           created_at?: string | null
           gst_rate?: number | null
           id?: string
@@ -3681,6 +4476,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "price_history_change_reason_id_fkey"
+            columns: ["change_reason_id"]
+            isOneToOne: false
+            referencedRelation: "price_change_reasons"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "price_history_material_id_fkey"
             columns: ["material_id"]
             isOneToOne: false
@@ -3700,6 +4502,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "v_low_stock_alerts"
             referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "price_history_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_materials_with_variants"
+            referencedColumns: ["id"]
           },
           {
             foreignKeyName: "price_history_material_id_fkey"
@@ -3807,6 +4616,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "v_low_stock_alerts"
             referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "purchase_order_items_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_materials_with_variants"
+            referencedColumns: ["id"]
           },
           {
             foreignKeyName: "purchase_order_items_material_id_fkey"
@@ -3962,6 +4778,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "purchase_orders_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
+          },
+          {
             foreignKeyName: "purchase_orders_vendor_id_fkey"
             columns: ["vendor_id"]
             isOneToOne: false
@@ -4100,6 +4923,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sites"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchase_payments_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
           },
           {
             foreignKeyName: "purchase_payments_vendor_id_fkey"
@@ -4359,12 +5189,15 @@ export type Database = {
           payment_mode: string | null
           payment_type: string | null
           proof_url: string | null
+          proof_urls: string[] | null
           settlement_date: string
           settlement_reference: string
+          settlement_type: string | null
           site_id: string
           subcontract_id: string | null
           total_amount: number
           updated_at: string
+          week_allocations: Json | null
         }
         Insert: {
           actual_payment_date?: string | null
@@ -4386,12 +5219,15 @@ export type Database = {
           payment_mode?: string | null
           payment_type?: string | null
           proof_url?: string | null
+          proof_urls?: string[] | null
           settlement_date: string
           settlement_reference: string
+          settlement_type?: string | null
           site_id: string
           subcontract_id?: string | null
           total_amount: number
           updated_at?: string
+          week_allocations?: Json | null
         }
         Update: {
           actual_payment_date?: string | null
@@ -4413,12 +5249,15 @@ export type Database = {
           payment_mode?: string | null
           payment_type?: string | null
           proof_url?: string | null
+          proof_urls?: string[] | null
           settlement_date?: string
           settlement_reference?: string
+          settlement_type?: string | null
           site_id?: string
           subcontract_id?: string | null
           total_amount?: number
           updated_at?: string
+          week_allocations?: Json | null
         }
         Relationships: [
           {
@@ -4448,6 +5287,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sites"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "settlement_groups_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
           },
           {
             foreignKeyName: "settlement_groups_subcontract_id_fkey"
@@ -4506,6 +5352,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sites"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "site_clients_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
           },
         ]
       }
@@ -4572,6 +5425,7 @@ export type Database = {
       site_engineer_transactions: {
         Row: {
           amount: number
+          batch_code: string | null
           cancellation_reason: string | null
           cancelled_at: string | null
           cancelled_by: string | null
@@ -4587,6 +5441,8 @@ export type Database = {
           money_source: string | null
           money_source_name: string | null
           notes: string | null
+          payer_name: string | null
+          payer_source: string | null
           payment_mode: string
           proof_url: string | null
           recipient_id: string | null
@@ -4595,13 +5451,17 @@ export type Database = {
           recorded_by_user_id: string | null
           related_attendance_id: string | null
           related_subcontract_id: string | null
+          remaining_balance: number | null
           settled_by: string | null
           settled_date: string | null
+          settlement_group_id: string | null
           settlement_mode: string | null
           settlement_proof_url: string | null
           settlement_reason: string | null
+          settlement_reference: string | null
           settlement_status: string | null
           site_id: string | null
+          site_restricted: boolean | null
           transaction_date: string
           transaction_type: string
           updated_at: string | null
@@ -4609,6 +5469,7 @@ export type Database = {
         }
         Insert: {
           amount: number
+          batch_code?: string | null
           cancellation_reason?: string | null
           cancelled_at?: string | null
           cancelled_by?: string | null
@@ -4624,6 +5485,8 @@ export type Database = {
           money_source?: string | null
           money_source_name?: string | null
           notes?: string | null
+          payer_name?: string | null
+          payer_source?: string | null
           payment_mode: string
           proof_url?: string | null
           recipient_id?: string | null
@@ -4632,13 +5495,17 @@ export type Database = {
           recorded_by_user_id?: string | null
           related_attendance_id?: string | null
           related_subcontract_id?: string | null
+          remaining_balance?: number | null
           settled_by?: string | null
           settled_date?: string | null
+          settlement_group_id?: string | null
           settlement_mode?: string | null
           settlement_proof_url?: string | null
           settlement_reason?: string | null
+          settlement_reference?: string | null
           settlement_status?: string | null
           site_id?: string | null
+          site_restricted?: boolean | null
           transaction_date?: string
           transaction_type: string
           updated_at?: string | null
@@ -4646,6 +5513,7 @@ export type Database = {
         }
         Update: {
           amount?: number
+          batch_code?: string | null
           cancellation_reason?: string | null
           cancelled_at?: string | null
           cancelled_by?: string | null
@@ -4661,6 +5529,8 @@ export type Database = {
           money_source?: string | null
           money_source_name?: string | null
           notes?: string | null
+          payer_name?: string | null
+          payer_source?: string | null
           payment_mode?: string
           proof_url?: string | null
           recipient_id?: string | null
@@ -4669,13 +5539,17 @@ export type Database = {
           recorded_by_user_id?: string | null
           related_attendance_id?: string | null
           related_subcontract_id?: string | null
+          remaining_balance?: number | null
           settled_by?: string | null
           settled_date?: string | null
+          settlement_group_id?: string | null
           settlement_mode?: string | null
           settlement_proof_url?: string | null
           settlement_reason?: string | null
+          settlement_reference?: string | null
           settlement_status?: string | null
           site_id?: string | null
+          site_restricted?: boolean | null
           transaction_date?: string
           transaction_type?: string
           updated_at?: string | null
@@ -4732,11 +5606,25 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "site_engineer_transactions_settlement_group_id_fkey"
+            columns: ["settlement_group_id"]
+            isOneToOne: false
+            referencedRelation: "settlement_groups"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "site_engineer_transactions_site_id_fkey"
             columns: ["site_id"]
             isOneToOne: false
             referencedRelation: "sites"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "site_engineer_transactions_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
           },
           {
             foreignKeyName: "site_engineer_transactions_user_id_fkey"
@@ -4828,6 +5716,13 @@ export type Database = {
             referencedRelation: "sites"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "site_holidays_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
+          },
         ]
       }
       site_material_budgets: {
@@ -4889,6 +5784,13 @@ export type Database = {
             referencedRelation: "sites"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "site_material_budgets_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
+          },
         ]
       }
       site_payers: {
@@ -4929,6 +5831,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sites"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "site_payers_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
           },
         ]
       }
@@ -4985,6 +5894,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sites"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "site_payment_milestones_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
           },
         ]
       }
@@ -5142,6 +6058,7 @@ export type Database = {
         Row: {
           available_qty: number | null
           avg_unit_cost: number | null
+          batch_code: string | null
           brand_id: string | null
           created_at: string | null
           current_qty: number
@@ -5159,6 +6076,7 @@ export type Database = {
         Insert: {
           available_qty?: number | null
           avg_unit_cost?: number | null
+          batch_code?: string | null
           brand_id?: string | null
           created_at?: string | null
           current_qty?: number
@@ -5176,6 +6094,7 @@ export type Database = {
         Update: {
           available_qty?: number | null
           avg_unit_cost?: number | null
+          batch_code?: string | null
           brand_id?: string | null
           created_at?: string | null
           current_qty?: number
@@ -5230,6 +6149,13 @@ export type Database = {
             foreignKeyName: "stock_inventory_material_id_fkey"
             columns: ["material_id"]
             isOneToOne: false
+            referencedRelation: "v_materials_with_variants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_inventory_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
             referencedRelation: "v_site_stock_summary"
             referencedColumns: ["material_id"]
           },
@@ -5239,6 +6165,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sites"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_inventory_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
           },
         ]
       }
@@ -5287,10 +6220,18 @@ export type Database = {
             referencedRelation: "sites"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "stock_locations_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
+          },
         ]
       }
       stock_transactions: {
         Row: {
+          batch_code: string | null
           created_at: string | null
           created_by: string | null
           id: string
@@ -5307,6 +6248,7 @@ export type Database = {
           unit_cost: number | null
         }
         Insert: {
+          batch_code?: string | null
           created_at?: string | null
           created_by?: string | null
           id?: string
@@ -5323,6 +6265,7 @@ export type Database = {
           unit_cost?: number | null
         }
         Update: {
+          batch_code?: string | null
           created_at?: string | null
           created_by?: string | null
           id?: string
@@ -5380,6 +6323,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sites"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_transactions_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
           },
         ]
       }
@@ -5445,6 +6395,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "v_low_stock_alerts"
             referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "stock_transfer_items_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_materials_with_variants"
+            referencedColumns: ["id"]
           },
           {
             foreignKeyName: "stock_transfer_items_material_id_fkey"
@@ -5543,6 +6500,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "stock_transfers_from_site_id_fkey"
+            columns: ["from_site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
+          },
+          {
             foreignKeyName: "stock_transfers_initiated_by_fkey"
             columns: ["initiated_by"]
             isOneToOne: false
@@ -5569,6 +6533,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sites"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_transfers_to_site_id_fkey"
+            columns: ["to_site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
           },
         ]
       }
@@ -5805,6 +6776,7 @@ export type Database = {
           id: string
           is_rate_based: boolean
           laborer_id: string | null
+          maestri_margin_per_day: number | null
           measurement_unit:
             | Database["public"]["Enums"]["measurement_unit"]
             | null
@@ -5834,6 +6806,7 @@ export type Database = {
           id?: string
           is_rate_based?: boolean
           laborer_id?: string | null
+          maestri_margin_per_day?: number | null
           measurement_unit?:
             | Database["public"]["Enums"]["measurement_unit"]
             | null
@@ -5863,6 +6836,7 @@ export type Database = {
           id?: string
           is_rate_based?: boolean
           laborer_id?: string | null
+          maestri_margin_per_day?: number | null
           measurement_unit?:
             | Database["public"]["Enums"]["measurement_unit"]
             | null
@@ -5910,6 +6884,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "contracts_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
+          },
+          {
             foreignKeyName: "contracts_team_id_fkey"
             columns: ["team_id"]
             isOneToOne: false
@@ -5934,9 +6915,11 @@ export type Database = {
           is_active: boolean
           notes: string | null
           owner_name: string | null
+          qr_code_url: string | null
           shop_name: string
           site_id: string | null
           updated_at: string
+          upi_id: string | null
         }
         Insert: {
           address?: string | null
@@ -5946,9 +6929,11 @@ export type Database = {
           is_active?: boolean
           notes?: string | null
           owner_name?: string | null
+          qr_code_url?: string | null
           shop_name: string
           site_id?: string | null
           updated_at?: string
+          upi_id?: string | null
         }
         Update: {
           address?: string | null
@@ -5958,9 +6943,11 @@ export type Database = {
           is_active?: boolean
           notes?: string | null
           owner_name?: string | null
+          qr_code_url?: string | null
           shop_name?: string
           site_id?: string | null
           updated_at?: string
+          upi_id?: string | null
         }
         Relationships: [
           {
@@ -5969,6 +6956,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sites"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tea_shop_accounts_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
           },
         ]
       }
@@ -6122,12 +7116,14 @@ export type Database = {
       tea_shop_entries: {
         Row: {
           amount: number
+          amount_paid: number | null
           created_at: string
           date: string
           entered_by: string | null
           entered_by_user_id: string | null
           entry_mode: string | null
           id: string
+          is_fully_paid: boolean | null
           is_split_entry: boolean | null
           items_detail: string | null
           market_laborer_count: number | null
@@ -6162,12 +7158,14 @@ export type Database = {
         }
         Insert: {
           amount: number
+          amount_paid?: number | null
           created_at?: string
           date: string
           entered_by?: string | null
           entered_by_user_id?: string | null
           entry_mode?: string | null
           id?: string
+          is_fully_paid?: boolean | null
           is_split_entry?: boolean | null
           items_detail?: string | null
           market_laborer_count?: number | null
@@ -6202,12 +7200,14 @@ export type Database = {
         }
         Update: {
           amount?: number
+          amount_paid?: number | null
           created_at?: string
           date?: string
           entered_by?: string | null
           entered_by_user_id?: string | null
           entry_mode?: string | null
           id?: string
+          is_fully_paid?: boolean | null
           is_split_entry?: boolean | null
           items_detail?: string | null
           market_laborer_count?: number | null
@@ -6256,6 +7256,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "tea_shop_entries_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
+          },
+          {
             foreignKeyName: "tea_shop_entries_split_source_entry_id_fkey"
             columns: ["split_source_entry_id"]
             isOneToOne: false
@@ -6268,6 +7275,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sites"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tea_shop_entries_split_target_site_id_fkey"
+            columns: ["split_target_site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
           },
           {
             foreignKeyName: "tea_shop_entries_tea_shop_id_fkey"
@@ -6306,6 +7320,45 @@ export type Database = {
           },
         ]
       }
+      tea_shop_settlement_allocations: {
+        Row: {
+          allocated_amount: number
+          created_at: string | null
+          entry_id: string
+          id: string
+          settlement_id: string
+        }
+        Insert: {
+          allocated_amount: number
+          created_at?: string | null
+          entry_id: string
+          id?: string
+          settlement_id: string
+        }
+        Update: {
+          allocated_amount?: number
+          created_at?: string | null
+          entry_id?: string
+          id?: string
+          settlement_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tea_shop_settlement_allocations_entry_id_fkey"
+            columns: ["entry_id"]
+            isOneToOne: false
+            referencedRelation: "tea_shop_entries"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tea_shop_settlement_allocations_settlement_id_fkey"
+            columns: ["settlement_id"]
+            isOneToOne: false
+            referencedRelation: "tea_shop_settlements"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       tea_shop_settlements: {
         Row: {
           amount_paid: number
@@ -6313,6 +7366,7 @@ export type Database = {
           created_at: string | null
           entries_total: number
           id: string
+          is_cancelled: boolean | null
           is_engineer_settled: boolean | null
           notes: string | null
           payer_type: string
@@ -6323,6 +7377,7 @@ export type Database = {
           previous_balance: number | null
           recorded_by: string | null
           recorded_by_user_id: string | null
+          settlement_reference: string | null
           site_engineer_id: string | null
           site_engineer_transaction_id: string | null
           status: string | null
@@ -6337,6 +7392,7 @@ export type Database = {
           created_at?: string | null
           entries_total: number
           id?: string
+          is_cancelled?: boolean | null
           is_engineer_settled?: boolean | null
           notes?: string | null
           payer_type: string
@@ -6347,6 +7403,7 @@ export type Database = {
           previous_balance?: number | null
           recorded_by?: string | null
           recorded_by_user_id?: string | null
+          settlement_reference?: string | null
           site_engineer_id?: string | null
           site_engineer_transaction_id?: string | null
           status?: string | null
@@ -6361,6 +7418,7 @@ export type Database = {
           created_at?: string | null
           entries_total?: number
           id?: string
+          is_cancelled?: boolean | null
           is_engineer_settled?: boolean | null
           notes?: string | null
           payer_type?: string
@@ -6371,6 +7429,7 @@ export type Database = {
           previous_balance?: number | null
           recorded_by?: string | null
           recorded_by_user_id?: string | null
+          settlement_reference?: string | null
           site_engineer_id?: string | null
           site_engineer_transaction_id?: string | null
           status?: string | null
@@ -6687,6 +7746,13 @@ export type Database = {
             foreignKeyName: "vendor_inventory_material_id_fkey"
             columns: ["material_id"]
             isOneToOne: false
+            referencedRelation: "v_materials_with_variants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_inventory_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
             referencedRelation: "v_site_stock_summary"
             referencedColumns: ["material_id"]
           },
@@ -6964,6 +8030,13 @@ export type Database = {
             referencedRelation: "sites"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "site_payers_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
+          },
         ]
       }
       v_active_attendance: {
@@ -7067,6 +8140,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "daily_attendance_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
+          },
+          {
             foreignKeyName: "daily_attendance_team_id_fkey"
             columns: ["team_id"]
             isOneToOne: false
@@ -7101,6 +8181,7 @@ export type Database = {
           description: string | null
           entered_by: string | null
           entered_by_user_id: string | null
+          expense_type: string | null
           id: string | null
           is_cleared: boolean | null
           is_deleted: boolean | null
@@ -7109,6 +8190,7 @@ export type Database = {
           payer_name: string | null
           payment_mode: string | null
           receipt_url: string | null
+          recorded_date: string | null
           settlement_group_id: string | null
           settlement_reference: string | null
           site_id: string | null
@@ -7119,6 +8201,81 @@ export type Database = {
           vendor_name: string | null
         }
         Relationships: []
+      }
+      v_batch_allocation_summary: {
+        Row: {
+          batch_code: string | null
+          cost_used: number | null
+          group_name: string | null
+          material_id: string | null
+          material_name: string | null
+          paid_by_site_id: string | null
+          paid_by_site_name: string | null
+          quantity_used: number | null
+          site_group_id: string | null
+          total_purchase_cost: number | null
+          unit: Database["public"]["Enums"]["material_unit"] | null
+          usage_site_id: string | null
+          usage_site_name: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "group_stock_transactions_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "materials"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "group_stock_transactions_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_group_stock_summary"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "group_stock_transactions_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_low_stock_alerts"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "group_stock_transactions_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_materials_with_variants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "group_stock_transactions_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_stock_summary"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "group_stock_transactions_site_group_id_fkey"
+            columns: ["site_group_id"]
+            isOneToOne: false
+            referencedRelation: "site_groups"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "group_stock_transactions_usage_site_id_fkey"
+            columns: ["usage_site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "group_stock_transactions_usage_site_id_fkey"
+            columns: ["usage_site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
+          },
+        ]
       }
       v_delivery_verification_details: {
         Row: {
@@ -7176,6 +8333,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sites"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "deliveries_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
           },
           {
             foreignKeyName: "deliveries_vendor_id_fkey"
@@ -7253,6 +8417,13 @@ export type Database = {
             foreignKeyName: "group_stock_transactions_material_id_fkey"
             columns: ["material_id"]
             isOneToOne: false
+            referencedRelation: "v_materials_with_variants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "group_stock_transactions_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
             referencedRelation: "v_site_stock_summary"
             referencedColumns: ["material_id"]
           },
@@ -7269,6 +8440,68 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sites"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "group_stock_transactions_usage_site_id_fkey"
+            columns: ["usage_site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
+          },
+        ]
+      }
+      v_inter_site_balance: {
+        Row: {
+          creditor_site_id: string | null
+          creditor_site_name: string | null
+          debtor_site_id: string | null
+          debtor_site_name: string | null
+          group_name: string | null
+          material_count: number | null
+          site_group_id: string | null
+          total_amount_owed: number | null
+          total_quantity: number | null
+          transaction_count: number | null
+          week_end: string | null
+          week_number: number | null
+          week_start: string | null
+          year: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "group_stock_transactions_payment_source_site_id_fkey"
+            columns: ["creditor_site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "group_stock_transactions_payment_source_site_id_fkey"
+            columns: ["creditor_site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
+          },
+          {
+            foreignKeyName: "group_stock_transactions_site_group_id_fkey"
+            columns: ["site_group_id"]
+            isOneToOne: false
+            referencedRelation: "site_groups"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "group_stock_transactions_usage_site_id_fkey"
+            columns: ["debtor_site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "group_stock_transactions_usage_site_id_fkey"
+            columns: ["debtor_site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
           },
         ]
       }
@@ -7362,6 +8595,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "local_purchases_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
+          },
+          {
             foreignKeyName: "local_purchases_vendor_id_fkey"
             columns: ["vendor_id"]
             isOneToOne: false
@@ -7391,6 +8631,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sites"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_inventory_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
           },
         ]
       }
@@ -7434,6 +8681,13 @@ export type Database = {
             foreignKeyName: "daily_material_usage_material_id_fkey"
             columns: ["material_id"]
             isOneToOne: false
+            referencedRelation: "v_materials_with_variants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "daily_material_usage_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
             referencedRelation: "v_site_stock_summary"
             referencedColumns: ["material_id"]
           },
@@ -7457,6 +8711,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sites"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "daily_material_usage_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
           },
         ]
       }
@@ -7522,6 +8783,13 @@ export type Database = {
             foreignKeyName: "vendor_inventory_material_id_fkey"
             columns: ["material_id"]
             isOneToOne: false
+            referencedRelation: "v_materials_with_variants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_inventory_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
             referencedRelation: "v_site_stock_summary"
             referencedColumns: ["material_id"]
           },
@@ -7531,6 +8799,87 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "vendors"
             referencedColumns: ["id"]
+          },
+        ]
+      }
+      v_materials_with_variants: {
+        Row: {
+          category_code: string | null
+          category_id: string | null
+          category_name: string | null
+          code: string | null
+          conversion_factor: number | null
+          created_at: string | null
+          created_by: string | null
+          description: string | null
+          gst_rate: number | null
+          hsn_code: string | null
+          id: string | null
+          image_url: string | null
+          is_active: boolean | null
+          is_variant: boolean | null
+          local_name: string | null
+          min_order_qty: number | null
+          name: string | null
+          parent_code: string | null
+          parent_id: string | null
+          parent_name: string | null
+          reorder_level: number | null
+          secondary_unit: Database["public"]["Enums"]["material_unit"] | null
+          specifications: Json | null
+          unit: Database["public"]["Enums"]["material_unit"] | null
+          updated_at: string | null
+          variant_count: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "materials_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "material_categories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "materials_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "materials_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "materials"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "materials_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "v_group_stock_summary"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "materials_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "v_low_stock_alerts"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "materials_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "v_materials_with_variants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "materials_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_stock_summary"
+            referencedColumns: ["material_id"]
           },
         ]
       }
@@ -7636,11 +8985,79 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "deliveries_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
+          },
+          {
             foreignKeyName: "deliveries_vendor_id_fkey"
             columns: ["vendor_id"]
             isOneToOne: false
             referencedRelation: "vendors"
             referencedColumns: ["id"]
+          },
+        ]
+      }
+      v_pending_inter_site_settlements: {
+        Row: {
+          creditor_site_id: string | null
+          creditor_site_name: string | null
+          debtor_site_id: string | null
+          debtor_site_name: string | null
+          group_name: string | null
+          material_count: number | null
+          settled_amount: number | null
+          settlement_id: string | null
+          settlement_state: string | null
+          settlement_status:
+            | Database["public"]["Enums"]["inter_site_settlement_status"]
+            | null
+          site_group_id: string | null
+          total_amount_owed: number | null
+          total_quantity: number | null
+          transaction_count: number | null
+          week_end: string | null
+          week_number: number | null
+          week_start: string | null
+          year: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "group_stock_transactions_payment_source_site_id_fkey"
+            columns: ["creditor_site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "group_stock_transactions_payment_source_site_id_fkey"
+            columns: ["creditor_site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
+          },
+          {
+            foreignKeyName: "group_stock_transactions_site_group_id_fkey"
+            columns: ["site_group_id"]
+            isOneToOne: false
+            referencedRelation: "site_groups"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "group_stock_transactions_usage_site_id_fkey"
+            columns: ["debtor_site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "group_stock_transactions_usage_site_id_fkey"
+            columns: ["debtor_site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
           },
         ]
       }
@@ -7673,6 +9090,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sites"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchase_orders_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
           },
           {
             foreignKeyName: "purchase_orders_vendor_id_fkey"
@@ -7713,36 +9137,115 @@ export type Database = {
             referencedRelation: "sites"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "local_purchases_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
+          },
         ]
       }
       v_price_history_details: {
         Row: {
+          bill_date: string | null
+          bill_number: string | null
+          bill_url: string | null
           brand_id: string | null
           brand_name: string | null
-          category_name: string | null
+          change_percentage: number | null
+          change_reason: string | null
+          change_reason_id: string | null
+          change_reason_text: string | null
           created_at: string | null
-          gst_rate: number | null
           id: string | null
-          loading_cost: number | null
           material_code: string | null
           material_id: string | null
           material_name: string | null
+          material_unit: Database["public"]["Enums"]["material_unit"] | null
           notes: string | null
+          previous_price: number | null
           price: number | null
-          price_includes_gst: boolean | null
-          quantity: number | null
-          recorded_by_name: string | null
+          price_change: number | null
+          reason_is_increase: boolean | null
           recorded_date: string | null
-          shop_name: string | null
-          source: string | null
-          source_reference: string | null
-          total_landed_cost: number | null
-          transport_cost: number | null
-          unit: string | null
-          unloading_cost: number | null
           vendor_id: string | null
           vendor_name: string | null
-          vendor_type: Database["public"]["Enums"]["vendor_type"] | null
+          vendor_shop_name: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "price_history_brand_id_fkey"
+            columns: ["brand_id"]
+            isOneToOne: false
+            referencedRelation: "material_brands"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "price_history_change_reason_id_fkey"
+            columns: ["change_reason_id"]
+            isOneToOne: false
+            referencedRelation: "price_change_reasons"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "price_history_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "materials"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "price_history_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_group_stock_summary"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "price_history_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_low_stock_alerts"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "price_history_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_materials_with_variants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "price_history_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_stock_summary"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "price_history_vendor_id_fkey"
+            columns: ["vendor_id"]
+            isOneToOne: false
+            referencedRelation: "vendors"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      v_price_trends: {
+        Row: {
+          brand_id: string | null
+          brand_name: string | null
+          change_percentage: number | null
+          material_id: string | null
+          material_name: string | null
+          max_price_90d: number | null
+          min_price_90d: number | null
+          moving_avg_30d: number | null
+          price: number | null
+          recorded_date: string | null
+          vendor_id: string | null
+          vendor_name: string | null
         }
         Relationships: [
           {
@@ -7772,6 +9275,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "v_low_stock_alerts"
             referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "price_history_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_materials_with_variants"
+            referencedColumns: ["id"]
           },
           {
             foreignKeyName: "price_history_material_id_fkey"
@@ -7866,6 +9376,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "building_sections_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
+          },
+          {
             foreignKeyName: "daily_attendance_section_id_fkey"
             columns: ["section_id"]
             isOneToOne: false
@@ -7903,6 +9420,78 @@ export type Database = {
             referencedRelation: "sites"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "building_sections_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
+          },
+        ]
+      }
+      v_settlement_details: {
+        Row: {
+          approved_at: string | null
+          created_at: string | null
+          from_site_id: string | null
+          from_site_name: string | null
+          group_name: string | null
+          id: string | null
+          item_count: number | null
+          materials_summary: string | null
+          notes: string | null
+          paid_amount: number | null
+          pending_amount: number | null
+          period_end: string | null
+          period_start: string | null
+          settled_at: string | null
+          settlement_code: string | null
+          site_group_id: string | null
+          status:
+            | Database["public"]["Enums"]["inter_site_settlement_status"]
+            | null
+          to_site_id: string | null
+          to_site_name: string | null
+          total_amount: number | null
+          week_number: number | null
+          year: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "inter_site_material_settlements_from_site_id_fkey"
+            columns: ["from_site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inter_site_material_settlements_from_site_id_fkey"
+            columns: ["from_site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
+          },
+          {
+            foreignKeyName: "inter_site_material_settlements_site_group_id_fkey"
+            columns: ["site_group_id"]
+            isOneToOne: false
+            referencedRelation: "site_groups"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inter_site_material_settlements_to_site_id_fkey"
+            columns: ["to_site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inter_site_material_settlements_to_site_id_fkey"
+            columns: ["to_site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
+          },
         ]
       }
       v_site_daily_by_category: {
@@ -7923,6 +9512,13 @@ export type Database = {
             referencedRelation: "sites"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "daily_attendance_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
+          },
         ]
       }
       v_site_daily_summary: {
@@ -7940,6 +9536,100 @@ export type Database = {
             columns: ["site_id"]
             isOneToOne: false
             referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "daily_attendance_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
+          },
+        ]
+      }
+      v_site_eligible_batches: {
+        Row: {
+          allocation_type: string | null
+          available_qty: number | null
+          avg_unit_cost: number | null
+          batch_code: string | null
+          brand_id: string | null
+          brand_name: string | null
+          can_use: boolean | null
+          dedicated_site_id: string | null
+          group_name: string | null
+          inventory_id: string | null
+          is_dedicated: boolean | null
+          material_code: string | null
+          material_id: string | null
+          material_name: string | null
+          site_group_id: string | null
+          site_id: string | null
+          site_name: string | null
+          unit: Database["public"]["Enums"]["material_unit"] | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "group_stock_inventory_brand_id_fkey"
+            columns: ["brand_id"]
+            isOneToOne: false
+            referencedRelation: "material_brands"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "group_stock_inventory_dedicated_site_id_fkey"
+            columns: ["dedicated_site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "group_stock_inventory_dedicated_site_id_fkey"
+            columns: ["dedicated_site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
+          },
+          {
+            foreignKeyName: "group_stock_inventory_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "materials"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "group_stock_inventory_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_group_stock_summary"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "group_stock_inventory_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_low_stock_alerts"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "group_stock_inventory_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_materials_with_variants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "group_stock_inventory_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_stock_summary"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "group_stock_inventory_site_group_id_fkey"
+            columns: ["site_group_id"]
+            isOneToOne: false
+            referencedRelation: "site_groups"
             referencedColumns: ["id"]
           },
         ]
@@ -7967,6 +9657,106 @@ export type Database = {
             referencedRelation: "sites"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "stock_inventory_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
+          },
+        ]
+      }
+      v_stock_by_batch: {
+        Row: {
+          available_qty: number | null
+          avg_unit_cost: number | null
+          batch_code: string | null
+          brand_id: string | null
+          brand_name: string | null
+          can_be_shared: boolean | null
+          category_name: string | null
+          current_qty: number | null
+          dedicated_site_id: string | null
+          dedicated_site_name: string | null
+          group_name: string | null
+          id: string | null
+          is_dedicated: boolean | null
+          last_received_date: string | null
+          last_used_date: string | null
+          material_code: string | null
+          material_id: string | null
+          material_name: string | null
+          paid_by_site_id: string | null
+          paid_by_site_name: string | null
+          reserved_qty: number | null
+          site_group_id: string | null
+          total_value: number | null
+          unit: Database["public"]["Enums"]["material_unit"] | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "group_stock_inventory_brand_id_fkey"
+            columns: ["brand_id"]
+            isOneToOne: false
+            referencedRelation: "material_brands"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "group_stock_inventory_dedicated_site_id_fkey"
+            columns: ["dedicated_site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "group_stock_inventory_dedicated_site_id_fkey"
+            columns: ["dedicated_site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
+          },
+          {
+            foreignKeyName: "group_stock_inventory_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "materials"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "group_stock_inventory_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_group_stock_summary"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "group_stock_inventory_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_low_stock_alerts"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "group_stock_inventory_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_materials_with_variants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "group_stock_inventory_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_stock_summary"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "group_stock_inventory_site_group_id_fkey"
+            columns: ["site_group_id"]
+            isOneToOne: false
+            referencedRelation: "site_groups"
+            referencedColumns: ["id"]
+          },
         ]
       }
       v_tea_shop_weekly: {
@@ -7987,6 +9777,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sites"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tea_shop_accounts_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
           },
         ]
       }
@@ -8111,6 +9908,13 @@ export type Database = {
             foreignKeyName: "vendor_inventory_material_id_fkey"
             columns: ["material_id"]
             isOneToOne: false
+            referencedRelation: "v_materials_with_variants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_inventory_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
             referencedRelation: "v_site_stock_summary"
             referencedColumns: ["material_id"]
           },
@@ -8133,6 +9937,18 @@ export type Database = {
         }
         Returns: boolean
       }
+      approve_settlement: {
+        Args: { p_approved_by: string; p_settlement_id: string }
+        Returns: boolean
+      }
+      calculate_material_weight: {
+        Args: { p_material_id: string; p_quantity: number }
+        Returns: {
+          total_weight: number
+          weight_per_unit: number
+          weight_unit: string
+        }[]
+      }
       calculate_salary_period: {
         Args: {
           p_calculated_by?: string
@@ -8142,6 +9958,18 @@ export type Database = {
         Returns: string
       }
       can_access_site: { Args: { p_site_id: string }; Returns: boolean }
+      can_site_use_batch: {
+        Args: { p_inventory_id: string; p_site_id: string }
+        Returns: boolean
+      }
+      cancel_settlement: {
+        Args: {
+          p_cancelled_by: string
+          p_reason: string
+          p_settlement_id: string
+        }
+        Returns: boolean
+      }
       copy_default_sections_to_site: {
         Args: { p_site_id: string }
         Returns: number
@@ -8162,6 +9990,28 @@ export type Database = {
         Args: { p_purchase_id: string; p_user_id: string }
         Returns: string
       }
+      create_weekly_settlement: {
+        Args: {
+          p_created_by?: string
+          p_from_site_id: string
+          p_site_group_id: string
+          p_to_site_id: string
+          p_week: number
+          p_year: number
+        }
+        Returns: string
+      }
+      dedicate_batch_to_site: {
+        Args: { p_inventory_id: string; p_site_id: string }
+        Returns: boolean
+      }
+      delete_engineer_transaction: {
+        Args: { p_transaction_id: string }
+        Returns: boolean
+      }
+      generate_batch_code:
+        | { Args: never; Returns: string }
+        | { Args: { p_payer_source: string }; Returns: string }
       generate_grn_number: { Args: never; Returns: string }
       generate_local_purchase_number: { Args: never; Returns: string }
       generate_mr_number: { Args: never; Returns: string }
@@ -8170,20 +10020,73 @@ export type Database = {
         Returns: string
       }
       generate_po_number: { Args: never; Returns: string }
+      generate_settlement_code: {
+        Args: { p_week: number; p_year: number }
+        Returns: string
+      }
       generate_settlement_reference: {
         Args: { p_site_id: string }
         Returns: string
       }
+      generate_tea_shop_settlement_reference: { Args: never; Returns: string }
       generate_transfer_number: { Args: never; Returns: string }
       generate_weekly_notifications: { Args: never; Returns: number }
+      get_batch_settlement_summary: {
+        Args: { batch_id: string }
+        Returns: {
+          amount_used: number
+          laborer_count: number
+          payment_channel: string
+          settlement_date: string
+          settlement_reference: string
+          site_name: string
+        }[]
+      }
       get_current_user_id: { Args: never; Returns: string }
       get_material_count_for_vendor: {
         Args: { p_vendor_id: string }
         Returns: number
       }
+      get_materials_with_variants: {
+        Args: { p_category_id?: string; p_include_inactive?: boolean }
+        Returns: {
+          category_id: string
+          category_name: string
+          code: string
+          id: string
+          is_active: boolean
+          is_variant: boolean
+          name: string
+          parent_id: string
+          parent_name: string
+          unit: string
+          variant_count: number
+        }[]
+      }
       get_monthly_report: {
         Args: { p_month: number; p_site_id: string; p_year: number }
         Returns: Json
+      }
+      get_settlement_batch_sources: {
+        Args: { p_settlement_group_id: string }
+        Returns: {
+          amount_used: number
+          batch_code: string
+          batch_date: string
+          batch_transaction_id: string
+          payer_name: string
+          payer_source: string
+        }[]
+      }
+      get_settlement_laborers: {
+        Args: { p_settlement_group_id: string }
+        Returns: {
+          amount: number
+          attendance_type: string
+          laborer_id: string
+          laborer_name: string
+          work_date: string
+        }[]
       }
       get_site_dashboard: {
         Args: { p_date?: string; p_site_id: string }
@@ -8196,6 +10099,14 @@ export type Database = {
       get_team_weekly_summary: {
         Args: { p_team_id: string; p_week_ending: string }
         Returns: Json
+      }
+      get_unsettled_balance: {
+        Args: {
+          p_from_site_id: string
+          p_site_group_id: string
+          p_to_site_id: string
+        }
+        Returns: number
       }
       get_user_role: {
         Args: never
@@ -8247,6 +10158,34 @@ export type Database = {
         }
         Returns: string
       }
+      record_price_with_reason: {
+        Args: {
+          p_bill_date?: string
+          p_bill_number?: string
+          p_bill_url?: string
+          p_brand_id: string
+          p_change_reason_id?: string
+          p_change_reason_text?: string
+          p_material_id: string
+          p_notes?: string
+          p_price: number
+          p_recorded_date: string
+          p_source?: string
+          p_vendor_id: string
+        }
+        Returns: string
+      }
+      record_settlement_payment: {
+        Args: {
+          p_amount: number
+          p_notes?: string
+          p_payment_mode: string
+          p_recorded_by?: string
+          p_reference_number?: string
+          p_settlement_id: string
+        }
+        Returns: string
+      }
       reject_deletion: {
         Args: {
           p_request_id: string
@@ -8266,35 +10205,70 @@ export type Database = {
       }
       show_limit: { Args: never; Returns: number }
       show_trgm: { Args: { "": string }; Returns: string[] }
-      update_group_stock_on_purchase: {
-        Args: {
-          p_brand_id: string
-          p_group_id: string
-          p_material_id: string
-          p_payment_site_id: string
-          p_payment_source: string
-          p_quantity: number
-          p_reference_id: string
-          p_reference_type: string
-          p_unit_cost: number
-          p_user_id: string
-        }
-        Returns: string
+      unlock_batch_for_sharing: {
+        Args: { p_inventory_id: string }
+        Returns: boolean
       }
-      update_group_stock_on_usage: {
-        Args: {
-          p_brand_id: string
-          p_group_id: string
-          p_material_id: string
-          p_quantity: number
-          p_reference_id: string
-          p_reference_type: string
-          p_usage_site_id: string
-          p_user_id: string
-          p_work_description: string
-        }
-        Returns: string
-      }
+      update_group_stock_on_purchase:
+        | {
+            Args: {
+              p_brand_id: string
+              p_group_id: string
+              p_material_id: string
+              p_payment_site_id: string
+              p_payment_source: string
+              p_quantity: number
+              p_reference_id: string
+              p_reference_type: string
+              p_unit_cost: number
+              p_user_id: string
+            }
+            Returns: string
+          }
+        | {
+            Args: {
+              p_brand_id: string
+              p_dedicated_site_id?: string
+              p_is_dedicated?: boolean
+              p_location_id: string
+              p_material_id: string
+              p_notes?: string
+              p_payment_source: string
+              p_payment_source_site_id: string
+              p_quantity: number
+              p_reference_id: string
+              p_reference_type: string
+              p_site_group_id: string
+              p_unit_cost: number
+            }
+            Returns: string
+          }
+      update_group_stock_on_usage:
+        | {
+            Args: {
+              p_brand_id: string
+              p_group_id: string
+              p_material_id: string
+              p_quantity: number
+              p_reference_id: string
+              p_reference_type: string
+              p_usage_site_id: string
+              p_user_id: string
+              p_work_description: string
+            }
+            Returns: string
+          }
+        | {
+            Args: {
+              p_inventory_id: string
+              p_notes?: string
+              p_quantity: number
+              p_site_group_id: string
+              p_usage_site_id: string
+              p_work_description?: string
+            }
+            Returns: string
+          }
       verify_delivery: {
         Args: {
           p_delivery_id: string
@@ -8336,6 +10310,12 @@ export type Database = {
         | "rejected"
       employment_type: "daily_wage" | "contract" | "specialist"
       expense_module: "labor" | "material" | "machinery" | "general"
+      inter_site_settlement_status:
+        | "draft"
+        | "pending"
+        | "approved"
+        | "settled"
+        | "cancelled"
       laborer_status: "active" | "inactive"
       material_request_status:
         | "draft"
@@ -8377,7 +10357,7 @@ export type Database = {
       salary_status: "draft" | "calculated" | "partial" | "paid"
       section_status: "not_started" | "in_progress" | "completed"
       site_status: "planning" | "active" | "on_hold" | "completed"
-      site_type: "single_client" | "multi_client"
+      site_type: "single_client" | "multi_client" | "personal"
       stock_transaction_type:
         | "purchase"
         | "usage"
@@ -8519,6 +10499,9 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
+  graphql_public: {
+    Enums: {},
+  },
   public: {
     Enums: {
       audit_action: ["create", "update", "delete", "soft_delete", "restore"],
@@ -8547,6 +10530,13 @@ export const Constants = {
       ],
       employment_type: ["daily_wage", "contract", "specialist"],
       expense_module: ["labor", "material", "machinery", "general"],
+      inter_site_settlement_status: [
+        "draft",
+        "pending",
+        "approved",
+        "settled",
+        "cancelled",
+      ],
       laborer_status: ["active", "inactive"],
       material_request_status: [
         "draft",
@@ -8591,7 +10581,7 @@ export const Constants = {
       salary_status: ["draft", "calculated", "partial", "paid"],
       section_status: ["not_started", "in_progress", "completed"],
       site_status: ["planning", "active", "on_hold", "completed"],
-      site_type: ["single_client", "multi_client"],
+      site_type: ["single_client", "multi_client", "personal"],
       stock_transaction_type: [
         "purchase",
         "usage",

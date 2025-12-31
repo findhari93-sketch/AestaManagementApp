@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { createClient } from "@/lib/supabase/client";
+import { createClient, ensureFreshSession } from "@/lib/supabase/client";
 import { queryKeys } from "@/lib/cache/keys";
 import type {
   Delivery,
@@ -270,6 +270,9 @@ export function useVerifyDelivery() {
       discrepancies?: DeliveryDiscrepancy[];
       verificationStatus: "verified" | "disputed" | "rejected";
     }) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
       // Update delivery status directly since RPC may not exist yet
       const { error } = await supabase
         .from("deliveries")
@@ -331,6 +334,9 @@ export function useQuickVerifyDelivery() {
       photos: string[];
       notes?: string;
     }) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
       // First update delivery items to set accepted_qty = received_qty
       const { data: items, error: itemsError } = await supabase
         .from("delivery_items")
@@ -388,6 +394,9 @@ export function useUpdateVerificationStatus() {
       status: "pending" | "verified" | "disputed" | "rejected";
       notes?: string;
     }) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
       const { error } = await supabase
         .from("deliveries")
         .update({
@@ -431,6 +440,9 @@ export function useUpdateDeliveryItemQuantities() {
         rejectionReason?: string;
       }>;
     }) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
       for (const item of items) {
         const { error } = await supabase
           .from("delivery_items")
@@ -467,6 +479,9 @@ export function useUploadVerificationPhotos() {
       deliveryId: string;
       files: File[];
     }) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
       const uploadedUrls: string[] = [];
 
       for (const file of files) {

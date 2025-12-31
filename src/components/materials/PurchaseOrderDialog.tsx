@@ -43,6 +43,7 @@ import type {
   MaterialWithDetails,
 } from "@/types/material.types";
 import { formatCurrency } from "@/lib/formatters";
+import WeightCalculationDisplay from "./WeightCalculationDisplay";
 
 interface PurchaseOrderDialogProps {
   open: boolean;
@@ -60,6 +61,8 @@ interface POItemRow extends PurchaseOrderItemFormData {
   id?: string;
   materialName?: string;
   unit?: string;
+  weight_per_unit?: number | null;
+  weight_unit?: string | null;
 }
 
 export default function PurchaseOrderDialog({
@@ -196,6 +199,8 @@ export default function PurchaseOrderDialog({
       tax_rate: newItemTaxRate ? parseFloat(newItemTaxRate) : selectedMaterial.gst_rate || undefined,
       materialName: selectedMaterial.name,
       unit: selectedMaterial.unit,
+      weight_per_unit: selectedMaterial.weight_per_unit,
+      weight_unit: selectedMaterial.weight_unit,
     };
 
     setItems([...items, newItem]);
@@ -494,7 +499,18 @@ export default function PurchaseOrderDialog({
                               {item.unit}
                             </Typography>
                           </TableCell>
-                          <TableCell align="right">{item.quantity}</TableCell>
+                          <TableCell align="right">
+                            {item.quantity}
+                            {item.weight_per_unit && (
+                              <WeightCalculationDisplay
+                                weightPerUnit={item.weight_per_unit}
+                                weightUnit={item.weight_unit}
+                                quantity={item.quantity}
+                                unit={item.unit}
+                                variant="inline"
+                              />
+                            )}
+                          </TableCell>
                           <TableCell align="right">
                             {formatCurrency(item.unit_price)}
                           </TableCell>

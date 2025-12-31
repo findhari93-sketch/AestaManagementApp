@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { createClient } from "@/lib/supabase/client";
+import { createClient, ensureFreshSession } from "@/lib/supabase/client";
 import { queryKeys } from "@/lib/cache/keys";
 import type {
   VendorInventory,
@@ -208,6 +208,9 @@ export function useUpsertVendorInventory() {
 
   return useMutation({
     mutationFn: async (data: VendorInventoryFormData) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
       // Check if item exists
       const { data: existing } = await (supabase as any)
         .from("vendor_inventory")
@@ -275,6 +278,9 @@ export function useUpdateVendorInventoryAvailability() {
       id: string;
       isAvailable: boolean;
     }) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
       const { error } = await (supabase as any)
         .from("vendor_inventory")
         .update({
@@ -413,6 +419,9 @@ export function useRecordPriceEntry() {
 
   return useMutation({
     mutationFn: async (data: PriceEntryFormData & { userId?: string }) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
       const totalLandedCost =
         data.price +
         (data.transport_cost || 0) +
@@ -583,6 +592,9 @@ export function useAddVendorInventory() {
 
   return useMutation({
     mutationFn: async (data: VendorInventoryFormData) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
       const { data: result, error } = await (supabase as any)
         .from("vendor_inventory")
         .insert({
@@ -631,6 +643,9 @@ export function useUpdateVendorInventory() {
       id: string;
       data: Partial<VendorInventoryFormData>;
     }) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
       const { data: result, error } = await (supabase as any)
         .from("vendor_inventory")
         .update({
@@ -679,6 +694,9 @@ export function useDeleteVendorInventory() {
       vendorId: string;
       materialId?: string;
     }) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
       const { error } = await (supabase as any)
         .from("vendor_inventory")
         .update({
@@ -758,7 +776,6 @@ export function useMaterialVendorCounts() {
       const { data, error } = await (supabase as any)
         .from("vendor_inventory")
         .select("material_id")
-        .eq("is_active", true)
         .eq("is_available", true)
         .not("material_id", "is", null);
 

@@ -28,13 +28,14 @@ import { useIsMobile } from "@/hooks/useIsMobile";
 import { useAuth } from "@/contexts/AuthContext";
 import { hasEditPermission } from "@/lib/permissions";
 import {
-  useMaterial,
+  useMaterialWithVariants,
   useDeleteMaterial,
   useMaterialCategories,
 } from "@/hooks/queries/useMaterials";
 import { useVendorCountForMaterial } from "@/hooks/queries/useVendorInventory";
 import MaterialDialog from "@/components/materials/MaterialDialog";
 import MaterialVendorsTab from "@/components/materials/MaterialVendorsTab";
+import MaterialVariantsTab from "@/components/materials/MaterialVariantsTab";
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -78,7 +79,7 @@ export default function MaterialDetailsPage() {
   const [tabValue, setTabValue] = useState(0);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
 
-  const { data: material, isLoading, error } = useMaterial(materialId);
+  const { data: material, isLoading, error } = useMaterialWithVariants(materialId);
   const { data: categories = [] } = useMaterialCategories();
   const { data: vendorCount = 0 } = useVendorCountForMaterial(materialId);
   const deleteMaterial = useDeleteMaterial();
@@ -258,6 +259,23 @@ export default function MaterialDetailsPage() {
       <Box sx={{ borderBottom: 1, borderColor: "divider" }}>
         <Tabs value={tabValue} onChange={handleTabChange}>
           <Tab label="Overview" />
+          {/* Variants tab - only show for parent materials (not variants) */}
+          {!material.parent_id && (
+            <Tab
+              label={
+                <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                  Variants
+                  {(material.variant_count || 0) > 0 && (
+                    <Chip
+                      label={material.variant_count}
+                      size="small"
+                      color="info"
+                    />
+                  )}
+                </Box>
+              }
+            />
+          )}
           <Tab
             label={
               <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
@@ -396,7 +414,15 @@ export default function MaterialDetailsPage() {
         </Grid>
       </TabPanel>
 
-      <TabPanel value={tabValue} index={1}>
+      {/* Variants Tab - only for parent materials */}
+      {!material.parent_id && (
+        <TabPanel value={tabValue} index={1}>
+          <MaterialVariantsTab material={material} canEdit={canEdit} />
+        </TabPanel>
+      )}
+
+      {/* Vendors Tab - index depends on whether variants tab is shown */}
+      <TabPanel value={tabValue} index={material.parent_id ? 1 : 2}>
         <MaterialVendorsTab material={material} />
       </TabPanel>
 

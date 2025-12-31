@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { createClient } from "@/lib/supabase/client";
+import { createClient, ensureFreshSession } from "@/lib/supabase/client";
 import { queryKeys } from "@/lib/cache/keys";
 import type {
   DailyMaterialUsage,
@@ -130,6 +130,9 @@ export function useCreateMaterialUsage() {
     mutationFn: async (
       data: UsageEntryFormData & { unit_cost?: number; total_cost?: number }
     ) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
       // Get unit cost from stock if not provided
       let unitCost = data.unit_cost;
       let totalCost = data.total_cost;
@@ -196,6 +199,9 @@ export function useUpdateMaterialUsage() {
       id: string;
       data: Partial<UsageEntryFormData>;
     }) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
       const { data: result, error } = await supabase
         .from("daily_material_usage")
         .update({ ...data, updated_at: new Date().toISOString() })
@@ -230,6 +236,9 @@ export function useDeleteMaterialUsage() {
 
   return useMutation({
     mutationFn: async ({ id, siteId }: { id: string; siteId: string }) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
       const { error } = await supabase
         .from("daily_material_usage")
         .delete()
@@ -262,6 +271,9 @@ export function useVerifyMaterialUsage() {
 
   return useMutation({
     mutationFn: async ({ id, userId }: { id: string; userId: string }) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
       const { data: result, error } = await supabase
         .from("daily_material_usage")
         .update({

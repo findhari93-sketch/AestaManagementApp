@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { createClient } from "@/lib/supabase/client";
+import { createClient, ensureFreshSession } from "@/lib/supabase/client";
 import { queryKeys } from "@/lib/cache/keys";
 import type { MarketLaborerAttendance } from "@/types/database.types";
 
@@ -142,6 +142,9 @@ export function useSaveMarketLaborers() {
 
   return useMutation({
     mutationFn: async (records: MarketLaborerInput[]) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
       if (records.length === 0) return [];
 
       // Use upsert to handle both insert and update
@@ -208,6 +211,9 @@ export function useDeleteMarketLaborer() {
       siteId: string;
       date: string;
     }) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
       // Cast to any because table may not exist yet
       const { error } = await (
         supabase.from("market_laborer_attendance") as any

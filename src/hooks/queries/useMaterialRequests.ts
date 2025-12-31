@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { createClient } from "@/lib/supabase/client";
+import { createClient, ensureFreshSession } from "@/lib/supabase/client";
 import { queryKeys } from "@/lib/cache/keys";
 import type {
   MaterialRequest,
@@ -106,6 +106,9 @@ export function useCreateMaterialRequest() {
 
   return useMutation({
     mutationFn: async (data: MaterialRequestFormData) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
       // Calculate estimated total cost
       let estimatedCost = 0;
       data.items.forEach((item) => {
@@ -180,6 +183,9 @@ export function useUpdateMaterialRequest() {
       id: string;
       data: Partial<MaterialRequestFormData>;
     }) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
       const { data: result, error } = await supabase
         .from("material_requests")
         .update({
@@ -224,6 +230,9 @@ export function useApproveMaterialRequest() {
       userId: string;
       approvedItems: { itemId: string; approved_qty: number }[];
     }) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
       // Update request status
       const { data: request, error: requestError } = await supabase
         .from("material_requests")
@@ -278,6 +287,9 @@ export function useRejectMaterialRequest() {
       userId: string;
       reason?: string;
     }) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
       const { data, error } = await supabase
         .from("material_requests")
         .update({
@@ -315,6 +327,9 @@ export function useCancelMaterialRequest() {
 
   return useMutation({
     mutationFn: async (id: string) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
       const { data, error } = await supabase
         .from("material_requests")
         .update({
@@ -349,6 +364,9 @@ export function useMarkRequestOrdered() {
 
   return useMutation({
     mutationFn: async ({ id, poId }: { id: string; poId: string }) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
       const { data, error } = await supabase
         .from("material_requests")
         .update({
@@ -391,6 +409,9 @@ export function useUpdateFulfilledQty() {
       fulfilledQty: number;
       requestId: string;
     }) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
       const { error } = await supabase
         .from("material_request_items")
         .update({ fulfilled_qty: fulfilledQty })

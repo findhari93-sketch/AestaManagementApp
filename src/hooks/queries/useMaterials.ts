@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { createClient } from "@/lib/supabase/client";
+import { createClient, ensureFreshSession } from "@/lib/supabase/client";
 import { queryKeys } from "@/lib/cache/keys";
 import type {
   Material,
@@ -11,6 +11,8 @@ import type {
   MaterialCategoryWithChildren,
   MaterialBrand,
   MaterialBrandFormData,
+  VariantFormData,
+  CreateMaterialWithVariantsData,
 } from "@/types/material.types";
 
 // ============================================
@@ -167,7 +169,43 @@ export function useMaterials(categoryId?: string | null) {
 }
 
 /**
+ * Extract base name from material name by removing common variant suffixes
+ * Examples: "TMT Bar 8mm" -> "TMT Bar", "AAC Blocks 4 inch" -> "AAC Blocks"
+ */
+function extractBaseName(name: string): { baseName: string; variantPart: string } {
+  // Common variant patterns to detect at the end of material names
+  const variantPatterns = [
+    // Size with unit: "8mm", "10mm", "12mm", "16mm", "20mm", "25mm", "32mm"
+    /\s+(\d+(?:\.\d+)?)\s*(mm|cm|m|inch|inches|"|'|ft|feet)$/i,
+    // Fraction sizes: "1/2 inch", "3/4 inch"
+    /\s+(\d+\/\d+)\s*(inch|inches|"|')$/i,
+    // Size without unit at end: "4 inch", "6 inch", "8 inch"
+    /\s+(\d+)\s+(inch|inches)$/i,
+    // Dimension patterns: "4x4", "6x6", "12x12"
+    /\s+(\d+x\d+)$/i,
+    // Weight/size descriptors: "40mm (Chips)", "12mm (Chips)"
+    /\s+(\d+(?:\.\d+)?mm)\s*\([^)]+\)$/i,
+    // Simple number at end: "Type 1", "Grade 2" (less aggressive)
+    /\s+(Type\s+\d+|Grade\s+\d+)$/i,
+  ];
+
+  for (const pattern of variantPatterns) {
+    const match = name.match(pattern);
+    if (match) {
+      const variantPart = match[0].trim();
+      const baseName = name.slice(0, name.length - match[0].length).trim();
+      if (baseName.length > 0) {
+        return { baseName, variantPart };
+      }
+    }
+  }
+
+  return { baseName: name, variantPart: '' };
+}
+
+/**
  * Fetch materials grouped by parent (for hierarchical display)
+ * Supports both explicit parent_id relationships AND smart name-based grouping
  * Returns parent materials with variant_count and parent-first sorting
  */
 export function useMaterialsGrouped(categoryId?: string | null) {
@@ -198,44 +236,118 @@ export function useMaterialsGrouped(categoryId?: string | null) {
 
       const materials = data as unknown as MaterialWithDetails[];
 
-      // Group variants under their parents
-      const parentMaterialsMap = new Map<string, MaterialWithDetails>();
-      const standalones: MaterialWithDetails[] = [];
-      const variantsByParent = new Map<string, MaterialWithDetails[]>();
+      // First: Handle explicit parent-child relationships (parent_id is set)
+      const explicitParentsMap = new Map<string, MaterialWithDetails>();
+      const explicitVariantsByParent = new Map<string, MaterialWithDetails[]>();
+      const materialsWithoutExplicitParent: MaterialWithDetails[] = [];
 
-      // First pass: identify parents and variants
       for (const material of materials) {
         if (material.parent_id) {
-          // This is a variant
-          const variants = variantsByParent.get(material.parent_id) || [];
+          // This material has an explicit parent
+          const variants = explicitVariantsByParent.get(material.parent_id) || [];
           variants.push(material);
-          variantsByParent.set(material.parent_id, variants);
+          explicitVariantsByParent.set(material.parent_id, variants);
         } else {
-          // This is a parent or standalone
-          parentMaterialsMap.set(material.id, material);
+          materialsWithoutExplicitParent.push(material);
         }
       }
 
-      // Second pass: attach variants to parents and identify standalones
-      for (const [id, material] of parentMaterialsMap) {
-        const variants = variantsByParent.get(id);
+      // Attach explicit variants to their parents
+      for (const material of materialsWithoutExplicitParent) {
+        const variants = explicitVariantsByParent.get(material.id);
         if (variants && variants.length > 0) {
-          // This is a parent with variants
-          material.variants = variants.sort((a, b) => a.name.localeCompare(b.name));
-          material.variant_count = variants.length;
+          explicitParentsMap.set(material.id, {
+            ...material,
+            variants: variants.sort((a, b) => a.name.localeCompare(b.name)),
+            variant_count: variants.length,
+          });
         }
-        standalones.push(material);
       }
 
-      // Sort: parents with variants first, then standalones, alphabetically
-      return standalones.sort((a, b) => {
-        // Sort by whether they have variants (parents with variants first)
+      // Second: Smart grouping for materials without explicit parent_id
+      // Group by detected base name pattern within the same category
+      const materialsToSmartGroup = materialsWithoutExplicitParent.filter(
+        m => !explicitParentsMap.has(m.id)
+      );
+
+      // Group by category + base name
+      const smartGroupMap = new Map<string, MaterialWithDetails[]>();
+
+      for (const material of materialsToSmartGroup) {
+        const { baseName, variantPart } = extractBaseName(material.name);
+        // Only group if we detected a variant part and category matches
+        if (variantPart) {
+          const groupKey = `${material.category_id || 'none'}::${baseName.toLowerCase()}`;
+          const group = smartGroupMap.get(groupKey) || [];
+          group.push({ ...material, _detectedBaseName: baseName, _detectedVariant: variantPart } as any);
+          smartGroupMap.set(groupKey, group);
+        }
+      }
+
+      // Convert smart groups to parent-variant structure
+      const smartGroupedMaterials: MaterialWithDetails[] = [];
+      const alreadyGroupedIds = new Set<string>();
+
+      for (const [groupKey, groupMaterials] of smartGroupMap) {
+        if (groupMaterials.length >= 2) {
+          // Create a virtual parent from the first material's properties
+          const firstMaterial = groupMaterials[0];
+          const baseName = (firstMaterial as any)._detectedBaseName;
+
+          // Mark all materials in this group as grouped
+          groupMaterials.forEach(m => alreadyGroupedIds.add(m.id));
+
+          // Create virtual parent entry (use first material as base, modify name)
+          const virtualParent: MaterialWithDetails = {
+            ...firstMaterial,
+            id: `group_${groupKey}`, // Virtual ID for grouping
+            name: baseName,
+            code: null, // No code for virtual parent
+            variants: groupMaterials.sort((a, b) => {
+              // Sort variants by the variant part (size)
+              const aVariant = (a as any)._detectedVariant || '';
+              const bVariant = (b as any)._detectedVariant || '';
+              // Try numeric sort first
+              const aNum = parseFloat(aVariant.replace(/[^\d.]/g, ''));
+              const bNum = parseFloat(bVariant.replace(/[^\d.]/g, ''));
+              if (!isNaN(aNum) && !isNaN(bNum)) {
+                return aNum - bNum;
+              }
+              return aVariant.localeCompare(bVariant);
+            }),
+            variant_count: groupMaterials.length,
+            _isVirtualParent: true, // Flag to identify virtual parents
+          } as any;
+
+          smartGroupedMaterials.push(virtualParent);
+        }
+      }
+
+      // Collect all results: explicit parents + smart groups + ungrouped standalones
+      const result: MaterialWithDetails[] = [];
+
+      // Add explicit parents (with their variants)
+      for (const parent of explicitParentsMap.values()) {
+        result.push(parent);
+      }
+
+      // Add smart-grouped materials
+      result.push(...smartGroupedMaterials);
+
+      // Add standalone materials (not grouped)
+      for (const material of materialsToSmartGroup) {
+        if (!alreadyGroupedIds.has(material.id)) {
+          result.push(material);
+        }
+      }
+
+      // Sort: groups with variants first, then standalones, alphabetically
+      return result.sort((a, b) => {
         const aHasVariants = (a.variant_count || 0) > 0;
         const bHasVariants = (b.variant_count || 0) > 0;
         if (aHasVariants !== bHasVariants) {
           return aHasVariants ? -1 : 1;
         }
-        // Then by name
         return a.name.localeCompare(b.name);
       });
     },
@@ -465,6 +577,9 @@ export function useCreateMaterial() {
 
   return useMutation({
     mutationFn: async (data: MaterialFormData) => {
+      // Ensure fresh session before mutation to prevent stale token issues
+      await ensureFreshSession();
+
       // Auto-generate code if not provided
       let code = data.code?.trim() || null;
       if (!code) {
@@ -511,6 +626,9 @@ export function useUpdateMaterial() {
       id: string;
       data: Partial<MaterialFormData>;
     }) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
       // Clean data: convert empty strings to null for UUID/optional fields
       const cleanData: Record<string, unknown> = {
         ...data,
@@ -550,6 +668,9 @@ export function useDeleteMaterial() {
 
   return useMutation({
     mutationFn: async (id: string) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
       const { error } = await supabase
         .from("materials")
         .update({ is_active: false, updated_at: new Date().toISOString() })
@@ -601,6 +722,9 @@ export function useCreateMaterialBrand() {
 
   return useMutation({
     mutationFn: async (data: MaterialBrandFormData) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
       const { data: result, error } = await supabase
         .from("material_brands")
         .insert(data)
@@ -637,6 +761,9 @@ export function useUpdateMaterialBrand() {
       id: string;
       data: Partial<MaterialBrandFormData>;
     }) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
       const { data: result, error } = await supabase
         .from("material_brands")
         .update(data)
@@ -674,6 +801,9 @@ export function useDeleteMaterialBrand() {
       id: string;
       materialId: string;
     }) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
       const { error } = await supabase
         .from("material_brands")
         .update({ is_active: false })
@@ -691,5 +821,222 @@ export function useDeleteMaterialBrand() {
       });
       queryClient.invalidateQueries({ queryKey: ["materials"] });
     },
+  });
+}
+
+// ============================================
+// MATERIAL VARIANTS
+// ============================================
+
+/**
+ * Create a material with variants in one transaction
+ * Creates the parent material first, then all variants with the same parent_id
+ */
+export function useCreateMaterialWithVariants() {
+  const queryClient = useQueryClient();
+  const supabase = createClient();
+
+  return useMutation({
+    mutationFn: async (data: CreateMaterialWithVariantsData) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
+      const { variants, ...parentData } = data;
+
+      // Generate parent code if not provided
+      let code = parentData.code?.trim() || null;
+      if (!code) {
+        code = await generateMaterialCode(supabase, parentData.name);
+      }
+
+      // Clean parent data
+      const cleanParentData = {
+        ...parentData,
+        code,
+        local_name: parentData.local_name?.trim() || null,
+        category_id: parentData.category_id?.trim() || null,
+        parent_id: null, // Parent materials should not have a parent
+        description: parentData.description?.trim() || null,
+        hsn_code: parentData.hsn_code?.trim() || null,
+      };
+
+      // Create parent material
+      const { data: parent, error: parentError } = await (
+        supabase.from("materials") as any
+      )
+        .insert(cleanParentData)
+        .select()
+        .single();
+
+      if (parentError) throw parentError;
+
+      // Create variants if any
+      if (variants && variants.length > 0) {
+        const variantsToInsert = variants.map((v, index) => {
+          const variantCode =
+            v.code?.trim() ||
+            `${code}-V${(index + 1).toString().padStart(2, "0")}`;
+          return {
+            name: v.name.trim(),
+            code: variantCode,
+            local_name: v.local_name?.trim() || null,
+            parent_id: parent.id,
+            category_id: parentData.category_id?.trim() || null,
+            unit: parentData.unit,
+            hsn_code: parentData.hsn_code?.trim() || null,
+            gst_rate: parentData.gst_rate,
+            weight_per_unit: v.weight_per_unit,
+            weight_unit: parentData.weight_unit || "kg",
+            length_per_piece: v.length_per_piece,
+            length_unit: parentData.length_unit || "m",
+            rods_per_bundle: v.rods_per_bundle,
+          };
+        });
+
+        const { error: variantError } = await (supabase.from("materials") as any)
+          .insert(variantsToInsert);
+
+        if (variantError) throw variantError;
+      }
+
+      return parent as Material;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["materials"] });
+    },
+  });
+}
+
+/**
+ * Add a variant to an existing parent material
+ */
+export function useAddVariantToMaterial() {
+  const queryClient = useQueryClient();
+  const supabase = createClient();
+
+  return useMutation({
+    mutationFn: async ({
+      parentId,
+      variant,
+    }: {
+      parentId: string;
+      variant: VariantFormData;
+    }) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
+      // Get parent material for inherited fields
+      const { data: parent, error: parentError } = await supabase
+        .from("materials")
+        .select("*")
+        .eq("id", parentId)
+        .single();
+
+      if (parentError) throw parentError;
+      if (!parent) throw new Error("Parent material not found");
+
+      // Cast parent to access all fields including new weight columns
+      const parentMaterial = parent as unknown as Material;
+
+      // Get count of existing variants to generate code
+      const { count } = await supabase
+        .from("materials")
+        .select("*", { count: "exact", head: true })
+        .eq("parent_id", parentId);
+
+      const variantCode =
+        variant.code?.trim() ||
+        `${parentMaterial.code}-V${((count || 0) + 1).toString().padStart(2, "0")}`;
+
+      const { data: result, error } = await (supabase.from("materials") as any)
+        .insert({
+          name: variant.name.trim(),
+          code: variantCode,
+          local_name: variant.local_name?.trim() || null,
+          parent_id: parentId,
+          category_id: parentMaterial.category_id,
+          unit: parentMaterial.unit,
+          hsn_code: parentMaterial.hsn_code,
+          gst_rate: parentMaterial.gst_rate,
+          weight_per_unit: variant.weight_per_unit,
+          weight_unit: parentMaterial.weight_unit || "kg",
+          length_per_piece: variant.length_per_piece,
+          length_unit: parentMaterial.length_unit || "m",
+          rods_per_bundle: variant.rods_per_bundle,
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+      return result as Material;
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["materials"] });
+      queryClient.invalidateQueries({ queryKey: ["material", variables.parentId] });
+      queryClient.invalidateQueries({
+        queryKey: ["material", variables.parentId, "with-variants"],
+      });
+    },
+  });
+}
+
+/**
+ * Fetch material with all its variants
+ */
+export function useMaterialWithVariants(id: string | undefined) {
+  const supabase = createClient();
+
+  return useQuery({
+    queryKey: ["material", id, "with-variants"],
+    queryFn: async () => {
+      if (!id) return null;
+
+      // Get main material
+      const { data: material, error } = await supabase
+        .from("materials")
+        .select(
+          `
+          *,
+          category:material_categories(id, name, code),
+          brands:material_brands(id, brand_name, is_preferred, quality_rating, notes, is_active)
+        `
+        )
+        .eq("id", id)
+        .single();
+
+      if (error) throw error;
+
+      const materialWithDetails = material as unknown as MaterialWithDetails;
+
+      // Get variants if this is a parent material (not a variant itself)
+      if (!materialWithDetails.parent_id) {
+        const { data: variants } = await supabase
+          .from("materials")
+          .select(
+            `
+            *,
+            brands:material_brands(id, brand_name, is_preferred, is_active)
+          `
+          )
+          .eq("parent_id", id)
+          .eq("is_active", true)
+          .order("name");
+
+        materialWithDetails.variants = (variants as unknown as MaterialWithDetails[]) || [];
+        materialWithDetails.variant_count = materialWithDetails.variants.length;
+      } else {
+        // Fetch parent material info if this is a variant
+        const { data: parent } = await supabase
+          .from("materials")
+          .select("id, name, code")
+          .eq("id", materialWithDetails.parent_id)
+          .single();
+
+        materialWithDetails.parent_material = parent || null;
+      }
+
+      return materialWithDetails;
+    },
+    enabled: !!id,
   });
 }

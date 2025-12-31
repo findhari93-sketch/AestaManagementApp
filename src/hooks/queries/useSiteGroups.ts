@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { createClient } from "@/lib/supabase/client";
+import { createClient, ensureFreshSession } from "@/lib/supabase/client";
 import { queryKeys } from "@/lib/cache/keys";
 import type {
   SiteGroup,
@@ -156,6 +156,9 @@ export function useCreateSiteGroup() {
 
   return useMutation({
     mutationFn: async (data: SiteGroupFormData) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
       const { data: group, error } = await (supabase as any)
         .from("site_groups")
         .insert(data)
@@ -186,6 +189,9 @@ export function useUpdateSiteGroup() {
       id: string;
       data: Partial<SiteGroupFormData>;
     }) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
       const { data: group, error } = await (supabase as any)
         .from("site_groups")
         .update({ ...data, updated_at: new Date().toISOString() })
@@ -220,6 +226,9 @@ export function useAddSiteToGroup() {
       siteId: string;
       groupId: string;
     }) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
       const { error } = await (supabase as any)
         .from("sites")
         .update({ site_group_id: groupId })
@@ -254,6 +263,9 @@ export function useRemoveSiteFromGroup() {
       siteId: string;
       groupId: string;
     }) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
       const { error } = await (supabase as any)
         .from("sites")
         .update({ site_group_id: null })
@@ -448,6 +460,9 @@ export function useAddGroupStockPurchase() {
       referenceId?: string;
       userId?: string;
     }) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
       // Insert transaction record directly
       const totalCost = data.quantity * data.unitCost;
 
@@ -543,6 +558,9 @@ export function useRecordGroupStockUsage() {
       referenceId?: string;
       userId?: string;
     }) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
       // Get current inventory to calculate cost
       const { data: inventory, error: invError } = await (supabase as any)
         .from("group_stock_inventory")

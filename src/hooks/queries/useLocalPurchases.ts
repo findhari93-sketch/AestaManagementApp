@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { createClient } from "@/lib/supabase/client";
+import { createClient, ensureFreshSession } from "@/lib/supabase/client";
 import { queryKeys } from "@/lib/cache/keys";
 import type {
   LocalPurchase,
@@ -251,6 +251,9 @@ export function useCreateLocalPurchase() {
     mutationFn: async (
       data: LocalPurchaseFormData & { engineerId: string }
     ) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
       const { items, ...purchaseData } = data;
 
       // Determine if needs reimbursement based on payment mode
@@ -358,6 +361,9 @@ export function useUpdateLocalPurchase() {
       id: string;
       data: Partial<LocalPurchaseFormData>;
     }) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
       const { items, ...purchaseData } = data;
 
       const { data: purchase, error } = await (supabase as any)
@@ -419,6 +425,9 @@ export function useCancelLocalPurchase() {
 
   return useMutation({
     mutationFn: async (id: string) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
       const { error } = await (supabase as any)
         .from("local_purchases")
         .update({
@@ -452,6 +461,9 @@ export function useCreateLocalPurchaseReimbursement() {
       purchaseId: string;
       userId: string;
     }) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
       // Get purchase details
       const { data: purchase, error: fetchError } = await (supabase as any)
         .from("local_purchases")

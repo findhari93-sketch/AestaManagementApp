@@ -8553,7 +8553,7 @@ export type Database = {
       salary_status: "draft" | "calculated" | "partial" | "paid"
       section_status: "not_started" | "in_progress" | "completed"
       site_status: "planning" | "active" | "on_hold" | "completed"
-      site_type: "single_client" | "multi_client"
+      site_type: "single_client" | "multi_client" | "personal"
       stock_transaction_type:
         | "purchase"
         | "usage"
@@ -8770,7 +8770,7 @@ export const Constants = {
       salary_status: ["draft", "calculated", "partial", "paid"],
       section_status: ["not_started", "in_progress", "completed"],
       site_status: ["planning", "active", "on_hold", "completed"],
-      site_type: ["single_client", "multi_client"],
+      site_type: ["single_client", "multi_client", "personal"],
       stock_transaction_type: [
         "purchase",
         "usage",

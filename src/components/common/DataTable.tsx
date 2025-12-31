@@ -53,7 +53,7 @@ export const tableDefaults = {
     showColumnFilters: true,  // Show column filters by default for better filtering UX
     showGlobalFilter: true,
     pagination: {
-      pageSize: 50,
+      pageSize: 100,
       pageIndex: 0,
     },
     columnPinning: {
@@ -63,7 +63,7 @@ export const tableDefaults = {
 
   // Pagination options
   muiPaginationProps: {
-    rowsPerPageOptions: [10, 30, 50, 100],
+    rowsPerPageOptions: [10, 50, 100, 200],
     showFirstButton: true,
     showLastButton: true,
   },
@@ -125,6 +125,8 @@ export default function DataTable<TData extends MRT_RowData>({
   rowCount,
   pagination: controlledPagination,
   onPaginationChange,
+  // Destructure initialState separately to merge properly
+  initialState: propsInitialState,
   ...otherProps
 }: DataTableProps<TData>) {
   const theme = useTheme();
@@ -141,15 +143,17 @@ export default function DataTable<TData extends MRT_RowData>({
   }, [isMobile, mobileHiddenColumns]);
 
   // Merge initial state with custom pagination, pinned columns, and column visibility
+  // IMPORTANT: We explicitly merge propsInitialState to ensure pagination settings are preserved
   const initialState = useMemo(
     () => ({
       ...tableDefaults.initialState,
-      ...(pageSize && {
-        pagination: {
-          pageSize: isMobile ? Math.min(pageSize, 50) : pageSize,
-          pageIndex: 0,
-        },
-      }),
+      // Apply custom initial state first (like sorting)
+      ...propsInitialState,
+      // Always ensure pagination is set correctly (pageSize prop or default 100)
+      pagination: {
+        pageSize: isMobile ? Math.min(pageSize || 100, 100) : (pageSize || 100),
+        pageIndex: 0,
+      },
       // Apply pinned columns - auto-pin first column on mobile if not specified
       columnPinning: {
         left: pinnedColumns?.left || [],
@@ -158,11 +162,10 @@ export default function DataTable<TData extends MRT_RowData>({
       // Hide specified columns on mobile
       columnVisibility: {
         ...mobileColumnVisibility,
-        ...(otherProps.initialState?.columnVisibility || {}),
+        ...(propsInitialState?.columnVisibility || {}),
       },
-      ...(otherProps.initialState || {}),
     }),
-    [pageSize, pinnedColumns, mobileColumnVisibility, isMobile, otherProps.initialState]
+    [pageSize, pinnedColumns, mobileColumnVisibility, isMobile, propsInitialState]
   );
 
   // Table container styles with ultra-compact mobile optimization
@@ -370,7 +373,7 @@ export default function DataTable<TData extends MRT_RowData>({
   // Pagination props - simplified for mobile
   const muiPaginationProps = useMemo(
     () => ({
-      rowsPerPageOptions: useCompact ? [15, 25, 50] : [10, 30, 50, 100],
+      rowsPerPageOptions: useCompact ? [25, 50, 100] : [10, 50, 100, 200],
       showFirstButton: !useCompact,
       showLastButton: !useCompact,
       size: useCompact ? 'small' as const : 'medium' as const,
@@ -395,7 +398,7 @@ export default function DataTable<TData extends MRT_RowData>({
       rowCount={rowCount}
       onPaginationChange={onPaginationChange ? (updater) => {
         const newPagination = typeof updater === 'function'
-          ? updater(controlledPagination || { pageIndex: 0, pageSize: pageSize || 50 })
+          ? updater(controlledPagination || { pageIndex: 0, pageSize: pageSize || 100 })
           : updater;
         onPaginationChange(newPagination);
       } : undefined}

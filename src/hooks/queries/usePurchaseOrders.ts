@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { createClient } from "@/lib/supabase/client";
+import { createClient, ensureFreshSession } from "@/lib/supabase/client";
 import { queryKeys } from "@/lib/cache/keys";
 import type {
   PurchaseOrder,
@@ -117,6 +117,9 @@ export function useCreatePurchaseOrder() {
 
   return useMutation({
     mutationFn: async (data: PurchaseOrderFormData) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
       // Calculate totals
       let subtotal = 0;
       let taxAmount = 0;
@@ -220,6 +223,9 @@ export function useUpdatePurchaseOrder() {
       id: string;
       data: Partial<PurchaseOrderFormData>;
     }) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
       const { data: result, error } = await supabase
         .from("purchase_orders")
         .update({
@@ -258,6 +264,9 @@ export function useSubmitPOForApproval() {
 
   return useMutation({
     mutationFn: async (id: string) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
       const { data, error } = await supabase
         .from("purchase_orders")
         .update({
@@ -292,6 +301,9 @@ export function useApprovePurchaseOrder() {
 
   return useMutation({
     mutationFn: async ({ id, userId }: { id: string; userId: string }) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
       const { data, error } = await supabase
         .from("purchase_orders")
         .update({
@@ -328,6 +340,9 @@ export function useMarkPOAsOrdered() {
 
   return useMutation({
     mutationFn: async (id: string) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
       const { data, error } = await supabase
         .from("purchase_orders")
         .update({
@@ -370,6 +385,9 @@ export function useCancelPurchaseOrder() {
       userId: string;
       reason?: string;
     }) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
       const { data, error } = await supabase
         .from("purchase_orders")
         .update({
@@ -406,6 +424,9 @@ export function useDeletePurchaseOrder() {
 
   return useMutation({
     mutationFn: async ({ id, siteId }: { id: string; siteId: string }) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
       // Delete items first
       const { error: itemsError } = await supabase
         .from("purchase_order_items")
@@ -451,6 +472,9 @@ export function useAddPOItem() {
       poId: string;
       item: PurchaseOrderItemFormData;
     }) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
       const itemTotal = item.quantity * item.unit_price;
       const discount = item.discount_percent
         ? (itemTotal * item.discount_percent) / 100
@@ -509,6 +533,9 @@ export function useUpdatePOItem() {
       poId: string;
       item: Partial<PurchaseOrderItemFormData>;
     }) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
       let updateData: Record<string, unknown> = { ...item };
 
       if (item.quantity !== undefined && item.unit_price !== undefined) {
@@ -560,6 +587,9 @@ export function useRemovePOItem() {
 
   return useMutation({
     mutationFn: async ({ id, poId }: { id: string; poId: string }) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
       const { error } = await supabase
         .from("purchase_order_items")
         .delete()
@@ -704,6 +734,9 @@ export function useRecordDelivery() {
 
   return useMutation({
     mutationFn: async (data: DeliveryFormData) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
       // Generate GRN number
       const timestamp = Date.now().toString(36).toUpperCase();
       const random = Math.random().toString(36).substring(2, 6).toUpperCase();
@@ -847,6 +880,9 @@ export function useVerifyDelivery() {
       userId: string;
       notes?: string;
     }) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
       const { data, error } = await supabase
         .from("deliveries")
         .update({
@@ -893,6 +929,9 @@ export function useUpdateDeliveryInvoice() {
       invoiceAmount?: number;
       invoiceUrl?: string;
     }) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
       const { data, error } = await supabase
         .from("deliveries")
         .update({
