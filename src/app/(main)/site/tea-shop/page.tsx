@@ -524,6 +524,7 @@ export default function TeaShopPage() {
                       }}>Date</TableCell>
                       <TableCell sx={{ fontWeight: 700, fontSize: { xs: '0.7rem', sm: '0.875rem' } }} align="center">Att</TableCell>
                       <TableCell sx={{ fontWeight: 700, fontSize: { xs: '0.7rem', sm: '0.875rem' } }} align="right">T&S</TableCell>
+                      <TableCell sx={{ fontWeight: 700, fontSize: { xs: '0.7rem', sm: '0.875rem' } }} align="center">Paid</TableCell>
                       <TableCell sx={{ fontWeight: 700, display: { xs: 'none', md: 'table-cell' } }} align="center">By</TableCell>
                       <TableCell sx={{ fontWeight: 700, fontSize: { xs: '0.7rem', sm: '0.875rem' } }} align="center">Act</TableCell>
                     </TableRow>
@@ -535,7 +536,7 @@ export default function TeaShopPage() {
                         return (
                           <TableRow key={`holiday-${item.date}`} sx={{ bgcolor: "warning.50" }}>
                             <TableCell
-                              colSpan={5}
+                              colSpan={6}
                               sx={{
                                 py: 1.5,
                                 borderLeft: 4,
@@ -566,7 +567,7 @@ export default function TeaShopPage() {
                         return (
                           <TableRow key={`no-entry-${item.date}`} sx={{ bgcolor: "grey.50" }}>
                             <TableCell
-                              colSpan={5}
+                              colSpan={6}
                               sx={{
                                 py: 1.5,
                                 borderLeft: 4,
@@ -685,6 +686,46 @@ export default function TeaShopPage() {
                             <Typography fontWeight={600} sx={{ fontSize: { xs: '0.7rem', sm: '0.875rem' } }}>
                               ₹{(entry.total_amount || 0).toLocaleString()}
                             </Typography>
+                          </TableCell>
+                          {/* Payment Status Column */}
+                          <TableCell align="center">
+                            {(() => {
+                              const entryAny = entry as any;
+                              const totalAmount = entry.total_amount || 0;
+                              const amountPaid = entryAny.amount_paid || 0;
+                              const isFullyPaid = entryAny.is_fully_paid === true;
+
+                              if (isFullyPaid || amountPaid >= totalAmount) {
+                                return (
+                                  <Tooltip title="Fully settled">
+                                    <CheckCircleIcon fontSize="small" color="success" />
+                                  </Tooltip>
+                                );
+                              } else if (amountPaid > 0) {
+                                return (
+                                  <Tooltip title={`Paid ₹${amountPaid.toLocaleString()} of ₹${totalAmount.toLocaleString()}`}>
+                                    <Chip
+                                      label={`₹${amountPaid}`}
+                                      size="small"
+                                      color="warning"
+                                      variant="outlined"
+                                      sx={{ fontSize: '0.65rem', height: 20 }}
+                                    />
+                                  </Tooltip>
+                                );
+                              } else {
+                                return (
+                                  <Tooltip title="Pending settlement">
+                                    <Chip
+                                      label="Pending"
+                                      size="small"
+                                      variant="outlined"
+                                      sx={{ fontSize: '0.6rem', height: 18, color: 'text.disabled', borderColor: 'divider' }}
+                                    />
+                                  </Tooltip>
+                                );
+                              }
+                            })()}
                           </TableCell>
                           <TableCell align="center" sx={{ display: { xs: 'none', md: 'table-cell' } }}>
                             <AuditAvatarGroup
