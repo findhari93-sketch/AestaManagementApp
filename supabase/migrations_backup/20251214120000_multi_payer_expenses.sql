@@ -24,6 +24,9 @@ CREATE INDEX IF NOT EXISTS idx_site_payers_active ON site_payers(site_id, is_act
 ALTER TABLE site_payers ENABLE ROW LEVEL SECURITY;
 
 -- RLS Policies for site_payers
+DROP POLICY IF EXISTS "Users can view payers for sites they have access to" ON site_payers;
+DROP POLICY IF EXISTS "Admins and site engineers can manage payers" ON site_payers;
+
 CREATE POLICY "Users can view payers for sites they have access to" ON site_payers
   FOR SELECT
   USING (true);

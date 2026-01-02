@@ -8,66 +8,33 @@
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 -- ============================================
--- ENUMS
+-- ENUMS (wrapped in DO block for idempotency)
 -- ============================================
-
--- Material unit types
-CREATE TYPE material_unit AS ENUM (
-  'kg', 'g', 'ton', 'liter', 'ml',
-  'piece', 'bag', 'bundle', 'sqft',
-  'sqm', 'cft', 'cum', 'nos', 'rmt', 'box', 'set'
-);
-
--- Purchase Order status
-CREATE TYPE po_status AS ENUM (
-  'draft',
-  'pending_approval',
-  'approved',
-  'ordered',
-  'partial_delivered',
-  'delivered',
-  'cancelled'
-);
-
--- Delivery status
-CREATE TYPE delivery_status AS ENUM (
-  'pending',
-  'in_transit',
-  'partial',
-  'delivered',
-  'rejected'
-);
-
--- Material request status
-CREATE TYPE material_request_status AS ENUM (
-  'draft',
-  'pending',
-  'approved',
-  'rejected',
-  'ordered',
-  'partial_fulfilled',
-  'fulfilled',
-  'cancelled'
-);
-
--- Stock transaction types
-CREATE TYPE stock_transaction_type AS ENUM (
-  'purchase',
-  'usage',
-  'transfer_in',
-  'transfer_out',
-  'adjustment',
-  'return',
-  'wastage',
-  'initial'
-);
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'material_unit') THEN
+    CREATE TYPE material_unit AS ENUM ('kg', 'g', 'ton', 'liter', 'ml', 'piece', 'bag', 'bundle', 'sqft', 'sqm', 'cft', 'cum', 'nos', 'rmt', 'box', 'set');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'po_status') THEN
+    CREATE TYPE po_status AS ENUM ('draft', 'pending_approval', 'approved', 'ordered', 'partial_delivered', 'delivered', 'cancelled');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'delivery_status') THEN
+    CREATE TYPE delivery_status AS ENUM ('pending', 'in_transit', 'partial', 'delivered', 'rejected');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'material_request_status') THEN
+    CREATE TYPE material_request_status AS ENUM ('draft', 'pending', 'approved', 'rejected', 'ordered', 'partial_fulfilled', 'fulfilled', 'cancelled');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'stock_transaction_type') THEN
+    CREATE TYPE stock_transaction_type AS ENUM ('purchase', 'usage', 'transfer_in', 'transfer_out', 'adjustment', 'return', 'wastage', 'initial');
+  END IF;
+END $$;
 
 -- ============================================
 -- COMPANY-LEVEL TABLES (Shared across sites)
 -- ============================================
 
 -- Vendors/Suppliers Master
-CREATE TABLE vendors (
+CREATE TABLE IF NOT EXISTS vendors (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL,
   code TEXT UNIQUE,
@@ -96,12 +63,12 @@ CREATE TABLE vendors (
   updated_by UUID REFERENCES users(id)
 );
 
-CREATE INDEX idx_vendors_active ON vendors(is_active) WHERE is_active = TRUE;
-CREATE INDEX idx_vendors_name ON vendors USING gin(name gin_trgm_ops);
-CREATE INDEX idx_vendors_code ON vendors(code);
+CREATE INDEX IF NOT EXISTS idx_vendors_active ON vendors(is_active) WHERE is_active = TRUE;
+CREATE INDEX IF NOT EXISTS idx_vendors_name ON vendors USING gin(name gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_vendors_code ON vendors(code);
 
 -- Material Categories (hierarchical)
-CREATE TABLE material_categories (
+CREATE TABLE IF NOT EXISTS material_categories (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL,
   code TEXT UNIQUE,
@@ -114,12 +81,12 @@ CREATE TABLE material_categories (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_material_categories_parent ON material_categories(parent_id);
-CREATE INDEX idx_material_categories_active ON material_categories(is_active) WHERE is_active = TRUE;
-CREATE INDEX idx_material_categories_order ON material_categories(display_order);
+CREATE INDEX IF NOT EXISTS idx_material_categories_parent ON material_categories(parent_id);
+CREATE INDEX IF NOT EXISTS idx_material_categories_active ON material_categories(is_active) WHERE is_active = TRUE;
+CREATE INDEX IF NOT EXISTS idx_material_categories_order ON material_categories(display_order);
 
 -- Materials Master (Material Catalog)
-CREATE TABLE materials (
+CREATE TABLE IF NOT EXISTS materials (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL,
   code TEXT UNIQUE,
@@ -152,13 +119,13 @@ CREATE TABLE materials (
   created_by UUID REFERENCES users(id)
 );
 
-CREATE INDEX idx_materials_category ON materials(category_id);
-CREATE INDEX idx_materials_active ON materials(is_active) WHERE is_active = TRUE;
-CREATE INDEX idx_materials_name ON materials USING gin(name gin_trgm_ops);
-CREATE INDEX idx_materials_code ON materials(code);
+CREATE INDEX IF NOT EXISTS idx_materials_category ON materials(category_id);
+CREATE INDEX IF NOT EXISTS idx_materials_active ON materials(is_active) WHERE is_active = TRUE;
+CREATE INDEX IF NOT EXISTS idx_materials_name ON materials USING gin(name gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_materials_code ON materials(code);
 
 -- Material Brands (for materials with multiple brands)
-CREATE TABLE material_brands (
+CREATE TABLE IF NOT EXISTS material_brands (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   material_id UUID NOT NULL REFERENCES materials(id) ON DELETE CASCADE,
   brand_name TEXT NOT NULL,
@@ -170,11 +137,11 @@ CREATE TABLE material_brands (
   UNIQUE(material_id, brand_name)
 );
 
-CREATE INDEX idx_material_brands_material ON material_brands(material_id);
-CREATE INDEX idx_material_brands_preferred ON material_brands(material_id) WHERE is_preferred = TRUE;
+CREATE INDEX IF NOT EXISTS idx_material_brands_material ON material_brands(material_id);
+CREATE INDEX IF NOT EXISTS idx_material_brands_preferred ON material_brands(material_id) WHERE is_preferred = TRUE;
 
 -- Vendor Material Categories (what categories vendor specializes in)
-CREATE TABLE vendor_material_categories (
+CREATE TABLE IF NOT EXISTS vendor_material_categories (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   vendor_id UUID NOT NULL REFERENCES vendors(id) ON DELETE CASCADE,
   category_id UUID NOT NULL REFERENCES material_categories(id) ON DELETE CASCADE,
@@ -183,11 +150,11 @@ CREATE TABLE vendor_material_categories (
   UNIQUE(vendor_id, category_id)
 );
 
-CREATE INDEX idx_vendor_material_categories_vendor ON vendor_material_categories(vendor_id);
-CREATE INDEX idx_vendor_material_categories_category ON vendor_material_categories(category_id);
+CREATE INDEX IF NOT EXISTS idx_vendor_material_categories_vendor ON vendor_material_categories(vendor_id);
+CREATE INDEX IF NOT EXISTS idx_vendor_material_categories_category ON vendor_material_categories(category_id);
 
 -- Material-Vendor Mapping (which vendors supply which materials at what price)
-CREATE TABLE material_vendors (
+CREATE TABLE IF NOT EXISTS material_vendors (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   material_id UUID NOT NULL REFERENCES materials(id) ON DELETE CASCADE,
   vendor_id UUID NOT NULL REFERENCES vendors(id) ON DELETE CASCADE,
@@ -204,12 +171,12 @@ CREATE TABLE material_vendors (
   UNIQUE(material_id, vendor_id, brand_id)
 );
 
-CREATE INDEX idx_material_vendors_material ON material_vendors(material_id);
-CREATE INDEX idx_material_vendors_vendor ON material_vendors(vendor_id);
-CREATE INDEX idx_material_vendors_preferred ON material_vendors(material_id) WHERE is_preferred = TRUE;
+CREATE INDEX IF NOT EXISTS idx_material_vendors_material ON material_vendors(material_id);
+CREATE INDEX IF NOT EXISTS idx_material_vendors_vendor ON material_vendors(vendor_id);
+CREATE INDEX IF NOT EXISTS idx_material_vendors_preferred ON material_vendors(material_id) WHERE is_preferred = TRUE;
 
 -- Vendor Price History (track price changes over time)
-CREATE TABLE vendor_price_history (
+CREATE TABLE IF NOT EXISTS vendor_price_history (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   material_vendor_id UUID NOT NULL REFERENCES material_vendors(id) ON DELETE CASCADE,
   old_price DECIMAL(12,2) NOT NULL,
@@ -220,15 +187,15 @@ CREATE TABLE vendor_price_history (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_vendor_price_history_mv ON vendor_price_history(material_vendor_id);
-CREATE INDEX idx_vendor_price_history_date ON vendor_price_history(effective_date DESC);
+CREATE INDEX IF NOT EXISTS idx_vendor_price_history_mv ON vendor_price_history(material_vendor_id);
+CREATE INDEX IF NOT EXISTS idx_vendor_price_history_date ON vendor_price_history(effective_date DESC);
 
 -- ============================================
 -- SITE-LEVEL TABLES
 -- ============================================
 
 -- Stock Locations (storage areas within a site)
-CREATE TABLE stock_locations (
+CREATE TABLE IF NOT EXISTS stock_locations (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   site_id UUID NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
@@ -242,11 +209,11 @@ CREATE TABLE stock_locations (
   UNIQUE(site_id, name)
 );
 
-CREATE INDEX idx_stock_locations_site ON stock_locations(site_id);
-CREATE INDEX idx_stock_locations_default ON stock_locations(site_id) WHERE is_default = TRUE;
+CREATE INDEX IF NOT EXISTS idx_stock_locations_site ON stock_locations(site_id);
+CREATE INDEX IF NOT EXISTS idx_stock_locations_default ON stock_locations(site_id) WHERE is_default = TRUE;
 
 -- Stock Inventory (current stock levels per site/location)
-CREATE TABLE stock_inventory (
+CREATE TABLE IF NOT EXISTS stock_inventory (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   site_id UUID NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
   location_id UUID REFERENCES stock_locations(id),
@@ -274,14 +241,14 @@ CREATE TABLE stock_inventory (
   UNIQUE(site_id, location_id, material_id, brand_id)
 );
 
-CREATE INDEX idx_stock_inventory_site ON stock_inventory(site_id);
-CREATE INDEX idx_stock_inventory_material ON stock_inventory(material_id);
-CREATE INDEX idx_stock_inventory_location ON stock_inventory(location_id);
-CREATE INDEX idx_stock_inventory_low_stock ON stock_inventory(site_id, material_id)
+CREATE INDEX IF NOT EXISTS idx_stock_inventory_site ON stock_inventory(site_id);
+CREATE INDEX IF NOT EXISTS idx_stock_inventory_material ON stock_inventory(material_id);
+CREATE INDEX IF NOT EXISTS idx_stock_inventory_location ON stock_inventory(location_id);
+CREATE INDEX IF NOT EXISTS idx_stock_inventory_low_stock ON stock_inventory(site_id, material_id)
   WHERE current_qty > 0;
 
 -- Stock Transactions (all stock movements - audit trail)
-CREATE TABLE stock_transactions (
+CREATE TABLE IF NOT EXISTS stock_transactions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   site_id UUID NOT NULL REFERENCES sites(id),
   inventory_id UUID NOT NULL REFERENCES stock_inventory(id),
@@ -304,14 +271,14 @@ CREATE TABLE stock_transactions (
   created_by UUID REFERENCES users(id)
 );
 
-CREATE INDEX idx_stock_transactions_site ON stock_transactions(site_id);
-CREATE INDEX idx_stock_transactions_inventory ON stock_transactions(inventory_id);
-CREATE INDEX idx_stock_transactions_date ON stock_transactions(transaction_date DESC);
-CREATE INDEX idx_stock_transactions_type ON stock_transactions(transaction_type);
-CREATE INDEX idx_stock_transactions_ref ON stock_transactions(reference_type, reference_id);
+CREATE INDEX IF NOT EXISTS idx_stock_transactions_site ON stock_transactions(site_id);
+CREATE INDEX IF NOT EXISTS idx_stock_transactions_inventory ON stock_transactions(inventory_id);
+CREATE INDEX IF NOT EXISTS idx_stock_transactions_date ON stock_transactions(transaction_date DESC);
+CREATE INDEX IF NOT EXISTS idx_stock_transactions_type ON stock_transactions(transaction_type);
+CREATE INDEX IF NOT EXISTS idx_stock_transactions_ref ON stock_transactions(reference_type, reference_id);
 
 -- Stock Transfers (between sites or locations)
-CREATE TABLE stock_transfers (
+CREATE TABLE IF NOT EXISTS stock_transfers (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   transfer_number TEXT UNIQUE,
 
@@ -336,13 +303,13 @@ CREATE TABLE stock_transfers (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_stock_transfers_from ON stock_transfers(from_site_id);
-CREATE INDEX idx_stock_transfers_to ON stock_transfers(to_site_id);
-CREATE INDEX idx_stock_transfers_status ON stock_transfers(status);
-CREATE INDEX idx_stock_transfers_date ON stock_transfers(transfer_date DESC);
+CREATE INDEX IF NOT EXISTS idx_stock_transfers_from ON stock_transfers(from_site_id);
+CREATE INDEX IF NOT EXISTS idx_stock_transfers_to ON stock_transfers(to_site_id);
+CREATE INDEX IF NOT EXISTS idx_stock_transfers_status ON stock_transfers(status);
+CREATE INDEX IF NOT EXISTS idx_stock_transfers_date ON stock_transfers(transfer_date DESC);
 
 -- Stock Transfer Items
-CREATE TABLE stock_transfer_items (
+CREATE TABLE IF NOT EXISTS stock_transfer_items (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   transfer_id UUID NOT NULL REFERENCES stock_transfers(id) ON DELETE CASCADE,
   material_id UUID NOT NULL REFERENCES materials(id),
@@ -354,15 +321,15 @@ CREATE TABLE stock_transfer_items (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_stock_transfer_items_transfer ON stock_transfer_items(transfer_id);
-CREATE INDEX idx_stock_transfer_items_material ON stock_transfer_items(material_id);
+CREATE INDEX IF NOT EXISTS idx_stock_transfer_items_transfer ON stock_transfer_items(transfer_id);
+CREATE INDEX IF NOT EXISTS idx_stock_transfer_items_material ON stock_transfer_items(material_id);
 
 -- ============================================
 -- PURCHASE ORDER TABLES
 -- ============================================
 
 -- Purchase Orders
-CREATE TABLE purchase_orders (
+CREATE TABLE IF NOT EXISTS purchase_orders (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   po_number TEXT UNIQUE NOT NULL,
 
@@ -412,14 +379,14 @@ CREATE TABLE purchase_orders (
   created_by UUID REFERENCES users(id)
 );
 
-CREATE INDEX idx_purchase_orders_site ON purchase_orders(site_id);
-CREATE INDEX idx_purchase_orders_vendor ON purchase_orders(vendor_id);
-CREATE INDEX idx_purchase_orders_status ON purchase_orders(status);
-CREATE INDEX idx_purchase_orders_date ON purchase_orders(order_date DESC);
-CREATE INDEX idx_purchase_orders_number ON purchase_orders(po_number);
+CREATE INDEX IF NOT EXISTS idx_purchase_orders_site ON purchase_orders(site_id);
+CREATE INDEX IF NOT EXISTS idx_purchase_orders_vendor ON purchase_orders(vendor_id);
+CREATE INDEX IF NOT EXISTS idx_purchase_orders_status ON purchase_orders(status);
+CREATE INDEX IF NOT EXISTS idx_purchase_orders_date ON purchase_orders(order_date DESC);
+CREATE INDEX IF NOT EXISTS idx_purchase_orders_number ON purchase_orders(po_number);
 
 -- Purchase Order Items
-CREATE TABLE purchase_order_items (
+CREATE TABLE IF NOT EXISTS purchase_order_items (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   po_id UUID NOT NULL REFERENCES purchase_orders(id) ON DELETE CASCADE,
   material_id UUID NOT NULL REFERENCES materials(id),
@@ -447,15 +414,15 @@ CREATE TABLE purchase_order_items (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_purchase_order_items_po ON purchase_order_items(po_id);
-CREATE INDEX idx_purchase_order_items_material ON purchase_order_items(material_id);
+CREATE INDEX IF NOT EXISTS idx_purchase_order_items_po ON purchase_order_items(po_id);
+CREATE INDEX IF NOT EXISTS idx_purchase_order_items_material ON purchase_order_items(material_id);
 
 -- ============================================
 -- DELIVERY TABLES (Goods Receipt Notes)
 -- ============================================
 
 -- Deliveries
-CREATE TABLE deliveries (
+CREATE TABLE IF NOT EXISTS deliveries (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   grn_number TEXT UNIQUE NOT NULL,
 
@@ -498,15 +465,15 @@ CREATE TABLE deliveries (
   created_by UUID REFERENCES users(id)
 );
 
-CREATE INDEX idx_deliveries_po ON deliveries(po_id);
-CREATE INDEX idx_deliveries_site ON deliveries(site_id);
-CREATE INDEX idx_deliveries_vendor ON deliveries(vendor_id);
-CREATE INDEX idx_deliveries_date ON deliveries(delivery_date DESC);
-CREATE INDEX idx_deliveries_status ON deliveries(delivery_status);
-CREATE INDEX idx_deliveries_grn ON deliveries(grn_number);
+CREATE INDEX IF NOT EXISTS idx_deliveries_po ON deliveries(po_id);
+CREATE INDEX IF NOT EXISTS idx_deliveries_site ON deliveries(site_id);
+CREATE INDEX IF NOT EXISTS idx_deliveries_vendor ON deliveries(vendor_id);
+CREATE INDEX IF NOT EXISTS idx_deliveries_date ON deliveries(delivery_date DESC);
+CREATE INDEX IF NOT EXISTS idx_deliveries_status ON deliveries(delivery_status);
+CREATE INDEX IF NOT EXISTS idx_deliveries_grn ON deliveries(grn_number);
 
 -- Delivery Items
-CREATE TABLE delivery_items (
+CREATE TABLE IF NOT EXISTS delivery_items (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   delivery_id UUID NOT NULL REFERENCES deliveries(id) ON DELETE CASCADE,
   po_item_id UUID REFERENCES purchase_order_items(id),
@@ -529,16 +496,16 @@ CREATE TABLE delivery_items (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_delivery_items_delivery ON delivery_items(delivery_id);
-CREATE INDEX idx_delivery_items_po_item ON delivery_items(po_item_id);
-CREATE INDEX idx_delivery_items_material ON delivery_items(material_id);
+CREATE INDEX IF NOT EXISTS idx_delivery_items_delivery ON delivery_items(delivery_id);
+CREATE INDEX IF NOT EXISTS idx_delivery_items_po_item ON delivery_items(po_item_id);
+CREATE INDEX IF NOT EXISTS idx_delivery_items_material ON delivery_items(material_id);
 
 -- ============================================
 -- PAYMENT TABLES
 -- ============================================
 
 -- Purchase Payments
-CREATE TABLE purchase_payments (
+CREATE TABLE IF NOT EXISTS purchase_payments (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   vendor_id UUID NOT NULL REFERENCES vendors(id),
   site_id UUID REFERENCES sites(id),
@@ -559,12 +526,12 @@ CREATE TABLE purchase_payments (
   created_by UUID REFERENCES users(id)
 );
 
-CREATE INDEX idx_purchase_payments_vendor ON purchase_payments(vendor_id);
-CREATE INDEX idx_purchase_payments_site ON purchase_payments(site_id);
-CREATE INDEX idx_purchase_payments_date ON purchase_payments(payment_date DESC);
+CREATE INDEX IF NOT EXISTS idx_purchase_payments_vendor ON purchase_payments(vendor_id);
+CREATE INDEX IF NOT EXISTS idx_purchase_payments_site ON purchase_payments(site_id);
+CREATE INDEX IF NOT EXISTS idx_purchase_payments_date ON purchase_payments(payment_date DESC);
 
 -- Purchase Payment Allocations (link payments to POs/deliveries)
-CREATE TABLE purchase_payment_allocations (
+CREATE TABLE IF NOT EXISTS purchase_payment_allocations (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   payment_id UUID NOT NULL REFERENCES purchase_payments(id) ON DELETE CASCADE,
   po_id UUID REFERENCES purchase_orders(id),
@@ -573,15 +540,15 @@ CREATE TABLE purchase_payment_allocations (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_purchase_payment_allocations_payment ON purchase_payment_allocations(payment_id);
-CREATE INDEX idx_purchase_payment_allocations_po ON purchase_payment_allocations(po_id);
+CREATE INDEX IF NOT EXISTS idx_purchase_payment_allocations_payment ON purchase_payment_allocations(payment_id);
+CREATE INDEX IF NOT EXISTS idx_purchase_payment_allocations_po ON purchase_payment_allocations(po_id);
 
 -- ============================================
 -- DAILY OPERATIONS TABLES
 -- ============================================
 
 -- Daily Material Usage (site engineers record this)
-CREATE TABLE daily_material_usage (
+CREATE TABLE IF NOT EXISTS daily_material_usage (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   site_id UUID NOT NULL REFERENCES sites(id),
   section_id UUID REFERENCES building_sections(id),
@@ -611,14 +578,14 @@ CREATE TABLE daily_material_usage (
   created_by UUID REFERENCES users(id)
 );
 
-CREATE INDEX idx_daily_material_usage_site ON daily_material_usage(site_id);
-CREATE INDEX idx_daily_material_usage_date ON daily_material_usage(usage_date DESC);
-CREATE INDEX idx_daily_material_usage_section ON daily_material_usage(section_id);
-CREATE INDEX idx_daily_material_usage_material ON daily_material_usage(material_id);
-CREATE INDEX idx_daily_material_usage_site_date ON daily_material_usage(site_id, usage_date);
+CREATE INDEX IF NOT EXISTS idx_daily_material_usage_site ON daily_material_usage(site_id);
+CREATE INDEX IF NOT EXISTS idx_daily_material_usage_date ON daily_material_usage(usage_date DESC);
+CREATE INDEX IF NOT EXISTS idx_daily_material_usage_section ON daily_material_usage(section_id);
+CREATE INDEX IF NOT EXISTS idx_daily_material_usage_material ON daily_material_usage(material_id);
+CREATE INDEX IF NOT EXISTS idx_daily_material_usage_site_date ON daily_material_usage(site_id, usage_date);
 
 -- Material Requests (site engineers request materials)
-CREATE TABLE material_requests (
+CREATE TABLE IF NOT EXISTS material_requests (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   request_number TEXT UNIQUE NOT NULL,
 
@@ -646,14 +613,14 @@ CREATE TABLE material_requests (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_material_requests_site ON material_requests(site_id);
-CREATE INDEX idx_material_requests_status ON material_requests(status);
-CREATE INDEX idx_material_requests_requested_by ON material_requests(requested_by);
-CREATE INDEX idx_material_requests_date ON material_requests(request_date DESC);
-CREATE INDEX idx_material_requests_priority ON material_requests(priority);
+CREATE INDEX IF NOT EXISTS idx_material_requests_site ON material_requests(site_id);
+CREATE INDEX IF NOT EXISTS idx_material_requests_status ON material_requests(status);
+CREATE INDEX IF NOT EXISTS idx_material_requests_requested_by ON material_requests(requested_by);
+CREATE INDEX IF NOT EXISTS idx_material_requests_date ON material_requests(request_date DESC);
+CREATE INDEX IF NOT EXISTS idx_material_requests_priority ON material_requests(priority);
 
 -- Material Request Items
-CREATE TABLE material_request_items (
+CREATE TABLE IF NOT EXISTS material_request_items (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   request_id UUID NOT NULL REFERENCES material_requests(id) ON DELETE CASCADE,
   material_id UUID NOT NULL REFERENCES materials(id),
@@ -669,11 +636,11 @@ CREATE TABLE material_request_items (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_material_request_items_request ON material_request_items(request_id);
-CREATE INDEX idx_material_request_items_material ON material_request_items(material_id);
+CREATE INDEX IF NOT EXISTS idx_material_request_items_request ON material_request_items(request_id);
+CREATE INDEX IF NOT EXISTS idx_material_request_items_material ON material_request_items(material_id);
 
 -- Site Material Budgets (optional budget tracking)
-CREATE TABLE site_material_budgets (
+CREATE TABLE IF NOT EXISTS site_material_budgets (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   site_id UUID NOT NULL REFERENCES sites(id),
   category_id UUID REFERENCES material_categories(id),
@@ -689,8 +656,8 @@ CREATE TABLE site_material_budgets (
   created_by UUID REFERENCES users(id)
 );
 
-CREATE INDEX idx_site_material_budgets_site ON site_material_budgets(site_id);
-CREATE INDEX idx_site_material_budgets_period ON site_material_budgets(period_start, period_end);
+CREATE INDEX IF NOT EXISTS idx_site_material_budgets_site ON site_material_budgets(site_id);
+CREATE INDEX IF NOT EXISTS idx_site_material_budgets_period ON site_material_budgets(period_start, period_end);
 
 -- ============================================
 -- VIEWS
@@ -1086,18 +1053,21 @@ $$ LANGUAGE plpgsql;
 -- ============================================
 
 -- Trigger for stock update on delivery
+DROP TRIGGER IF EXISTS trg_update_stock_on_delivery ON delivery_items;
 CREATE TRIGGER trg_update_stock_on_delivery
   AFTER INSERT ON delivery_items
   FOR EACH ROW
   EXECUTE FUNCTION update_stock_on_delivery();
 
 -- Trigger for stock update on usage
+DROP TRIGGER IF EXISTS trg_update_stock_on_usage ON daily_material_usage;
 CREATE TRIGGER trg_update_stock_on_usage
   BEFORE INSERT ON daily_material_usage
   FOR EACH ROW
   EXECUTE FUNCTION update_stock_on_usage();
 
 -- Trigger for low stock alerts
+DROP TRIGGER IF EXISTS trg_check_low_stock ON stock_inventory;
 CREATE TRIGGER trg_check_low_stock
   AFTER UPDATE OF current_qty ON stock_inventory
   FOR EACH ROW
@@ -1105,6 +1075,7 @@ CREATE TRIGGER trg_check_low_stock
   EXECUTE FUNCTION check_low_stock_alerts();
 
 -- Trigger for PO status update on delivery
+DROP TRIGGER IF EXISTS trg_update_po_status_on_delivery ON delivery_items;
 CREATE TRIGGER trg_update_po_status_on_delivery
   AFTER INSERT ON delivery_items
   FOR EACH ROW
@@ -1137,6 +1108,25 @@ ALTER TABLE daily_material_usage ENABLE ROW LEVEL SECURITY;
 ALTER TABLE material_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE material_request_items ENABLE ROW LEVEL SECURITY;
 ALTER TABLE site_material_budgets ENABLE ROW LEVEL SECURITY;
+
+-- Drop existing policies first (for idempotency)
+DO $$
+DECLARE
+  pol RECORD;
+BEGIN
+  FOR pol IN
+    SELECT policyname, tablename FROM pg_policies
+    WHERE schemaname = 'public'
+    AND tablename IN ('vendors', 'material_categories', 'materials', 'material_brands',
+                      'vendor_material_categories', 'material_vendors', 'vendor_price_history',
+                      'stock_locations', 'stock_inventory', 'stock_transactions', 'stock_transfers',
+                      'stock_transfer_items', 'purchase_orders', 'purchase_order_items',
+                      'deliveries', 'delivery_items', 'purchase_payments', 'purchase_payment_allocations',
+                      'daily_material_usage', 'material_requests', 'material_request_items', 'site_material_budgets')
+  LOOP
+    EXECUTE format('DROP POLICY IF EXISTS %I ON %I', pol.policyname, pol.tablename);
+  END LOOP;
+END $$;
 
 -- Company-level tables: All authenticated users can view
 CREATE POLICY "allow_select_vendors" ON vendors FOR SELECT TO authenticated USING (true);

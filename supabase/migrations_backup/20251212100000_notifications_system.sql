@@ -30,6 +30,12 @@ CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user_active ON push_subscripti
 -- ============================================
 ALTER TABLE push_subscriptions ENABLE ROW LEVEL SECURITY;
 
+-- Drop existing policies if they exist (for idempotency)
+DROP POLICY IF EXISTS "Users can view their own push subscriptions" ON push_subscriptions;
+DROP POLICY IF EXISTS "Users can insert their own push subscriptions" ON push_subscriptions;
+DROP POLICY IF EXISTS "Users can update their own push subscriptions" ON push_subscriptions;
+DROP POLICY IF EXISTS "Users can delete their own push subscriptions" ON push_subscriptions;
+
 -- Users can view their own subscriptions
 CREATE POLICY "Users can view their own push subscriptions"
   ON push_subscriptions FOR SELECT
