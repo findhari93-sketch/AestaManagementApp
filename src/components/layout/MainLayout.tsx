@@ -68,6 +68,7 @@ import {
   LocalShipping as DeliveryIcon,
   AccountBalance as AccountBalanceIcon,
   TrendingUp as TrendingUpIcon,
+  HomeWork as RentalIcon,
 } from "@mui/icons-material";
 import { useRouter, usePathname } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
@@ -206,6 +207,11 @@ const siteNavCategories: NavCategory[] = [
         icon: <AccountBalanceIcon />,
         path: "/site/inter-site-settlement",
       },
+      {
+        text: "Rentals",
+        icon: <RentalIcon />,
+        path: "/site/rentals",
+      },
     ],
   },
   {
@@ -277,6 +283,11 @@ const companyNavCategories: NavCategory[] = [
         text: "Site Groups",
         icon: <GroupsIcon />,
         path: "/company/site-groups",
+      },
+      {
+        text: "Rentals",
+        icon: <RentalIcon />,
+        path: "/company/rentals",
       },
     ],
   },

@@ -139,6 +139,14 @@ export const queryKeys = {
       ['group-tea-shop', 'group', groupId, 'attendance', date] as const,
   },
 
+  combinedTeaShop: {
+    all: ['combined-tea-shop'] as const,
+    entries: (groupId: string) => ['combined-tea-shop', 'entries', groupId] as const,
+    settlements: (groupId: string) => ['combined-tea-shop', 'settlements', groupId] as const,
+    pending: (groupId: string) => ['combined-tea-shop', 'pending', groupId] as const,
+    unsettled: (groupId: string) => ['combined-tea-shop', 'unsettled', groupId] as const,
+  },
+
   // ==================== INVENTORY DATA (5min cache) ====================
   
   materialStock: {

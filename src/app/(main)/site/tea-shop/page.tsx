@@ -40,8 +40,7 @@ import {
   CheckCircle as CheckCircleIcon,
   Groups as GroupsIcon,
 } from "@mui/icons-material";
-import Switch from "@mui/material/Switch";
-import FormControlLabel from "@mui/material/FormControlLabel";
+// Removed: Switch and FormControlLabel - no longer needed after removing manual group toggle
 import { createClient } from "@/lib/supabase/client";
 import { useSite } from "@/contexts/SiteContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -63,10 +62,16 @@ import {
   useGroupTeaShopSettlements,
 } from "@/hooks/queries/useGroupTeaShop";
 import { useSiteGroup } from "@/hooks/queries/useSiteGroups";
+import {
+  useCombinedTeaShopEntries,
+  useCombinedTeaShopPendingBalance,
+  useCombinedTeaShopSettlements,
+  type CombinedTeaShopEntry,
+} from "@/hooks/queries/useCombinedTeaShop";
 
 // Types for combined entries view
 type CombinedEntryType =
-  | { type: "entry"; date: string; entry: TeaShopEntry }
+  | { type: "entry"; date: string; entry: TeaShopEntry; siteName?: string; source?: "individual" | "group" }
   | { type: "holiday"; date: string; holiday: SiteHoliday }
   | { type: "no_entry"; date: string; attendanceCount: { named: number; market: number } };
 import dayjs from "dayjs";
@@ -112,64 +117,65 @@ export default function TeaShopPage() {
   const [editingEntry, setEditingEntry] = useState<TeaShopEntry | null>(null);
   const [editingSettlement, setEditingSettlement] = useState<TeaShopSettlement | null>(null);
 
-  // Group mode state
-  const [isGroupMode, setIsGroupMode] = useState(false);
+  // Legacy group mode state (for backward compat dialogs)
   const [editingGroupEntry, setEditingGroupEntry] = useState<TeaShopGroupEntryWithAllocations | null>(null);
 
-  // Check if site is in a group
+  // Check if site is in a group - AUTO-DETECT group mode
   const siteGroupId = selectedSite?.site_group_id as string | undefined;
+  const isInGroup = !!siteGroupId;
   const { data: siteGroup } = useSiteGroup(siteGroupId);
 
-  // Group tea shop data (only fetched when in group mode)
-  const { data: groupShop } = useGroupTeaShopAccount(isGroupMode ? siteGroupId : undefined);
-  const { data: groupEntries } = useGroupTeaShopEntries(isGroupMode ? siteGroupId : undefined);
-  const { data: groupPendingData } = useGroupTeaShopPendingBalance(isGroupMode ? siteGroupId : undefined);
-  const { data: groupSettlements } = useGroupTeaShopSettlements(isGroupMode ? siteGroupId : undefined);
+  // Combined tea shop data (fetched when site is in a group)
+  const { data: combinedEntriesData } = useCombinedTeaShopEntries(isInGroup ? siteGroupId : undefined);
+  const { data: combinedPendingData } = useCombinedTeaShopPendingBalance(isInGroup ? siteGroupId : undefined);
+  const { data: combinedSettlementsData } = useCombinedTeaShopSettlements(isInGroup ? siteGroupId : undefined);
 
-  const groupPendingBalance = groupPendingData?.pending || 0;
+  const combinedPendingBalance = combinedPendingData?.pending || 0;
 
-  // Auto-enable group mode if a group shop exists
-  useEffect(() => {
-    if (groupShop && siteGroupId) {
-      setIsGroupMode(true);
-    }
-  }, [groupShop, siteGroupId]);
+  // Legacy group tea shop hooks (for backward compat with existing group shop)
+  const { data: groupShop } = useGroupTeaShopAccount(isInGroup ? siteGroupId : undefined);
+  const { data: groupEntries } = useGroupTeaShopEntries(isInGroup ? siteGroupId : undefined);
+  const { data: groupPendingData } = useGroupTeaShopPendingBalance(isInGroup ? siteGroupId : undefined);
+  const { data: groupSettlements } = useGroupTeaShopSettlements(isInGroup ? siteGroupId : undefined);
 
   const canEdit = hasEditPermission(userProfile?.role);
 
   // Calculate summary stats
   const stats = useMemo(() => {
-    // Use group data when in group mode, site data otherwise
-    if (isGroupMode && groupEntries) {
+    // Use combined data when site is in a group
+    if (isInGroup && combinedEntriesData) {
       const weekStart = dayjs().startOf("week").format("YYYY-MM-DD");
       const monthStart = dayjs().startOf("month").format("YYYY-MM-DD");
 
-      const thisWeekTotal = groupEntries
-        .filter((e: any) => e.date >= weekStart)
-        .reduce((sum: number, e: any) => sum + (e.total_amount || 0), 0);
+      const thisWeekTotal = combinedEntriesData
+        .filter((e) => e.date >= weekStart)
+        .reduce((sum, e) => sum + (e.total_amount || 0), 0);
 
-      const thisMonthTotal = groupEntries
-        .filter((e: any) => e.date >= monthStart)
-        .reduce((sum: number, e: any) => sum + (e.total_amount || 0), 0);
+      const thisMonthTotal = combinedEntriesData
+        .filter((e) => e.date >= monthStart)
+        .reduce((sum, e) => sum + (e.total_amount || 0), 0);
 
-      const lastGroupSettlement = groupSettlements && groupSettlements.length > 0
-        ? groupSettlements.reduce((latest: any, s: any) =>
+      const totalTea = combinedEntriesData.reduce((sum, e) => sum + (e.tea_total || 0), 0);
+      const totalSnacks = combinedEntriesData.reduce((sum, e) => sum + (e.snacks_total || 0), 0);
+
+      const lastSettlement = combinedSettlementsData && combinedSettlementsData.length > 0
+        ? combinedSettlementsData.reduce((latest, s) =>
             new Date(s.payment_date) > new Date(latest.payment_date) ? s : latest
           )
         : null;
 
       return {
-        totalEntries: groupEntries.reduce((sum: number, e: any) => sum + (e.total_amount || 0), 0),
-        totalTea: 0, // Group entries don't track tea/snacks separately
-        totalSnacks: 0,
-        pendingBalance: groupPendingBalance,
+        totalEntries: combinedEntriesData.reduce((sum, e) => sum + (e.total_amount || 0), 0),
+        totalTea,
+        totalSnacks,
+        pendingBalance: combinedPendingBalance,
         thisWeekTotal,
         thisMonthTotal,
-        lastSettlement: lastGroupSettlement,
+        lastSettlement,
       };
     }
 
-    // Site-specific stats
+    // Site-specific stats (when not in a group)
     const filteredEntries = isAllTime
       ? entries
       : entries.filter(
@@ -213,7 +219,7 @@ export default function TeaShopPage() {
       thisMonthTotal,
       lastSettlement,
     };
-  }, [entries, settlements, dateFrom, dateTo, isAllTime, isGroupMode, groupEntries, groupSettlements, groupPendingBalance]);
+  }, [entries, settlements, dateFrom, dateTo, isAllTime, isInGroup, combinedEntriesData, combinedSettlementsData, combinedPendingBalance]);
 
   const fetchData = async () => {
     if (!selectedSite) return;
@@ -360,37 +366,51 @@ export default function TeaShopPage() {
 
   // Create combined entries view with holidays and missing entries
   const combinedEntries = useMemo((): CombinedEntryType[] => {
-    const entryDates = new Set(filteredEntries.map((e) => e.date));
+    // Use combined data when in a group
+    const entriesToUse = isInGroup && combinedEntriesData
+      ? combinedEntriesData
+      : filteredEntries;
+
+    const entryDates = new Set(entriesToUse.map((e) => e.date));
     const holidayDates = new Set(holidays.map((h) => (h as any).date));
     const result: CombinedEntryType[] = [];
 
     // Add actual entries
-    filteredEntries.forEach((entry) => {
-      result.push({ type: "entry", date: entry.date, entry });
+    entriesToUse.forEach((entry) => {
+      const combinedEntry = entry as CombinedTeaShopEntry;
+      result.push({
+        type: "entry",
+        date: entry.date,
+        entry,
+        siteName: combinedEntry.site_name,
+        source: combinedEntry.source,
+      });
     });
 
-    // Add holidays that don't have entries (within date filter)
-    holidays.forEach((holiday) => {
-      const hDate = (holiday as any).date;
-      const inRange = isAllTime || (dateFrom && dateTo && hDate >= dateFrom && hDate <= dateTo);
-      if (inRange && !entryDates.has(hDate)) {
-        result.push({ type: "holiday", date: hDate, holiday });
-      }
-    });
+    // Add holidays that don't have entries (within date filter) - only for non-grouped mode
+    if (!isInGroup) {
+      holidays.forEach((holiday) => {
+        const hDate = (holiday as any).date;
+        const inRange = isAllTime || (dateFrom && dateTo && hDate >= dateFrom && hDate <= dateTo);
+        if (inRange && !entryDates.has(hDate)) {
+          result.push({ type: "holiday", date: hDate, holiday });
+        }
+      });
 
-    // Add "no entry" rows for dates with attendance but no T&S entry (and not a holiday)
-    attendanceByDate.forEach((att, date) => {
-      const inRange = isAllTime || (dateFrom && dateTo && date >= dateFrom && date <= dateTo);
-      const hasWorkers = att.named > 0 || att.market > 0;
+      // Add "no entry" rows for dates with attendance but no T&S entry (and not a holiday)
+      attendanceByDate.forEach((att, date) => {
+        const inRange = isAllTime || (dateFrom && dateTo && date >= dateFrom && date <= dateTo);
+        const hasWorkers = att.named > 0 || att.market > 0;
 
-      if (inRange && hasWorkers && !entryDates.has(date) && !holidayDates.has(date)) {
-        result.push({ type: "no_entry", date, attendanceCount: att });
-      }
-    });
+        if (inRange && hasWorkers && !entryDates.has(date) && !holidayDates.has(date)) {
+          result.push({ type: "no_entry", date, attendanceCount: att });
+        }
+      });
+    }
 
     // Sort by date descending
     return result.sort((a, b) => b.date.localeCompare(a.date));
-  }, [filteredEntries, holidays, attendanceByDate, dateFrom, dateTo, isAllTime]);
+  }, [filteredEntries, holidays, attendanceByDate, dateFrom, dateTo, isAllTime, isInGroup, combinedEntriesData]);
 
   if (!selectedSite) {
     return (
@@ -407,52 +427,39 @@ export default function TeaShopPage() {
       <PageHeader
         title="Tea Shop"
         subtitle={
-          isGroupMode
-            ? groupShop
-              ? `${groupShop.shop_name} - ${siteGroup?.sites?.length || 0} sites: ${siteGroup?.sites?.map((s: any) => s.name).join(", ") || ""}`
-              : `Group: ${siteGroup?.name || ""} - No group shop configured`
+          isInGroup
+            ? shop
+              ? `${shop.shop_name} - Group: ${siteGroup?.sites?.map((s: any) => s.name).join(", ") || ""}`
+              : `Group: ${siteGroup?.name || ""} - ${siteGroup?.sites?.length || 0} sites`
             : shop
             ? shop.shop_name
             : "No shop configured"
         }
         actions={
           <Box sx={{ display: "flex", gap: 0.5, alignItems: "center" }}>
-            {/* Group Mode Toggle - only show if site is in a group */}
-            {siteGroupId && (
-              <FormControlLabel
-                control={
-                  <Switch
-                    size="small"
-                    checked={isGroupMode}
-                    onChange={(e) => setIsGroupMode(e.target.checked)}
-                    color="secondary"
-                  />
-                }
-                label={
-                  <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-                    <GroupsIcon fontSize="small" color={isGroupMode ? "secondary" : "disabled"} />
-                    <Typography variant="caption" sx={{ display: { xs: "none", sm: "block" } }}>
-                      Group
-                    </Typography>
-                  </Box>
-                }
-                sx={{ mr: 1 }}
-              />
+            {/* Group indicator (no toggle - automatic grouping) */}
+            {isInGroup && (
+              <Tooltip title={`Grouped with ${siteGroup?.sites?.length || 0} sites`}>
+                <Chip
+                  icon={<GroupsIcon fontSize="small" />}
+                  label={`${siteGroup?.sites?.length || 0} sites`}
+                  size="small"
+                  color="secondary"
+                  variant="outlined"
+                  sx={{ mr: 1, display: { xs: 'none', sm: 'flex' } }}
+                />
+              </Tooltip>
             )}
             {/* Desktop buttons - hidden on mobile via CSS */}
             <Box sx={{ display: { xs: 'none', sm: 'flex' }, gap: 0.5 }}>
-              {(isGroupMode ? groupShop : shop) && (
+              {shop && (
                 <>
                   <Button
                     variant="contained"
                     color="primary"
                     startIcon={<AddIcon />}
                     onClick={() => {
-                      if (isGroupMode) {
-                        setEditingGroupEntry(null);
-                      } else {
-                        setEditingEntry(null);
-                      }
+                      setEditingEntry(null);
                       setEntryDialogOpen(true);
                     }}
                     disabled={!canEdit}
@@ -464,7 +471,7 @@ export default function TeaShopPage() {
                     variant="outlined"
                     startIcon={<PaymentIcon />}
                     onClick={() => setSettlementDialogOpen(true)}
-                    disabled={!canEdit || (isGroupMode ? groupPendingBalance <= 0 : stats.pendingBalance <= 0)}
+                    disabled={!canEdit || stats.pendingBalance <= 0}
                     size="small"
                   >
                     Pay Shop
@@ -553,8 +560,8 @@ export default function TeaShopPage() {
         </Grid>
       </Grid>
 
-      {/* No Shop Alert - Site Mode */}
-      {!isGroupMode && !shop && !loading && (
+      {/* No Shop Alert */}
+      {!shop && !loading && (
         <Alert
           severity="info"
           action={
@@ -563,35 +570,30 @@ export default function TeaShopPage() {
             </Button>
           }
         >
-          No tea shop configured for this site. Add a shop to start tracking.
+          {isInGroup
+            ? `No tea shop configured for this site. Add a shop to start tracking expenses for the group.`
+            : "No tea shop configured for this site. Add a shop to start tracking."}
         </Alert>
       )}
 
-      {/* Group Mode Alert - No Group Shop Configured */}
-      {isGroupMode && !groupShop && !loading && siteGroup && (
+      {/* Group Info Banner - show when in group with shop */}
+      {isInGroup && shop && siteGroup && (
         <Alert
           severity="info"
+          icon={<GroupsIcon />}
           sx={{ mb: 2 }}
-          action={
-            <Button color="inherit" size="small" onClick={() => setShopDrawerOpen(true)}>
-              Configure
-            </Button>
-          }
         >
-          <Typography fontWeight={600} sx={{ mb: 0.5 }}>Group Mode Active</Typography>
           <Typography variant="body2">
-            Sites in group: {siteGroup.sites?.map((s: any) => s.name).join(", ") || "Loading..."}
+            <strong>Grouped Sites:</strong> {siteGroup.sites?.map((s: any) => s.name).join(", ")}
           </Typography>
-          <Typography variant="body2" sx={{ mt: 0.5 }}>
-            {shop
-              ? `Convert "${shop.shop_name}" to a group shop, or create a new group shop.`
-              : "Create a group tea shop to start tracking expenses for all sites together."}
+          <Typography variant="caption" color="text.secondary">
+            Showing combined tea shop data for all sites in this group
           </Typography>
         </Alert>
       )}
 
       {/* Tabs */}
-      {(isGroupMode ? groupShop : shop) && (
+      {shop && (
         <Paper sx={{ borderRadius: 2 }}>
           <Tabs value={tabValue} onChange={(_, v) => setTabValue(v)} sx={{ borderBottom: 1, borderColor: "divider" }}>
             <Tab label="Entries" icon={<LocalCafe />} iconPosition="start" />
@@ -646,6 +648,9 @@ export default function TeaShopPage() {
                         zIndex: 1,
                         fontSize: { xs: '0.7rem', sm: '0.875rem' },
                       }}>Date</TableCell>
+                      {isInGroup && (
+                        <TableCell sx={{ fontWeight: 700, fontSize: { xs: '0.7rem', sm: '0.875rem' } }}>Site</TableCell>
+                      )}
                       <TableCell sx={{ fontWeight: 700, fontSize: { xs: '0.7rem', sm: '0.875rem' } }} align="center">Att</TableCell>
                       <TableCell sx={{ fontWeight: 700, fontSize: { xs: '0.7rem', sm: '0.875rem' } }} align="right">T&S</TableCell>
                       <TableCell sx={{ fontWeight: 700, fontSize: { xs: '0.7rem', sm: '0.875rem' } }} align="center">Paid</TableCell>
@@ -660,7 +665,7 @@ export default function TeaShopPage() {
                         return (
                           <TableRow key={`holiday-${item.date}`} sx={{ bgcolor: "warning.50" }}>
                             <TableCell
-                              colSpan={6}
+                              colSpan={isInGroup ? 7 : 6}
                               sx={{
                                 py: 1.5,
                                 borderLeft: 4,
@@ -691,7 +696,7 @@ export default function TeaShopPage() {
                         return (
                           <TableRow key={`no-entry-${item.date}`} sx={{ bgcolor: "grey.50" }}>
                             <TableCell
-                              colSpan={6}
+                              colSpan={isInGroup ? 7 : 6}
                               sx={{
                                 py: 1.5,
                                 borderLeft: 4,
@@ -741,6 +746,8 @@ export default function TeaShopPage() {
                       const entry = item.entry;
                       const extEntry = entry as TeaShopEntryExtended;
                       const isSplit = extEntry.is_split_entry;
+                      const entrySiteName = item.siteName;
+                      const entrySource = item.source;
 
                       return (
                         <TableRow key={entry.id} hover>
@@ -777,6 +784,20 @@ export default function TeaShopPage() {
                               )}
                             </Box>
                           </TableCell>
+                          {/* Site Name Column - only in group mode */}
+                          {isInGroup && (
+                            <TableCell>
+                              <Tooltip title={entrySource === "group" ? "Legacy group entry" : `Entry from ${entrySiteName}`}>
+                                <Chip
+                                  label={entrySiteName ? (entrySiteName.length > 12 ? entrySiteName.slice(0, 10) + "..." : entrySiteName) : "?"}
+                                  size="small"
+                                  variant={entrySource === "group" ? "filled" : "outlined"}
+                                  color={entrySource === "group" ? "secondary" : "default"}
+                                  sx={{ fontSize: '0.65rem', height: 20 }}
+                                />
+                              </Tooltip>
+                            </TableCell>
+                          )}
                           <TableCell align="center">
                             {(() => {
                               const att = attendanceByDate.get(entry.date);
@@ -890,7 +911,7 @@ export default function TeaShopPage() {
                     })}
                     {combinedEntries.length === 0 && (
                       <TableRow>
-                        <TableCell colSpan={5} align="center" sx={{ py: 4 }}>
+                        <TableCell colSpan={isInGroup ? 7 : 6} align="center" sx={{ py: 4 }}>
                           <Typography color="text.secondary">
                             No entries found for the selected date range
                           </Typography>
@@ -907,7 +928,7 @@ export default function TeaShopPage() {
           <TabPanel value={tabValue} index={1}>
             <Box sx={{ mb: 2 }}>
               <Chip
-                label={`${settlements.length} records`}
+                label={`${(isInGroup ? combinedSettlementsData : settlements)?.length || 0} records`}
                 size="small"
                 variant="outlined"
                 sx={{ fontWeight: 500 }}
@@ -918,6 +939,9 @@ export default function TeaShopPage() {
                 <TableHead>
                   <TableRow sx={{ bgcolor: "action.selected" }}>
                     <TableCell sx={{ fontWeight: 700, fontSize: { xs: '0.7rem', sm: '0.875rem' } }}>Ref</TableCell>
+                    {isInGroup && (
+                      <TableCell sx={{ fontWeight: 700, fontSize: { xs: '0.7rem', sm: '0.875rem' } }}>Site</TableCell>
+                    )}
                     <TableCell sx={{ fontWeight: 700, fontSize: { xs: '0.7rem', sm: '0.875rem' } }}>Payment Date</TableCell>
                     <TableCell sx={{ fontWeight: 700, fontSize: { xs: '0.7rem', sm: '0.875rem' } }} align="right">Amount</TableCell>
                     <TableCell sx={{ fontWeight: 700, fontSize: { xs: '0.7rem', sm: '0.875rem' } }} align="center">Paid By</TableCell>
@@ -929,12 +953,14 @@ export default function TeaShopPage() {
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {settlements.map((settlement) => {
+                  {(isInGroup ? combinedSettlementsData || [] : settlements).map((settlement) => {
                     const settlementAny = settlement as any;
                     const proofUrl = settlementAny.proof_url;
                     const subcontract = settlementAny.subcontracts;
                     const isEngineerSettled = settlementAny.is_engineer_settled;
                     const settlementRef = settlementAny.settlement_reference;
+                    const settlementSiteName = settlementAny.site_name;
+                    const settlementSource = settlementAny.source;
 
                     return (
                       <TableRow key={settlement.id} hover>
@@ -954,6 +980,19 @@ export default function TeaShopPage() {
                             </Typography>
                           </Tooltip>
                         </TableCell>
+
+                        {/* Site Name - only in group mode */}
+                        {isInGroup && (
+                          <TableCell>
+                            <Chip
+                              label={settlementSiteName ? (settlementSiteName.length > 12 ? settlementSiteName.slice(0, 10) + "..." : settlementSiteName) : "?"}
+                              size="small"
+                              variant={settlementSource === "group" ? "filled" : "outlined"}
+                              color={settlementSource === "group" ? "secondary" : "default"}
+                              sx={{ fontSize: '0.65rem', height: 20 }}
+                            />
+                          </TableCell>
+                        )}
 
                         {/* Payment Date */}
                         <TableCell>
@@ -1060,9 +1099,9 @@ export default function TeaShopPage() {
                       </TableRow>
                     );
                   })}
-                  {settlements.length === 0 && (
+                  {(isInGroup ? combinedSettlementsData || [] : settlements).length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={9} align="center" sx={{ py: 4 }}>
+                      <TableCell colSpan={isInGroup ? 10 : 9} align="center" sx={{ py: 4 }}>
                         <Typography color="text.secondary">
                           No settlements recorded yet
                         </Typography>
@@ -1080,18 +1119,18 @@ export default function TeaShopPage() {
       <TeaShopDrawer
         open={shopDrawerOpen}
         onClose={() => setShopDrawerOpen(false)}
-        shop={isGroupMode ? groupShop ?? null : shop}
+        shop={shop}
         siteId={selectedSite.id}
         siteGroupId={siteGroupId}
-        isGroupMode={isGroupMode}
+        isGroupMode={false}
         onSuccess={() => {
           setShopDrawerOpen(false);
           fetchData();
         }}
       />
 
-      {/* Site-level dialogs (non-group mode) */}
-      {!isGroupMode && shop && (
+      {/* Site-level dialogs - always use site dialogs, entries are site-specific */}
+      {shop && (
         <>
           <TeaShopEntryDialog
             open={entryDialogOpen}
@@ -1121,6 +1160,8 @@ export default function TeaShopPage() {
             pendingBalance={stats.pendingBalance}
             entries={entries}
             settlement={editingSettlement}
+            isInGroup={isInGroup}
+            siteGroupId={siteGroupId}
             onSuccess={() => {
               setSettlementDialogOpen(false);
               setEditingSettlement(null);
@@ -1130,54 +1171,15 @@ export default function TeaShopPage() {
         </>
       )}
 
-      {/* Group-level dialogs (group mode) */}
-      {isGroupMode && groupShop && siteGroup && (
-        <>
-          <GroupTeaShopEntryDialog
-            open={entryDialogOpen}
-            onClose={() => {
-              setEntryDialogOpen(false);
-              setEditingGroupEntry(null);
-              setInitialEntryDate(undefined);
-            }}
-            shop={groupShop}
-            siteGroup={siteGroup}
-            entry={editingGroupEntry}
-            initialDate={initialEntryDate}
-            onSuccess={() => {
-              setEntryDialogOpen(false);
-              setEditingGroupEntry(null);
-              setInitialEntryDate(undefined);
-            }}
-          />
-
-          <GroupTeaShopSettlementDialog
-            open={settlementDialogOpen}
-            onClose={() => {
-              setSettlementDialogOpen(false);
-            }}
-            shop={groupShop}
-            siteGroup={siteGroup}
-            onSuccess={() => {
-              setSettlementDialogOpen(false);
-            }}
-          />
-        </>
-      )}
-
       {/* Mobile FAB - always rendered, visibility controlled by CSS */}
       <Fab
         color="primary"
         onClick={() => {
-          if (isGroupMode) {
-            setEditingGroupEntry(null);
-          } else {
-            setEditingEntry(null);
-          }
+          setEditingEntry(null);
           setEntryDialogOpen(true);
         }}
         sx={{
-          display: (isGroupMode ? groupShop : shop) && canEdit ? { xs: 'flex', sm: 'none' } : 'none',
+          display: shop && canEdit ? { xs: 'flex', sm: 'none' } : 'none',
           position: "fixed",
           bottom: 16,
           right: 16,

@@ -51,6 +51,8 @@ interface TeaShopSettlementDialogProps {
   entries: TeaShopEntry[];
   onSuccess?: () => void;
   settlement?: TeaShopSettlement | null; // For edit mode
+  isInGroup?: boolean; // Whether site is in a group
+  siteGroupId?: string; // Site group ID for combined data
 }
 
 interface SiteEngineer {
@@ -71,6 +73,7 @@ interface AllocationPreview {
   previouslyPaid: number;
   allocatedAmount: number;
   isFullyPaid: boolean;
+  siteName?: string; // For group mode
 }
 
 // Generate settlement reference in TSS-YYMMDD-NNN format
@@ -88,6 +91,8 @@ export default function TeaShopSettlementDialog({
   entries,
   onSuccess,
   settlement,
+  isInGroup = false,
+  siteGroupId,
 }: TeaShopSettlementDialogProps) {
   const isEditMode = !!settlement;
   const { userProfile } = useAuth();
@@ -205,26 +210,86 @@ export default function TeaShopSettlementDialog({
   };
 
   // Fetch unsettled entries (oldest first for waterfall)
+  // When in group mode, fetches from ALL sites in the group
   const fetchUnsettledEntries = async () => {
     setLoadingEntries(true);
     try {
-      // Fetch entries that are not fully paid
-      // is_fully_paid = NULL (new entry) or FALSE (partially paid)
-      const { data } = await (supabase
-        .from("tea_shop_entries") as any)
-        .select("*")
-        .eq("tea_shop_id", shop.id)
-        .or("is_fully_paid.is.null,is_fully_paid.eq.false")
-        .order("date", { ascending: true }); // Oldest first
+      if (isInGroup && siteGroupId) {
+        // Fetch combined unsettled entries from all sites in the group
+        const { data: sites } = await (supabase as any)
+          .from("sites")
+          .select("id, name")
+          .eq("site_group_id", siteGroupId);
 
-      // Filter out entries that are actually fully paid (amount_paid >= total_amount)
-      const filteredData = (data || []).filter((entry: any) => {
-        const totalAmount = entry.total_amount || 0;
-        const amountPaid = entry.amount_paid || 0;
-        return amountPaid < totalAmount;
-      });
+        if (!sites || sites.length === 0) {
+          setUnsettledEntries([]);
+          return;
+        }
 
-      setUnsettledEntries(filteredData as TeaShopEntry[]);
+        const siteIds = sites.map((s: any) => s.id);
+        const siteNameMap = new Map<string, string>();
+        sites.forEach((s: any) => siteNameMap.set(s.id, s.name));
+
+        // Get tea shop accounts for all sites
+        const { data: shops } = await (supabase as any)
+          .from("tea_shop_accounts")
+          .select("id, site_id")
+          .in("site_id", siteIds)
+          .eq("is_active", true);
+
+        if (!shops || shops.length === 0) {
+          setUnsettledEntries([]);
+          return;
+        }
+
+        const shopSiteMap = new Map<string, string>();
+        shops.forEach((s: any) => {
+          if (s.site_id) shopSiteMap.set(s.id, s.site_id);
+        });
+        const shopIds = Array.from(shopSiteMap.keys());
+
+        // Fetch unsettled entries from all shops
+        const { data } = await (supabase as any)
+          .from("tea_shop_entries")
+          .select("*")
+          .in("tea_shop_id", shopIds)
+          .or("is_fully_paid.is.null,is_fully_paid.eq.false")
+          .order("date", { ascending: true });
+
+        // Filter and add site names
+        const filteredData = (data || [])
+          .filter((entry: any) => {
+            const totalAmount = entry.total_amount || 0;
+            const amountPaid = entry.amount_paid || 0;
+            return amountPaid < totalAmount;
+          })
+          .map((entry: any) => {
+            const siteId = shopSiteMap.get(entry.tea_shop_id) || "";
+            return {
+              ...entry,
+              site_name: siteNameMap.get(siteId) || "Unknown",
+            };
+          });
+
+        setUnsettledEntries(filteredData);
+      } else {
+        // Single site mode - fetch only from current shop
+        const { data } = await (supabase
+          .from("tea_shop_entries") as any)
+          .select("*")
+          .eq("tea_shop_id", shop.id)
+          .or("is_fully_paid.is.null,is_fully_paid.eq.false")
+          .order("date", { ascending: true }); // Oldest first
+
+        // Filter out entries that are actually fully paid (amount_paid >= total_amount)
+        const filteredData = (data || []).filter((entry: any) => {
+          const totalAmount = entry.total_amount || 0;
+          const amountPaid = entry.amount_paid || 0;
+          return amountPaid < totalAmount;
+        });
+
+        setUnsettledEntries(filteredData as TeaShopEntry[]);
+      }
     } catch (err) {
       console.error("Error fetching unsettled entries:", err);
     } finally {
@@ -257,6 +322,7 @@ export default function TeaShopSettlementDialog({
         previouslyPaid,
         allocatedAmount: toAllocate,
         isFullyPaid: toAllocate >= entryRemaining,
+        siteName: (entry as any).site_name, // Include site name for group mode
       });
 
       remaining -= toAllocate;
@@ -498,12 +564,15 @@ export default function TeaShopSettlementDialog({
         {allocationPreview.length > 0 && (
           <Paper variant="outlined" sx={{ p: 2, mb: 3 }}>
             <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1.5 }}>
-              ALLOCATION PREVIEW (Oldest First)
+              ALLOCATION PREVIEW (Oldest First){isInGroup && " - All Sites"}
             </Typography>
             <Table size="small">
               <TableHead>
                 <TableRow>
                   <TableCell sx={{ fontWeight: 600, fontSize: "0.75rem" }}>Date</TableCell>
+                  {isInGroup && (
+                    <TableCell sx={{ fontWeight: 600, fontSize: "0.75rem" }}>Site</TableCell>
+                  )}
                   <TableCell align="right" sx={{ fontWeight: 600, fontSize: "0.75rem" }}>Entry</TableCell>
                   <TableCell align="right" sx={{ fontWeight: 600, fontSize: "0.75rem" }}>Paying</TableCell>
                   <TableCell align="center" sx={{ fontWeight: 600, fontSize: "0.75rem" }}>Status</TableCell>
@@ -522,6 +591,16 @@ export default function TeaShopSettlementDialog({
                         </Typography>
                       </Box>
                     </TableCell>
+                    {isInGroup && (
+                      <TableCell sx={{ py: 0.75 }}>
+                        <Chip
+                          label={alloc.siteName ? (alloc.siteName.length > 10 ? alloc.siteName.slice(0, 8) + "..." : alloc.siteName) : "?"}
+                          size="small"
+                          variant="outlined"
+                          sx={{ height: 18, fontSize: "0.6rem" }}
+                        />
+                      </TableCell>
+                    )}
                     <TableCell align="right" sx={{ py: 0.75 }}>
                       <Typography variant="body2" fontSize="0.8rem">
                         ₹{alloc.entryAmount.toLocaleString()}
@@ -546,7 +625,7 @@ export default function TeaShopSettlementDialog({
             </Table>
             <Box sx={{ mt: 1.5, display: "flex", justifyContent: "space-between" }}>
               <Typography variant="body2" color="text.secondary">
-                Entries covered: {allocationPreview.length}
+                Entries covered: {allocationPreview.length}{isInGroup && " (from all sites)"}
               </Typography>
               <Typography variant="body2" fontWeight={600}>
                 Total: ₹{totalAllocated.toLocaleString()}
