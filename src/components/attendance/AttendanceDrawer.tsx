@@ -56,6 +56,11 @@ import dayjs from "dayjs";
 import LaborerSelectionDialog from "./LaborerSelectionDialog";
 import MarketLaborerDialog from "./MarketLaborerDialog";
 import TeaShopEntryDialog from "../tea-shop/TeaShopEntryDialog";
+import TeaShopEntryModeDialog from "../tea-shop/TeaShopEntryModeDialog";
+import GroupTeaShopEntryDialog from "../tea-shop/GroupTeaShopEntryDialog";
+import { useSiteGroup } from "@/hooks/queries/useSiteGroups";
+import { useGroupTeaShopAccount } from "@/hooks/queries/useGroupTeaShop";
+import type { SiteGroupWithSites } from "@/types/material.types";
 import AttendanceSaveConfirmDialog from "./AttendanceSaveConfirmDialog";
 import { WorkUpdatesSection } from "./work-updates";
 import SectionAutocomplete from "../common/SectionAutocomplete";
@@ -75,6 +80,8 @@ interface AttendanceDrawerProps {
   date?: string;
   onSuccess?: () => void;
   mode?: AttendanceMode; // morning=check-in, evening=confirm, full=legacy
+  siteGroupId?: string; // For group tea shop support
+  siteName?: string; // Current site name for display
 }
 
 interface LaborerWithCategory {
@@ -298,9 +305,15 @@ export default function AttendanceDrawer({
   date: initialDate,
   onSuccess,
   mode = "full",
+  siteGroupId,
+  siteName = "Current Site",
 }: AttendanceDrawerProps) {
   const { userProfile } = useAuth();
   const supabase = createClient();
+
+  // Group tea shop support
+  const { data: siteGroup } = useSiteGroup(siteGroupId);
+  const { data: groupTeaShop } = useGroupTeaShopAccount(siteGroupId);
 
   // Refs for preventing race conditions
   const fetchVersionRef = useRef(0);
@@ -380,6 +393,8 @@ export default function AttendanceDrawer({
     null
   );
   const [teaShopDialogOpen, setTeaShopDialogOpen] = useState(false);
+  const [teaShopEntryModeDialogOpen, setTeaShopEntryModeDialogOpen] = useState(false);
+  const [groupTeaShopDialogOpen, setGroupTeaShopDialogOpen] = useState(false);
 
   // Audit tracking - store original creator info when editing
   const [originalCreator, setOriginalCreator] = useState<{
@@ -390,7 +405,6 @@ export default function AttendanceDrawer({
   // Save confirmation dialog state
   const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
   const [hasExistingAttendance, setHasExistingAttendance] = useState(false);
-  const [siteName, setSiteName] = useState("");
 
   // Two-phase attendance state
   const [workProgressPercent, setWorkProgressPercent] = useState(100);
@@ -579,17 +593,6 @@ export default function AttendanceDrawer({
       setTeaShops(shops);
       if (shops.length > 0 && !selectedTeaShop) {
         setSelectedTeaShop(shops[0]);
-      }
-
-      // Fetch site name for confirmation dialog
-      const { data: siteData } = await supabase
-        .from("sites")
-        .select("name")
-        .eq("id", siteId)
-        .single();
-
-      if (siteData) {
-        setSiteName(siteData.name);
       }
     } catch (err: any) {
       console.error("Error fetching data:", err);
@@ -2267,8 +2270,16 @@ export default function AttendanceDrawer({
                         size="small"
                         color="warning"
                         startIcon={<TeaIcon />}
-                        onClick={() => setTeaShopDialogOpen(true)}
-                        disabled={!selectedTeaShop}
+                        onClick={() => {
+                          // If site is in a group with a group tea shop, show choice dialog
+                          if (siteGroupId && groupTeaShop) {
+                            setTeaShopEntryModeDialogOpen(true);
+                          } else {
+                            // Regular site-specific entry
+                            setTeaShopDialogOpen(true);
+                          }
+                        }}
+                        disabled={!selectedTeaShop && !groupTeaShop}
                       >
                         {existingTeaEntry
                           ? `Tea ₹${teaShopTotal.toLocaleString()}`
@@ -3410,6 +3421,40 @@ export default function AttendanceDrawer({
           entry={existingTeaEntry}
           onSuccess={handleTeaShopDialogSuccess}
           initialDate={selectedDate}
+        />
+      )}
+
+      {/* Tea Shop Entry Mode Dialog - For choosing between group and site entry */}
+      {siteGroup && (
+        <TeaShopEntryModeDialog
+          open={teaShopEntryModeDialogOpen}
+          onClose={() => setTeaShopEntryModeDialogOpen(false)}
+          siteName={siteName}
+          groupSites={siteGroup.sites?.map((s: any) => s.name) || []}
+          onSelectGroupEntry={() => {
+            setTeaShopEntryModeDialogOpen(false);
+            setGroupTeaShopDialogOpen(true);
+          }}
+          onSelectSiteEntry={() => {
+            setTeaShopEntryModeDialogOpen(false);
+            setTeaShopDialogOpen(true);
+          }}
+        />
+      )}
+
+      {/* Group Tea Shop Entry Dialog */}
+      {groupTeaShop && siteGroup && (
+        <GroupTeaShopEntryDialog
+          open={groupTeaShopDialogOpen}
+          onClose={() => setGroupTeaShopDialogOpen(false)}
+          shop={groupTeaShop}
+          siteGroup={siteGroup as SiteGroupWithSites}
+          initialDate={selectedDate}
+          onSuccess={() => {
+            setGroupTeaShopDialogOpen(false);
+            // Refresh tea shop data
+            handleTeaShopDialogSuccess();
+          }}
         />
       )}
 

@@ -22,7 +22,7 @@ import {
   AutoAwesome as AutoGenerateIcon,
 } from "@mui/icons-material";
 import type { VariantFormData } from "@/types/material.types";
-import { TMT_WEIGHTS, TMT_STANDARD_LENGTH, TMT_RODS_PER_BUNDLE } from "@/lib/weightCalculation";
+import { TMT_WEIGHTS, TMT_STANDARD_LENGTH, TMT_STANDARD_LENGTH_UNIT, TMT_RODS_PER_BUNDLE } from "@/lib/weightCalculation";
 
 interface VariantInlineTableProps {
   parentName: string;
@@ -114,7 +114,7 @@ export default function VariantInlineTable({
             onClick={handleAutoGenerate}
             variant="outlined"
           >
-            Auto-generate TMT sizes (6mm - 32mm)
+            Auto-generate TMT sizes (8mm - 32mm)
           </Button>
         </Box>
       )}
@@ -132,7 +132,7 @@ export default function VariantInlineTable({
                 Weight/Unit (kg)
               </TableCell>
               <TableCell align="right" sx={{ width: 110 }}>
-                Length/Pc (m)
+                Length/Pc (ft)
               </TableCell>
               <TableCell align="right" sx={{ width: 100 }}>
                 Rods/Bundle

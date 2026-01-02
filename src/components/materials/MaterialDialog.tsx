@@ -102,6 +102,7 @@ export default function MaterialDialog({
   const [isVariant, setIsVariant] = useState(false);
   const [variants, setVariants] = useState<VariantFormData[]>([]);
   const [showVariantSection, setShowVariantSection] = useState(false);
+  const [showWeightSection, setShowWeightSection] = useState(false);
   const [formData, setFormData] = useState<MaterialFormData>({
     name: "",
     code: "",
@@ -117,7 +118,7 @@ export default function MaterialDialog({
     weight_per_unit: null,
     weight_unit: "kg",
     length_per_piece: null,
-    length_unit: "m",
+    length_unit: "ft",
   });
 
   // Reset form when material changes
@@ -138,11 +139,13 @@ export default function MaterialDialog({
         weight_per_unit: material.weight_per_unit,
         weight_unit: material.weight_unit || "kg",
         length_per_piece: material.length_per_piece,
-        length_unit: material.length_unit || "m",
+        length_unit: material.length_unit || "ft",
       });
       setIsVariant(!!material.parent_id);
       setVariants([]);
       setShowVariantSection(false);
+      // Show weight section if material has weight/length data
+      setShowWeightSection(!!material.weight_per_unit || !!material.length_per_piece);
     } else {
       setFormData({
         name: "",
@@ -159,11 +162,12 @@ export default function MaterialDialog({
         weight_per_unit: null,
         weight_unit: "kg",
         length_per_piece: null,
-        length_unit: "m",
+        length_unit: "ft",
       });
       setIsVariant(false);
       setVariants([]);
       setShowVariantSection(false);
+      setShowWeightSection(false);
     }
     setError("");
     setNewBrandName("");
@@ -554,86 +558,106 @@ export default function MaterialDialog({
             />
           </Grid>
 
-          {/* Weight & Length Section */}
+          {/* Weight & Length Section - Toggleable */}
           <Grid size={12}>
-            <Divider sx={{ my: 1 }}>
-              <Typography variant="caption" color="text.secondary">
-                Weight & Length (Optional)
-              </Typography>
-            </Divider>
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1, my: 1 }}>
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={showWeightSection}
+                    onChange={(e) => setShowWeightSection(e.target.checked)}
+                    size="small"
+                  />
+                }
+                label={
+                  <Typography variant="body2" color="text.secondary">
+                    Enable Weight & Length Tracking
+                  </Typography>
+                }
+              />
+            </Box>
           </Grid>
 
-          <Grid size={{ xs: 6, md: 3 }}>
-            <TextField
-              fullWidth
-              label="Weight per Unit"
-              type="number"
-              value={formData.weight_per_unit ?? ""}
-              onChange={(e) =>
-                handleChange(
-                  "weight_per_unit",
-                  e.target.value ? parseFloat(e.target.value) : null
-                )
-              }
-              helperText="e.g., 0.395 kg for 8mm TMT"
-              slotProps={{
-                input: {
-                  inputProps: { min: 0, step: 0.001 },
-                },
-              }}
-            />
-          </Grid>
+          {showWeightSection && (
+            <>
+              <Grid size={12}>
+                <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: "block" }}>
+                  Common Settings (Applied to All Variants)
+                </Typography>
+              </Grid>
 
-          <Grid size={{ xs: 6, md: 3 }}>
-            <FormControl fullWidth>
-              <InputLabel>Weight Unit</InputLabel>
-              <Select
-                value={formData.weight_unit || "kg"}
-                onChange={(e) => handleChange("weight_unit", e.target.value)}
-                label="Weight Unit"
-              >
-                <MenuItem value="kg">Kilogram (kg)</MenuItem>
-                <MenuItem value="g">Gram (g)</MenuItem>
-                <MenuItem value="ton">Ton</MenuItem>
-              </Select>
-            </FormControl>
-          </Grid>
+              <Grid size={{ xs: 6, md: 3 }}>
+                <TextField
+                  fullWidth
+                  label="Length per Piece"
+                  type="number"
+                  value={formData.length_per_piece ?? ""}
+                  onChange={(e) =>
+                    handleChange(
+                      "length_per_piece",
+                      e.target.value ? parseFloat(e.target.value) : null
+                    )
+                  }
+                  helperText="e.g., 40ft for TMT bars"
+                  slotProps={{
+                    input: {
+                      inputProps: { min: 0, step: 0.1 },
+                    },
+                  }}
+                />
+              </Grid>
 
-          <Grid size={{ xs: 6, md: 3 }}>
-            <TextField
-              fullWidth
-              label="Length per Piece"
-              type="number"
-              value={formData.length_per_piece ?? ""}
-              onChange={(e) =>
-                handleChange(
-                  "length_per_piece",
-                  e.target.value ? parseFloat(e.target.value) : null
-                )
-              }
-              helperText="e.g., 12m for TMT bars"
-              slotProps={{
-                input: {
-                  inputProps: { min: 0, step: 0.1 },
-                },
-              }}
-            />
-          </Grid>
+              <Grid size={{ xs: 6, md: 3 }}>
+                <FormControl fullWidth>
+                  <InputLabel>Length Unit</InputLabel>
+                  <Select
+                    value={formData.length_unit || "ft"}
+                    onChange={(e) => handleChange("length_unit", e.target.value)}
+                    label="Length Unit"
+                  >
+                    <MenuItem value="ft">Feet (ft)</MenuItem>
+                    <MenuItem value="m">Meter (m)</MenuItem>
+                  </Select>
+                </FormControl>
+              </Grid>
 
-          <Grid size={{ xs: 6, md: 3 }}>
-            <FormControl fullWidth>
-              <InputLabel>Length Unit</InputLabel>
-              <Select
-                value={formData.length_unit || "m"}
-                onChange={(e) => handleChange("length_unit", e.target.value)}
-                label="Length Unit"
-              >
-                <MenuItem value="m">Meter (m)</MenuItem>
-                <MenuItem value="ft">Feet (ft)</MenuItem>
-                <MenuItem value="mm">Millimeter (mm)</MenuItem>
-              </Select>
-            </FormControl>
-          </Grid>
+              <Grid size={{ xs: 6, md: 3 }}>
+                <FormControl fullWidth>
+                  <InputLabel>Weight Unit</InputLabel>
+                  <Select
+                    value={formData.weight_unit || "kg"}
+                    onChange={(e) => handleChange("weight_unit", e.target.value)}
+                    label="Weight Unit"
+                  >
+                    <MenuItem value="kg">Kilogram (kg)</MenuItem>
+                    <MenuItem value="g">Gram (g)</MenuItem>
+                    <MenuItem value="ton">Ton</MenuItem>
+                  </Select>
+                </FormControl>
+              </Grid>
+
+              <Grid size={{ xs: 6, md: 3 }}>
+                <TextField
+                  fullWidth
+                  label="Weight per Unit"
+                  type="number"
+                  value={formData.weight_per_unit ?? ""}
+                  onChange={(e) =>
+                    handleChange(
+                      "weight_per_unit",
+                      e.target.value ? parseFloat(e.target.value) : null
+                    )
+                  }
+                  helperText="For parent material (optional)"
+                  slotProps={{
+                    input: {
+                      inputProps: { min: 0, step: 0.001 },
+                    },
+                  }}
+                />
+              </Grid>
+            </>
+          )}
 
           {/* Inline Variants Section - Only for new parent materials (not editing, not variants) */}
           {!isEdit && !isVariant && (

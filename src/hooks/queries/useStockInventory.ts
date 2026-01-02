@@ -111,7 +111,7 @@ export function useSiteStock(siteId: string | undefined, locationId?: string) {
 
       const { data, error } = await query.order("material(name)");
       if (error) throw error;
-      return data as StockInventoryWithDetails[];
+      return (data as unknown) as StockInventoryWithDetails[];
     },
     enabled: !!siteId,
   });
@@ -144,7 +144,7 @@ export function useSiteStockAll(siteId: string | undefined) {
         .order("material(name)");
 
       if (error) throw error;
-      return data as StockInventoryWithDetails[];
+      return (data as unknown) as StockInventoryWithDetails[];
     },
     enabled: !!siteId,
   });

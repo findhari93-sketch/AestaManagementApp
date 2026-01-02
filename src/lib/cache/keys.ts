@@ -123,10 +123,20 @@ export const queryKeys = {
   teaShop: {
     all: ['tea-shop'] as const,
     entries: (siteId: string) => ['tea-shop', 'site', siteId, 'entries'] as const,
-    settlements: (siteId: string) => 
+    settlements: (siteId: string) =>
       ['tea-shop', 'site', siteId, 'settlements'] as const,
-    pending: (siteId: string) => 
+    pending: (siteId: string) =>
       ['tea-shop', 'site', siteId, 'pending'] as const,
+  },
+
+  groupTeaShop: {
+    all: ['group-tea-shop'] as const,
+    byGroup: (groupId: string) => ['group-tea-shop', 'group', groupId] as const,
+    entries: (groupId: string) => ['group-tea-shop', 'group', groupId, 'entries'] as const,
+    settlements: (groupId: string) => ['group-tea-shop', 'group', groupId, 'settlements'] as const,
+    pending: (groupId: string) => ['group-tea-shop', 'group', groupId, 'pending'] as const,
+    attendance: (groupId: string, date: string) =>
+      ['group-tea-shop', 'group', groupId, 'attendance', date] as const,
   },
 
   // ==================== INVENTORY DATA (5min cache) ====================

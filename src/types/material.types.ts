@@ -68,7 +68,7 @@ export type StockTransactionType =
 
 export type RequestPriority = "low" | "normal" | "high" | "urgent";
 
-export type VendorType = "shop" | "dealer" | "manufacturer" | "individual";
+export type VendorType = "shop" | "dealer" | "manufacturer" | "individual" | "rental_store";
 
 export type DeliveryVerificationStatus = "pending" | "verified" | "disputed" | "rejected";
 
@@ -1218,6 +1218,7 @@ export const VENDOR_TYPE_LABELS: Record<VendorType, string> = {
   dealer: "Dealer",
   manufacturer: "Manufacturer",
   individual: "Individual",
+  rental_store: "Rental Store",
 };
 
 export const VENDOR_TYPE_ICONS: Record<VendorType, string> = {
@@ -1225,6 +1226,7 @@ export const VENDOR_TYPE_ICONS: Record<VendorType, string> = {
   dealer: "local_shipping",
   manufacturer: "factory",
   individual: "person",
+  rental_store: "handyman",
 };
 
 export const DELIVERY_VERIFICATION_STATUS_LABELS: Record<DeliveryVerificationStatus, string> = {

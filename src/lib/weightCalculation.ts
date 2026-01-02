@@ -99,10 +99,10 @@ export function formatQuantityWithWeight(
   return baseText;
 }
 
-// Common TMT bar weights per piece (12m standard length)
+// Common TMT bar weights per piece (40ft / ~12m standard length)
+// Note: 6mm removed as not available in local shops
 export const TMT_WEIGHTS: Record<string, number> = {
-  "6mm": 0.222, // kg per 12m piece
-  "8mm": 0.395,
+  "8mm": 0.395, // kg per piece
   "10mm": 0.617,
   "12mm": 0.888,
   "16mm": 1.58,
@@ -112,8 +112,8 @@ export const TMT_WEIGHTS: Record<string, number> = {
 };
 
 // Standard rods per bundle for different TMT sizes
+// Note: 6mm removed as not available in local shops
 export const TMT_RODS_PER_BUNDLE: Record<string, number> = {
-  "6mm": 12,
   "8mm": 10,
   "10mm": 7,
   "12mm": 5,
@@ -123,5 +123,6 @@ export const TMT_RODS_PER_BUNDLE: Record<string, number> = {
   "32mm": 2,
 };
 
-// Standard length for TMT bars in meters
-export const TMT_STANDARD_LENGTH = 12;
+// Standard length for TMT bars (40 feet is standard in local market)
+export const TMT_STANDARD_LENGTH = 40;
+export const TMT_STANDARD_LENGTH_UNIT = "ft";

@@ -36,9 +36,11 @@ import {
 } from "@mui/icons-material";
 import { createClient } from "@/lib/supabase/client";
 import FileUploader, { UploadedFile } from "@/components/common/FileUploader";
+import PayerSourceSelector from "@/components/settlement/PayerSourceSelector";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSite } from "@/contexts/SiteContext";
 import type { TeaShopAccount, TeaShopEntry, TeaShopSettlement, PaymentMode, Subcontract } from "@/types/database.types";
+import type { PayerSource } from "@/types/settlement.types";
 import dayjs from "dayjs";
 
 interface TeaShopSettlementDialogProps {
@@ -104,6 +106,8 @@ export default function TeaShopSettlementDialog({
   const [createWalletTransaction, setCreateWalletTransaction] = useState(true);
   const [notes, setNotes] = useState("");
   const [proofUrl, setProofUrl] = useState<string | null>(null);
+  const [payerSource, setPayerSource] = useState<PayerSource>("own_money");
+  const [customPayerName, setCustomPayerName] = useState("");
 
   // Site engineers list
   const [engineers, setEngineers] = useState<SiteEngineer[]>([]);
@@ -134,6 +138,8 @@ export default function TeaShopSettlementDialog({
         setNotes(settlement.notes || "");
         setSelectedSubcontractId(settlement.subcontract_id || "");
         setProofUrl((settlement as any).proof_url || null);
+        setPayerSource((settlement as any).payer_source || "own_money");
+        setCustomPayerName((settlement as any).payer_name || "");
       } else {
         // New settlement - reset form
         setAmountPaying(pendingBalance);
@@ -145,6 +151,8 @@ export default function TeaShopSettlementDialog({
         setNotes("");
         setSelectedSubcontractId("");
         setProofUrl(null);
+        setPayerSource("own_money");
+        setCustomPayerName("");
       }
       setError(null);
     }
@@ -332,6 +340,10 @@ export default function TeaShopSettlementDialog({
         recorded_by_user_id: userProfile?.id || null,
         subcontract_id: selectedSubcontractId || null,
         proof_url: proofUrl,
+        payer_source: payerSource,
+        payer_name: (payerSource === "custom" || payerSource === "other_site_money")
+          ? customPayerName
+          : null,
       };
 
       let settlementId: string;
@@ -634,6 +646,15 @@ export default function TeaShopSettlementDialog({
             </Box>
           )}
         </Paper>
+
+        {/* Payment Source */}
+        <PayerSourceSelector
+          value={payerSource}
+          customName={customPayerName}
+          onChange={setPayerSource}
+          onCustomNameChange={setCustomPayerName}
+          compact
+        />
 
         {/* Link to Subcontract (Optional) */}
         <FormControl fullWidth size="small" sx={{ mb: 3 }}>

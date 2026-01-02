@@ -29,10 +29,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .from("users")
         .select("*")
         .eq("auth_id", userId)
-        .single();
+        .maybeSingle();
 
       if (error) {
         console.error("[AuthContext] Error fetching user profile:", error);
+        setUserProfile(null);
+        return;
+      }
+
+      if (!data) {
+        console.warn("[AuthContext] No profile found for auth user:", userId);
         setUserProfile(null);
         return;
       }

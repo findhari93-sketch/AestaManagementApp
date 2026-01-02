@@ -38,7 +38,10 @@ import {
   EventBusy as NoEntryIcon,
   Visibility as ViewIcon,
   CheckCircle as CheckCircleIcon,
+  Groups as GroupsIcon,
 } from "@mui/icons-material";
+import Switch from "@mui/material/Switch";
+import FormControlLabel from "@mui/material/FormControlLabel";
 import { createClient } from "@/lib/supabase/client";
 import { useSite } from "@/contexts/SiteContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -49,7 +52,17 @@ import TeaShopDrawer from "@/components/tea-shop/TeaShopDrawer";
 import TeaShopEntryDialog from "@/components/tea-shop/TeaShopEntryDialog";
 import AuditAvatarGroup from "@/components/common/AuditAvatarGroup";
 import TeaShopSettlementDialog from "@/components/tea-shop/TeaShopSettlementDialog";
-import type { TeaShopAccount, TeaShopEntry, TeaShopSettlement, TeaShopEntryExtended, SiteHoliday } from "@/types/database.types";
+import GroupTeaShopEntryDialog from "@/components/tea-shop/GroupTeaShopEntryDialog";
+import GroupTeaShopSettlementDialog from "@/components/tea-shop/GroupTeaShopSettlementDialog";
+import type { TeaShopAccount, TeaShopEntry, TeaShopSettlement, TeaShopEntryExtended, SiteHoliday, TeaShopGroupEntryWithAllocations } from "@/types/database.types";
+import type { SiteGroupWithSites } from "@/types/material.types";
+import {
+  useGroupTeaShopAccount,
+  useGroupTeaShopEntries,
+  useGroupTeaShopPendingBalance,
+  useGroupTeaShopSettlements,
+} from "@/hooks/queries/useGroupTeaShop";
+import { useSiteGroup } from "@/hooks/queries/useSiteGroups";
 
 // Types for combined entries view
 type CombinedEntryType =
@@ -99,10 +112,64 @@ export default function TeaShopPage() {
   const [editingEntry, setEditingEntry] = useState<TeaShopEntry | null>(null);
   const [editingSettlement, setEditingSettlement] = useState<TeaShopSettlement | null>(null);
 
+  // Group mode state
+  const [isGroupMode, setIsGroupMode] = useState(false);
+  const [editingGroupEntry, setEditingGroupEntry] = useState<TeaShopGroupEntryWithAllocations | null>(null);
+
+  // Check if site is in a group
+  const siteGroupId = selectedSite?.site_group_id as string | undefined;
+  const { data: siteGroup } = useSiteGroup(siteGroupId);
+
+  // Group tea shop data (only fetched when in group mode)
+  const { data: groupShop } = useGroupTeaShopAccount(isGroupMode ? siteGroupId : undefined);
+  const { data: groupEntries } = useGroupTeaShopEntries(isGroupMode ? siteGroupId : undefined);
+  const { data: groupPendingData } = useGroupTeaShopPendingBalance(isGroupMode ? siteGroupId : undefined);
+  const { data: groupSettlements } = useGroupTeaShopSettlements(isGroupMode ? siteGroupId : undefined);
+
+  const groupPendingBalance = groupPendingData?.pending || 0;
+
+  // Auto-enable group mode if a group shop exists
+  useEffect(() => {
+    if (groupShop && siteGroupId) {
+      setIsGroupMode(true);
+    }
+  }, [groupShop, siteGroupId]);
+
   const canEdit = hasEditPermission(userProfile?.role);
 
   // Calculate summary stats
   const stats = useMemo(() => {
+    // Use group data when in group mode, site data otherwise
+    if (isGroupMode && groupEntries) {
+      const weekStart = dayjs().startOf("week").format("YYYY-MM-DD");
+      const monthStart = dayjs().startOf("month").format("YYYY-MM-DD");
+
+      const thisWeekTotal = groupEntries
+        .filter((e: any) => e.date >= weekStart)
+        .reduce((sum: number, e: any) => sum + (e.total_amount || 0), 0);
+
+      const thisMonthTotal = groupEntries
+        .filter((e: any) => e.date >= monthStart)
+        .reduce((sum: number, e: any) => sum + (e.total_amount || 0), 0);
+
+      const lastGroupSettlement = groupSettlements && groupSettlements.length > 0
+        ? groupSettlements.reduce((latest: any, s: any) =>
+            new Date(s.payment_date) > new Date(latest.payment_date) ? s : latest
+          )
+        : null;
+
+      return {
+        totalEntries: groupEntries.reduce((sum: number, e: any) => sum + (e.total_amount || 0), 0),
+        totalTea: 0, // Group entries don't track tea/snacks separately
+        totalSnacks: 0,
+        pendingBalance: groupPendingBalance,
+        thisWeekTotal,
+        thisMonthTotal,
+        lastSettlement: lastGroupSettlement,
+      };
+    }
+
+    // Site-specific stats
     const filteredEntries = isAllTime
       ? entries
       : entries.filter(
@@ -146,7 +213,7 @@ export default function TeaShopPage() {
       thisMonthTotal,
       lastSettlement,
     };
-  }, [entries, settlements, dateFrom, dateTo, isAllTime]);
+  }, [entries, settlements, dateFrom, dateTo, isAllTime, isGroupMode, groupEntries, groupSettlements, groupPendingBalance]);
 
   const fetchData = async () => {
     if (!selectedSite) return;
@@ -339,19 +406,53 @@ export default function TeaShopPage() {
       {/* Header */}
       <PageHeader
         title="Tea Shop"
-        subtitle={shop ? shop.shop_name : "No shop configured"}
+        subtitle={
+          isGroupMode
+            ? groupShop
+              ? `${groupShop.shop_name} - ${siteGroup?.sites?.length || 0} sites: ${siteGroup?.sites?.map((s: any) => s.name).join(", ") || ""}`
+              : `Group: ${siteGroup?.name || ""} - No group shop configured`
+            : shop
+            ? shop.shop_name
+            : "No shop configured"
+        }
         actions={
-          <Box sx={{ display: "flex", gap: 0.5 }}>
+          <Box sx={{ display: "flex", gap: 0.5, alignItems: "center" }}>
+            {/* Group Mode Toggle - only show if site is in a group */}
+            {siteGroupId && (
+              <FormControlLabel
+                control={
+                  <Switch
+                    size="small"
+                    checked={isGroupMode}
+                    onChange={(e) => setIsGroupMode(e.target.checked)}
+                    color="secondary"
+                  />
+                }
+                label={
+                  <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                    <GroupsIcon fontSize="small" color={isGroupMode ? "secondary" : "disabled"} />
+                    <Typography variant="caption" sx={{ display: { xs: "none", sm: "block" } }}>
+                      Group
+                    </Typography>
+                  </Box>
+                }
+                sx={{ mr: 1 }}
+              />
+            )}
             {/* Desktop buttons - hidden on mobile via CSS */}
             <Box sx={{ display: { xs: 'none', sm: 'flex' }, gap: 0.5 }}>
-              {shop && (
+              {(isGroupMode ? groupShop : shop) && (
                 <>
                   <Button
                     variant="contained"
                     color="primary"
                     startIcon={<AddIcon />}
                     onClick={() => {
-                      setEditingEntry(null);
+                      if (isGroupMode) {
+                        setEditingGroupEntry(null);
+                      } else {
+                        setEditingEntry(null);
+                      }
                       setEntryDialogOpen(true);
                     }}
                     disabled={!canEdit}
@@ -363,7 +464,7 @@ export default function TeaShopPage() {
                     variant="outlined"
                     startIcon={<PaymentIcon />}
                     onClick={() => setSettlementDialogOpen(true)}
-                    disabled={!canEdit || stats.pendingBalance <= 0}
+                    disabled={!canEdit || (isGroupMode ? groupPendingBalance <= 0 : stats.pendingBalance <= 0)}
                     size="small"
                   >
                     Pay Shop
@@ -452,8 +553,8 @@ export default function TeaShopPage() {
         </Grid>
       </Grid>
 
-      {/* No Shop Alert */}
-      {!shop && !loading && (
+      {/* No Shop Alert - Site Mode */}
+      {!isGroupMode && !shop && !loading && (
         <Alert
           severity="info"
           action={
@@ -466,8 +567,31 @@ export default function TeaShopPage() {
         </Alert>
       )}
 
+      {/* Group Mode Alert - No Group Shop Configured */}
+      {isGroupMode && !groupShop && !loading && siteGroup && (
+        <Alert
+          severity="info"
+          sx={{ mb: 2 }}
+          action={
+            <Button color="inherit" size="small" onClick={() => setShopDrawerOpen(true)}>
+              Configure
+            </Button>
+          }
+        >
+          <Typography fontWeight={600} sx={{ mb: 0.5 }}>Group Mode Active</Typography>
+          <Typography variant="body2">
+            Sites in group: {siteGroup.sites?.map((s: any) => s.name).join(", ") || "Loading..."}
+          </Typography>
+          <Typography variant="body2" sx={{ mt: 0.5 }}>
+            {shop
+              ? `Convert "${shop.shop_name}" to a group shop, or create a new group shop.`
+              : "Create a group tea shop to start tracking expenses for all sites together."}
+          </Typography>
+        </Alert>
+      )}
+
       {/* Tabs */}
-      {shop && (
+      {(isGroupMode ? groupShop : shop) && (
         <Paper sx={{ borderRadius: 2 }}>
           <Tabs value={tabValue} onChange={(_, v) => setTabValue(v)} sx={{ borderBottom: 1, borderColor: "divider" }}>
             <Tab label="Entries" icon={<LocalCafe />} iconPosition="start" />
@@ -956,15 +1080,18 @@ export default function TeaShopPage() {
       <TeaShopDrawer
         open={shopDrawerOpen}
         onClose={() => setShopDrawerOpen(false)}
-        shop={shop}
+        shop={isGroupMode ? groupShop ?? null : shop}
         siteId={selectedSite.id}
+        siteGroupId={siteGroupId}
+        isGroupMode={isGroupMode}
         onSuccess={() => {
           setShopDrawerOpen(false);
           fetchData();
         }}
       />
 
-      {shop && (
+      {/* Site-level dialogs (non-group mode) */}
+      {!isGroupMode && shop && (
         <>
           <TeaShopEntryDialog
             open={entryDialogOpen}
@@ -1003,15 +1130,54 @@ export default function TeaShopPage() {
         </>
       )}
 
+      {/* Group-level dialogs (group mode) */}
+      {isGroupMode && groupShop && siteGroup && (
+        <>
+          <GroupTeaShopEntryDialog
+            open={entryDialogOpen}
+            onClose={() => {
+              setEntryDialogOpen(false);
+              setEditingGroupEntry(null);
+              setInitialEntryDate(undefined);
+            }}
+            shop={groupShop}
+            siteGroup={siteGroup}
+            entry={editingGroupEntry}
+            initialDate={initialEntryDate}
+            onSuccess={() => {
+              setEntryDialogOpen(false);
+              setEditingGroupEntry(null);
+              setInitialEntryDate(undefined);
+            }}
+          />
+
+          <GroupTeaShopSettlementDialog
+            open={settlementDialogOpen}
+            onClose={() => {
+              setSettlementDialogOpen(false);
+            }}
+            shop={groupShop}
+            siteGroup={siteGroup}
+            onSuccess={() => {
+              setSettlementDialogOpen(false);
+            }}
+          />
+        </>
+      )}
+
       {/* Mobile FAB - always rendered, visibility controlled by CSS */}
       <Fab
         color="primary"
         onClick={() => {
-          setEditingEntry(null);
+          if (isGroupMode) {
+            setEditingGroupEntry(null);
+          } else {
+            setEditingEntry(null);
+          }
           setEntryDialogOpen(true);
         }}
         sx={{
-          display: shop && canEdit ? { xs: 'flex', sm: 'none' } : 'none',
+          display: (isGroupMode ? groupShop : shop) && canEdit ? { xs: 'flex', sm: 'none' } : 'none',
           position: "fixed",
           bottom: 16,
           right: 16,

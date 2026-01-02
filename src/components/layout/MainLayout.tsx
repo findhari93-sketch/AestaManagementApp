@@ -74,6 +74,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useThemeMode } from "@/contexts/ThemeContext";
 import { useSyncStatus } from "@/hooks/useSyncStatus";
 import SiteSelector from "@/components/layout/SiteSelector";
+import { useSite } from "@/contexts/SiteContext";
 import NotificationBell from "@/components/notifications/NotificationBell";
 import ActiveSectionChip from "@/components/layout/ActiveSectionChip";
 import SettlementDialogManager from "@/components/settlement/SettlementDialogManager";
@@ -247,11 +248,6 @@ const companyNavCategories: NavCategory[] = [
         path: "/company/contracts",
       },
       {
-        text: "Salary & Payments",
-        icon: <AccountBalanceWalletIcon />,
-        path: "/company/salary",
-      },
-      {
         text: "Engineer Wallet",
         icon: <PaymentIcon />,
         path: "/company/engineer-wallet",
@@ -348,6 +344,7 @@ export default function MainLayout({
   const isMobile = useIsMobile("md");
   const { mode, toggleTheme } = useThemeMode();
   const syncStatus = useSyncStatus();
+  const { selectedSite } = useSite();
   const {
     startDate,
     endDate,
@@ -955,6 +952,7 @@ export default function MainLayout({
               startDate={startDate}
               endDate={endDate}
               onChange={(start, end) => setDateRange(start, end)}
+              minDate={selectedSite?.start_date ? new Date(selectedSite.start_date) : undefined}
             />
 
             {/* Quick Filter Chips - Hidden on mobile */}

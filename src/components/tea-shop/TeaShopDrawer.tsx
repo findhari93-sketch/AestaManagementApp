@@ -30,6 +30,8 @@ interface TeaShopDrawerProps {
   onClose: () => void;
   shop: TeaShopAccount | null;
   siteId: string;
+  siteGroupId?: string;
+  isGroupMode?: boolean;
   onSuccess?: () => void;
 }
 
@@ -38,6 +40,8 @@ export default function TeaShopDrawer({
   onClose,
   shop,
   siteId,
+  siteGroupId,
+  isGroupMode = false,
   onSuccess,
 }: TeaShopDrawerProps) {
   const { userProfile } = useAuth();
@@ -60,6 +64,9 @@ export default function TeaShopDrawer({
   const [upiId, setUpiId] = useState("");
   const [qrCodeUrl, setQrCodeUrl] = useState<string | null>(null);
 
+  // Group shop state
+  const [isGroupShop, setIsGroupShop] = useState(false);
+
   useEffect(() => {
     if (open) {
       if (shop) {
@@ -72,6 +79,8 @@ export default function TeaShopDrawer({
         // Load payment info
         setUpiId((shop as any).upi_id || "");
         setQrCodeUrl((shop as any).qr_code_url || null);
+        // Load group shop info
+        setIsGroupShop((shop as any).is_group_shop || false);
       } else {
         // Reset for new shop
         setShopName("");
@@ -82,10 +91,12 @@ export default function TeaShopDrawer({
         setIsActive(true);
         setUpiId("");
         setQrCodeUrl(null);
+        // Default to group shop if in group mode
+        setIsGroupShop(isGroupMode && !!siteGroupId);
       }
       setError(null);
     }
-  }, [open, shop]);
+  }, [open, shop, isGroupMode, siteGroupId]);
 
   // Handle QR code image upload
   const handleQrCodeUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -148,12 +159,17 @@ export default function TeaShopDrawer({
       return;
     }
 
+    // Validate group shop requires a group
+    if (isGroupShop && !siteGroupId) {
+      setError("Cannot create group shop: site is not in a group");
+      return;
+    }
+
     setLoading(true);
     setError(null);
 
     try {
-      const shopData = {
-        site_id: siteId,
+      const shopData: Record<string, any> = {
         shop_name: shopName.trim(),
         owner_name: ownerName.trim() || null,
         contact_phone: contactPhone.trim() || null,
@@ -162,7 +178,17 @@ export default function TeaShopDrawer({
         is_active: isActive,
         upi_id: upiId.trim() || null,
         qr_code_url: qrCodeUrl || null,
+        is_group_shop: isGroupShop,
       };
+
+      // Set site_id or site_group_id based on group shop setting
+      if (isGroupShop && siteGroupId) {
+        shopData.site_group_id = siteGroupId;
+        shopData.site_id = null;
+      } else {
+        shopData.site_id = siteId;
+        shopData.site_group_id = null;
+      }
 
       if (shop) {
         // Update existing shop
@@ -354,6 +380,47 @@ export default function TeaShopDrawer({
               </Box>
             )}
           </Paper>
+
+          {/* Group Shop Toggle - only show if site is in a group */}
+          {siteGroupId && (
+            <Paper
+              variant="outlined"
+              sx={{
+                p: 2,
+                bgcolor: isGroupShop ? "secondary.50" : "grey.50",
+                borderColor: isGroupShop ? "secondary.main" : "divider",
+              }}
+            >
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={isGroupShop}
+                    onChange={(e) => setIsGroupShop(e.target.checked)}
+                    color="secondary"
+                  />
+                }
+                label={
+                  <Box>
+                    <Typography variant="body2" fontWeight={600}>
+                      Group Tea Shop
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      This shop serves all sites in the group
+                    </Typography>
+                  </Box>
+                }
+              />
+              {/* Show warning when converting existing site shop to group shop */}
+              {shop && !((shop as any).is_group_shop) && isGroupShop && (
+                <Alert severity="info" sx={{ mt: 1 }}>
+                  <Typography variant="caption">
+                    Converting to group shop: This shop will serve all sites in the group.
+                    Existing site-specific entries will remain unchanged.
+                  </Typography>
+                </Alert>
+              )}
+            </Paper>
+          )}
 
           {shop && (
             <FormControlLabel

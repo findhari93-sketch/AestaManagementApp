@@ -1,0 +1,293 @@
+"use client";
+
+import {
+  Box,
+  Typography,
+  Paper,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableRow,
+  Chip,
+  Divider,
+} from "@mui/material";
+import {
+  Warning as WarningIcon,
+  CheckCircle as CheckIcon,
+} from "@mui/icons-material";
+import type { RentalCostCalculation } from "@/types/rental.types";
+import dayjs from "dayjs";
+
+interface RentalCostBreakdownProps {
+  calculation: RentalCostCalculation;
+  showItemDetails?: boolean;
+  compact?: boolean;
+}
+
+export default function RentalCostBreakdown({
+  calculation,
+  showItemDetails = true,
+  compact = false,
+}: RentalCostBreakdownProps) {
+  const {
+    startDate,
+    currentDate,
+    expectedReturnDate,
+    daysElapsed,
+    itemsCost,
+    subtotal,
+    discountAmount,
+    transportCostOutward,
+    transportCostReturn,
+    totalTransportCost,
+    damagesCost,
+    grossTotal,
+    advancesPaid,
+    balanceDue,
+    isOverdue,
+    daysOverdue,
+  } = calculation;
+
+  return (
+    <Paper variant="outlined" sx={{ p: compact ? 1.5 : 2 }}>
+      {/* Header */}
+      <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+        <Typography variant="subtitle2" color="text.secondary">
+          COST BREAKDOWN
+        </Typography>
+        <Box display="flex" alignItems="center" gap={1}>
+          <Chip
+            size="small"
+            label={`${daysElapsed} days`}
+            color="primary"
+            variant="outlined"
+          />
+          {isOverdue && (
+            <Chip
+              size="small"
+              icon={<WarningIcon />}
+              label={`${daysOverdue} days overdue`}
+              color="error"
+            />
+          )}
+        </Box>
+      </Box>
+
+      {/* Date Info */}
+      <Box display="flex" gap={3} mb={2} flexWrap="wrap">
+        <Box>
+          <Typography variant="caption" color="text.secondary">
+            Start Date
+          </Typography>
+          <Typography variant="body2" fontWeight={500}>
+            {dayjs(startDate).format("DD MMM YYYY")}
+          </Typography>
+        </Box>
+        {expectedReturnDate && (
+          <Box>
+            <Typography variant="caption" color="text.secondary">
+              Expected Return
+            </Typography>
+            <Typography
+              variant="body2"
+              fontWeight={500}
+              color={isOverdue ? "error.main" : "text.primary"}
+            >
+              {dayjs(expectedReturnDate).format("DD MMM YYYY")}
+            </Typography>
+          </Box>
+        )}
+        <Box>
+          <Typography variant="caption" color="text.secondary">
+            As of
+          </Typography>
+          <Typography variant="body2" fontWeight={500}>
+            {dayjs(currentDate).format("DD MMM YYYY")}
+          </Typography>
+        </Box>
+      </Box>
+
+      {/* Item Details Table */}
+      {showItemDetails && itemsCost.length > 0 && (
+        <>
+          <Table size="small" sx={{ mb: 2 }}>
+            <TableHead>
+              <TableRow>
+                <TableCell sx={{ fontWeight: 600, fontSize: "0.75rem", py: 1 }}>
+                  Item
+                </TableCell>
+                <TableCell
+                  align="right"
+                  sx={{ fontWeight: 600, fontSize: "0.75rem", py: 1 }}
+                >
+                  Qty
+                </TableCell>
+                <TableCell
+                  align="right"
+                  sx={{ fontWeight: 600, fontSize: "0.75rem", py: 1 }}
+                >
+                  Rate/Day
+                </TableCell>
+                <TableCell
+                  align="right"
+                  sx={{ fontWeight: 600, fontSize: "0.75rem", py: 1 }}
+                >
+                  Days
+                </TableCell>
+                <TableCell
+                  align="right"
+                  sx={{ fontWeight: 600, fontSize: "0.75rem", py: 1 }}
+                >
+                  Amount
+                </TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {itemsCost.map((item) => (
+                <TableRow key={item.itemId}>
+                  <TableCell sx={{ py: 0.75, fontSize: "0.8rem" }}>
+                    <Box>
+                      <Typography variant="body2" fontSize="0.8rem">
+                        {item.itemName}
+                      </Typography>
+                      {item.quantityReturned > 0 && (
+                        <Typography variant="caption" color="success.main">
+                          {item.quantityReturned} returned
+                        </Typography>
+                      )}
+                    </Box>
+                  </TableCell>
+                  <TableCell align="right" sx={{ py: 0.75, fontSize: "0.8rem" }}>
+                    {item.quantityOutstanding}
+                    {item.quantity !== item.quantityOutstanding && (
+                      <Typography variant="caption" color="text.secondary">
+                        /{item.quantity}
+                      </Typography>
+                    )}
+                  </TableCell>
+                  <TableCell align="right" sx={{ py: 0.75, fontSize: "0.8rem" }}>
+                    ₹{item.dailyRate}
+                  </TableCell>
+                  <TableCell align="right" sx={{ py: 0.75, fontSize: "0.8rem" }}>
+                    {item.daysRented}
+                  </TableCell>
+                  <TableCell
+                    align="right"
+                    sx={{ py: 0.75, fontSize: "0.8rem", fontWeight: 600 }}
+                  >
+                    ₹{item.subtotal.toLocaleString()}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+          <Divider sx={{ my: 1.5 }} />
+        </>
+      )}
+
+      {/* Cost Summary */}
+      <Box display="flex" flexDirection="column" gap={0.75}>
+        <Box display="flex" justifyContent="space-between">
+          <Typography variant="body2" color="text.secondary">
+            Items Subtotal
+          </Typography>
+          <Typography variant="body2">₹{subtotal.toLocaleString()}</Typography>
+        </Box>
+
+        {discountAmount > 0 && (
+          <Box display="flex" justifyContent="space-between">
+            <Typography variant="body2" color="success.main">
+              Discount
+            </Typography>
+            <Typography variant="body2" color="success.main">
+              -₹{discountAmount.toLocaleString()}
+            </Typography>
+          </Box>
+        )}
+
+        {transportCostOutward > 0 && (
+          <Box display="flex" justifyContent="space-between">
+            <Typography variant="body2" color="text.secondary">
+              Transport (Outward)
+            </Typography>
+            <Typography variant="body2">
+              ₹{transportCostOutward.toLocaleString()}
+            </Typography>
+          </Box>
+        )}
+
+        {transportCostReturn > 0 && (
+          <Box display="flex" justifyContent="space-between">
+            <Typography variant="body2" color="text.secondary">
+              Transport (Return)
+            </Typography>
+            <Typography variant="body2">
+              ₹{transportCostReturn.toLocaleString()}
+            </Typography>
+          </Box>
+        )}
+
+        {damagesCost > 0 && (
+          <Box display="flex" justifyContent="space-between">
+            <Typography variant="body2" color="error.main">
+              Damages
+            </Typography>
+            <Typography variant="body2" color="error.main">
+              ₹{damagesCost.toLocaleString()}
+            </Typography>
+          </Box>
+        )}
+
+        <Divider sx={{ my: 0.5 }} />
+
+        <Box display="flex" justifyContent="space-between">
+          <Typography variant="body2" fontWeight={600}>
+            Gross Total
+          </Typography>
+          <Typography variant="body2" fontWeight={600}>
+            ₹{grossTotal.toLocaleString()}
+          </Typography>
+        </Box>
+
+        <Box display="flex" justifyContent="space-between">
+          <Typography variant="body2" color="success.main">
+            Advances Paid
+          </Typography>
+          <Typography variant="body2" color="success.main">
+            -₹{advancesPaid.toLocaleString()}
+          </Typography>
+        </Box>
+
+        <Divider sx={{ my: 0.5 }} />
+
+        <Box
+          display="flex"
+          justifyContent="space-between"
+          alignItems="center"
+          p={1}
+          bgcolor={balanceDue > 0 ? "error.50" : "success.50"}
+          borderRadius={1}
+        >
+          <Box display="flex" alignItems="center" gap={1}>
+            {balanceDue <= 0 ? (
+              <CheckIcon color="success" fontSize="small" />
+            ) : (
+              <WarningIcon color="error" fontSize="small" />
+            )}
+            <Typography variant="subtitle2" fontWeight={700}>
+              {balanceDue > 0 ? "Balance Due" : "Credit Balance"}
+            </Typography>
+          </Box>
+          <Typography
+            variant="subtitle1"
+            fontWeight={700}
+            color={balanceDue > 0 ? "error.main" : "success.main"}
+          >
+            ₹{Math.abs(balanceDue).toLocaleString()}
+          </Typography>
+        </Box>
+      </Box>
+    </Paper>
+  );
+}

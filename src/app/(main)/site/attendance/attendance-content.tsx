@@ -71,13 +71,21 @@ import {
   CalendarMonth,
   Lock as LockIcon,
   Warning as WarningIcon,
+  WarningAmber as WarningAmberIcon,
   ArrowForward as ArrowForwardIcon,
   ArrowBack as ArrowBackIcon,
+  VisibilityOff as VisibilityOffIcon,
+  EditCalendar as EditCalendarIcon,
 } from "@mui/icons-material";
 import AttendanceDrawer from "@/components/attendance/AttendanceDrawer";
 import HolidayConfirmDialog from "@/components/attendance/HolidayConfirmDialog";
 import UnifiedSettlementDialog from "@/components/settlement/UnifiedSettlementDialog";
 import TeaShopEntryDialog from "@/components/tea-shop/TeaShopEntryDialog";
+import TeaShopEntryModeDialog from "@/components/tea-shop/TeaShopEntryModeDialog";
+import GroupTeaShopEntryDialog from "@/components/tea-shop/GroupTeaShopEntryDialog";
+import { useSiteGroup } from "@/hooks/queries/useSiteGroups";
+import { useGroupTeaShopAccount } from "@/hooks/queries/useGroupTeaShop";
+import type { SiteGroupWithSites } from "@/types/material.types";
 import PaymentDialog from "@/components/payments/PaymentDialog";
 import type { UnifiedSettlementConfig, SettlementRecord } from "@/types/settlement.types";
 import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
@@ -107,6 +115,19 @@ import { useSearchParams, useRouter } from "next/navigation";
 import type { LaborerType, DailyWorkSummary } from "@/types/database.types";
 import type { AttendancePageData } from "@/lib/data/attendance";
 import dayjs from "dayjs";
+import {
+  groupHolidays,
+  formatHolidayDateRange,
+  formatHolidayDayRange,
+  type HolidayGroup,
+} from "@/lib/utils/holidayUtils";
+import {
+  getUnfilledDates,
+  groupUnfilledDates,
+  formatUnfilledDateRange,
+  formatUnfilledDayRange,
+  type UnfilledGroup,
+} from "@/lib/utils/unfilledDatesUtils";
 
 interface AttendanceContentProps {
   initialData: AttendancePageData | null;
@@ -264,6 +285,11 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
   const router = useRouter();
   const theme = useTheme();
 
+  // Group tea shop support
+  const siteGroupId = (selectedSite as any)?.site_group_id as string | undefined;
+  const { data: siteGroup } = useSiteGroup(siteGroupId);
+  const { data: groupTeaShop } = useGroupTeaShopAccount(siteGroupId);
+
   const { dateFrom, dateTo } = formatForApi();
 
   // URL params for highlighting (from redirect)
@@ -347,6 +373,8 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
     null
   );
   const [teaShopEditingEntry, setTeaShopEditingEntry] = useState<any>(null);
+  const [teaShopEntryModeDialogOpen, setTeaShopEntryModeDialogOpen] = useState(false);
+  const [groupTeaShopDialogOpen, setGroupTeaShopDialogOpen] = useState(false);
 
   // Work update viewer state
   const [workUpdateViewerOpen, setWorkUpdateViewerOpen] = useState(false);
@@ -390,6 +418,36 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
       created_by: string | null;
     }>
   >([]);
+
+  // Show/hide holidays toggle with session persistence
+  const [showHolidays, setShowHolidays] = useState(() => {
+    if (typeof window === "undefined") return true;
+    try {
+      const stored = sessionStorage.getItem("attendance_showHolidays");
+      return stored === null ? true : stored === "true";
+    } catch {
+      return true;
+    }
+  });
+
+  // Persist showHolidays preference to sessionStorage
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      try {
+        sessionStorage.setItem("attendance_showHolidays", String(showHolidays));
+      } catch {
+        // Ignore storage errors
+      }
+    }
+  }, [showHolidays]);
+
+  // Unfilled dates tracking state
+  const [expandedUnfilledGroups, setExpandedUnfilledGroups] = useState<Set<string>>(new Set());
+  const [unfilledActionDialog, setUnfilledActionDialog] = useState<{
+    open: boolean;
+    date: string;
+    isHoliday?: boolean;
+  } | null>(null);
 
   // SpeedDial controlled state (click-only, not hover)
   const [speedDialOpen, setSpeedDialOpen] = useState(false);
@@ -925,33 +983,70 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
     const attendanceDates = new Set(dateSummaries.map((s) => s.date));
 
     // Filter holidays within selected date range that don't have attendance
-    const holidayOnlyEntries = recentHolidays
-      .filter((h) => {
-        if (!dateFrom || !dateTo) return false;
-        const hDate = h.date;
-        return (
-          hDate >= dateFrom && hDate <= dateTo && !attendanceDates.has(hDate)
-        );
-      })
-      .map((h) => ({
-        type: "holiday" as const,
-        date: h.date,
-        holiday: h,
-      }));
+    const holidaysWithoutAttendance = recentHolidays.filter((h) => {
+      if (!dateFrom || !dateTo) return false;
+      const hDate = h.date;
+      return hDate >= dateFrom && hDate <= dateTo && !attendanceDates.has(hDate);
+    });
+
+    // Group consecutive holidays with the same reason
+    const holidayGroups = groupHolidays(holidaysWithoutAttendance);
+
+    // Create grouped holiday entries (only if showHolidays is true)
+    const holidayGroupEntries = showHolidays
+      ? holidayGroups.map((group) => ({
+          type: "holiday_group" as const,
+          date: group.startDate,
+          endDate: group.endDate,
+          group,
+        }))
+      : [];
+
+    // Calculate unfilled dates (dates with no attendance AND no holiday)
+    // Use project start date if available, otherwise use the earliest visible date
+    const projectStart = selectedSite?.start_date || dateFrom;
+    // Use today as the end boundary (don't show future dates as unfilled)
+    const todayStr = dayjs().format("YYYY-MM-DD");
+    const projectEnd = dateTo && dateTo < todayStr ? dateTo : todayStr;
+
+    // Get all holiday dates for unfilled calculation
+    const holidayDates = new Set(recentHolidays.map((h) => h.date));
+
+    // Calculate unfilled dates within the visible range, bounded by project dates
+    const effectiveStart = dateFrom && projectStart ? (dateFrom > projectStart ? dateFrom : projectStart) : (dateFrom || projectStart);
+    const effectiveEnd = dateTo && projectEnd ? (dateTo < projectEnd ? dateTo : projectEnd) : (dateTo || projectEnd);
+
+    const unfilledDates = effectiveStart && effectiveEnd && showHolidays
+      ? getUnfilledDates(effectiveStart, effectiveEnd, attendanceDates, holidayDates)
+      : [];
+
+    // Group consecutive unfilled dates
+    const unfilledGroups = groupUnfilledDates(unfilledDates);
+
+    // Create unfilled group entries
+    const unfilledGroupEntries = unfilledGroups.map((group) => ({
+      type: "unfilled_group" as const,
+      date: group.startDate,
+      endDate: group.endDate,
+      group,
+    }));
 
     // Map dateSummaries and check if each date is also a holiday
+    // Only show holiday indicator if showHolidays is true
     const attendanceEntries = dateSummaries.map((s) => {
-      const holiday = recentHolidays.find((h) => h.date === s.date);
+      const holiday = showHolidays
+        ? recentHolidays.find((h) => h.date === s.date) || null
+        : null;
       return {
         type: "attendance" as const,
         date: s.date,
         summary: s,
-        holiday: holiday || null,
+        holiday,
       };
     });
 
     // Combine and sort by date descending
-    const combined = [...attendanceEntries, ...holidayOnlyEntries].sort(
+    const combined = [...attendanceEntries, ...holidayGroupEntries, ...unfilledGroupEntries].sort(
       (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
     );
 
@@ -960,7 +1055,8 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
     // separator AFTER all entries of one week, BEFORE entries of the previous week.
     type CombinedEntry =
       | { type: "attendance"; date: string; summary: DateSummary; holiday: typeof recentHolidays[0] | null }
-      | { type: "holiday"; date: string; holiday: typeof recentHolidays[0] }
+      | { type: "holiday_group"; date: string; endDate: string; group: HolidayGroup }
+      | { type: "unfilled_group"; date: string; endDate: string; group: UnfilledGroup }
       | { type: "weekly_separator"; date: string; weeklySummary: WeeklySummary };
 
     const withWeeklySeparators: CombinedEntry[] = [];
@@ -1065,7 +1161,7 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
     });
 
     return withWeeklySeparators;
-  }, [dateSummaries, recentHolidays, dateFrom, dateTo]);
+  }, [dateSummaries, recentHolidays, dateFrom, dateTo, showHolidays, selectedSite?.start_date]);
 
   // Process initialData from server on first render
   useEffect(() => {
@@ -1295,8 +1391,12 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
     }
 
     const today = dayjs().format("YYYY-MM-DD");
-    const thirtyDaysAgo = dayjs().subtract(30, "day").format("YYYY-MM-DD");
     const thirtyDaysLater = dayjs().add(30, "day").format("YYYY-MM-DD");
+
+    // Use dateFrom if available, otherwise default to 30 days ago
+    const queryFrom = dateFrom || dayjs().subtract(30, "day").format("YYYY-MM-DD");
+    // Use dateTo or 30 days in future, whichever is later (to show upcoming holidays)
+    const queryTo = dateTo && dateTo > thirtyDaysLater ? dateTo : thirtyDaysLater;
 
     try {
       // Check today's holiday (use maybeSingle to avoid error when no holiday exists)
@@ -1312,13 +1412,13 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
       }
       setTodayHoliday(todayData || null);
 
-      // Fetch recent and upcoming holidays (last 30 days to next 30 days)
+      // Fetch holidays within the selected date range (plus upcoming holidays)
       const { data: holidaysData, error: holidaysError } = await supabase
         .from("site_holidays")
         .select("*")
         .eq("site_id", selectedSite.id)
-        .gte("date", thirtyDaysAgo)
-        .lte("date", thirtyDaysLater)
+        .gte("date", queryFrom)
+        .lte("date", queryTo)
         .order("date", { ascending: false });
 
       if (holidaysError) {
@@ -1328,7 +1428,7 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
     } catch (err) {
       console.error("Error checking holidays:", err);
     }
-  }, [selectedSite?.id, supabase]);
+  }, [selectedSite?.id, supabase, dateFrom, dateTo]);
 
   useEffect(() => {
     checkTodayHoliday();
@@ -1347,6 +1447,71 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
     checkTodayHoliday();
     invalidateAttendance();
   };
+
+  // Handler for filling attendance on an unfilled date
+  const handleFillUnfilledDate = useCallback((date: string) => {
+    // Check if this date is a holiday
+    const isHoliday = recentHolidays.some((h) => h.date === date);
+
+    if (isHoliday) {
+      // Show confirmation dialog to remove holiday first
+      setUnfilledActionDialog({ open: true, date, isHoliday: true });
+    } else {
+      // Open attendance drawer for this date
+      setSelectedDateForDrawer(date);
+      setDrawerMode("full");
+      setDrawerOpen(true);
+    }
+  }, [recentHolidays]);
+
+  // Handler for marking an unfilled date as holiday
+  const handleMarkUnfilledAsHoliday = useCallback((date: string) => {
+    // Check if this date has attendance
+    const hasAttendance = dateSummaries.some((s) => s.date === date);
+
+    if (hasAttendance) {
+      // Show error - cannot mark as holiday if attendance exists
+      setRestorationMessage("Cannot mark as holiday - attendance already exists for this date.");
+    } else {
+      // Open holiday dialog for this specific date
+      setHolidayDialogMode("mark");
+      setHolidayDialogOpen(true);
+      // Note: The HolidayConfirmDialog will need to be modified to accept a specific date
+      // For now, we'll use today's date behavior but this should be enhanced
+    }
+  }, [dateSummaries]);
+
+  // Handler for confirming to overwrite a holiday with attendance
+  const handleConfirmOverwriteHoliday = useCallback(async () => {
+    if (!unfilledActionDialog?.date || !selectedSite?.id) return;
+
+    try {
+      // Delete the holiday first
+      const { error: deleteError } = await supabase
+        .from("site_holidays")
+        .delete()
+        .eq("site_id", selectedSite.id)
+        .eq("date", unfilledActionDialog.date);
+
+      if (deleteError) {
+        console.error("Error deleting holiday:", deleteError);
+        setRestorationMessage("Failed to remove holiday. Please try again.");
+        return;
+      }
+
+      // Refresh holidays
+      checkTodayHoliday();
+
+      // Open attendance drawer for this date
+      setSelectedDateForDrawer(unfilledActionDialog.date);
+      setDrawerMode("full");
+      setDrawerOpen(true);
+      setUnfilledActionDialog(null);
+    } catch (err) {
+      console.error("Error overwriting holiday:", err);
+      setRestorationMessage("An error occurred. Please try again.");
+    }
+  }, [unfilledActionDialog, selectedSite?.id, supabase, checkTodayHoliday]);
 
   const toggleDateExpanded = (date: string) => {
     setDateSummaries((prev) =>
@@ -1568,6 +1733,14 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
 
   // Handler to open tea shop dialog directly
   const handleOpenTeaShopDialog = async (date: string) => {
+    // If site has a group tea shop, show entry mode dialog first
+    if (siteGroupId && groupTeaShop) {
+      setTeaShopDialogDate(date);
+      setTeaShopEntryModeDialogOpen(true);
+      return;
+    }
+
+    // Otherwise, open site-specific tea shop dialog
     const shop = await fetchTeaShopAccount();
     if (shop) {
       // Check if there's an existing entry for this date
@@ -1585,6 +1758,26 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
       setTeaShopDialogOpen(true);
     } else {
       alert("Could not load tea shop. Please try again.");
+    }
+  };
+
+  // Handler for site-specific entry from entry mode dialog
+  const handleSiteSpecificTeaEntry = async () => {
+    setTeaShopEntryModeDialogOpen(false);
+    const shop = await fetchTeaShopAccount();
+    if (shop && teaShopDialogDate) {
+      // Check if there's an existing entry for this date
+      const { data: existingEntry } = await (
+        supabase.from("tea_shop_entries") as any
+      )
+        .select("*")
+        .eq("tea_shop_id", shop.id)
+        .eq("date", teaShopDialogDate)
+        .single();
+
+      setTeaShopAccount(shop);
+      setTeaShopEditingEntry(existingEntry || null);
+      setTeaShopDialogOpen(true);
     }
   };
 
@@ -2743,7 +2936,7 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
                         zIndex: 3,
                       }}
                     ></TableCell>
-                    {/* Sticky date column */}
+                    {/* Sticky date column with holiday toggle */}
                     <TableCell
                       sx={{
                         bgcolor: "primary.dark",
@@ -2752,7 +2945,7 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
                         position: "sticky",
                         left: 40,
                         zIndex: 3,
-                        minWidth: { xs: 60, sm: 80 },
+                        minWidth: { xs: 80, sm: 120 },
                         "&::after": {
                           content: '""',
                           position: "absolute",
@@ -2765,7 +2958,49 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
                         },
                       }}
                     >
-                      Date
+                      <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                        Date
+                        <Tooltip title={showHolidays ? "Hide holidays" : "Show holidays"}>
+                          <Chip
+                            icon={
+                              showHolidays ? (
+                                <BeachAccessIcon sx={{ fontSize: "12px !important" }} />
+                              ) : (
+                                <VisibilityOffIcon sx={{ fontSize: "12px !important" }} />
+                              )
+                            }
+                            label={
+                              <Box sx={{ display: { xs: "none", sm: "inline" } }}>
+                                {showHolidays ? "On" : "Off"}
+                              </Box>
+                            }
+                            size="small"
+                            color={showHolidays ? "warning" : "default"}
+                            variant={showHolidays ? "filled" : "outlined"}
+                            onClick={() => setShowHolidays(!showHolidays)}
+                            sx={{
+                              cursor: "pointer",
+                              fontSize: "0.65rem",
+                              height: 18,
+                              minWidth: { xs: 24, sm: 50 },
+                              opacity: showHolidays ? 1 : 0.6,
+                              transition: "all 0.2s",
+                              "& .MuiChip-icon": {
+                                fontSize: "12px !important",
+                                ml: 0.5,
+                                mr: { xs: 0, sm: -0.5 },
+                              },
+                              "& .MuiChip-label": {
+                                px: { xs: 0, sm: 0.5 },
+                              },
+                              "&:hover": {
+                                opacity: 1,
+                                transform: "scale(1.05)",
+                              },
+                            }}
+                          />
+                        </Tooltip>
+                      </Box>
                     </TableCell>
                     <TableCell
                       sx={{
@@ -2937,12 +3172,12 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
                 <TableBody>
                   {combinedDateEntries.map((entry) => (
                     <React.Fragment key={entry.date}>
-                      {/* Holiday-only row (no attendance data) */}
-                      {entry.type === "holiday" && (
+                      {/* Grouped holiday row (no attendance data) */}
+                      {entry.type === "holiday_group" && (
                         <TableRow
                           sx={{
-                            bgcolor: "warning.50",
-                            "&:hover": { bgcolor: "warning.100" },
+                            bgcolor: alpha(theme.palette.warning.main, 0.08),
+                            "&:hover": { bgcolor: alpha(theme.palette.warning.main, 0.15) },
                           }}
                         >
                           <TableCell
@@ -2957,42 +3192,215 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
                               sx={{
                                 display: "flex",
                                 alignItems: "center",
-                                gap: 1.5,
+                                gap: { xs: 1, sm: 1.5 },
                                 flexWrap: "wrap",
                               }}
                             >
                               <BeachAccessIcon
-                                sx={{ color: "warning.main", fontSize: 24 }}
+                                sx={{ color: "warning.main", fontSize: { xs: 20, sm: 24 } }}
                               />
-                              <Typography
-                                variant="body2"
-                                fontWeight={600}
-                                sx={{ minWidth: 80 }}
-                              >
-                                {dayjs(entry.date).format("DD MMM")}
-                              </Typography>
-                              <Typography
-                                variant="caption"
-                                color="text.secondary"
-                              >
-                                {dayjs(entry.date).format("dddd")}
-                              </Typography>
+                              <Box sx={{ display: "flex", flexDirection: "column", gap: 0.25 }}>
+                                <Typography
+                                  variant="body2"
+                                  fontWeight={600}
+                                  sx={{ lineHeight: 1.2 }}
+                                >
+                                  {formatHolidayDateRange(entry.group)}
+                                </Typography>
+                                {entry.group.dayCount > 1 && (
+                                  <Typography
+                                    variant="caption"
+                                    color="text.secondary"
+                                    sx={{ lineHeight: 1, display: { xs: "none", sm: "block" } }}
+                                  >
+                                    {formatHolidayDayRange(entry.group)}
+                                  </Typography>
+                                )}
+                              </Box>
                               <Chip
-                                label="Holiday"
+                                label={`${entry.group.dayCount} ${entry.group.dayCount === 1 ? "day" : "days"}`}
                                 size="small"
                                 color="warning"
-                                sx={{ fontWeight: 600 }}
+                                sx={{
+                                  fontWeight: 600,
+                                  height: 22,
+                                  fontSize: "0.7rem",
+                                }}
                               />
-                              <Typography
-                                variant="body2"
-                                color="text.secondary"
-                                sx={{ fontStyle: "italic" }}
-                              >
-                                {entry.holiday?.reason || "No reason specified"}
-                              </Typography>
+                              {entry.group.reason && (
+                                <Typography
+                                  variant="body2"
+                                  color="text.secondary"
+                                  sx={{
+                                    fontStyle: "italic",
+                                    ml: { xs: 0, sm: 1 },
+                                    flex: { xs: "1 1 100%", sm: "0 1 auto" },
+                                    mt: { xs: 0.5, sm: 0 },
+                                  }}
+                                >
+                                  {entry.group.reason}
+                                </Typography>
+                              )}
                             </Box>
                           </TableCell>
                         </TableRow>
+                      )}
+
+                      {/* Unfilled dates group row */}
+                      {entry.type === "unfilled_group" && (
+                        <>
+                          <TableRow
+                            onClick={() => {
+                              setExpandedUnfilledGroups((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(entry.group.startDate)) {
+                                  next.delete(entry.group.startDate);
+                                } else {
+                                  next.add(entry.group.startDate);
+                                }
+                                return next;
+                              });
+                            }}
+                            sx={{
+                              bgcolor: alpha(theme.palette.error.main, 0.06),
+                              "&:hover": { bgcolor: alpha(theme.palette.error.main, 0.12) },
+                              cursor: "pointer",
+                            }}
+                          >
+                            <TableCell
+                              colSpan={13}
+                              sx={{
+                                py: 1.5,
+                                borderLeft: 4,
+                                borderLeftColor: "error.main",
+                              }}
+                            >
+                              <Box
+                                sx={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: { xs: 1, sm: 1.5 },
+                                  flexWrap: "wrap",
+                                }}
+                              >
+                                {expandedUnfilledGroups.has(entry.group.startDate) ? (
+                                  <ExpandLess sx={{ color: "error.main", fontSize: { xs: 20, sm: 24 } }} />
+                                ) : (
+                                  <ExpandMore sx={{ color: "error.main", fontSize: { xs: 20, sm: 24 } }} />
+                                )}
+                                <WarningAmberIcon
+                                  sx={{ color: "error.main", fontSize: { xs: 20, sm: 24 } }}
+                                />
+                                <Box sx={{ display: "flex", flexDirection: "column", gap: 0.25 }}>
+                                  <Typography
+                                    variant="body2"
+                                    fontWeight={600}
+                                    sx={{ lineHeight: 1.2 }}
+                                  >
+                                    {formatUnfilledDateRange(entry.group)}
+                                  </Typography>
+                                  {entry.group.dayCount > 1 && (
+                                    <Typography
+                                      variant="caption"
+                                      color="text.secondary"
+                                      sx={{ lineHeight: 1, display: { xs: "none", sm: "block" } }}
+                                    >
+                                      {formatUnfilledDayRange(entry.group)}
+                                    </Typography>
+                                  )}
+                                </Box>
+                                <Chip
+                                  label={`${entry.group.dayCount} ${entry.group.dayCount === 1 ? "day" : "days"} unfilled`}
+                                  size="small"
+                                  color="error"
+                                  variant="outlined"
+                                  sx={{
+                                    fontWeight: 600,
+                                    height: 22,
+                                    fontSize: "0.7rem",
+                                  }}
+                                />
+                                <Typography
+                                  variant="caption"
+                                  color="text.secondary"
+                                  sx={{
+                                    ml: "auto",
+                                    display: { xs: "none", sm: "block" },
+                                  }}
+                                >
+                                  Click to expand
+                                </Typography>
+                              </Box>
+                            </TableCell>
+                          </TableRow>
+                          {/* Expanded individual unfilled date rows */}
+                          <TableRow>
+                            <TableCell colSpan={13} sx={{ p: 0, border: 0 }}>
+                              <Collapse in={expandedUnfilledGroups.has(entry.group.startDate)} unmountOnExit>
+                                <Table size="small">
+                                  <TableBody>
+                                    {entry.group.dates.map((date) => (
+                                      <TableRow
+                                        key={date}
+                                        sx={{
+                                          bgcolor: alpha(theme.palette.error.main, 0.03),
+                                          "&:hover": { bgcolor: alpha(theme.palette.error.main, 0.08) },
+                                        }}
+                                      >
+                                        <TableCell sx={{ pl: 6, width: 150 }}>
+                                          <Typography variant="body2">
+                                            {dayjs(date).format("DD MMM")}
+                                            <Typography
+                                              component="span"
+                                              variant="caption"
+                                              color="text.secondary"
+                                              sx={{ ml: 1 }}
+                                            >
+                                              {dayjs(date).format("ddd")}
+                                            </Typography>
+                                          </Typography>
+                                        </TableCell>
+                                        <TableCell>
+                                          <Typography variant="body2" color="text.secondary">
+                                            No entry recorded
+                                          </Typography>
+                                        </TableCell>
+                                        <TableCell align="right" sx={{ pr: 2 }}>
+                                          <Box sx={{ display: "flex", gap: 0.5, justifyContent: "flex-end" }}>
+                                            <Tooltip title="Fill Attendance">
+                                              <IconButton
+                                                size="small"
+                                                color="primary"
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  handleFillUnfilledDate(date);
+                                                }}
+                                              >
+                                                <EditCalendarIcon fontSize="small" />
+                                              </IconButton>
+                                            </Tooltip>
+                                            <Tooltip title="Mark as Holiday">
+                                              <IconButton
+                                                size="small"
+                                                color="warning"
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  handleMarkUnfilledAsHoliday(date);
+                                                }}
+                                              >
+                                                <BeachAccessIcon fontSize="small" />
+                                              </IconButton>
+                                            </Tooltip>
+                                          </Box>
+                                        </TableCell>
+                                      </TableRow>
+                                    ))}
+                                  </TableBody>
+                                </Table>
+                              </Collapse>
+                            </TableCell>
+                          </TableRow>
+                        </>
                       )}
 
                       {/* Weekly separator strip */}
@@ -4610,6 +5018,8 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
           setDrawerMode("full");
         }}
         mode={drawerMode}
+        siteGroupId={(selectedSite as any)?.site_group_id}
+        siteName={selectedSite?.name || "Current Site"}
       />
 
       {/* Tea Shop Entry Dialog (Direct) */}
@@ -4629,6 +5039,43 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
             setTeaShopDialogOpen(false);
             setTeaShopDialogDate(undefined);
             setTeaShopEditingEntry(null);
+          }}
+        />
+      )}
+
+      {/* Tea Shop Entry Mode Dialog - For choosing between group and site entry */}
+      {siteGroup && (
+        <TeaShopEntryModeDialog
+          open={teaShopEntryModeDialogOpen}
+          onClose={() => {
+            setTeaShopEntryModeDialogOpen(false);
+            setTeaShopDialogDate(undefined);
+          }}
+          siteName={selectedSite?.name || "Current Site"}
+          groupSites={siteGroup.sites?.map((s: any) => s.name) || []}
+          onSelectGroupEntry={() => {
+            setTeaShopEntryModeDialogOpen(false);
+            setGroupTeaShopDialogOpen(true);
+          }}
+          onSelectSiteEntry={handleSiteSpecificTeaEntry}
+        />
+      )}
+
+      {/* Group Tea Shop Entry Dialog */}
+      {groupTeaShop && siteGroup && (
+        <GroupTeaShopEntryDialog
+          open={groupTeaShopDialogOpen}
+          onClose={() => {
+            setGroupTeaShopDialogOpen(false);
+            setTeaShopDialogDate(undefined);
+          }}
+          shop={groupTeaShop}
+          siteGroup={siteGroup as SiteGroupWithSites}
+          initialDate={teaShopDialogDate}
+          onSuccess={() => {
+            invalidateAttendance();
+            setGroupTeaShopDialogOpen(false);
+            setTeaShopDialogDate(undefined);
           }}
         />
       )}
@@ -5868,6 +6315,42 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
           onSuccess={handleHolidaySuccess}
         />
       )}
+
+      {/* Holiday Override Confirmation Dialog (for filling attendance on a holiday) */}
+      <Dialog
+        open={!!unfilledActionDialog?.isHoliday}
+        onClose={() => setUnfilledActionDialog(null)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
+          <WarningAmberIcon color="warning" />
+          <Typography variant="h6" component="span">
+            Date is Marked as Holiday
+          </Typography>
+        </DialogTitle>
+        <DialogContent>
+          <Typography sx={{ mb: 2 }}>
+            <strong>{unfilledActionDialog?.date ? dayjs(unfilledActionDialog.date).format("DD MMM YYYY (dddd)") : ""}</strong> is marked as a holiday.
+          </Typography>
+          <Alert severity="warning">
+            Do you want to remove the holiday and fill attendance instead? This action will permanently delete the holiday record.
+          </Alert>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setUnfilledActionDialog(null)}>
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            color="warning"
+            onClick={handleConfirmOverwriteHoliday}
+            startIcon={<EditCalendarIcon />}
+          >
+            Remove Holiday & Fill Attendance
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Paid Record Protection Dialog */}
       <Dialog

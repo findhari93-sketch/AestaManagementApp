@@ -37,6 +37,7 @@ import {
   LocalShipping as DealerIcon,
   Factory as FactoryIcon,
   Person as PersonIcon,
+  Handyman as RentalIcon,
 } from "@mui/icons-material";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import {
@@ -316,8 +317,8 @@ export default function VendorDialog({
               onChange={(_, value) => {
                 if (value) {
                   handleChange("vendor_type", value);
-                  // Auto-set has_physical_store for shop type
-                  if (value === "shop") {
+                  // Auto-set has_physical_store for shop and rental_store types
+                  if (value === "shop" || value === "rental_store") {
                     handleChange("has_physical_store", true);
                   }
                 }
@@ -342,19 +343,23 @@ export default function VendorDialog({
                 <PersonIcon sx={{ mr: 1 }} />
                 {VENDOR_TYPE_LABELS.individual}
               </ToggleButton>
+              <ToggleButton value="rental_store" aria-label="rental_store">
+                <RentalIcon sx={{ mr: 1 }} />
+                {VENDOR_TYPE_LABELS.rental_store}
+              </ToggleButton>
             </ToggleButtonGroup>
           </Grid>
 
-          {/* Shop Name - shown for shop type */}
-          {formData.vendor_type === "shop" && (
+          {/* Shop Name - shown for shop and rental_store types */}
+          {(formData.vendor_type === "shop" || formData.vendor_type === "rental_store") && (
             <Grid size={12}>
               <TextField
                 fullWidth
-                label="Shop/Store Name"
+                label={formData.vendor_type === "rental_store" ? "Rental Store Name" : "Shop/Store Name"}
                 value={formData.shop_name}
                 onChange={(e) => handleChange("shop_name", e.target.value)}
-                placeholder="e.g., Sri Lakshmi Hardware"
-                helperText="Display name for the shop"
+                placeholder={formData.vendor_type === "rental_store" ? "e.g., Sri Lakshmi Rentals" : "e.g., Sri Lakshmi Hardware"}
+                helperText={formData.vendor_type === "rental_store" ? "Display name for the rental store" : "Display name for the shop"}
               />
             </Grid>
           )}

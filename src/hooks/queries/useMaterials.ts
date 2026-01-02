@@ -578,7 +578,10 @@ export function useCreateMaterial() {
   return useMutation({
     mutationFn: async (data: MaterialFormData) => {
       // Ensure fresh session before mutation to prevent stale token issues
-      await ensureFreshSession();
+      const sessionValid = await ensureFreshSession();
+      if (!sessionValid) {
+        throw new Error("Session expired. Please refresh the page and try again.");
+      }
 
       // Auto-generate code if not provided
       let code = data.code?.trim() || null;
@@ -627,7 +630,10 @@ export function useUpdateMaterial() {
       data: Partial<MaterialFormData>;
     }) => {
       // Ensure fresh session before mutation
-      await ensureFreshSession();
+      const sessionValid = await ensureFreshSession();
+      if (!sessionValid) {
+        throw new Error("Session expired. Please refresh the page and try again.");
+      }
 
       // Clean data: convert empty strings to null for UUID/optional fields
       const cleanData: Record<string, unknown> = {
@@ -669,14 +675,22 @@ export function useDeleteMaterial() {
   return useMutation({
     mutationFn: async (id: string) => {
       // Ensure fresh session before mutation
-      await ensureFreshSession();
+      const sessionValid = await ensureFreshSession();
+      if (!sessionValid) {
+        throw new Error("Session expired. Please refresh the page and try again.");
+      }
 
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from("materials")
         .update({ is_active: false, updated_at: new Date().toISOString() })
-        .eq("id", id);
+        .eq("id", id)
+        .select()
+        .maybeSingle();
 
       if (error) throw error;
+      if (!data) {
+        throw new Error("Failed to delete material. You may not have permission to perform this action.");
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["materials"] });
@@ -723,7 +737,10 @@ export function useCreateMaterialBrand() {
   return useMutation({
     mutationFn: async (data: MaterialBrandFormData) => {
       // Ensure fresh session before mutation
-      await ensureFreshSession();
+      const sessionValid = await ensureFreshSession();
+      if (!sessionValid) {
+        throw new Error("Session expired. Please refresh the page and try again.");
+      }
 
       const { data: result, error } = await supabase
         .from("material_brands")
@@ -762,7 +779,10 @@ export function useUpdateMaterialBrand() {
       data: Partial<MaterialBrandFormData>;
     }) => {
       // Ensure fresh session before mutation
-      await ensureFreshSession();
+      const sessionValid = await ensureFreshSession();
+      if (!sessionValid) {
+        throw new Error("Session expired. Please refresh the page and try again.");
+      }
 
       const { data: result, error } = await supabase
         .from("material_brands")
@@ -802,7 +822,10 @@ export function useDeleteMaterialBrand() {
       materialId: string;
     }) => {
       // Ensure fresh session before mutation
-      await ensureFreshSession();
+      const sessionValid = await ensureFreshSession();
+      if (!sessionValid) {
+        throw new Error("Session expired. Please refresh the page and try again.");
+      }
 
       const { error } = await supabase
         .from("material_brands")
@@ -839,7 +862,10 @@ export function useCreateMaterialWithVariants() {
   return useMutation({
     mutationFn: async (data: CreateMaterialWithVariantsData) => {
       // Ensure fresh session before mutation
-      await ensureFreshSession();
+      const sessionValid = await ensureFreshSession();
+      if (!sessionValid) {
+        throw new Error("Session expired. Please refresh the page and try again.");
+      }
 
       const { variants, ...parentData } = data;
 
@@ -923,7 +949,10 @@ export function useAddVariantToMaterial() {
       variant: VariantFormData;
     }) => {
       // Ensure fresh session before mutation
-      await ensureFreshSession();
+      const sessionValid = await ensureFreshSession();
+      if (!sessionValid) {
+        throw new Error("Session expired. Please refresh the page and try again.");
+      }
 
       // Get parent material for inherited fields
       const { data: parent, error: parentError } = await supabase

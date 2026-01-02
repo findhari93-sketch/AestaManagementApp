@@ -41,6 +41,7 @@ import { useMaterialCategories } from "@/hooks/queries/useMaterials";
 import { useMaterialCountForVendor } from "@/hooks/queries/useVendorInventory";
 import VendorDialog from "@/components/materials/VendorDialog";
 import VendorMaterialsTab from "@/components/materials/VendorMaterialsTab";
+import { RentalStoreInventoryTab } from "@/components/rentals";
 import { VENDOR_TYPE_LABELS } from "@/types/material.types";
 
 interface TabPanelProps {
@@ -323,6 +324,9 @@ export default function VendorDetailsPage() {
               </Box>
             }
           />
+          {vendor.vendor_type === "rental_store" && (
+            <Tab label="Rental Inventory" />
+          )}
         </Tabs>
       </Box>
 
@@ -475,6 +479,15 @@ export default function VendorDetailsPage() {
       <TabPanel value={tabValue} index={1}>
         <VendorMaterialsTab vendor={vendor} />
       </TabPanel>
+
+      {vendor.vendor_type === "rental_store" && (
+        <TabPanel value={tabValue} index={2}>
+          <RentalStoreInventoryTab
+            vendorId={vendor.id}
+            vendorName={vendor.shop_name || vendor.name}
+          />
+        </TabPanel>
+      )}
 
       {/* Edit Dialog */}
       <VendorDialog

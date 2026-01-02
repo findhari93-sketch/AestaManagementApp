@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useCallback } from "react";
+import { useRef, useState, useCallback, useEffect } from "react";
 import {
   Box,
   CircularProgress,
@@ -53,6 +53,80 @@ const withTimeout = <T,>(promise: Promise<T>, timeoutMs: number, errorMsg: strin
       setTimeout(() => reject(new Error(errorMsg)), timeoutMs)
     ),
   ]);
+};
+
+// Upload timeout constants
+const UPLOAD_TIMEOUT_MS = 30000; // 30 seconds per upload attempt
+const MAX_OPERATION_MS = 120000; // 2 minutes max for entire operation
+
+// Helper to convert storage errors to user-friendly messages
+const getUploadErrorMessage = (error: unknown): string => {
+  if (!(error instanceof Error)) {
+    return "Upload failed. Please try again.";
+  }
+
+  const message = error.message.toLowerCase();
+
+  // Check for timeout
+  if (message.includes("timed out")) {
+    return "Upload timed out. Please check your internet connection and try again.";
+  }
+
+  // Check for cancellation
+  if (error.name === "AbortError" || message.includes("cancelled") || message.includes("aborted")) {
+    return "Upload cancelled";
+  }
+
+  // Check for storage API errors with status codes (StorageApiError has status property)
+  if ("status" in error && typeof (error as Record<string, unknown>).status === "number") {
+    const status = (error as Record<string, unknown>).status as number;
+
+    switch (status) {
+      case 406:
+        return "Image format not supported. Please try a JPEG or PNG image.";
+      case 413:
+        return "Image is too large. Please try a smaller photo (max 10MB).";
+      case 403:
+        return "Permission denied. Please sign in again and retry.";
+      case 401:
+        return "Session expired. Please refresh the page and try again.";
+      case 500:
+      case 502:
+      case 503:
+        return "Server error. Please try again in a few moments.";
+      default:
+        if (status >= 400 && status < 500) {
+          return `Upload rejected (${status}). Please try a different image.`;
+        }
+        if (status >= 500) {
+          return "Server error. Please try again later.";
+        }
+    }
+  }
+
+  // Check for common error message patterns
+  if (message.includes("not allowed") || message.includes("mime") || message.includes("type")) {
+    return "Image format not supported. Please try a JPEG or PNG image.";
+  }
+
+  if (message.includes("too large") || message.includes("size")) {
+    return "Image is too large. Please try a smaller photo.";
+  }
+
+  if (message.includes("network") || message.includes("fetch")) {
+    return "Network error. Please check your connection and try again.";
+  }
+
+  if (message.includes("bucket")) {
+    return "Storage not available. Please contact support.";
+  }
+
+  // Default: return the original message if it's reasonable, otherwise generic
+  if (error.message.length > 0 && error.message.length < 100) {
+    return error.message;
+  }
+
+  return "Upload failed. Please try again.";
 };
 
 // Canvas-based fallback compression for when library fails
@@ -154,11 +228,29 @@ export default function PhotoCaptureButton({
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const galleryInputRef = useRef<HTMLInputElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const isMountedRef = useRef(true);
+  const overallTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadStatus, setUploadStatus] = useState<UploadStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const [menuAnchor, setMenuAnchor] = useState<null | HTMLElement>(null);
+
+  // Cleanup on unmount - abort any in-progress upload
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      // Abort any in-progress upload on unmount
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+      // Clear overall timeout
+      if (overallTimeoutRef.current) {
+        clearTimeout(overallTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // Calculate actual pixel size
   const pixelSize = SIZE_MAP[size];
@@ -208,18 +300,27 @@ export default function PhotoCaptureButton({
       console.log(`[PhotoCapture] Upload attempt ${attempt}/${maxRetries}`);
 
       try {
-        const { error: uploadError, data: uploadData } = await supabase.storage
-          .from("work-updates")
-          .upload(filePath, file, {
-            cacheControl: "3600",
-            upsert: true,
-          });
+        // Wrap upload with timeout to prevent indefinite hangs
+        const { error: uploadError, data: uploadData } = await withTimeout(
+          supabase.storage
+            .from("work-updates")
+            .upload(filePath, file, {
+              cacheControl: "3600",
+              upsert: true,
+            }),
+          UPLOAD_TIMEOUT_MS,
+          `Upload timed out after ${UPLOAD_TIMEOUT_MS / 1000}s. Please check your connection.`
+        );
 
         if (!uploadError) {
           return { error: null, data: uploadData };
         }
 
         lastError = new Error(uploadError.message || "Upload failed");
+        // Preserve status code if available for better error messages
+        if ("status" in uploadError) {
+          (lastError as unknown as Record<string, unknown>).status = (uploadError as unknown as Record<string, unknown>).status;
+        }
         console.warn(`[PhotoCapture] Attempt ${attempt} failed:`, uploadError.message);
 
         // Wait before retry (exponential backoff)
@@ -229,6 +330,11 @@ export default function PhotoCaptureButton({
       } catch (err) {
         lastError = err instanceof Error ? err : new Error(String(err));
         console.warn(`[PhotoCapture] Attempt ${attempt} exception:`, lastError.message);
+
+        // Don't retry on timeout - fail fast
+        if (lastError.message.includes("timed out")) {
+          break;
+        }
       }
     }
 
@@ -254,6 +360,21 @@ export default function PhotoCaptureButton({
 
     // Create abort controller for cancellation
     abortControllerRef.current = new AbortController();
+
+    // Set up overall timeout safety net to guarantee UI never stays stuck
+    overallTimeoutRef.current = setTimeout(() => {
+      console.warn("[PhotoCapture] Overall operation timeout reached");
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+      if (isMountedRef.current) {
+        setIsUploading(false);
+        setUploadProgress(0);
+        setUploadStatus("error");
+        setError("Operation timed out. Please try again.");
+        setTimeout(() => setError(null), 10000);
+      }
+    }, MAX_OPERATION_MS);
 
     setIsUploading(true);
     setUploadProgress(5);
@@ -374,23 +495,35 @@ export default function PhotoCaptureButton({
       onPhotoCapture(publicUrl);
     } catch (err: unknown) {
       console.error("[PhotoCapture] Error:", err);
-      setUploadStatus("error");
 
-      let errorMessage = "Upload failed";
-      if (err instanceof Error) {
-        if (err.name === "AbortError" || err.message === "Upload cancelled") {
-          errorMessage = "Upload cancelled";
-        } else {
-          errorMessage = err.message;
-        }
+      // Only update state if component is still mounted
+      if (isMountedRef.current) {
+        setUploadStatus("error");
+
+        // Use helper for user-friendly error messages
+        const errorMessage = getUploadErrorMessage(err);
+        console.log("[PhotoCapture] User error message:", errorMessage);
+
+        setError(errorMessage);
+        // Clear error after 10 seconds
+        setTimeout(() => {
+          if (isMountedRef.current) {
+            setError(null);
+          }
+        }, 10000);
+      }
+    } finally {
+      // Clear overall timeout
+      if (overallTimeoutRef.current) {
+        clearTimeout(overallTimeoutRef.current);
+        overallTimeoutRef.current = null;
       }
 
-      setError(errorMessage);
-      // Clear error after 10 seconds
-      setTimeout(() => setError(null), 10000);
-    } finally {
-      setIsUploading(false);
-      setUploadProgress(0);
+      // Only update state if component is still mounted
+      if (isMountedRef.current) {
+        setIsUploading(false);
+        setUploadProgress(0);
+      }
       abortControllerRef.current = null;
     }
   };

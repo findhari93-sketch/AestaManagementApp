@@ -138,7 +138,21 @@
       "Bash(src/hooks/queries/useSiteGroups.ts )",
       "Bash(src/hooks/queries/useVendors.ts)",
       "Bash(supabase db push:*)",
-      "Bash(git commit -m \"$\\(cat <<''EOF''\nUpdate navigation labels, fix migrations, and various improvements\n\n- Fix Daily & Market settlement payment source showing \"Unspecified\"\n- Update navigation labels \\(Price Comparison, Vendor Directory\\)\n- Fix batch_tracking migration \\(s.status instead of s.is_active\\)\n- Fix price_analytics migration \\(recorded_date instead of effective_date\\)\n- Add material seed data, batch tracking, inter-site settlement, price analytics migrations\n- Various tea shop, settlement, and attendance improvements\n\n🤖 Generated with [Claude Code]\\(https://claude.com/claude-code\\)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")"
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nUpdate navigation labels, fix migrations, and various improvements\n\n- Fix Daily & Market settlement payment source showing \"Unspecified\"\n- Update navigation labels \\(Price Comparison, Vendor Directory\\)\n- Fix batch_tracking migration \\(s.status instead of s.is_active\\)\n- Fix price_analytics migration \\(recorded_date instead of effective_date\\)\n- Add material seed data, batch tracking, inter-site settlement, price analytics migrations\n- Various tea shop, settlement, and attendance improvements\n\n🤖 Generated with [Claude Code]\\(https://claude.com/claude-code\\)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git -C \"c:\\\\Users\\\\Haribabu\\\\Documents\\\\AppsCopilot\\\\AestaManagementApp\" log --oneline --all --grep=\"material\\\\|variant\" -i)",
+      "Bash(git -C \"c:\\\\Users\\\\Haribabu\\\\Documents\\\\AppsCopilot\\\\AestaManagementApp\" log --oneline -10)",
+      "Bash(git -C \"c:\\\\Users\\\\Haribabu\\\\Documents\\\\AppsCopilot\\\\AestaManagementApp\" show --stat 631d028)",
+      "Bash(npm run db:start:*)",
+      "Bash(powershell -Command \"\\(Get-Content ''supabase\\\\migrations\\\\20251214100000_material_management.sql''\\) -replace ''IF NOT EXISTS\\([a-z]\\)'', ''IF NOT EXISTS $1'' | Set-Content ''supabase\\\\migrations\\\\20251214100000_material_management.sql''\")",
+      "Bash(if exist supabasemigrations_backup rmdir /s /q supabasemigrations_backup)",
+      "Bash(move supabasemigrations supabasemigrations_backup)",
+      "Bash(npm run db:stop:*)",
+      "Bash(PGPASSWORD=postgres psql:*)",
+      "Bash(docker exec:*)",
+      "Bash(docker ps:*)",
+      "Bash(npx supabase sql:*)",
+      "Bash(npx supabase status)",
+      "Bash(psql:*)"
     ],
     "deny": [],
     "ask": []

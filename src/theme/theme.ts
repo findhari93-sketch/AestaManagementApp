@@ -327,10 +327,28 @@ const theme = createTheme({
       },
     },
     MuiDialog: {
+      defaultProps: {
+        disableScrollLock: true,
+      },
       styleOverrides: {
         paper: {
           borderRadius: 12,
         },
+      },
+    },
+    MuiModal: {
+      defaultProps: {
+        disableScrollLock: true,
+      },
+    },
+    MuiPopover: {
+      defaultProps: {
+        disableScrollLock: true,
+      },
+    },
+    MuiMenu: {
+      defaultProps: {
+        disableScrollLock: true,
       },
     },
     MuiAlert: {
@@ -586,10 +604,28 @@ export function createAppTheme(mode: ThemePreference) {
         },
       },
       MuiDialog: {
+        defaultProps: {
+          disableScrollLock: true,
+        },
         styleOverrides: {
           paper: {
             borderRadius: 12,
           },
+        },
+      },
+      MuiModal: {
+        defaultProps: {
+          disableScrollLock: true,
+        },
+      },
+      MuiPopover: {
+        defaultProps: {
+          disableScrollLock: true,
+        },
+      },
+      MuiMenu: {
+        defaultProps: {
+          disableScrollLock: true,
         },
       },
       MuiAlert: {

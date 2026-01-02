@@ -34,18 +34,8 @@ import { useSite } from "@/contexts/SiteContext";
 import { useAuth } from "@/contexts/AuthContext";
 import PageHeader from "@/components/layout/PageHeader";
 import { hasEditPermission } from "@/lib/permissions";
-import type { SiteHoliday } from "@/types/database.types";
 import dayjs from "dayjs";
-
-// Interface for grouped holidays
-interface HolidayGroup {
-  id: string;
-  startDate: string;
-  endDate: string;
-  reason: string;
-  holidays: SiteHoliday[];
-  dayCount: number;
-}
+import { groupHolidays, type HolidayGroup, type SiteHoliday } from "@/lib/utils/holidayUtils";
 
 // Interface for table rows (can be group header or individual day)
 interface TableRow {
@@ -53,62 +43,6 @@ interface TableRow {
   type: "group" | "child";
   group: HolidayGroup;
   holiday?: SiteHoliday; // Only for child rows
-}
-
-// Group consecutive holidays with the same reason
-function groupHolidays(holidays: SiteHoliday[]): HolidayGroup[] {
-  if (holidays.length === 0) return [];
-
-  // Sort by date ascending for grouping
-  const sorted = [...holidays].sort(
-    (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
-  );
-
-  const groups: HolidayGroup[] = [];
-  let currentGroup: SiteHoliday[] = [sorted[0]];
-
-  for (let i = 1; i < sorted.length; i++) {
-    const current = sorted[i];
-    const previous = sorted[i - 1];
-
-    // Check if consecutive (1 day apart) and same reason
-    const prevDate = dayjs(previous.date);
-    const currDate = dayjs(current.date);
-    const isConsecutive = currDate.diff(prevDate, "day") === 1;
-    const sameReason =
-      (current.reason || "").trim().toLowerCase() ===
-      (previous.reason || "").trim().toLowerCase();
-
-    if (isConsecutive && sameReason) {
-      currentGroup.push(current);
-    } else {
-      // Save current group and start new one
-      groups.push({
-        id: currentGroup[0].id,
-        startDate: currentGroup[0].date,
-        endDate: currentGroup[currentGroup.length - 1].date,
-        reason: currentGroup[0].reason || "",
-        holidays: currentGroup,
-        dayCount: currentGroup.length,
-      });
-      currentGroup = [current];
-    }
-  }
-
-  // Don't forget the last group
-  groups.push({
-    id: currentGroup[0].id,
-    startDate: currentGroup[0].date,
-    endDate: currentGroup[currentGroup.length - 1].date,
-    reason: currentGroup[0].reason || "",
-    holidays: currentGroup,
-    dayCount: currentGroup.length,
-  });
-
-  // Sort groups by date descending (most recent first)
-  return groups.sort(
-    (a, b) => new Date(b.startDate).getTime() - new Date(a.startDate).getTime()
-  );
 }
 
 // Parse error messages to user-friendly format

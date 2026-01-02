@@ -54,6 +54,13 @@ import { useRouter } from "next/navigation";
 import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
 import dayjs from "dayjs";
 import type { DateGroup, DailyPaymentRecord } from "@/types/payment.types";
+import {
+  groupHolidays,
+  formatHolidayDateRange,
+  formatHolidayDayRange,
+  type HolidayGroup,
+  type SiteHoliday,
+} from "@/lib/utils/holidayUtils";
 import { getPayerSourceLabel, getPayerSourceColor } from "@/components/settlement/PayerSourceSelector";
 import type { PayerSource } from "@/types/settlement.types";
 
@@ -119,6 +126,8 @@ interface DateRowData {
   isContractOnly?: boolean;
   isHoliday?: boolean;
   holidayReason?: string | null;
+  // Grouped holiday info (for holiday-only rows that span multiple days)
+  holidayGroup?: HolidayGroup | null;
   // Engineer user ID for "With Engineer" records (for Settle Now button)
   withEngineerUserId: string | null;
   withEngineerTransactionId: string | null;
@@ -423,63 +432,84 @@ export default function SalarySettlementTable({
       });
 
     // Create rows for holiday-only dates (no attendance at all)
+    // Group consecutive holidays with the same reason
     const allDatesWithRows = new Set([
       ...existingDates,
       ...contractOnlyDates,
     ]);
 
-    const holidayOnlyRows: DateRowData[] = holidays
+    // Filter holidays that don't have any rows and convert to SiteHoliday format for grouping
+    const holidaysWithoutRows = holidays
       .filter(h => !allDatesWithRows.has(h.date))
-      .map(holiday => ({
-        id: holiday.date,
-        date: holiday.date,
-        dateLabel: dayjs(holiday.date).format("MMM DD, YYYY"),
-        dayName: dayjs(holiday.date).format("dddd"),
-        dailyCount: 0,
-        marketCount: 0,
-        dailyLaborers: 0,
-        marketLaborers: 0,
-        totalAmount: 0,
-        pendingAmount: 0,
-        paidAmount: 0,
-        sentToEngineerAmount: 0,
-        awaitingApprovalAmount: 0,
-        status: "holiday" as const,
-        hasPendingRecords: false,
-        hasSentToEngineerRecords: false,
-        hasPaidRecords: false,
-        hasAwaitingApprovalRecords: false,
-        awaitingApprovalTransactionId: null,
+      .map(h => ({
+        id: h.id,
+        site_id: "", // Not needed for grouping
+        date: h.date,
+        reason: h.reason,
+        is_paid_holiday: h.is_paid_holiday,
+        created_at: "",
+        created_by: null,
+      })) as SiteHoliday[];
+
+    // Group consecutive holidays
+    const holidayGroups = groupHolidays(holidaysWithoutRows);
+
+    // Create one row per holiday group
+    const holidayOnlyRows: DateRowData[] = holidayGroups.map(group => ({
+      id: group.startDate, // Use start date as ID
+      date: group.startDate,
+      dateLabel: formatHolidayDateRange(group),
+      dayName: group.dayCount === 1
+        ? dayjs(group.startDate).format("dddd")
+        : formatHolidayDayRange(group),
+      dailyCount: 0,
+      marketCount: 0,
+      dailyLaborers: 0,
+      marketLaborers: 0,
+      totalAmount: 0,
+      pendingAmount: 0,
+      paidAmount: 0,
+      sentToEngineerAmount: 0,
+      awaitingApprovalAmount: 0,
+      status: "holiday" as const,
+      hasPendingRecords: false,
+      hasSentToEngineerRecords: false,
+      hasPaidRecords: false,
+      hasAwaitingApprovalRecords: false,
+      awaitingApprovalTransactionId: null,
+      dailyRecords: [],
+      marketRecords: [],
+      settlementReferences: [],
+      paymentSources: [],
+      group: {
+        date: group.startDate,
+        dateLabel: formatHolidayDateRange(group),
+        dayName: group.dayCount === 1
+          ? dayjs(group.startDate).format("dddd")
+          : formatHolidayDayRange(group),
         dailyRecords: [],
         marketRecords: [],
-        settlementReferences: [],
-        paymentSources: [],
-        group: {
-          date: holiday.date,
-          dateLabel: dayjs(holiday.date).format("MMM DD, YYYY"),
-          dayName: dayjs(holiday.date).format("dddd"),
-          dailyRecords: [],
-          marketRecords: [],
-          summary: {
-            dailyCount: 0,
-            dailyTotal: 0,
-            dailyPending: 0,
-            dailyPaid: 0,
-            dailySentToEngineer: 0,
-            marketCount: 0,
-            marketTotal: 0,
-            marketPending: 0,
-            marketPaid: 0,
-            marketSentToEngineer: 0,
-          },
-          isExpanded: false,
+        summary: {
+          dailyCount: 0,
+          dailyTotal: 0,
+          dailyPending: 0,
+          dailyPaid: 0,
+          dailySentToEngineer: 0,
+          marketCount: 0,
+          marketTotal: 0,
+          marketPending: 0,
+          marketPaid: 0,
+          marketSentToEngineer: 0,
         },
-        isContractOnly: false,
-        isHoliday: true,
-        holidayReason: holiday.reason,
-        withEngineerUserId: null,
-        withEngineerTransactionId: null,
-      }));
+        isExpanded: false,
+      },
+      isContractOnly: false,
+      isHoliday: true,
+      holidayReason: group.reason,
+      holidayGroup: group,
+      withEngineerUserId: null,
+      withEngineerTransactionId: null,
+    }));
 
     // Merge and sort all rows by date descending
     return [...dateGroupRows, ...contractOnlyRows, ...holidayOnlyRows].sort(
@@ -633,11 +663,19 @@ export default function SalarySettlementTable({
                   />
                 </Tooltip>
               )}
-              {row.original.isHoliday && (
-                <Tooltip title={row.original.holidayReason || "Holiday"}>
+              {row.original.isHoliday && showHolidays && (
+                <Tooltip title={
+                  row.original.holidayGroup && row.original.holidayGroup.dayCount > 1
+                    ? `${row.original.holidayGroup.dayCount} days: ${row.original.holidayReason || "Holiday"}`
+                    : row.original.holidayReason || "Holiday"
+                }>
                   <Chip
                     icon={<HolidayIcon sx={{ fontSize: 10 }} />}
-                    label="Holiday"
+                    label={
+                      row.original.holidayGroup && row.original.holidayGroup.dayCount > 1
+                        ? `${row.original.holidayGroup.dayCount} days`
+                        : "Holiday"
+                    }
                     size="small"
                     color="warning"
                     variant="outlined"

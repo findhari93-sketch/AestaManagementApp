@@ -3,5 +3,4 @@
 
 export * from "./dashboard";
 export * from "./laborers";
-export * from "./salary";
 export * from "./attendance";

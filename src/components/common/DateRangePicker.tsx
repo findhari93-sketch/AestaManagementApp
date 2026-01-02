@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useMemo } from "react";
 import {
   Box,
   Button,
@@ -138,16 +138,30 @@ const presets: Preset[] = [
   {
     key: "allTime",
     label: "All time",
-    getRange: () => ({
-      start: new Date(2020, 0, 1), // Far back date
+    getRange: (siteStartDate?: Date) => ({
+      start: siteStartDate || new Date(2020, 0, 1), // Use site start date if provided
       end: endOfDay(new Date()),
     }),
   },
 ];
 
+// Create presets with dynamic minDate for allTime
+const getPresetsWithMinDate = (minDate?: Date): Preset[] =>
+  presets.map((preset) =>
+    preset.key === "allTime"
+      ? {
+          ...preset,
+          getRange: () => ({
+            start: minDate || new Date(2020, 0, 1),
+            end: endOfDay(new Date()),
+          }),
+        }
+      : preset
+  );
+
 // Find matching preset for current date range
-const findMatchingPreset = (start: Date, end: Date): PresetKey | null => {
-  for (const preset of presets) {
+const findMatchingPreset = (start: Date, end: Date, presetList: Preset[] = presets): PresetKey | null => {
+  for (const preset of presetList) {
     const range = preset.getRange();
     if (
       format(start, "yyyy-MM-dd") === format(range.start, "yyyy-MM-dd") &&
@@ -206,6 +220,9 @@ export default function DateRangePicker({
   const isMobile = useIsMobile();
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
 
+  // Create dynamic presets with minDate for allTime
+  const dynamicPresets = useMemo(() => getPresetsWithMinDate(minDate), [minDate]);
+
   const [tempRange, setTempRange] = useState<Range[]>([
     {
       startDate: startDate || new Date(),
@@ -229,9 +246,9 @@ export default function DateRangePicker({
           key: "selection",
         },
       ]);
-      setSelectedPreset(findMatchingPreset(startDate, endDate));
+      setSelectedPreset(findMatchingPreset(startDate, endDate, dynamicPresets));
     }
-  }, [startDate, endDate]);
+  }, [startDate, endDate, dynamicPresets]);
 
   const handleOpen = (event: React.MouseEvent<HTMLElement>) => {
     setAnchorEl(event.currentTarget);
@@ -289,7 +306,7 @@ export default function DateRangePicker({
     setTempRange([selection]);
     // Clear preset when manually selecting
     if (selection.startDate && selection.endDate) {
-      setSelectedPreset(findMatchingPreset(selection.startDate, selection.endDate));
+      setSelectedPreset(findMatchingPreset(selection.startDate, selection.endDate, dynamicPresets));
     }
   };
 
@@ -438,7 +455,7 @@ export default function DateRangePicker({
               scrollbarWidth: "none",
             }}
           >
-            {presets.slice(0, 8).map((preset) => (
+            {dynamicPresets.slice(0, 8).map((preset) => (
               <Chip
                 key={preset.key}
                 label={preset.label.replace(" (Sun - Today)", "").replace(" (Sun - Sat)", "")}
@@ -467,7 +484,7 @@ export default function DateRangePicker({
             }}
           >
             <List dense disablePadding>
-              {presets.map((preset) => (
+              {dynamicPresets.map((preset) => (
                 <ListItemButton
                   key={preset.key}
                   selected={selectedPreset === preset.key}

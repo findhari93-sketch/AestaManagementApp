@@ -1,0 +1,517 @@
+/**
+ * Rental Management Types
+ * Type definitions for the Rental Management System
+ */
+
+// ============================================
+// ENUMS AND CONSTANTS
+// ============================================
+
+export type RentalType = "equipment" | "scaffolding" | "shuttering" | "other";
+
+export type RentalOrderStatus =
+  | "draft"
+  | "confirmed"
+  | "active"
+  | "partially_returned"
+  | "completed"
+  | "cancelled";
+
+export type RentalItemStatus =
+  | "pending"
+  | "active"
+  | "partially_returned"
+  | "returned"
+  | "damaged";
+
+export type ReturnCondition = "good" | "damaged" | "lost";
+
+export type TransportHandler = "vendor" | "company" | "laborer";
+
+export type RentalPriceSource = "rental" | "quotation" | "manual";
+
+// Labels for display
+export const RENTAL_TYPE_LABELS: Record<RentalType, string> = {
+  equipment: "Equipment/Machines",
+  scaffolding: "Scaffolding",
+  shuttering: "Shuttering",
+  other: "Other",
+};
+
+export const RENTAL_ORDER_STATUS_LABELS: Record<RentalOrderStatus, string> = {
+  draft: "Draft",
+  confirmed: "Confirmed",
+  active: "Active",
+  partially_returned: "Partially Returned",
+  completed: "Completed",
+  cancelled: "Cancelled",
+};
+
+export const RENTAL_ORDER_STATUS_COLORS: Record<
+  RentalOrderStatus,
+  "default" | "secondary" | "destructive" | "outline"
+> = {
+  draft: "secondary",
+  confirmed: "outline",
+  active: "default",
+  partially_returned: "outline",
+  completed: "default",
+  cancelled: "destructive",
+};
+
+export const RENTAL_ITEM_STATUS_LABELS: Record<RentalItemStatus, string> = {
+  pending: "Pending",
+  active: "Active",
+  partially_returned: "Partially Returned",
+  returned: "Returned",
+  damaged: "Damaged",
+};
+
+export const RETURN_CONDITION_LABELS: Record<ReturnCondition, string> = {
+  good: "Good",
+  damaged: "Damaged",
+  lost: "Lost",
+};
+
+export const TRANSPORT_HANDLER_LABELS: Record<TransportHandler, string> = {
+  vendor: "Vendor",
+  company: "Company",
+  laborer: "Laborer",
+};
+
+// ============================================
+// BASE TYPES
+// ============================================
+
+export interface RentalItemCategory {
+  id: string;
+  name: string;
+  code: string | null;
+  description: string | null;
+  parent_id: string | null;
+  display_order: number;
+  icon: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RentalItem {
+  id: string;
+  name: string;
+  code: string | null;
+  local_name: string | null;
+  category_id: string | null;
+  description: string | null;
+  rental_type: RentalType;
+  unit: string;
+  specifications: Record<string, unknown> | null;
+  default_daily_rate: number | null;
+  image_url: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+  created_by: string | null;
+}
+
+export interface RentalStoreInventory {
+  id: string;
+  vendor_id: string;
+  rental_item_id: string;
+  daily_rate: number;
+  weekly_rate: number | null;
+  monthly_rate: number | null;
+  transport_cost: number | null;
+  loading_cost: number | null;
+  unloading_cost: number | null;
+  min_rental_days: number;
+  long_term_discount_percentage: number;
+  long_term_threshold_days: number;
+  notes: string | null;
+  last_price_update: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RentalOrder {
+  id: string;
+  rental_order_number: string;
+  site_id: string;
+  vendor_id: string;
+  order_date: string;
+  start_date: string;
+  expected_return_date: string | null;
+  actual_return_date: string | null;
+  status: RentalOrderStatus;
+  estimated_total: number;
+  actual_total: number | null;
+
+  // Transport outward
+  transport_cost_outward: number;
+  loading_cost_outward: number;
+  unloading_cost_outward: number;
+  outward_by: TransportHandler | null;
+
+  // Transport return
+  transport_cost_return: number;
+  loading_cost_return: number;
+  unloading_cost_return: number;
+  return_by: TransportHandler | null;
+
+  // Receipts
+  vendor_slip_url: string | null;
+  return_receipt_url: string | null;
+
+  // Notes
+  notes: string | null;
+  internal_notes: string | null;
+
+  // Discount
+  negotiated_discount_percentage: number;
+  negotiated_discount_amount: number;
+
+  // Approval/Cancellation
+  approved_by: string | null;
+  approved_at: string | null;
+  cancelled_by: string | null;
+  cancelled_at: string | null;
+  cancellation_reason: string | null;
+
+  // Audit
+  created_at: string;
+  updated_at: string;
+  created_by: string | null;
+}
+
+export interface RentalOrderItem {
+  id: string;
+  rental_order_id: string;
+  rental_item_id: string;
+  quantity: number;
+  daily_rate_default: number;
+  daily_rate_actual: number;
+  item_start_date: string | null;
+  item_expected_return_date: string | null;
+  quantity_returned: number;
+  quantity_outstanding: number;
+  status: RentalItemStatus;
+  specifications: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RentalReturn {
+  id: string;
+  rental_order_id: string;
+  rental_order_item_id: string;
+  return_date: string;
+  quantity_returned: number;
+  condition: ReturnCondition;
+  damage_description: string | null;
+  damage_cost: number;
+  receipt_url: string | null;
+  notes: string | null;
+  created_at: string;
+  created_by: string | null;
+}
+
+export interface RentalAdvance {
+  id: string;
+  rental_order_id: string;
+  advance_date: string;
+  amount: number;
+  payment_mode: string | null;
+  payment_channel: string | null;
+  payer_source: string | null;
+  payer_name: string | null;
+  proof_url: string | null;
+  engineer_transaction_id: string | null;
+  settlement_group_id: string | null;
+  notes: string | null;
+  created_at: string;
+  created_by: string | null;
+}
+
+export interface RentalSettlement {
+  id: string;
+  rental_order_id: string;
+  settlement_date: string;
+  settlement_reference: string | null;
+  total_rental_amount: number;
+  total_transport_amount: number;
+  total_damage_amount: number;
+  negotiated_final_amount: number | null;
+  total_advance_paid: number;
+  balance_amount: number;
+  payment_mode: string | null;
+  payment_channel: string | null;
+  payer_source: string | null;
+  payer_name: string | null;
+  final_receipt_url: string | null;
+  engineer_transaction_id: string | null;
+  settlement_group_id: string | null;
+  notes: string | null;
+  settled_by: string | null;
+  settled_by_name: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RentalPriceHistory {
+  id: string;
+  vendor_id: string;
+  rental_item_id: string;
+  daily_rate: number;
+  recorded_date: string;
+  source: RentalPriceSource;
+  source_reference: string | null;
+  notes: string | null;
+  recorded_by: string | null;
+  created_at: string;
+}
+
+// ============================================
+// EXTENDED TYPES WITH RELATIONSHIPS
+// ============================================
+
+export interface RentalItemCategoryWithChildren extends RentalItemCategory {
+  children?: RentalItemCategory[];
+}
+
+export interface RentalItemWithDetails extends RentalItem {
+  category?: RentalItemCategory | null;
+}
+
+export interface RentalStoreInventoryWithDetails extends RentalStoreInventory {
+  vendor?: {
+    id: string;
+    name: string;
+    phone: string | null;
+    shop_name: string | null;
+  };
+  rental_item?: RentalItem;
+}
+
+export interface RentalOrderWithDetails extends RentalOrder {
+  vendor?: {
+    id: string;
+    name: string;
+    phone: string | null;
+    address: string | null;
+    shop_name: string | null;
+  };
+  site?: {
+    id: string;
+    name: string;
+  };
+  items?: RentalOrderItemWithDetails[];
+  advances?: RentalAdvance[];
+  returns?: RentalReturn[];
+  settlement?: RentalSettlement | null;
+  // Calculated fields
+  accrued_rental_cost?: number;
+  total_advance_paid?: number;
+  days_since_start?: number;
+  is_overdue?: boolean;
+}
+
+export interface RentalOrderItemWithDetails extends RentalOrderItem {
+  rental_item?: RentalItem;
+  returns?: RentalReturn[];
+  // Calculated fields
+  accrued_cost?: number;
+  days_rented?: number;
+}
+
+// ============================================
+// FORM DATA TYPES
+// ============================================
+
+export interface RentalItemFormData {
+  name: string;
+  code?: string;
+  local_name?: string;
+  category_id?: string;
+  description?: string;
+  rental_type: RentalType;
+  unit: string;
+  specifications?: Record<string, unknown>;
+  default_daily_rate?: number;
+  image_url?: string;
+}
+
+export interface RentalStoreInventoryFormData {
+  vendor_id: string;
+  rental_item_id: string;
+  daily_rate: number;
+  weekly_rate?: number;
+  monthly_rate?: number;
+  transport_cost?: number;
+  loading_cost?: number;
+  unloading_cost?: number;
+  min_rental_days?: number;
+  long_term_discount_percentage?: number;
+  long_term_threshold_days?: number;
+  notes?: string;
+}
+
+export interface RentalOrderFormData {
+  site_id: string;
+  vendor_id: string;
+  start_date: string;
+  expected_return_date?: string;
+  transport_cost_outward?: number;
+  loading_cost_outward?: number;
+  unloading_cost_outward?: number;
+  outward_by?: TransportHandler;
+  vendor_slip_url?: string;
+  notes?: string;
+  negotiated_discount_percentage?: number;
+  items: RentalOrderItemFormData[];
+}
+
+export interface RentalOrderItemFormData {
+  rental_item_id: string;
+  quantity: number;
+  daily_rate_default: number;
+  daily_rate_actual: number;
+  item_start_date?: string;
+  item_expected_return_date?: string;
+  specifications?: string;
+  notes?: string;
+}
+
+export interface RentalReturnFormData {
+  rental_order_id: string;
+  rental_order_item_id: string;
+  return_date: string;
+  quantity_returned: number;
+  condition: ReturnCondition;
+  damage_description?: string;
+  damage_cost?: number;
+  receipt_url?: string;
+  notes?: string;
+}
+
+export interface RentalAdvanceFormData {
+  rental_order_id: string;
+  advance_date: string;
+  amount: number;
+  payment_mode: string;
+  payment_channel: string;
+  payer_source?: string;
+  payer_name?: string;
+  proof_url?: string;
+  notes?: string;
+}
+
+export interface RentalSettlementFormData {
+  rental_order_id: string;
+  settlement_date: string;
+  total_rental_amount: number;
+  total_transport_amount: number;
+  total_damage_amount: number;
+  negotiated_final_amount?: number;
+  total_advance_paid: number;
+  balance_amount: number;
+  payment_mode: string;
+  payment_channel: string;
+  payer_source?: string;
+  payer_name?: string;
+  final_receipt_url?: string;
+  notes?: string;
+}
+
+// ============================================
+// CALCULATION TYPES
+// ============================================
+
+export interface RentalCostCalculation {
+  orderId: string;
+  startDate: string;
+  currentDate: string;
+  expectedReturnDate: string | null;
+
+  // Days calculation
+  daysElapsed: number;
+  expectedTotalDays: number;
+
+  // Cost breakdown
+  itemsCost: RentalItemCostBreakdown[];
+  subtotal: number;
+  discountAmount: number;
+  transportCostOutward: number;
+  transportCostReturn: number;
+  totalTransportCost: number;
+  damagesCost: number;
+
+  // Totals
+  grossTotal: number;
+  advancesPaid: number;
+  balanceDue: number;
+
+  // Status
+  isOverdue: boolean;
+  daysOverdue: number;
+}
+
+export interface RentalItemCostBreakdown {
+  itemId: string;
+  itemName: string;
+  quantity: number;
+  quantityReturned: number;
+  quantityOutstanding: number;
+  dailyRate: number;
+  daysRented: number;
+  subtotal: number;
+}
+
+// ============================================
+// FILTER/QUERY TYPES
+// ============================================
+
+export interface RentalOrderFilterState {
+  siteId?: string;
+  vendorId?: string;
+  status?: RentalOrderStatus | "all";
+  rentalType?: RentalType | "all";
+  dateFrom?: string;
+  dateTo?: string;
+  showOverdueOnly?: boolean;
+}
+
+export interface RentalPriceComparisonResult {
+  rentalItemId: string;
+  rentalItemName: string;
+  vendors: RentalVendorPrice[];
+}
+
+export interface RentalVendorPrice {
+  vendorId: string;
+  vendorName: string;
+  shopName: string | null;
+  dailyRate: number;
+  weeklyRate: number | null;
+  monthlyRate: number | null;
+  transportCost: number;
+  rating: number | null;
+  lastRentalDate: string | null;
+}
+
+// ============================================
+// SUMMARY/DASHBOARD TYPES
+// ============================================
+
+export interface RentalSummary {
+  ongoingCount: number;
+  overdueCount: number;
+  totalAccruedCost: number;
+  totalAdvancesPaid: number;
+  totalDue: number;
+}
+
+export interface RentalDashboardStats extends RentalSummary {
+  recentOrders: RentalOrderWithDetails[];
+  overdueOrders: RentalOrderWithDetails[];
+}

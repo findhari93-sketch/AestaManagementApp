@@ -36,6 +36,7 @@ import {
   History as HistoryIcon,
   ShoppingCart as OrderIcon,
   FilterList as FilterIcon,
+  Handyman as RentalIcon,
 } from "@mui/icons-material";
 import { useRouter } from "next/navigation";
 import PageHeader from "@/components/layout/PageHeader";
@@ -66,6 +67,7 @@ const vendorTypeIcons: Record<VendorType, React.ReactNode> = {
   dealer: <DealerIcon fontSize="small" />,
   manufacturer: <FactoryIcon fontSize="small" />,
   individual: <PersonIcon fontSize="small" />,
+  rental_store: <RentalIcon fontSize="small" />,
 };
 
 // Format currency
