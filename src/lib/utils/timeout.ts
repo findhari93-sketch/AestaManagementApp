@@ -40,11 +40,11 @@ export async function withTimeout<T>(
  */
 export const TIMEOUTS = {
   /** Standard database operations (insert, update, delete) */
-  DATABASE_OPERATION: 30000, // 30 seconds
+  DATABASE_OPERATION: 60000, // 60 seconds (increased for slow network conditions)
   /** Complex settlement operations */
-  SETTLEMENT: 60000, // 60 seconds
+  SETTLEMENT: 120000, // 2 minutes (increased for complex waterfall calculations)
   /** File upload operations */
-  FILE_UPLOAD: 120000, // 2 minutes
+  FILE_UPLOAD: 180000, // 3 minutes
   /** Quick queries */
-  QUERY: 15000, // 15 seconds
+  QUERY: 30000, // 30 seconds (increased for heavy queries)
 } as const;

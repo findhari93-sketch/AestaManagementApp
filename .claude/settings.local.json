@@ -152,7 +152,13 @@
       "Bash(docker ps:*)",
       "Bash(npx supabase sql:*)",
       "Bash(npx supabase status)",
-      "Bash(psql:*)"
+      "Bash(psql:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nAdd rental management, group tea shop features, and fix type exports\n\n- Add rental management system \\(company & site pages, components, hooks\\)\n- Add group tea shop feature for site groups with shared tea vendors\n- Restore helper type exports in database.types.ts after regeneration\n- Fix various type errors for build compatibility\n- Remove deprecated salary pages\n\n🤖 Generated with [Claude Code]\\(https://claude.com/claude-code\\)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(supabase --version:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nConsolidate migrations and sync with remote database\n\n- Replace 96+ individual migrations with 4 consolidated files\n- Add initial_schema.sql with full database structure\n- Add remote_schema.sql with current DB state\n- Add rental_management.sql and group_tea_shop.sql for new features\n- Backup old migrations to migrations_backup folder\n- Add supabase config and seed files\n\n🤖 Generated with [Claude Code]\\(https://claude.com/claude-code\\)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(wc -l:*)",
+      "Bash(dir /s \"c:\\\\Users\\\\Haribabu\\\\Documents\\\\AppsCopilot\\\\AestaManagementApp\\\\src\\\\app\\\\site\")",
+      "Bash(dir /b \"c:\\\\Users\\\\Haribabu\\\\Documents\\\\AppsCopilot\\\\AestaManagementApp\\\\src\\\\app\")"
     ],
     "deny": [],
     "ask": []

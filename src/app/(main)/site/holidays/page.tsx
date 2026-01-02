@@ -228,6 +228,40 @@ export default function HolidaysPage() {
 
     setLoading(true);
     try {
+      // Check if attendance exists for the date(s) being marked as holiday
+      // Skip this check when editing (only updating reason, not adding new dates)
+      if (!editingGroup) {
+        const datesToCheck = bulkMode
+          ? (() => {
+              // Generate dates for bulk mode check
+              const dates: string[] = [];
+              let current = dayjs(form.startDate);
+              const end = dayjs(form.endDate);
+              while (current.isBefore(end) || current.isSame(end, "day")) {
+                dates.push(current.format("YYYY-MM-DD"));
+                current = current.add(1, "day");
+              }
+              return dates;
+            })()
+          : [form.date];
+
+        const { data: existingAttendance } = await supabase
+          .from("daily_attendance")
+          .select("date")
+          .eq("site_id", selectedSite.id)
+          .in("date", datesToCheck)
+          .limit(1);
+
+        if (existingAttendance && existingAttendance.length > 0) {
+          showSnackbar(
+            `Cannot mark ${dayjs(existingAttendance[0].date).format("DD MMM YYYY")} as holiday - attendance already recorded for this date`,
+            "error"
+          );
+          setLoading(false);
+          return;
+        }
+      }
+
       if (editingGroup) {
         if (editingGroup.dayCount === 1) {
           // Single holiday - update both date and reason

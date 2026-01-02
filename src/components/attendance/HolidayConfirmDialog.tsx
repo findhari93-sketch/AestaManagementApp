@@ -86,6 +86,20 @@ export default function HolidayConfirmDialog({
     setError(null);
 
     try {
+      // Check if attendance exists for today
+      const { data: existingAttendance } = await supabase
+        .from("daily_attendance")
+        .select("date")
+        .eq("site_id", site.id)
+        .eq("date", today)
+        .limit(1);
+
+      if (existingAttendance && existingAttendance.length > 0) {
+        setError("Cannot mark today as holiday - attendance already recorded for this date");
+        setSaving(false);
+        return;
+      }
+
       const { error: insertError } = await supabase
         .from("site_holidays")
         .insert({

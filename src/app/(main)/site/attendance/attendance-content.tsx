@@ -982,11 +982,13 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
     // Get set of dates that have attendance data
     const attendanceDates = new Set(dateSummaries.map((s) => s.date));
 
-    // Filter holidays within selected date range that don't have attendance
+    // Filter holidays that don't have attendance
+    // When "All Time" is selected (dateFrom/dateTo are null), show all holidays
+    // Otherwise, filter to the selected date range
     const holidaysWithoutAttendance = recentHolidays.filter((h) => {
-      if (!dateFrom || !dateTo) return false;
       const hDate = h.date;
-      return hDate >= dateFrom && hDate <= dateTo && !attendanceDates.has(hDate);
+      const inDateRange = !dateFrom || !dateTo || (hDate >= dateFrom && hDate <= dateTo);
+      return inDateRange && !attendanceDates.has(hDate);
     });
 
     // Group consecutive holidays with the same reason

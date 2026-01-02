@@ -23,10 +23,10 @@ type SyncConfig = {
 const DEFAULT_CONFIG: SyncConfig = {
   enabled: true,
   intervals: {
-    reference: 5 * 60 * 1000, // 5 minutes
-    transactional: 30 * 1000, // 30 seconds for active page data
-    dashboard: 2 * 60 * 1000, // 2 minutes
-    cleanup: 15 * 60 * 1000, // 15 minutes
+    reference: 10 * 60 * 1000, // 10 minutes
+    transactional: 2 * 60 * 1000, // 2 minutes (reduced frequency to prevent timeout cascades)
+    dashboard: 5 * 60 * 1000, // 5 minutes
+    cleanup: 30 * 60 * 1000, // 30 minutes
   },
 };
 

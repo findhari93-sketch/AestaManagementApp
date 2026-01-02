@@ -356,8 +356,8 @@ export default function SiteSubcontractsPage() {
         if (result.error) throw result.error;
       }
 
-      await fetchSubcontracts();
-      handleCloseDialog();
+      handleCloseDialog(); // Close dialog immediately for better UX
+      fetchSubcontracts(); // Refresh in background (non-blocking)
     } catch (err: any) {
       console.error("Error saving subcontract:", err);
       setError("Failed to save subcontract: " + err.message);

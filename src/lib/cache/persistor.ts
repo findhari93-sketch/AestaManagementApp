@@ -16,7 +16,7 @@ import { getTabCoordinator } from "@/lib/tab/coordinator";
 const CACHE_VERSION = 1;
 const CACHE_KEY = `aesta-query-cache-v${CACHE_VERSION}`;
 const MAX_AGE = 90 * 24 * 60 * 60 * 1000; // 90 days max retention
-const RESTORE_TIMEOUT = 10000; // 10 seconds for restore (increased for multi-tab scenarios)
+const RESTORE_TIMEOUT = 30000; // 30 seconds for restore (more tolerance for slow IndexedDB)
 const MAX_RESTORE_RETRIES = 3;
 
 /**

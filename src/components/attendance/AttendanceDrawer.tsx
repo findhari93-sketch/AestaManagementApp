@@ -1146,6 +1146,19 @@ export default function AttendanceDrawer({
       return;
     }
 
+    // Check if a holiday exists for this date
+    const { data: existingHoliday } = await supabase
+      .from("site_holidays")
+      .select("date, reason")
+      .eq("site_id", siteId)
+      .eq("date", selectedDate)
+      .maybeSingle();
+
+    if (existingHoliday) {
+      setError(`Cannot record attendance - ${selectedDate} is marked as a holiday (${existingHoliday.reason || 'No reason specified'})`);
+      return;
+    }
+
     // For new dates, check if attendance already exists
     if (!initialDate) {
       const { data: existingData } = await supabase
