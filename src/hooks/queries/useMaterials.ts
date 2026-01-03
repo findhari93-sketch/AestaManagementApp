@@ -110,6 +110,104 @@ export function useCreateMaterialCategory() {
   });
 }
 
+/**
+ * Update an existing material category
+ */
+export function useUpdateMaterialCategory() {
+  const queryClient = useQueryClient();
+  const supabase = createClient();
+
+  return useMutation({
+    mutationFn: async ({
+      id,
+      data,
+    }: {
+      id: string;
+      data: Partial<MaterialCategory>;
+    }) => {
+      const { data: result, error } = await (
+        supabase.from("material_categories") as any
+      )
+        .update(data)
+        .eq("id", id)
+        .select()
+        .single();
+
+      if (error) throw error;
+      return result;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.materials.all });
+      queryClient.invalidateQueries({
+        queryKey: ["materials", "categories", "tree"],
+      });
+    },
+  });
+}
+
+/**
+ * Delete (soft delete) a material category
+ * Reassigns all materials in this category to "Miscellaneous" category
+ */
+export function useDeleteMaterialCategory() {
+  const queryClient = useQueryClient();
+  const supabase = createClient();
+
+  return useMutation({
+    mutationFn: async (id: string) => {
+      // First, find or create the "Miscellaneous" category
+      let { data: miscCategory } = await supabase
+        .from("material_categories")
+        .select("id")
+        .eq("name", "Miscellaneous")
+        .eq("is_active", true)
+        .single();
+
+      if (!miscCategory) {
+        // Create Miscellaneous category if it doesn't exist
+        const { data: newMisc, error: createError } = await (
+          supabase.from("material_categories") as any
+        )
+          .insert({
+            name: "Miscellaneous",
+            code: "MISC",
+            description: "Default category for unassigned materials",
+            display_order: 999,
+            is_active: true,
+          })
+          .select()
+          .single();
+
+        if (createError) throw createError;
+        miscCategory = newMisc;
+      }
+
+      // Reassign all materials in this category to Miscellaneous
+      const { error: reassignError } = await supabase
+        .from("materials")
+        .update({ category_id: miscCategory.id })
+        .eq("category_id", id);
+
+      if (reassignError) throw reassignError;
+
+      // Soft delete the category
+      const { error } = await supabase
+        .from("material_categories")
+        .update({ is_active: false })
+        .eq("id", id);
+
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.materials.all });
+      queryClient.invalidateQueries({
+        queryKey: ["materials", "categories", "tree"],
+      });
+      queryClient.invalidateQueries({ queryKey: ["materials"] });
+    },
+  });
+}
+
 // ============================================
 // MATERIALS
 // ============================================

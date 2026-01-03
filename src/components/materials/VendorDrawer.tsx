@@ -38,7 +38,9 @@ import {
   Receipt as ReceiptIcon,
   CheckCircle as VerifiedIcon,
   History as HistoryIcon,
+  Delete as DeleteIcon,
 } from "@mui/icons-material";
+import { useDeleteVendorInventory } from "@/hooks/queries/useVendorInventory";
 import { useQuery } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase/client";
 import { formatCurrency, formatDate } from "@/lib/formatters";
@@ -88,10 +90,12 @@ export default function VendorDrawer({
 }: VendorDrawerProps) {
   const [expandedVendor, setExpandedVendor] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<SortOption>("best_price");
+  const [removingVendorId, setRemovingVendorId] = useState<string | null>(null);
   const supabase = createClient();
+  const deleteVendorInventory = useDeleteVendorInventory();
 
   // Fetch vendors for this material with pricing and order history
-  const { data: vendors = [], isLoading } = useQuery({
+  const { data: vendors = [], isLoading, refetch } = useQuery({
     queryKey: ["material-vendors", material?.id],
     queryFn: async () => {
       if (!material?.id) return [];
@@ -272,6 +276,35 @@ export default function VendorDrawer({
       `Hi ${vendorName}, I would like to enquire about ${material?.name}.`
     );
     window.open(`https://wa.me/91${phone.replace(/\D/g, "")}?text=${message}`, "_blank");
+  };
+
+  // Remove vendor from this material
+  const handleRemoveVendor = async (vendorId: string, vendorName: string) => {
+    if (!material?.id) return;
+    if (!confirm(`Remove "${vendorName}" from this material's vendor list?`)) return;
+
+    setRemovingVendorId(vendorId);
+    try {
+      // Find the vendor_inventory record
+      const { data: inventory } = await supabase
+        .from("vendor_inventory")
+        .select("id")
+        .eq("vendor_id", vendorId)
+        .eq("material_id", material.id)
+        .single();
+
+      if (inventory) {
+        await deleteVendorInventory.mutateAsync({
+          id: inventory.id,
+          vendorId,
+        });
+        refetch(); // Refresh the vendor list
+      }
+    } catch (err) {
+      console.error("Failed to remove vendor:", err);
+    } finally {
+      setRemovingVendorId(null);
+    }
   };
 
   return (
@@ -473,15 +506,17 @@ export default function VendorDrawer({
                       </Typography>
                     )}
 
-                    {/* Expand/Collapse Button */}
-                    <Button
-                      size="small"
-                      onClick={() => setExpandedVendor(isExpanded ? null : vendor.id)}
-                      endIcon={isExpanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
-                      sx={{ mb: 1 }}
-                    >
-                      {isExpanded ? "Hide Details" : "Show Details"}
-                    </Button>
+                    {/* Expand/Collapse Button - only show if there's content to display */}
+                    {(vendor.recent_orders.length > 0 || vendor.price_history.length > 0) && (
+                      <Button
+                        size="small"
+                        onClick={() => setExpandedVendor(isExpanded ? null : vendor.id)}
+                        endIcon={isExpanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+                        sx={{ mb: 1 }}
+                      >
+                        {isExpanded ? "Hide Details" : "Show Details"}
+                      </Button>
+                    )}
 
                     {/* Expanded Details */}
                     <Collapse in={isExpanded}>
@@ -593,6 +628,16 @@ export default function VendorDrawer({
                           Place Order
                         </Button>
                       )}
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        color="error"
+                        startIcon={<DeleteIcon />}
+                        onClick={() => handleRemoveVendor(vendor.id, vendor.name)}
+                        disabled={removingVendorId === vendor.id}
+                      >
+                        {removingVendorId === vendor.id ? "Removing..." : "Remove"}
+                      </Button>
                     </Box>
                   </CardContent>
                 </Card>

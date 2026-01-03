@@ -599,6 +599,7 @@ export function useAddVendorInventory() {
         .from("vendor_inventory")
         .insert({
           ...data,
+          price_source: data.price_source || "manual",
           last_price_update: new Date().toISOString(),
           is_available: data.is_available ?? true,
           is_active: true,

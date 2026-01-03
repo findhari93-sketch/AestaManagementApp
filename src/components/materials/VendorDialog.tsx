@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   Dialog,
   DialogTitle,
@@ -12,23 +12,18 @@ import {
   Box,
   Typography,
   IconButton,
-  Chip,
   Divider,
   Alert,
   Accordion,
   AccordionSummary,
   AccordionDetails,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
-  OutlinedInput,
   Rating,
   ToggleButton,
   ToggleButtonGroup,
   FormControlLabel,
   Switch,
   InputAdornment,
+  CircularProgress,
 } from "@mui/material";
 import {
   Close as CloseIcon,
@@ -38,7 +33,13 @@ import {
   Factory as FactoryIcon,
   Person as PersonIcon,
   Handyman as RentalIcon,
+  Edit as EditIcon,
+  CloudUpload as UploadIcon,
+  Delete as DeleteIcon,
 } from "@mui/icons-material";
+import CategoryAutocomplete from "@/components/common/CategoryAutocomplete";
+import { compressImage } from "@/components/attendance/work-updates/imageUtils";
+import { createClient } from "@/lib/supabase/client";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import {
   useCreateVendor,
@@ -47,8 +48,8 @@ import {
 import type {
   VendorWithCategories,
   VendorFormData,
-  MaterialCategory,
   VendorType,
+  MaterialCategory,
 } from "@/types/material.types";
 import { VENDOR_TYPE_LABELS } from "@/types/material.types";
 
@@ -56,22 +57,25 @@ interface VendorDialogProps {
   open: boolean;
   onClose: () => void;
   vendor: VendorWithCategories | null;
-  categories: MaterialCategory[];
+  categories?: MaterialCategory[]; // Optional - CategoryAutocomplete fetches its own data
 }
 
 export default function VendorDialog({
   open,
   onClose,
   vendor,
-  categories,
 }: VendorDialogProps) {
   const isMobile = useIsMobile();
   const isEdit = !!vendor;
 
   const createVendor = useCreateVendor();
   const updateVendor = useUpdateVendor();
+  const supabase = createClient();
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   const [error, setError] = useState("");
+  const [customizeCode, setCustomizeCode] = useState(false);
+  const [uploadingQr, setUploadingQr] = useState(false);
   const [formData, setFormData] = useState<VendorFormData>({
     name: "",
     code: "",
@@ -111,6 +115,8 @@ export default function VendorDialog({
     accepts_cash: true,
     accepts_credit: false,
     credit_days: 0,
+    upi_id: "",
+    qr_code_url: "",
   });
 
   // Reset form when vendor changes
@@ -155,7 +161,10 @@ export default function VendorDialog({
         accepts_cash: vendor.accepts_cash ?? true,
         accepts_credit: vendor.accepts_credit || false,
         credit_days: vendor.credit_days || 0,
+        upi_id: vendor.upi_id || "",
+        qr_code_url: vendor.qr_code_url || "",
       });
+      setCustomizeCode(!!vendor.code);
     } else {
       setFormData({
         name: "",
@@ -196,20 +205,67 @@ export default function VendorDialog({
         accepts_cash: true,
         accepts_credit: false,
         credit_days: 0,
+        upi_id: "",
+        qr_code_url: "",
       });
+      setCustomizeCode(false);
     }
     setError("");
   }, [vendor, open]);
 
-  // Get parent categories only
-  const parentCategories = useMemo(
-    () => categories.filter((c) => !c.parent_id),
-    [categories]
-  );
 
   const handleChange = (field: keyof VendorFormData, value: unknown) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
     setError("");
+  };
+
+  // QR Code upload handler
+  const handleQrCodeUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      setError("Please upload an image file");
+      return;
+    }
+
+    setUploadingQr(true);
+    setError("");
+
+    try {
+      // Compress image for QR codes (max 200KB, 400px)
+      const compressedFile = await compressImage(file, 200, 400, 400, 0.8);
+
+      // Generate unique file name
+      const fileExt = "jpg";
+      const fileName = `vendors/${vendor?.id || "new"}/${Date.now()}.${fileExt}`;
+
+      // Upload to Supabase Storage
+      const { error: uploadError } = await supabase.storage
+        .from("vendor-qr")
+        .upload(fileName, compressedFile, {
+          cacheControl: "3600",
+          upsert: true,
+        });
+
+      if (uploadError) throw uploadError;
+
+      // Get public URL
+      const { data: urlData } = supabase.storage.from("vendor-qr").getPublicUrl(fileName);
+      handleChange("qr_code_url", urlData.publicUrl);
+    } catch (err: unknown) {
+      console.error("Error uploading QR code:", err);
+      setError("Failed to upload QR code image");
+    } finally {
+      setUploadingQr(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    }
+  };
+
+  const handleRemoveQrCode = () => {
+    handleChange("qr_code_url", "");
   };
 
   const handleSubmit = async () => {
@@ -251,7 +307,7 @@ export default function VendorDialog({
           alignItems: "center",
         }}
       >
-        <Typography variant="h6">
+        <Typography variant="h6" component="span">
           {isEdit ? "Edit Vendor" : "Add New Vendor"}
         </Typography>
         <IconButton onClick={onClose} size="small">
@@ -268,7 +324,7 @@ export default function VendorDialog({
 
         <Grid container spacing={2}>
           {/* Basic Info */}
-          <Grid size={{ xs: 12, md: 6 }}>
+          <Grid size={{ xs: 12, md: customizeCode ? 5 : 8 }}>
             <TextField
               fullWidth
               label="Vendor Name"
@@ -276,21 +332,38 @@ export default function VendorDialog({
               onChange={(e) => handleChange("name", e.target.value)}
               required
               autoFocus
+              helperText={
+                !customizeCode && (
+                  <Box component="span" sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                    Code will be auto-generated
+                    <Button
+                      size="small"
+                      onClick={() => setCustomizeCode(true)}
+                      sx={{ minWidth: "auto", p: 0, ml: 0.5, textTransform: "none", fontSize: "0.75rem" }}
+                      startIcon={<EditIcon sx={{ fontSize: 14 }} />}
+                    >
+                      Customize
+                    </Button>
+                  </Box>
+                )
+              }
             />
           </Grid>
-          <Grid size={{ xs: 12, md: 3 }}>
-            <TextField
-              fullWidth
-              label="Vendor Code"
-              value={formData.code}
-              onChange={(e) => handleChange("code", e.target.value.toUpperCase())}
-              placeholder="Auto-generated if empty"
-              helperText="Leave empty to auto-generate based on type"
-            />
-          </Grid>
-          <Grid size={{ xs: 12, md: 3 }}>
-            <Box sx={{ pt: 1 }}>
-              <Typography variant="caption" color="text.secondary">
+          {customizeCode && (
+            <Grid size={{ xs: 12, md: 3 }}>
+              <TextField
+                fullWidth
+                label="Vendor Code"
+                value={formData.code}
+                onChange={(e) => handleChange("code", e.target.value.toUpperCase())}
+                placeholder="e.g., SHP-0001"
+                helperText="Leave empty to auto-generate"
+              />
+            </Grid>
+          )}
+          <Grid size={{ xs: 12, md: 4 }}>
+            <Box sx={{ display: "flex", flexDirection: "column" }}>
+              <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5 }}>
                 Rating
               </Typography>
               <Rating
@@ -610,31 +683,14 @@ export default function VendorDialog({
           </Grid>
 
           <Grid size={12}>
-            <FormControl fullWidth>
-              <InputLabel>Categories</InputLabel>
-              <Select
-                multiple
-                value={formData.category_ids || []}
-                onChange={(e) => handleChange("category_ids", e.target.value)}
-                input={<OutlinedInput label="Categories" />}
-                renderValue={(selected) => (
-                  <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
-                    {(selected as string[]).map((id) => {
-                      const cat = categories.find((c) => c.id === id);
-                      return cat ? (
-                        <Chip key={id} label={cat.name} size="small" />
-                      ) : null;
-                    })}
-                  </Box>
-                )}
-              >
-                {parentCategories.map((cat) => (
-                  <MenuItem key={cat.id} value={cat.id}>
-                    {cat.name}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
+            <CategoryAutocomplete
+              value={formData.category_ids || []}
+              onChange={(value) => handleChange("category_ids", value || [])}
+              multiple
+              parentOnly
+              label="Categories"
+              placeholder="Search and select categories..."
+            />
           </Grid>
 
           {/* Tax & Payment Section - Accordion */}
@@ -772,14 +828,100 @@ export default function VendorDialog({
             </Accordion>
           </Grid>
 
-          {/* Bank Details - Accordion */}
+          {/* Bank & Payment Details - Accordion */}
           <Grid size={12}>
             <Accordion>
               <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                <Typography>Bank Details</Typography>
+                <Typography>Bank & Payment Details</Typography>
               </AccordionSummary>
               <AccordionDetails>
                 <Grid container spacing={2}>
+                  {/* UPI Section */}
+                  <Grid size={12}>
+                    <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                      UPI / Digital Payment
+                    </Typography>
+                  </Grid>
+                  <Grid size={{ xs: 12, md: 6 }}>
+                    <TextField
+                      fullWidth
+                      label="UPI ID"
+                      value={formData.upi_id}
+                      onChange={(e) => handleChange("upi_id", e.target.value)}
+                      placeholder="name@upi or phone@bank"
+                      helperText="e.g., vendor@ybl, 9876543210@paytm"
+                    />
+                  </Grid>
+                  <Grid size={{ xs: 12, md: 6 }}>
+                    <Box>
+                      <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: "block" }}>
+                        Payment QR Code
+                      </Typography>
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept="image/*"
+                        onChange={handleQrCodeUpload}
+                        style={{ display: "none" }}
+                        id="vendor-qr-upload"
+                      />
+                      {formData.qr_code_url ? (
+                        <Box sx={{ display: "flex", alignItems: "flex-start", gap: 2 }}>
+                          <Box
+                            component="img"
+                            src={formData.qr_code_url}
+                            alt="Payment QR Code"
+                            sx={{
+                              width: 100,
+                              height: 100,
+                              objectFit: "contain",
+                              borderRadius: 1,
+                              border: "1px solid",
+                              borderColor: "divider",
+                            }}
+                          />
+                          <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              onClick={() => fileInputRef.current?.click()}
+                              disabled={uploadingQr}
+                              startIcon={uploadingQr ? <CircularProgress size={16} /> : <UploadIcon />}
+                            >
+                              Replace
+                            </Button>
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              color="error"
+                              onClick={handleRemoveQrCode}
+                              startIcon={<DeleteIcon />}
+                            >
+                              Remove
+                            </Button>
+                          </Box>
+                        </Box>
+                      ) : (
+                        <Button
+                          variant="outlined"
+                          onClick={() => fileInputRef.current?.click()}
+                          disabled={uploadingQr}
+                          startIcon={uploadingQr ? <CircularProgress size={16} /> : <UploadIcon />}
+                          sx={{ height: 56 }}
+                        >
+                          {uploadingQr ? "Uploading..." : "Upload QR Code"}
+                        </Button>
+                      )}
+                    </Box>
+                  </Grid>
+
+                  {/* Bank Details Section */}
+                  <Grid size={12}>
+                    <Divider sx={{ my: 1 }} />
+                    <Typography variant="subtitle2" sx={{ mt: 1, mb: 1 }}>
+                      Bank Account Details
+                    </Typography>
+                  </Grid>
                   <Grid size={{ xs: 12, md: 4 }}>
                     <TextField
                       fullWidth

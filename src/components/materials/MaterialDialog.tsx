@@ -25,6 +25,7 @@ import {
   FormControlLabel,
   Switch,
   Autocomplete,
+  InputAdornment,
 } from "@mui/material";
 import {
   Close as CloseIcon,
@@ -33,7 +34,11 @@ import {
   Star as StarIcon,
   StarBorder as StarBorderIcon,
   AccountTree as AccountTreeIcon,
+  Edit as EditIcon,
+  Translate as TranslateIcon,
+  Description as DescriptionIcon,
 } from "@mui/icons-material";
+import CategoryAutocomplete from "@/components/common/CategoryAutocomplete";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import {
   useCreateMaterial,
@@ -103,6 +108,10 @@ export default function MaterialDialog({
   const [variants, setVariants] = useState<VariantFormData[]>([]);
   const [showVariantSection, setShowVariantSection] = useState(false);
   const [showWeightSection, setShowWeightSection] = useState(false);
+  // UX improvement toggles
+  const [customizeCode, setCustomizeCode] = useState(false);
+  const [showLocalName, setShowLocalName] = useState(false);
+  const [showDescription, setShowDescription] = useState(false);
   const [formData, setFormData] = useState<MaterialFormData>({
     name: "",
     code: "",
@@ -146,6 +155,10 @@ export default function MaterialDialog({
       setShowVariantSection(false);
       // Show weight section if material has weight/length data
       setShowWeightSection(!!material.weight_per_unit || !!material.length_per_piece);
+      // Set UX toggles based on existing data
+      setCustomizeCode(!!material.code);
+      setShowLocalName(!!material.local_name);
+      setShowDescription(!!material.description);
     } else {
       setFormData({
         name: "",
@@ -168,6 +181,10 @@ export default function MaterialDialog({
       setVariants([]);
       setShowVariantSection(false);
       setShowWeightSection(false);
+      // Reset UX toggles
+      setCustomizeCode(false);
+      setShowLocalName(false);
+      setShowDescription(false);
     }
     setError("");
     setNewBrandName("");
@@ -337,7 +354,7 @@ export default function MaterialDialog({
 
         <Grid container spacing={2}>
           {/* Basic Info */}
-          <Grid size={{ xs: 12, md: 8 }}>
+          <Grid size={{ xs: 12, md: customizeCode ? 6 : 8 }}>
             <TextField
               fullWidth
               label="Material Name"
@@ -345,54 +362,130 @@ export default function MaterialDialog({
               onChange={(e) => handleChange("name", e.target.value)}
               required
               autoFocus
-            />
-          </Grid>
-          <Grid size={{ xs: 12, md: 4 }}>
-            <TextField
-              fullWidth
-              label="Material Code"
-              value={formData.code}
-              onChange={(e) =>
-                handleChange("code", e.target.value.toUpperCase())
+              helperText={
+                !customizeCode && (
+                  <Box component="span" sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                    Code will be auto-generated
+                    <Button
+                      size="small"
+                      onClick={() => setCustomizeCode(true)}
+                      sx={{ minWidth: "auto", p: 0, ml: 0.5, textTransform: "none", fontSize: "0.75rem" }}
+                      startIcon={<EditIcon sx={{ fontSize: 14 }} />}
+                    >
+                      Customize
+                    </Button>
+                  </Box>
+                )
               }
-              placeholder="Auto-generated if empty"
-              helperText="Leave empty to auto-generate"
+            />
+          </Grid>
+          {customizeCode && (
+            <Grid size={{ xs: 12, md: 2 }}>
+              <TextField
+                fullWidth
+                label="Code"
+                value={formData.code}
+                onChange={(e) =>
+                  handleChange("code", e.target.value.toUpperCase())
+                }
+                placeholder="Auto"
+                helperText="Auto if empty"
+              />
+            </Grid>
+          )}
+
+          <Grid size={{ xs: 12, md: 4 }}>
+            <CategoryAutocomplete
+              value={formData.category_id || null}
+              onChange={(value) => handleChange("category_id", value || "")}
+              parentOnly={false}
+              disabled={isVariant && !!formData.parent_id}
+              label="Category"
+              placeholder="Search categories..."
             />
           </Grid>
 
-          <Grid size={{ xs: 12, md: 6 }}>
-            <TextField
-              fullWidth
-              label="Local Name (Tamil)"
-              value={formData.local_name}
-              onChange={(e) => handleChange("local_name", e.target.value)}
-            />
+          {/* Optional Fields - Local Name and Description as toggle buttons */}
+          <Grid size={12}>
+            <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}>
+              {!showLocalName && (
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={<TranslateIcon />}
+                  onClick={() => setShowLocalName(true)}
+                  sx={{ textTransform: "none" }}
+                >
+                  Add Local Name (Tamil)
+                </Button>
+              )}
+              {!showDescription && (
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={<DescriptionIcon />}
+                  onClick={() => setShowDescription(true)}
+                  sx={{ textTransform: "none" }}
+                >
+                  Add Description
+                </Button>
+              )}
+            </Box>
           </Grid>
 
-          <Grid size={{ xs: 12, md: 6 }}>
-            <FormControl fullWidth>
-              <InputLabel>Category</InputLabel>
-              <Select
-                value={formData.category_id}
-                onChange={(e) => handleChange("category_id", e.target.value)}
-                label="Category"
-                disabled={isVariant && !!formData.parent_id}
-              >
-                <MenuItem value="">No Category</MenuItem>
-                {parentCategories.map((cat) => (
-                  <MenuItem key={cat.id} value={cat.id}>
-                    {cat.name}
-                  </MenuItem>
-                ))}
-                {subCategories.length > 0 && <Divider sx={{ my: 1 }} />}
-                {subCategories.map((cat) => (
-                  <MenuItem key={cat.id} value={cat.id} sx={{ pl: 4 }}>
-                    └ {cat.name}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Grid>
+          {showLocalName && (
+            <Grid size={{ xs: 12, md: 6 }}>
+              <TextField
+                fullWidth
+                label="Local Name (Tamil)"
+                value={formData.local_name}
+                onChange={(e) => handleChange("local_name", e.target.value)}
+                InputProps={{
+                  endAdornment: (
+                    <InputAdornment position="end">
+                      <IconButton
+                        size="small"
+                        onClick={() => {
+                          setShowLocalName(false);
+                          handleChange("local_name", "");
+                        }}
+                      >
+                        <CloseIcon fontSize="small" />
+                      </IconButton>
+                    </InputAdornment>
+                  ),
+                }}
+              />
+            </Grid>
+          )}
+
+          {showDescription && (
+            <Grid size={{ xs: 12, md: showLocalName ? 6 : 12 }}>
+              <TextField
+                fullWidth
+                label="Description"
+                value={formData.description}
+                onChange={(e) => handleChange("description", e.target.value)}
+                multiline
+                rows={2}
+                InputProps={{
+                  endAdornment: (
+                    <InputAdornment position="end" sx={{ alignSelf: "flex-start", mt: 1 }}>
+                      <IconButton
+                        size="small"
+                        onClick={() => {
+                          setShowDescription(false);
+                          handleChange("description", "");
+                        }}
+                      >
+                        <CloseIcon fontSize="small" />
+                      </IconButton>
+                    </InputAdornment>
+                  ),
+                }}
+              />
+            </Grid>
+          )}
 
           {/* Variant Section */}
           <Grid size={12}>
@@ -459,17 +552,6 @@ export default function MaterialDialog({
             </Grid>
           )}
 
-          <Grid size={{ xs: 12 }}>
-            <TextField
-              fullWidth
-              label="Description"
-              value={formData.description}
-              onChange={(e) => handleChange("description", e.target.value)}
-              multiline
-              rows={2}
-            />
-          </Grid>
-
           <Grid size={12}>
             <Divider sx={{ my: 1 }}>
               <Typography variant="caption" color="text.secondary">
@@ -526,7 +608,7 @@ export default function MaterialDialog({
           <Grid size={{ xs: 6, md: 6 }}>
             <TextField
               fullWidth
-              label="Reorder Level"
+              label={`Reorder Level (${formData.unit})`}
               type="number"
               value={formData.reorder_level}
               onChange={(e) =>
@@ -536,6 +618,7 @@ export default function MaterialDialog({
               slotProps={{
                 input: {
                   inputProps: { min: 0, step: 1 },
+                  endAdornment: <InputAdornment position="end">{formData.unit}</InputAdornment>,
                 },
               }}
             />
@@ -544,15 +627,17 @@ export default function MaterialDialog({
           <Grid size={{ xs: 6, md: 6 }}>
             <TextField
               fullWidth
-              label="Min Order Quantity"
+              label={`Min Order Quantity (${formData.unit})`}
               type="number"
               value={formData.min_order_qty}
               onChange={(e) =>
                 handleChange("min_order_qty", parseFloat(e.target.value) || 1)
               }
+              helperText="Minimum quantity when placing orders"
               slotProps={{
                 input: {
                   inputProps: { min: 1, step: 1 },
+                  endAdornment: <InputAdornment position="end">{formData.unit}</InputAdornment>,
                 },
               }}
             />

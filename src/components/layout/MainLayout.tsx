@@ -270,6 +270,11 @@ const companyNavCategories: NavCategory[] = [
         path: "/company/materials",
       },
       {
+        text: "Categories",
+        icon: <InventoryIcon />,
+        path: "/company/categories",
+      },
+      {
         text: "Price Comparison",
         icon: <TrendingUpIcon />,
         path: "/company/material-search",

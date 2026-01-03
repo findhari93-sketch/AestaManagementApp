@@ -130,6 +130,8 @@ export interface Vendor {
   accepts_cash: boolean;
   accepts_credit: boolean;
   credit_days: number | null;
+  upi_id: string | null;
+  qr_code_url: string | null;
 }
 
 // ============================================
@@ -839,6 +841,8 @@ export interface VendorFormData {
   accepts_cash?: boolean;
   accepts_credit?: boolean;
   credit_days?: number;
+  upi_id?: string;
+  qr_code_url?: string;
 }
 
 export interface MaterialFormData {
