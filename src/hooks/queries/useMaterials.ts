@@ -182,6 +182,8 @@ export function useDeleteMaterialCategory() {
         miscCategory = newMisc;
       }
 
+      if (!miscCategory) throw new Error("Failed to get or create Miscellaneous category");
+
       // Reassign all materials in this category to Miscellaneous
       const { error: reassignError } = await supabase
         .from("materials")

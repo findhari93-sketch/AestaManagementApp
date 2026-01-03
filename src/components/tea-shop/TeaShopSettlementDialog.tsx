@@ -29,10 +29,12 @@ import {
   TableHead,
   TableRow,
   Chip,
+  Tooltip,
 } from "@mui/material";
 import {
   Close as CloseIcon,
   QrCode2 as QrCodeIcon,
+  Groups as GroupsIcon,
 } from "@mui/icons-material";
 import { createClient } from "@/lib/supabase/client";
 import FileUploader, { UploadedFile } from "@/components/common/FileUploader";
@@ -74,6 +76,7 @@ interface AllocationPreview {
   allocatedAmount: number;
   isFullyPaid: boolean;
   siteName?: string; // For group mode
+  isGroupEntry?: boolean; // Whether this is a group entry (split across sites)
 }
 
 // Generate settlement reference in TSS-YYMMDD-NNN format
@@ -113,6 +116,9 @@ export default function TeaShopSettlementDialog({
   const [proofUrl, setProofUrl] = useState<string | null>(null);
   const [payerSource, setPayerSource] = useState<PayerSource>("own_money");
   const [customPayerName, setCustomPayerName] = useState("");
+
+  // Settlement mode: waterfall (allocate to entries) or standalone (historical/no allocation)
+  const [settlementMode, setSettlementMode] = useState<"waterfall" | "standalone">("waterfall");
 
   // Site engineers list
   const [engineers, setEngineers] = useState<SiteEngineer[]>([]);
@@ -158,6 +164,7 @@ export default function TeaShopSettlementDialog({
         setProofUrl(null);
         setPayerSource("own_money");
         setCustomPayerName("");
+        setSettlementMode("waterfall");
       }
       setError(null);
     }
@@ -230,29 +237,11 @@ export default function TeaShopSettlementDialog({
         const siteNameMap = new Map<string, string>();
         sites.forEach((s: any) => siteNameMap.set(s.id, s.name));
 
-        // Get tea shop accounts for all sites
-        const { data: shops } = await (supabase as any)
-          .from("tea_shop_accounts")
-          .select("id, site_id")
-          .in("site_id", siteIds)
-          .eq("is_active", true);
-
-        if (!shops || shops.length === 0) {
-          setUnsettledEntries([]);
-          return;
-        }
-
-        const shopSiteMap = new Map<string, string>();
-        shops.forEach((s: any) => {
-          if (s.site_id) shopSiteMap.set(s.id, s.site_id);
-        });
-        const shopIds = Array.from(shopSiteMap.keys());
-
-        // Fetch unsettled entries from all shops
+        // Fetch unsettled entries directly by site_id (more reliable for group entries)
         const { data } = await (supabase as any)
           .from("tea_shop_entries")
           .select("*")
-          .in("tea_shop_id", shopIds)
+          .in("site_id", siteIds)
           .or("is_fully_paid.is.null,is_fully_paid.eq.false")
           .order("date", { ascending: true });
 
@@ -264,10 +253,11 @@ export default function TeaShopSettlementDialog({
             return amountPaid < totalAmount;
           })
           .map((entry: any) => {
-            const siteId = shopSiteMap.get(entry.tea_shop_id) || "";
             return {
               ...entry,
-              site_name: siteNameMap.get(siteId) || "Unknown",
+              site_name: siteNameMap.get(entry.site_id) || "Unknown",
+              // For group entries, the total is split across sites
+              isGroupEntry: entry.is_group_entry === true,
             };
           });
 
@@ -323,6 +313,7 @@ export default function TeaShopSettlementDialog({
         allocatedAmount: toAllocate,
         isFullyPaid: toAllocate >= entryRemaining,
         siteName: (entry as any).site_name, // Include site name for group mode
+        isGroupEntry: (entry as any).isGroupEntry, // Include group entry flag
       });
 
       remaining -= toAllocate;
@@ -384,23 +375,26 @@ export default function TeaShopSettlementDialog({
         : generateSettlementRef();
 
       // Settlement record data
+      const isStandalone = settlementMode === "standalone";
       const settlementData = {
         tea_shop_id: shop.id,
         settlement_reference: settlementRef,
-        period_start: allocationPreview.length > 0 ? allocationPreview[0].date : paymentDate,
-        period_end: allocationPreview.length > 0 ? allocationPreview[allocationPreview.length - 1].date : paymentDate,
-        entries_total: totalAllocated,
+        // For standalone: period_start and period_end = payment_date
+        period_start: isStandalone ? paymentDate : (allocationPreview.length > 0 ? allocationPreview[0].date : paymentDate),
+        period_end: isStandalone ? paymentDate : (allocationPreview.length > 0 ? allocationPreview[allocationPreview.length - 1].date : paymentDate),
+        // For standalone: entries_total = amount_paid (represents the settlement value itself)
+        entries_total: isStandalone ? amountPaying : totalAllocated,
         previous_balance: 0, // Not using period-based anymore
-        total_due: pendingBalance,
+        total_due: isStandalone ? amountPaying : pendingBalance,
         amount_paid: amountPaying,
-        balance_remaining: balanceRemaining,
+        balance_remaining: isStandalone ? 0 : balanceRemaining,
         payment_date: paymentDate,
         payment_mode: paymentMode,
         payer_type: payerType,
         site_engineer_id: payerType === "site_engineer" ? selectedEngineerId : null,
         site_engineer_transaction_id: isEditMode ? settlement?.site_engineer_transaction_id : engineerTransactionId,
         is_engineer_settled: isEditMode ? settlement?.is_engineer_settled : false,
-        status: balanceRemaining > 0 ? "partial" : "completed",
+        status: isStandalone ? "completed" : (balanceRemaining > 0 ? "partial" : "completed"),
         notes: notes.trim() || null,
         recorded_by: userProfile?.name || null,
         recorded_by_user_id: userProfile?.id || null,
@@ -410,6 +404,7 @@ export default function TeaShopSettlementDialog({
         payer_name: (payerSource === "custom" || payerSource === "other_site_money")
           ? customPayerName
           : null,
+        is_standalone: isStandalone,
       };
 
       let settlementId: string;
@@ -440,25 +435,27 @@ export default function TeaShopSettlementDialog({
         settlementId = newSettlement.id;
       }
 
-      // Create allocation records and update entries
-      for (const alloc of allocationPreview) {
-        // Insert allocation record
-        await (supabase.from as any)("tea_shop_settlement_allocations")
-          .insert({
-            settlement_id: settlementId,
-            entry_id: alloc.entryId,
-            allocated_amount: alloc.allocatedAmount,
-          });
+      // Create allocation records and update entries - ONLY for waterfall mode
+      if (!isStandalone) {
+        for (const alloc of allocationPreview) {
+          // Insert allocation record
+          await (supabase.from as any)("tea_shop_settlement_allocations")
+            .insert({
+              settlement_id: settlementId,
+              entry_id: alloc.entryId,
+              allocated_amount: alloc.allocatedAmount,
+            });
 
-        // Update entry with new payment info
-        const newPaid = alloc.previouslyPaid + alloc.allocatedAmount;
-        await (supabase
-          .from("tea_shop_entries") as any)
-          .update({
-            amount_paid: newPaid,
-            is_fully_paid: alloc.isFullyPaid,
-          })
-          .eq("id", alloc.entryId);
+          // Update entry with new payment info
+          const newPaid = alloc.previouslyPaid + alloc.allocatedAmount;
+          await (supabase
+            .from("tea_shop_entries") as any)
+            .update({
+              amount_paid: newPaid,
+              is_fully_paid: alloc.isFullyPaid,
+            })
+            .eq("id", alloc.entryId);
+        }
       }
 
       onSuccess?.();
@@ -560,8 +557,54 @@ export default function TeaShopSettlementDialog({
           }}
         />
 
-        {/* Waterfall Allocation Preview */}
-        {allocationPreview.length > 0 && (
+        {/* Settlement Type Selection */}
+        <Paper variant="outlined" sx={{ p: 2, mb: 3 }}>
+          <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>
+            SETTLEMENT TYPE
+          </Typography>
+          <RadioGroup
+            value={settlementMode}
+            onChange={(e) => setSettlementMode(e.target.value as "waterfall" | "standalone")}
+          >
+            <FormControlLabel
+              value="waterfall"
+              control={<Radio size="small" />}
+              label={
+                <Box>
+                  <Typography variant="body2">Allocate to entries</Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Payment applied to oldest unpaid entries (FIFO)
+                  </Typography>
+                </Box>
+              }
+            />
+            <FormControlLabel
+              value="standalone"
+              control={<Radio size="small" />}
+              label={
+                <Box>
+                  <Typography variant="body2">Historical/Standalone</Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    For historical data - doesn&apos;t allocate to specific entries
+                  </Typography>
+                </Box>
+              }
+            />
+          </RadioGroup>
+        </Paper>
+
+        {/* Info alert for standalone mode */}
+        {settlementMode === "standalone" && (
+          <Alert severity="info" sx={{ mb: 3 }}>
+            <Typography variant="body2">
+              This settlement counts toward total paid but won&apos;t link to specific entries.
+              Use for historical data where daily breakdown doesn&apos;t exist.
+            </Typography>
+          </Alert>
+        )}
+
+        {/* Waterfall Allocation Preview - Only show in waterfall mode */}
+        {settlementMode === "waterfall" && allocationPreview.length > 0 && (
           <Paper variant="outlined" sx={{ p: 2, mb: 3 }}>
             <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1.5 }}>
               ALLOCATION PREVIEW (Oldest First){isInGroup && " - All Sites"}
@@ -602,9 +645,16 @@ export default function TeaShopSettlementDialog({
                       </TableCell>
                     )}
                     <TableCell align="right" sx={{ py: 0.75 }}>
-                      <Typography variant="body2" fontSize="0.8rem">
-                        ₹{alloc.entryAmount.toLocaleString()}
-                      </Typography>
+                      <Box sx={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 0.5 }}>
+                        {alloc.isGroupEntry && (
+                          <Tooltip title="Group entry - settling covers all sites">
+                            <GroupsIcon fontSize="small" color="primary" sx={{ fontSize: "0.9rem" }} />
+                          </Tooltip>
+                        )}
+                        <Typography variant="body2" fontSize="0.8rem">
+                          ₹{alloc.entryAmount.toLocaleString()}
+                        </Typography>
+                      </Box>
                     </TableCell>
                     <TableCell align="right" sx={{ py: 0.75 }}>
                       <Typography variant="body2" fontSize="0.8rem" fontWeight={600} color="success.main">
@@ -634,24 +684,28 @@ export default function TeaShopSettlementDialog({
           </Paper>
         )}
 
-        {loadingEntries && (
+        {/* Loading indicator - only for waterfall mode */}
+        {settlementMode === "waterfall" && loadingEntries && (
           <Box sx={{ display: "flex", justifyContent: "center", py: 2 }}>
             <CircularProgress size={24} />
           </Box>
         )}
 
-        <Box sx={{ display: "flex", justifyContent: "space-between", mb: 3 }}>
-          <Typography variant="body2" color="text.secondary">
-            Balance After Payment:
-          </Typography>
-          <Typography
-            variant="body2"
-            fontWeight={600}
-            color={balanceRemaining > 0 ? "error.main" : "success.main"}
-          >
-            ₹{balanceRemaining.toLocaleString()}
-          </Typography>
-        </Box>
+        {/* Balance After Payment - only show for waterfall mode */}
+        {settlementMode === "waterfall" && (
+          <Box sx={{ display: "flex", justifyContent: "space-between", mb: 3 }}>
+            <Typography variant="body2" color="text.secondary">
+              Balance After Payment:
+            </Typography>
+            <Typography
+              variant="body2"
+              fontWeight={600}
+              color={balanceRemaining > 0 ? "error.main" : "success.main"}
+            >
+              ₹{balanceRemaining.toLocaleString()}
+            </Typography>
+          </Box>
+        )}
 
         {/* Payment Date */}
         <TextField

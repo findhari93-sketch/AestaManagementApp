@@ -183,7 +183,7 @@ export default function CategoryDialog({
             <FormControl fullWidth>
               <CategoryAutocomplete
                 value={formData.parent_id}
-                onChange={(id) => setFormData({ ...formData, parent_id: id })}
+                onChange={(id) => setFormData({ ...formData, parent_id: Array.isArray(id) ? id[0] : id })}
                 parentOnly
                 label="Parent Category (Optional)"
                 placeholder="Select parent category for hierarchy..."
