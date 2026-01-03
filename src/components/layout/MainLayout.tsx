@@ -149,7 +149,7 @@ const siteNavCategories: NavCategory[] = [
         path: "/site/my-wallet",
       },
       {
-        text: "Tea Shop",
+        text: "T&S Settlement",
         icon: <LocalCafeIcon />,
         path: "/site/tea-shop",
       },
@@ -278,6 +278,11 @@ const companyNavCategories: NavCategory[] = [
         text: "Vendor Directory",
         icon: <StoreIcon />,
         path: "/company/vendors",
+      },
+      {
+        text: "Tea Shops",
+        icon: <LocalCafeIcon />,
+        path: "/company/tea-shops",
       },
       {
         text: "Site Groups",

@@ -147,6 +147,20 @@ export const queryKeys = {
     unsettled: (groupId: string) => ['combined-tea-shop', 'unsettled', groupId] as const,
   },
 
+  // Company-level tea shops (new model)
+  companyTeaShops: {
+    all: ['company-tea-shops'] as const,
+    list: () => ['company-tea-shops', 'list'] as const,
+    byId: (id: string) => ['company-tea-shops', id] as const,
+    assignments: (teaShopId: string) => ['company-tea-shops', teaShopId, 'assignments'] as const,
+    forSite: (siteId: string) => ['company-tea-shops', 'for-site', siteId] as const,
+    forGroup: (groupId: string) => ['company-tea-shops', 'for-group', groupId] as const,
+    entries: (teaShopId: string) => ['company-tea-shops', teaShopId, 'entries'] as const,
+    settlements: (teaShopId: string) => ['company-tea-shops', teaShopId, 'settlements'] as const,
+    dayUnits: (groupId: string, date: string) => ['company-tea-shops', 'day-units', groupId, date] as const,
+    entryAllocations: (entryId: string) => ['company-tea-shops', 'entry-allocations', entryId] as const,
+  },
+
   // ==================== INVENTORY DATA (5min cache) ====================
   
   materialStock: {

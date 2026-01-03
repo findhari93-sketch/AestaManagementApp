@@ -32,6 +32,8 @@ interface SimpleEntryModeContentProps {
   secondarySitePercent: number;
   onSitePercentChange: (primary: number, secondary: number) => void;
   availableSites: Site[];
+  // Hide labor group split and multi-site sections for group entries
+  hideForGroupEntry?: boolean;
 }
 
 export default function SimpleEntryModeContent({
@@ -52,6 +54,7 @@ export default function SimpleEntryModeContent({
   secondarySitePercent,
   onSitePercentChange,
   availableSites,
+  hideForGroupEntry = false,
 }: SimpleEntryModeContentProps) {
   // Calculate the effective total for this site (after multi-site split)
   const effectiveTotal = enableMultiSite && secondarySite
@@ -106,33 +109,39 @@ export default function SimpleEntryModeContent({
         )}
       </Box>
 
-      <Divider />
+      {/* Labor Group Percentage Split - Hidden for group entries */}
+      {!hideForGroupEntry && (
+        <>
+          <Divider />
+          <PercentageSplitInput
+            daily={percentageSplit.daily}
+            contract={percentageSplit.contract}
+            market={percentageSplit.market}
+            totalCost={effectiveTotal}
+            onChange={onPercentageSplitChange}
+          />
+        </>
+      )}
 
-      {/* Labor Group Percentage Split */}
-      <PercentageSplitInput
-        daily={percentageSplit.daily}
-        contract={percentageSplit.contract}
-        market={percentageSplit.market}
-        totalCost={effectiveTotal}
-        onChange={onPercentageSplitChange}
-      />
-
-      <Divider />
-
-      {/* Multi-Site Split Section */}
-      <MultiSiteSplitSection
-        enabled={enableMultiSite}
-        onEnabledChange={onEnableMultiSiteChange}
-        primarySite={primarySite}
-        secondarySite={secondarySite}
-        onSecondarySiteChange={onSecondarySiteChange}
-        primaryPercent={primarySitePercent}
-        secondaryPercent={secondarySitePercent}
-        onPercentChange={onSitePercentChange}
-        totalCost={totalCost}
-        availableSites={availableSites}
-        date={date}
-      />
+      {/* Multi-Site Split Section - Hidden for group entries */}
+      {!hideForGroupEntry && (
+        <>
+          <Divider />
+          <MultiSiteSplitSection
+            enabled={enableMultiSite}
+            onEnabledChange={onEnableMultiSiteChange}
+            primarySite={primarySite}
+            secondarySite={secondarySite}
+            onSecondarySiteChange={onSecondarySiteChange}
+            primaryPercent={primarySitePercent}
+            secondaryPercent={secondarySitePercent}
+            onPercentChange={onSitePercentChange}
+            totalCost={totalCost}
+            availableSites={availableSites}
+            date={date}
+          />
+        </>
+      )}
 
       {/* Notes */}
       <TextField

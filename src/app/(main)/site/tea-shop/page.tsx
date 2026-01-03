@@ -22,6 +22,14 @@ import {
   TableRow,
   Tooltip,
   Fab,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
 } from "@mui/material";
 import {
   Add as AddIcon,
@@ -39,15 +47,15 @@ import {
   Visibility as ViewIcon,
   CheckCircle as CheckCircleIcon,
   Groups as GroupsIcon,
+  FilterList as FilterIcon,
 } from "@mui/icons-material";
-// Removed: Switch and FormControlLabel - no longer needed after removing manual group toggle
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { useSite } from "@/contexts/SiteContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useDateRange } from "@/contexts/DateRangeContext";
 import PageHeader from "@/components/layout/PageHeader";
 import { hasEditPermission } from "@/lib/permissions";
-import TeaShopDrawer from "@/components/tea-shop/TeaShopDrawer";
 import TeaShopEntryDialog from "@/components/tea-shop/TeaShopEntryDialog";
 import AuditAvatarGroup from "@/components/common/AuditAvatarGroup";
 import TeaShopSettlementDialog from "@/components/tea-shop/TeaShopSettlementDialog";
@@ -68,6 +76,10 @@ import {
   useCombinedTeaShopSettlements,
   type CombinedTeaShopEntry,
 } from "@/hooks/queries/useCombinedTeaShop";
+import {
+  useTeaShopForSite,
+  type CompanyTeaShop,
+} from "@/hooks/queries/useCompanyTeaShops";
 
 // Types for combined entries view
 type CombinedEntryType =
@@ -96,6 +108,7 @@ export default function TeaShopPage() {
   const { userProfile } = useAuth();
   const { formatForApi, isAllTime } = useDateRange();
   const supabase = createClient();
+  const router = useRouter();
 
   const { dateFrom, dateTo } = formatForApi();
 
@@ -111,7 +124,7 @@ export default function TeaShopPage() {
   const [initialEntryDate, setInitialEntryDate] = useState<string | undefined>(undefined);
 
   // Dialog states
-  const [shopDrawerOpen, setShopDrawerOpen] = useState(false);
+  const [configDialogOpen, setConfigDialogOpen] = useState(false);
   const [entryDialogOpen, setEntryDialogOpen] = useState(false);
   const [settlementDialogOpen, setSettlementDialogOpen] = useState(false);
   const [editingEntry, setEditingEntry] = useState<TeaShopEntry | null>(null);
@@ -120,10 +133,22 @@ export default function TeaShopPage() {
   // Legacy group mode state (for backward compat dialogs)
   const [editingGroupEntry, setEditingGroupEntry] = useState<TeaShopGroupEntryWithAllocations | null>(null);
 
+  // Site filter for grouped sites - defaults to selected site, can change to "all" or other sites
+  const [siteFilter, setSiteFilter] = useState<string>("");
+
   // Check if site is in a group - AUTO-DETECT group mode
   const siteGroupId = selectedSite?.site_group_id as string | undefined;
   const isInGroup = !!siteGroupId;
   const { data: siteGroup } = useSiteGroup(siteGroupId);
+
+  // NEW: Get company tea shop for this site (checks direct assignment first, then group assignment)
+  const { data: companyTeaShop, isLoading: loadingCompanyTeaShop } = useTeaShopForSite(selectedSite?.id);
+
+  // Get list of sites for filtering when in a group
+  const groupSites = useMemo(() => {
+    if (!isInGroup || !siteGroup?.sites) return [];
+    return siteGroup.sites.map((s: any) => ({ id: s.id, name: s.name }));
+  }, [isInGroup, siteGroup]);
 
   // Combined tea shop data (fetched when site is in a group)
   const { data: combinedEntriesData } = useCombinedTeaShopEntries(isInGroup ? siteGroupId : undefined);
@@ -329,6 +354,13 @@ export default function TeaShopPage() {
     fetchData();
   }, [selectedSite]);
 
+  // Set default site filter to selected site when site changes (for grouped sites)
+  useEffect(() => {
+    if (selectedSite?.id && isInGroup) {
+      setSiteFilter(selectedSite.id);
+    }
+  }, [selectedSite?.id, isInGroup]);
+
   const handleDeleteEntry = async (id: string) => {
     if (!confirm("Are you sure you want to delete this entry?")) return;
 
@@ -367,9 +399,19 @@ export default function TeaShopPage() {
   // Create combined entries view with holidays and missing entries
   const combinedEntries = useMemo((): CombinedEntryType[] => {
     // Use combined data when in a group
-    const entriesToUse = isInGroup && combinedEntriesData
+    let entriesToUse = isInGroup && combinedEntriesData
       ? combinedEntriesData
       : filteredEntries;
+
+    // Apply site filter when in group mode (filter by specific site, or show all if "all" selected)
+    if (isInGroup && siteFilter && siteFilter !== "all" && combinedEntriesData) {
+      entriesToUse = combinedEntriesData.filter((e) => {
+        const combined = e as CombinedTeaShopEntry;
+        // Match by site_id if available, otherwise by site_name
+        return combined.site_id === siteFilter ||
+               groupSites.find(s => s.id === siteFilter)?.name === combined.site_name;
+      });
+    }
 
     const entryDates = new Set(entriesToUse.map((e) => e.date));
     const holidayDates = new Set(holidays.map((h) => (h as any).date));
@@ -410,13 +452,13 @@ export default function TeaShopPage() {
 
     // Sort by date descending
     return result.sort((a, b) => b.date.localeCompare(a.date));
-  }, [filteredEntries, holidays, attendanceByDate, dateFrom, dateTo, isAllTime, isInGroup, combinedEntriesData]);
+  }, [filteredEntries, holidays, attendanceByDate, dateFrom, dateTo, isAllTime, isInGroup, combinedEntriesData, siteFilter, groupSites]);
 
   if (!selectedSite) {
     return (
       <Box>
-        <PageHeader title="Tea Shop" />
-        <Alert severity="warning">Please select a site to view tea shop</Alert>
+        <PageHeader title="T&S Settlement" />
+        <Alert severity="warning">Please select a site to view T&S settlement</Alert>
       </Box>
     );
   }
@@ -425,18 +467,37 @@ export default function TeaShopPage() {
     <Box>
       {/* Header */}
       <PageHeader
-        title="Tea Shop"
+        title="T&S Settlement"
         subtitle={
-          isInGroup
-            ? shop
-              ? `${shop.shop_name} - Group: ${siteGroup?.sites?.map((s: any) => s.name).join(", ") || ""}`
-              : `Group: ${siteGroup?.name || ""} - ${siteGroup?.sites?.length || 0} sites`
+          companyTeaShop
+            ? isInGroup
+              ? `${companyTeaShop.name} - ${siteGroup?.sites?.length || 0} sites`
+              : companyTeaShop.name
             : shop
-            ? shop.shop_name
+            ? isInGroup
+              ? `${shop.shop_name} - Group: ${siteGroup?.name || ""}`
+              : shop.shop_name
             : "No shop configured"
         }
         actions={
           <Box sx={{ display: "flex", gap: 0.5, alignItems: "center" }}>
+            {/* Site Filter - only show when in group with multiple sites */}
+            {isInGroup && groupSites.length > 1 && (
+              <FormControl size="small" sx={{ minWidth: 120, mr: 1, display: { xs: 'none', sm: 'block' } }}>
+                <Select
+                  value={siteFilter}
+                  onChange={(e) => setSiteFilter(e.target.value)}
+                  displayEmpty
+                  startAdornment={<FilterIcon fontSize="small" sx={{ mr: 0.5, color: 'action.active' }} />}
+                  sx={{ fontSize: '0.875rem' }}
+                >
+                  <MenuItem value="all">All Sites</MenuItem>
+                  {groupSites.map((site) => (
+                    <MenuItem key={site.id} value={site.id}>{site.name}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            )}
             {/* Group indicator (no toggle - automatic grouping) */}
             {isInGroup && (
               <Tooltip title={`Grouped with ${siteGroup?.sites?.length || 0} sites`}>
@@ -452,7 +513,7 @@ export default function TeaShopPage() {
             )}
             {/* Desktop buttons - hidden on mobile via CSS */}
             <Box sx={{ display: { xs: 'none', sm: 'flex' }, gap: 0.5 }}>
-              {shop && (
+              {(shop || companyTeaShop) && (
                 <>
                   <Button
                     variant="contained"
@@ -479,7 +540,7 @@ export default function TeaShopPage() {
                 </>
               )}
             </Box>
-            <IconButton onClick={() => setShopDrawerOpen(true)} disabled={!canEdit} size="small">
+            <IconButton onClick={() => setConfigDialogOpen(true)} size="small">
               <Settings />
             </IconButton>
           </Box>
@@ -561,23 +622,40 @@ export default function TeaShopPage() {
       </Grid>
 
       {/* No Shop Alert */}
-      {!shop && !loading && (
+      {!shop && !companyTeaShop && !loading && !loadingCompanyTeaShop && (
         <Alert
           severity="info"
           action={
-            <Button color="inherit" size="small" onClick={() => setShopDrawerOpen(true)}>
+            <Button color="inherit" size="small" onClick={() => router.push('/company/tea-shops')}>
               Add Shop
             </Button>
           }
         >
           {isInGroup
-            ? `No tea shop configured for this site. Add a shop to start tracking expenses for the group.`
-            : "No tea shop configured for this site. Add a shop to start tracking."}
+            ? `No tea shop configured for this site group. Go to Company → Tea Shops to assign one.`
+            : "No tea shop configured for this site. Go to Company → Tea Shops to assign one."}
         </Alert>
       )}
 
-      {/* Group Info Banner - show when in group with shop */}
-      {isInGroup && shop && siteGroup && (
+      {/* Company Tea Shop Info Banner - show when using new company tea shop */}
+      {companyTeaShop && isInGroup && siteGroup && (
+        <Alert
+          severity="success"
+          icon={<GroupsIcon />}
+          sx={{ mb: 2 }}
+        >
+          <Typography variant="body2">
+            <strong>Grouped Sites:</strong> {siteGroup.sites?.map((s: any) => s.name).join(", ")}
+          </Typography>
+          <Typography variant="caption" color="text.secondary">
+            Tea shop costs are split based on day units across all sites.
+            {siteFilter !== "all" && ` Filtered to show only ${groupSites.find(s => s.id === siteFilter)?.name}`}
+          </Typography>
+        </Alert>
+      )}
+
+      {/* Legacy Group Info Banner - show when in group with old shop model */}
+      {isInGroup && shop && !companyTeaShop && siteGroup && (
         <Alert
           severity="info"
           icon={<GroupsIcon />}
@@ -593,7 +671,7 @@ export default function TeaShopPage() {
       )}
 
       {/* Tabs */}
-      {shop && (
+      {(shop || companyTeaShop) && (
         <Paper sx={{ borderRadius: 2 }}>
           <Tabs value={tabValue} onChange={(_, v) => setTabValue(v)} sx={{ borderBottom: 1, borderColor: "divider" }}>
             <Tab label="Entries" icon={<LocalCafe />} iconPosition="start" />
@@ -1115,61 +1193,97 @@ export default function TeaShopPage() {
         </Paper>
       )}
 
-      {/* Dialogs */}
-      <TeaShopDrawer
-        open={shopDrawerOpen}
-        onClose={() => setShopDrawerOpen(false)}
-        shop={shop}
-        siteId={selectedSite.id}
-        siteGroupId={siteGroupId}
-        isGroupMode={false}
-        onSuccess={() => {
-          setShopDrawerOpen(false);
-          fetchData();
-        }}
-      />
+      {/* Config Redirect Dialog */}
+      <Dialog
+        open={configDialogOpen}
+        onClose={() => setConfigDialogOpen(false)}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>Tea Shop Configuration</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary">
+            To configure or modify tea shop settings, please visit the Company Tea Shops page.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfigDialogOpen(false)}>
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            onClick={() => {
+              setConfigDialogOpen(false);
+              router.push("/company/tea-shops");
+            }}
+          >
+            Go to Tea Shops
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Site-level dialogs - always use site dialogs, entries are site-specific */}
-      {shop && (
-        <>
-          <TeaShopEntryDialog
-            open={entryDialogOpen}
-            onClose={() => {
-              setEntryDialogOpen(false);
-              setEditingEntry(null);
-              setInitialEntryDate(undefined);
-            }}
-            shop={shop}
-            entry={editingEntry}
-            initialDate={initialEntryDate}
-            onSuccess={() => {
-              setEntryDialogOpen(false);
-              setEditingEntry(null);
-              setInitialEntryDate(undefined);
-              fetchData();
-            }}
-          />
+      {/* Create a compatible shop object from company tea shop if needed */}
+      {(() => {
+        // Use legacy shop if available, otherwise create from company tea shop
+        const effectiveShop: TeaShopAccount | null = shop || (companyTeaShop ? {
+          id: companyTeaShop.id,
+          site_id: selectedSite.id, // Use current site for entries
+          shop_name: companyTeaShop.name,
+          owner_name: companyTeaShop.owner_name,
+          contact_phone: companyTeaShop.contact_phone,
+          address: companyTeaShop.address,
+          upi_id: companyTeaShop.upi_id,
+          qr_code_url: companyTeaShop.qr_code_url,
+          notes: companyTeaShop.notes,
+          is_active: companyTeaShop.is_active,
+          created_at: companyTeaShop.created_at,
+          updated_at: companyTeaShop.updated_at,
+        } : null);
 
-          <TeaShopSettlementDialog
-            open={settlementDialogOpen}
-            onClose={() => {
-              setSettlementDialogOpen(false);
-              setEditingSettlement(null);
-            }}
-            shop={shop}
-            pendingBalance={stats.pendingBalance}
-            entries={entries}
-            settlement={editingSettlement}
-            isInGroup={isInGroup}
-            siteGroupId={siteGroupId}
-            onSuccess={() => {
-              setSettlementDialogOpen(false);
-              setEditingSettlement(null);
-              fetchData();
-            }}
-          />
-        </>
-      )}
+        if (!effectiveShop) return null;
+
+        return (
+          <>
+            <TeaShopEntryDialog
+              open={entryDialogOpen}
+              onClose={() => {
+                setEntryDialogOpen(false);
+                setEditingEntry(null);
+                setInitialEntryDate(undefined);
+              }}
+              shop={effectiveShop}
+              entry={editingEntry}
+              initialDate={initialEntryDate}
+              onSuccess={() => {
+                setEntryDialogOpen(false);
+                setEditingEntry(null);
+                setInitialEntryDate(undefined);
+                fetchData();
+              }}
+            />
+
+            <TeaShopSettlementDialog
+              open={settlementDialogOpen}
+              onClose={() => {
+                setSettlementDialogOpen(false);
+                setEditingSettlement(null);
+              }}
+              shop={effectiveShop}
+              pendingBalance={stats.pendingBalance}
+              entries={entries}
+              settlement={editingSettlement}
+              isInGroup={isInGroup}
+              siteGroupId={siteGroupId}
+              onSuccess={() => {
+                setSettlementDialogOpen(false);
+                setEditingSettlement(null);
+                fetchData();
+              }}
+            />
+          </>
+        );
+      })()}
 
       {/* Mobile FAB - always rendered, visibility controlled by CSS */}
       <Fab
@@ -1179,7 +1293,7 @@ export default function TeaShopPage() {
           setEntryDialogOpen(true);
         }}
         sx={{
-          display: shop && canEdit ? { xs: 'flex', sm: 'none' } : 'none',
+          display: (shop || companyTeaShop) && canEdit ? { xs: 'flex', sm: 'none' } : 'none',
           position: "fixed",
           bottom: 16,
           right: 16,

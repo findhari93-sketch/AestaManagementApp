@@ -1752,7 +1752,7 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
         .select("*")
         .eq("tea_shop_id", shop.id)
         .eq("date", date)
-        .single();
+        .maybeSingle();
 
       setTeaShopAccount(shop);
       setTeaShopDialogDate(date);
@@ -1775,7 +1775,7 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
         .select("*")
         .eq("tea_shop_id", shop.id)
         .eq("date", teaShopDialogDate)
-        .single();
+        .maybeSingle();
 
       setTeaShopAccount(shop);
       setTeaShopEditingEntry(existingEntry || null);
@@ -3853,7 +3853,7 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
                                 )}
                               </Box>
                             </TableCell>
-                            <TableCell>
+                            <TableCell sx={{ px: { xs: 0.5, sm: 1 } }}>
                               <Box
                                 sx={{
                                   display: "flex",

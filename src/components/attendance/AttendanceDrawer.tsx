@@ -725,7 +725,7 @@ export default function AttendanceDrawer({
           .select("*")
           .eq("tea_shop_id", shopToUse.id)
           .eq("date", dateToLoad)
-          .single();
+          .maybeSingle();
 
         if (teaEntryData) {
           setExistingTeaEntry(teaEntryData as TeaShopEntry);
