@@ -1791,13 +1791,17 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
 
   // Fetch group entry data synchronously before opening edit dialog
   const handleEditGroupEntry = async (entryId: string, date: string) => {
+    console.log("handleEditGroupEntry called with:", { entryId, date });
     try {
       // Fetch entry from tea_shop_entries
+      console.log("Fetching entry from tea_shop_entries...");
       const { data: entry, error: entryError } = await (supabase as any)
         .from("tea_shop_entries")
         .select("*")
         .eq("id", entryId)
         .single();
+
+      console.log("Entry fetch result:", { entry, entryError });
 
       if (entryError) {
         console.error("Error fetching entry:", entryError);
@@ -1838,9 +1842,11 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
       };
 
       // Set data and open dialog
+      console.log("Setting dialog data and opening:", { fullEntry, date });
       setEditingGroupEntryData(fullEntry);
       setTeaShopDialogDate(date);
       setGroupTeaShopDialogOpen(true);
+      console.log("Dialog should now be open");
     } catch (err) {
       console.error("Error in handleEditGroupEntry:", err);
     }
@@ -5638,6 +5644,8 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
                 const isGroupEntry = teaShopPopoverData.data.isGroupEntry;
                 const entryId = teaShopPopoverData.data.entryId;
 
+                console.log("Edit clicked:", { dateToEdit, isGroupEntry, entryId });
+
                 // Close popover first
                 setTeaShopPopoverAnchor(null);
                 setTeaShopPopoverData(null);
@@ -5645,11 +5653,13 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
 
                 // For group entries: fetch data and open dialog directly (skip mode dialog)
                 if (isGroupEntry && entryId) {
+                  console.log("Opening group entry edit for:", entryId);
                   await handleEditGroupEntry(entryId, dateToEdit);
                   return;
                 }
 
                 // For non-group entries: use normal flow
+                console.log("Opening normal tea shop dialog");
                 handleOpenTeaShopDialog(dateToEdit);
               }}
             >
