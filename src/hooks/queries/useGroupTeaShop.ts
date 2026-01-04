@@ -148,8 +148,8 @@ export function useGroupTeaShopEntry(entryId: string | undefined) {
         site_group_id: entry.site_group_id || null,
         date: entry.date,
         total_amount: entry.total_amount,
-        is_percentage_override: false,
-        percentage_split: null,
+        is_percentage_override: entry.is_percentage_override || false,
+        percentage_split: entry.percentage_split || null,
         notes: entry.notes,
         entered_by: entry.entered_by,
         entered_by_user_id: entry.entered_by_user_id,
@@ -301,17 +301,23 @@ export function useCreateGroupTeaShopEntry() {
 
   return useMutation({
     mutationFn: async (data: CreateGroupEntryData) => {
-      await ensureFreshSession();
+      const isSessionValid = await ensureFreshSession();
+      if (!isSessionValid) {
+        throw new Error("Session expired. Please refresh the page and try again.");
+      }
 
-      // Create the group entry
+      // Create the entry in tea_shop_entries with is_group_entry = true
       const { data: entry, error: entryError } = await (supabase as any)
-        .from("tea_shop_group_entries")
+        .from("tea_shop_entries")
         .insert({
           tea_shop_id: data.teaShopId,
           site_group_id: data.siteGroupId,
+          site_id: null, // Group entries don't have a single site
           date: data.date,
           total_amount: data.totalAmount,
-          is_percentage_override: data.isPercentageOverride || false,
+          amount_paid: 0,
+          is_fully_paid: false,
+          is_group_entry: true,
           percentage_split: data.percentageSplit || null,
           notes: data.notes || null,
           entered_by: data.enteredBy || null,
@@ -322,19 +328,17 @@ export function useCreateGroupTeaShopEntry() {
 
       if (entryError) throw entryError;
 
-      // Create allocations for each site
+      // Create allocations in tea_shop_entry_allocations
       const allocationsToInsert = data.allocations.map((alloc) => ({
-        group_entry_id: entry.id,
+        entry_id: entry.id,
         site_id: alloc.siteId,
-        named_laborer_count: alloc.namedLaborerCount,
-        market_laborer_count: alloc.marketLaborerCount,
-        attendance_count: alloc.namedLaborerCount + alloc.marketLaborerCount,
+        worker_count: alloc.namedLaborerCount + alloc.marketLaborerCount,
         allocation_percentage: alloc.percentage,
         allocated_amount: alloc.amount,
       }));
 
       const { error: allocError } = await (supabase as any)
-        .from("tea_shop_group_allocations")
+        .from("tea_shop_entry_allocations")
         .insert(allocationsToInsert);
 
       if (allocError) throw allocError;
@@ -368,19 +372,19 @@ export function useUpdateGroupTeaShopEntry() {
 
   return useMutation({
     mutationFn: async (data: UpdateGroupEntryData) => {
-      await ensureFreshSession();
+      const isSessionValid = await ensureFreshSession();
+      if (!isSessionValid) {
+        throw new Error("Session expired. Please refresh the page and try again.");
+      }
 
-      // Update the group entry
+      // Update the entry in tea_shop_entries (not tea_shop_group_entries)
       const { data: entry, error: entryError } = await (supabase as any)
-        .from("tea_shop_group_entries")
+        .from("tea_shop_entries")
         .update({
           date: data.date,
           total_amount: data.totalAmount,
-          is_percentage_override: data.isPercentageOverride || false,
           percentage_split: data.percentageSplit || null,
           notes: data.notes || null,
-          updated_by: data.updatedBy || null,
-          updated_by_user_id: data.updatedByUserId || null,
           updated_at: new Date().toISOString(),
         })
         .eq("id", data.id)
@@ -389,25 +393,23 @@ export function useUpdateGroupTeaShopEntry() {
 
       if (entryError) throw entryError;
 
-      // Delete existing allocations
+      // Delete existing allocations from tea_shop_entry_allocations
       await (supabase as any)
-        .from("tea_shop_group_allocations")
+        .from("tea_shop_entry_allocations")
         .delete()
-        .eq("group_entry_id", data.id);
+        .eq("entry_id", data.id);
 
-      // Create new allocations
+      // Create new allocations in tea_shop_entry_allocations
       const allocationsToInsert = data.allocations.map((alloc) => ({
-        group_entry_id: data.id,
+        entry_id: data.id,
         site_id: alloc.siteId,
-        named_laborer_count: alloc.namedLaborerCount,
-        market_laborer_count: alloc.marketLaborerCount,
-        attendance_count: alloc.namedLaborerCount + alloc.marketLaborerCount,
+        worker_count: alloc.namedLaborerCount + alloc.marketLaborerCount,
         allocation_percentage: alloc.percentage,
         allocated_amount: alloc.amount,
       }));
 
       const { error: allocError } = await (supabase as any)
-        .from("tea_shop_group_allocations")
+        .from("tea_shop_entry_allocations")
         .insert(allocationsToInsert);
 
       if (allocError) throw allocError;

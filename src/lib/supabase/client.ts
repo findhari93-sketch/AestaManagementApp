@@ -50,7 +50,7 @@ export function createClient() {
  * Has a 5-second timeout to prevent hanging indefinitely.
  */
 export async function ensureFreshSession(): Promise<boolean> {
-  const SESSION_TIMEOUT = 5000; // 5 seconds
+  const SESSION_TIMEOUT = 10000; // 10 seconds (increased from 5)
 
   const sessionCheckPromise = async (): Promise<boolean> => {
     const supabase = createClient();
@@ -68,16 +68,21 @@ export async function ensureFreshSession(): Promise<boolean> {
         return false;
       }
 
-      // Check if token is expired or about to expire (within 2 minutes)
+      // Check if token is expired or about to expire (within 5 minutes for buffer)
       const expiresAt = session.expires_at;
       if (expiresAt) {
-        const twoMinutesFromNow = Math.floor(Date.now() / 1000) + 120;
-        if (expiresAt < twoMinutesFromNow) {
+        const fiveMinutesFromNow = Math.floor(Date.now() / 1000) + 300;
+        if (expiresAt < fiveMinutesFromNow) {
           // Token is expired or about to expire, refresh it
-          const { error: refreshError } = await supabase.auth.refreshSession();
+          console.log("Session expiring soon, refreshing...");
+          const { data, error: refreshError } = await supabase.auth.refreshSession();
           if (refreshError) {
             console.error("Session refresh failed:", refreshError);
+            // Try to sign in again if refresh fails
             return false;
+          }
+          if (data.session) {
+            console.log("Session refreshed successfully");
           }
         }
       }
@@ -93,7 +98,7 @@ export async function ensureFreshSession(): Promise<boolean> {
   const timeoutPromise = new Promise<boolean>((resolve) => {
     setTimeout(() => {
       console.warn("ensureFreshSession timed out, proceeding anyway");
-      resolve(true); // Assume session is valid on timeout to avoid blocking user
+      resolve(true); // Still proceed on timeout to avoid blocking user completely
     }, SESSION_TIMEOUT);
   });
 

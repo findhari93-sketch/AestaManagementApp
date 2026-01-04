@@ -382,6 +382,10 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
   const [popoverGroupAllocations, setPopoverGroupAllocations] = useState<any[] | null>(null);
   // Pre-fetched group entry data for editing (sync fetch approach)
   const [editingGroupEntryData, setEditingGroupEntryData] = useState<any>(null);
+  // Tea shop for editing (fetched from entry's tea_shop_id)
+  const [editingTeaShop, setEditingTeaShop] = useState<any>(null);
+  // Site group for editing (fetched from entry's site_group_id)
+  const [editingSiteGroup, setEditingSiteGroup] = useState<any>(null);
 
   // Work update viewer state
   const [workUpdateViewerOpen, setWorkUpdateViewerOpen] = useState(false);
@@ -1791,17 +1795,13 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
 
   // Fetch group entry data synchronously before opening edit dialog
   const handleEditGroupEntry = async (entryId: string, date: string) => {
-    console.log("handleEditGroupEntry called with:", { entryId, date });
     try {
       // Fetch entry from tea_shop_entries
-      console.log("Fetching entry from tea_shop_entries...");
       const { data: entry, error: entryError } = await (supabase as any)
         .from("tea_shop_entries")
         .select("*")
         .eq("id", entryId)
         .single();
-
-      console.log("Entry fetch result:", { entry, entryError });
 
       if (entryError) {
         console.error("Error fetching entry:", entryError);
@@ -1814,6 +1814,28 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
         .select("*, site:sites(id, name)")
         .eq("entry_id", entryId);
 
+      // Fetch tea shop from entry's tea_shop_id (fallback if groupTeaShop is null)
+      let teaShopForEdit = groupTeaShop;
+      if (!teaShopForEdit && entry.tea_shop_id) {
+        const { data: fetchedShop } = await (supabase as any)
+          .from("tea_shop_accounts")
+          .select("*")
+          .eq("id", entry.tea_shop_id)
+          .single();
+        teaShopForEdit = fetchedShop;
+      }
+
+      // Fetch site group from entry's site_group_id (fallback if siteGroup is null)
+      let siteGroupForEdit = siteGroup;
+      if (!siteGroupForEdit && entry.site_group_id) {
+        const { data: fetchedGroup } = await (supabase as any)
+          .from("site_groups")
+          .select("*, sites(*)")
+          .eq("id", entry.site_group_id)
+          .single();
+        siteGroupForEdit = fetchedGroup;
+      }
+
       // Transform to expected format for GroupTeaShopEntryDialog
       const fullEntry = {
         id: entry.id,
@@ -1821,8 +1843,8 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
         site_group_id: entry.site_group_id || null,
         date: entry.date,
         total_amount: entry.total_amount,
-        is_percentage_override: false,
-        percentage_split: null,
+        is_percentage_override: entry.is_percentage_override || false,
+        percentage_split: entry.percentage_split || null,
         notes: entry.notes,
         entered_by: entry.entered_by,
         entered_by_user_id: entry.entered_by_user_id,
@@ -1842,11 +1864,11 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
       };
 
       // Set data and open dialog
-      console.log("Setting dialog data and opening:", { fullEntry, date });
       setEditingGroupEntryData(fullEntry);
+      setEditingTeaShop(teaShopForEdit);
+      setEditingSiteGroup(siteGroupForEdit);
       setTeaShopDialogDate(date);
       setGroupTeaShopDialogOpen(true);
-      console.log("Dialog should now be open");
     } catch (err) {
       console.error("Error in handleEditGroupEntry:", err);
     }
@@ -5195,16 +5217,18 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
       )}
 
       {/* Group Tea Shop Entry Dialog */}
-      {groupTeaShop && siteGroup && (
+      {(groupTeaShop || editingTeaShop) && (siteGroup || editingSiteGroup) && (
         <GroupTeaShopEntryDialog
           open={groupTeaShopDialogOpen}
           onClose={() => {
             setGroupTeaShopDialogOpen(false);
             setTeaShopDialogDate(undefined);
             setEditingGroupEntryData(null);
+            setEditingTeaShop(null);
+            setEditingSiteGroup(null);
           }}
-          shop={groupTeaShop}
-          siteGroup={siteGroup as SiteGroupWithSites}
+          shop={groupTeaShop || editingTeaShop}
+          siteGroup={(siteGroup || editingSiteGroup) as SiteGroupWithSites}
           initialDate={teaShopDialogDate}
           entry={editingGroupEntryData}
           onSuccess={() => {
@@ -5212,6 +5236,8 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
             setGroupTeaShopDialogOpen(false);
             setTeaShopDialogDate(undefined);
             setEditingGroupEntryData(null);
+            setEditingTeaShop(null);
+            setEditingSiteGroup(null);
           }}
         />
       )}
@@ -5644,8 +5670,6 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
                 const isGroupEntry = teaShopPopoverData.data.isGroupEntry;
                 const entryId = teaShopPopoverData.data.entryId;
 
-                console.log("Edit clicked:", { dateToEdit, isGroupEntry, entryId });
-
                 // Close popover first
                 setTeaShopPopoverAnchor(null);
                 setTeaShopPopoverData(null);
@@ -5653,13 +5677,11 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
 
                 // For group entries: fetch data and open dialog directly (skip mode dialog)
                 if (isGroupEntry && entryId) {
-                  console.log("Opening group entry edit for:", entryId);
                   await handleEditGroupEntry(entryId, dateToEdit);
                   return;
                 }
 
                 // For non-group entries: use normal flow
-                console.log("Opening normal tea shop dialog");
                 handleOpenTeaShopDialog(dateToEdit);
               }}
             >
