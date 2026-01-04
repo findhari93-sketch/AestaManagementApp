@@ -1,6 +1,8 @@
 "use client";
 
 import React, { useState, useEffect, useMemo } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { queryKeys } from "@/lib/cache/keys";
 import {
   Dialog,
   DialogTitle,
@@ -55,6 +57,7 @@ interface TeaShopSettlementDialogProps {
   settlement?: TeaShopSettlement | null; // For edit mode
   isInGroup?: boolean; // Whether site is in a group
   siteGroupId?: string; // Site group ID for combined data
+  filterBySiteId?: string; // Filter entries to specific site in group mode
 }
 
 interface SiteEngineer {
@@ -96,17 +99,19 @@ export default function TeaShopSettlementDialog({
   settlement,
   isInGroup = false,
   siteGroupId,
+  filterBySiteId,
 }: TeaShopSettlementDialogProps) {
   const isEditMode = !!settlement;
   const { userProfile } = useAuth();
   const { selectedSite } = useSite();
   const supabase = createClient();
+  const queryClient = useQueryClient();
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Form state
-  const [amountPaying, setAmountPaying] = useState(pendingBalance);
+  const [amountPaying, setAmountPaying] = useState(Math.round(pendingBalance));
   const [paymentDate, setPaymentDate] = useState(dayjs().format("YYYY-MM-DD"));
   const [paymentMode, setPaymentMode] = useState<PaymentMode>("cash");
   const [payerType, setPayerType] = useState<"site_engineer" | "company_direct">("company_direct");
@@ -153,7 +158,7 @@ export default function TeaShopSettlementDialog({
         setCustomPayerName((settlement as any).payer_name || "");
       } else {
         // New settlement - reset form
-        setAmountPaying(pendingBalance);
+        setAmountPaying(Math.round(pendingBalance));
         setPaymentDate(dayjs().format("YYYY-MM-DD"));
         setPaymentMode("cash");
         setPayerType("company_direct");
@@ -168,7 +173,7 @@ export default function TeaShopSettlementDialog({
       }
       setError(null);
     }
-  }, [open, pendingBalance, settlement, isEditMode]);
+  }, [open, pendingBalance, settlement, isEditMode, filterBySiteId]);
 
   const fetchEngineers = async () => {
     if (!selectedSite) return;
@@ -217,7 +222,7 @@ export default function TeaShopSettlementDialog({
   };
 
   // Fetch unsettled entries (oldest first for waterfall)
-  // When in group mode, fetches from ALL sites in the group
+  // When in group mode, fetches from ALL sites in the group (or filtered site if filterBySiteId is set)
   const fetchUnsettledEntries = async () => {
     setLoadingEntries(true);
     try {
@@ -233,7 +238,12 @@ export default function TeaShopSettlementDialog({
           return;
         }
 
-        const siteIds = sites.map((s: any) => s.id);
+        // Filter to specific site if filterBySiteId is provided
+        let siteIds = sites.map((s: any) => s.id);
+        if (filterBySiteId && filterBySiteId !== "all") {
+          siteIds = siteIds.filter((id: string) => id === filterBySiteId);
+        }
+
         const siteNameMap = new Map<string, string>();
         sites.forEach((s: any) => siteNameMap.set(s.id, s.name));
 
@@ -437,14 +447,31 @@ export default function TeaShopSettlementDialog({
 
       // Create allocation records and update entries - ONLY for waterfall mode
       if (!isStandalone) {
-        for (const alloc of allocationPreview) {
-          // Insert allocation record
-          await (supabase.from as any)("tea_shop_settlement_allocations")
-            .insert({
+        // Deduplicate allocations by entryId to prevent unique constraint violations
+        const seenEntryIds = new Set<string>();
+        const uniqueAllocations = allocationPreview.filter((alloc) => {
+          if (seenEntryIds.has(alloc.entryId)) {
+            console.warn(`Duplicate entry in allocation: ${alloc.entryId}`);
+            return false;
+          }
+          seenEntryIds.add(alloc.entryId);
+          return true;
+        });
+
+        for (const alloc of uniqueAllocations) {
+          // Use upsert to handle potential conflicts (settlement_id, entry_id is unique)
+          const { error: allocError } = await (supabase.from as any)("tea_shop_settlement_allocations")
+            .upsert({
               settlement_id: settlementId,
               entry_id: alloc.entryId,
               allocated_amount: alloc.allocatedAmount,
+            }, {
+              onConflict: "settlement_id,entry_id",
             });
+
+          if (allocError) {
+            console.error(`Error upserting allocation for entry ${alloc.entryId}:`, allocError);
+          }
 
           // Update entry with new payment info
           const newPaid = alloc.previouslyPaid + alloc.allocatedAmount;
@@ -456,6 +483,22 @@ export default function TeaShopSettlementDialog({
             })
             .eq("id", alloc.entryId);
         }
+      }
+
+      // Invalidate queries to refresh data immediately
+      if (siteGroupId) {
+        // Group mode - invalidate combined tea shop queries
+        queryClient.invalidateQueries({ queryKey: queryKeys.combinedTeaShop.settlements(siteGroupId) });
+        queryClient.invalidateQueries({ queryKey: queryKeys.combinedTeaShop.entries(siteGroupId) });
+        queryClient.invalidateQueries({ queryKey: queryKeys.combinedTeaShop.pending(siteGroupId) });
+        queryClient.invalidateQueries({ queryKey: queryKeys.combinedTeaShop.all });
+      }
+      // Also invalidate company tea shop queries for the specific shop
+      if (shop?.id) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.companyTeaShops.byId(shop.id) });
+        queryClient.invalidateQueries({ queryKey: queryKeys.companyTeaShops.settlements(shop.id) });
+        queryClient.invalidateQueries({ queryKey: queryKeys.companyTeaShops.entries(shop.id) });
+        queryClient.invalidateQueries({ queryKey: queryKeys.companyTeaShops.all });
       }
 
       onSuccess?.();
