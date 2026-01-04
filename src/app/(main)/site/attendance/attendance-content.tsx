@@ -85,7 +85,7 @@ import TeaShopEntryDialog from "@/components/tea-shop/TeaShopEntryDialog";
 import TeaShopEntryModeDialog from "@/components/tea-shop/TeaShopEntryModeDialog";
 import GroupTeaShopEntryDialog from "@/components/tea-shop/GroupTeaShopEntryDialog";
 import { useSiteGroup } from "@/hooks/queries/useSiteGroups";
-import { useGroupTeaShopAccount } from "@/hooks/queries/useGroupTeaShop";
+import { useGroupTeaShopAccount, useGroupTeaShopEntry } from "@/hooks/queries/useGroupTeaShop";
 import type { SiteGroupWithSites } from "@/types/material.types";
 import PaymentDialog from "@/components/payments/PaymentDialog";
 import type { UnifiedSettlementConfig, SettlementRecord } from "@/types/settlement.types";
@@ -379,6 +379,11 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
   const [teaShopEditingEntry, setTeaShopEditingEntry] = useState<any>(null);
   const [teaShopEntryModeDialogOpen, setTeaShopEntryModeDialogOpen] = useState(false);
   const [groupTeaShopDialogOpen, setGroupTeaShopDialogOpen] = useState(false);
+  const [editingGroupEntryId, setEditingGroupEntryId] = useState<string | null>(null);
+  const [popoverGroupAllocations, setPopoverGroupAllocations] = useState<any[] | null>(null);
+
+  // Fetch group entry data for editing
+  const { data: editingGroupEntry } = useGroupTeaShopEntry(editingGroupEntryId || undefined);
 
   // Work update viewer state
   const [workUpdateViewerOpen, setWorkUpdateViewerOpen] = useState(false);
@@ -1775,6 +1780,15 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
       console.error("Error fetching/creating tea shop account:", error);
       return null;
     }
+  };
+
+  // Fetch group allocations for popover display
+  const fetchGroupEntryAllocations = async (entryId: string) => {
+    const { data } = await (supabase as any)
+      .from("tea_shop_group_allocations")
+      .select("*, site:sites(id, name)")
+      .eq("group_entry_id", entryId);
+    setPopoverGroupAllocations(data);
   };
 
   // Handler to open tea shop dialog directly
@@ -3800,6 +3814,12 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
                                       date: entry.summary.date,
                                       data: entry.summary.teaShop!,
                                     });
+                                    // Fetch all site allocations for group entries
+                                    if (entry.summary.teaShop?.isGroupEntry && entry.summary.teaShop?.entryId) {
+                                      fetchGroupEntryAllocations(entry.summary.teaShop.entryId);
+                                    } else {
+                                      setPopoverGroupAllocations(null);
+                                    }
                                   }}
                                   sx={{
                                     cursor: "pointer",
@@ -5120,14 +5140,17 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
           onClose={() => {
             setGroupTeaShopDialogOpen(false);
             setTeaShopDialogDate(undefined);
+            setEditingGroupEntryId(null);
           }}
           shop={groupTeaShop}
           siteGroup={siteGroup as SiteGroupWithSites}
           initialDate={teaShopDialogDate}
+          entry={editingGroupEntry}
           onSuccess={() => {
             invalidateAttendance();
             setGroupTeaShopDialogOpen(false);
             setTeaShopDialogDate(undefined);
+            setEditingGroupEntryId(null);
           }}
         />
       )}
@@ -5528,6 +5551,28 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
               </Typography>
             </Box>
 
+            {/* Show all site allocations for group entries */}
+            {teaShopPopoverData.data.isGroupEntry && popoverGroupAllocations && popoverGroupAllocations.length > 0 && (
+              <Box sx={{ mt: 1.5, pt: 1.5, borderTop: 1, borderColor: "divider" }}>
+                <Typography variant="caption" fontWeight={600} color="text.secondary" sx={{ display: "block", mb: 0.5 }}>
+                  All Sites:
+                </Typography>
+                {popoverGroupAllocations.map((alloc: any) => (
+                  <Box key={alloc.site_id} sx={{ display: "flex", justifyContent: "space-between", mt: 0.25 }}>
+                    <Typography variant="caption">{alloc.site?.name || "Unknown"}</Typography>
+                    <Typography variant="caption">₹{(alloc.allocated_amount || 0).toLocaleString()}</Typography>
+                  </Box>
+                ))}
+                <Divider sx={{ my: 0.5 }} />
+                <Box sx={{ display: "flex", justifyContent: "space-between" }}>
+                  <Typography variant="caption" fontWeight={600}>Total:</Typography>
+                  <Typography variant="caption" fontWeight={600} color="success.main">
+                    ₹{popoverGroupAllocations.reduce((sum: number, a: any) => sum + (a.allocated_amount || 0), 0).toLocaleString()}
+                  </Typography>
+                </Box>
+              </Box>
+            )}
+
             <Button
               fullWidth
               size="small"
@@ -5535,8 +5580,13 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
               sx={{ mt: 1.5 }}
               onClick={() => {
                 const dateToEdit = teaShopPopoverData.date;
+                // Set entry ID for editing if it's a group entry
+                if (teaShopPopoverData.data.isGroupEntry && teaShopPopoverData.data.entryId) {
+                  setEditingGroupEntryId(teaShopPopoverData.data.entryId);
+                }
                 setTeaShopPopoverAnchor(null);
                 setTeaShopPopoverData(null);
+                setPopoverGroupAllocations(null);
                 handleOpenTeaShopDialog(dateToEdit);
               }}
             >
