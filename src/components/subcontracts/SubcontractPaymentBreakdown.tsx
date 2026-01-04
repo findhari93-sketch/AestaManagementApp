@@ -69,19 +69,22 @@ export default function SubcontractPaymentBreakdown({
 
     try {
       // Fetch subcontract payments (salary advances, part payments, milestones)
+      // Filter out deleted payments
       const { data: payments, error: paymentsError } = await supabase
         .from("subcontract_payments")
         .select("*")
         .eq("contract_id", subcontractId)
+        .eq("is_deleted", false)
         .order("payment_date", { ascending: false });
 
       if (paymentsError) throw paymentsError;
 
-      // Fetch linked tea shop settlements
+      // Fetch linked tea shop settlements (exclude cancelled)
       const { data: teaSettlements, error: teaError } = await supabase
         .from("tea_shop_settlements")
         .select("*, tea_shop_accounts(shop_name)")
         .eq("subcontract_id", subcontractId)
+        .eq("is_cancelled", false)
         .order("payment_date", { ascending: false });
 
       if (teaError) throw teaError;

@@ -22,6 +22,7 @@ export interface RawAttendanceData {
   marketAttendance: any[];
   workSummaries: any[];
   teaShopEntries: any[];
+  teaShopAllocations: any[]; // Allocations for group tea shop entries
 }
 
 async function fetchAttendanceData(
@@ -76,10 +77,10 @@ async function fetchAttendanceData(
     summaryQuery = summaryQuery.gte("date", dateFrom).lte("date", dateTo);
   }
 
-  // Build tea shop entries query
+  // Build tea shop entries query (direct entries for this site)
   let teaShopQuery = (supabase.from("tea_shop_entries") as any)
     .select(
-      "date, tea_total, snacks_total, total_amount, working_laborer_count, working_laborer_total, nonworking_laborer_count, nonworking_laborer_total, market_laborer_count, market_laborer_total"
+      "id, date, tea_total, snacks_total, total_amount, is_group_entry, site_group_id, working_laborer_count, working_laborer_total, nonworking_laborer_count, nonworking_laborer_total, market_laborer_count, market_laborer_total"
     )
     .eq("site_id", siteId);
 
@@ -87,13 +88,23 @@ async function fetchAttendanceData(
     teaShopQuery = teaShopQuery.gte("date", dateFrom).lte("date", dateTo);
   }
 
+  // Build tea shop allocations query (this site's share of group entries from other sites)
+  let teaShopAllocationsQuery = ((supabase as any).from("tea_shop_entry_allocations"))
+    .select("allocated_amount, entry_id, entry:tea_shop_entries!inner(id, date, is_group_entry, site_group_id)")
+    .eq("site_id", siteId);
+
+  if (!isAllTime && dateFrom && dateTo) {
+    teaShopAllocationsQuery = teaShopAllocationsQuery.gte("entry.date", dateFrom).lte("entry.date", dateTo);
+  }
+
   // Execute all queries in parallel
-  const [attendanceResult, marketResult, summaryResult, teaShopResult] =
+  const [attendanceResult, marketResult, summaryResult, teaShopResult, teaShopAllocationsResult] =
     await Promise.all([
       attendanceQuery,
       marketQuery,
       summaryQuery,
       teaShopQuery,
+      teaShopAllocationsQuery,
     ]);
 
   // Check for critical errors
@@ -113,12 +124,16 @@ async function fetchAttendanceData(
   if (teaShopResult.error) {
     console.warn("Tea shop query failed:", teaShopResult.error);
   }
+  if (teaShopAllocationsResult.error) {
+    console.warn("Tea shop allocations query failed:", teaShopAllocationsResult.error);
+  }
 
   return {
     dailyAttendance: attendanceResult.data || [],
     marketAttendance: marketResult.data || [],
     workSummaries: summaryResult.data || [],
     teaShopEntries: teaShopResult.data || [],
+    teaShopAllocations: teaShopAllocationsResult.data || [],
   };
 }
 

@@ -37,8 +37,11 @@ import {
   Edit as EditIcon,
   Translate as TranslateIcon,
   Description as DescriptionIcon,
+  Image as ImageIcon,
 } from "@mui/icons-material";
 import CategoryAutocomplete from "@/components/common/CategoryAutocomplete";
+import FileUploader from "@/components/common/FileUploader";
+import { createClient } from "@/lib/supabase/client";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import {
   useCreateMaterial,
@@ -112,6 +115,8 @@ export default function MaterialDialog({
   const [customizeCode, setCustomizeCode] = useState(false);
   const [showLocalName, setShowLocalName] = useState(false);
   const [showDescription, setShowDescription] = useState(false);
+  const [showImageUpload, setShowImageUpload] = useState(false);
+  const supabase = createClient();
   const [formData, setFormData] = useState<MaterialFormData>({
     name: "",
     code: "",
@@ -128,6 +133,7 @@ export default function MaterialDialog({
     weight_unit: "kg",
     length_per_piece: null,
     length_unit: "ft",
+    image_url: "",
   });
 
   // Reset form when material changes
@@ -149,6 +155,7 @@ export default function MaterialDialog({
         weight_unit: material.weight_unit || "kg",
         length_per_piece: material.length_per_piece,
         length_unit: material.length_unit || "ft",
+        image_url: material.image_url || "",
       });
       setIsVariant(!!material.parent_id);
       setVariants([]);
@@ -159,6 +166,7 @@ export default function MaterialDialog({
       setCustomizeCode(!!material.code);
       setShowLocalName(!!material.local_name);
       setShowDescription(!!material.description);
+      setShowImageUpload(!!material.image_url);
     } else {
       setFormData({
         name: "",
@@ -176,6 +184,7 @@ export default function MaterialDialog({
         weight_unit: "kg",
         length_per_piece: null,
         length_unit: "ft",
+        image_url: "",
       });
       setIsVariant(false);
       setVariants([]);
@@ -185,6 +194,7 @@ export default function MaterialDialog({
       setCustomizeCode(false);
       setShowLocalName(false);
       setShowDescription(false);
+      setShowImageUpload(false);
     }
     setError("");
     setNewBrandName("");
@@ -430,6 +440,17 @@ export default function MaterialDialog({
                   Add Description
                 </Button>
               )}
+              {!showImageUpload && (
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={<ImageIcon />}
+                  onClick={() => setShowImageUpload(true)}
+                  sx={{ textTransform: "none" }}
+                >
+                  Add Product Image
+                </Button>
+              )}
             </Box>
           </Grid>
 
@@ -484,6 +505,38 @@ export default function MaterialDialog({
                   ),
                 }}
               />
+            </Grid>
+          )}
+
+          {showImageUpload && (
+            <Grid size={12}>
+              <Box sx={{ display: "flex", alignItems: "flex-start", gap: 1 }}>
+                <Box sx={{ flex: 1 }}>
+                  <FileUploader
+                    supabase={supabase}
+                    bucketName="work-updates"
+                    folderPath="product-photos"
+                    fileNamePrefix="material"
+                    accept="image"
+                    label="Product Image"
+                    value={formData.image_url ? { url: formData.image_url, name: "Product Image", size: 0 } : null}
+                    onUpload={(file) => handleChange("image_url", file.url)}
+                    onRemove={() => handleChange("image_url", "")}
+                    compact
+                    maxSizeMB={2}
+                  />
+                </Box>
+                <IconButton
+                  size="small"
+                  onClick={() => {
+                    setShowImageUpload(false);
+                    handleChange("image_url", "");
+                  }}
+                  sx={{ mt: 1 }}
+                >
+                  <CloseIcon fontSize="small" />
+                </IconButton>
+              </Box>
             </Grid>
           )}
 

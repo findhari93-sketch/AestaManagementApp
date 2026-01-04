@@ -151,7 +151,11 @@ export default function TeaShopPage() {
   }, [isInGroup, siteGroup]);
 
   // Combined tea shop data (fetched when site is in a group)
-  const { data: combinedEntriesData } = useCombinedTeaShopEntries(isInGroup ? siteGroupId : undefined);
+  // Pass filterBySiteId to get allocated amounts for group entries
+  const { data: combinedEntriesData } = useCombinedTeaShopEntries(
+    isInGroup ? siteGroupId : undefined,
+    { filterBySiteId: siteFilter && siteFilter !== "all" ? siteFilter : selectedSite?.id }
+  );
   const { data: combinedPendingData } = useCombinedTeaShopPendingBalance(isInGroup ? siteGroupId : undefined);
   const { data: combinedSettlementsData } = useCombinedTeaShopSettlements(isInGroup ? siteGroupId : undefined);
 
@@ -172,13 +176,14 @@ export default function TeaShopPage() {
       const weekStart = dayjs().startOf("week").format("YYYY-MM-DD");
       const monthStart = dayjs().startOf("month").format("YYYY-MM-DD");
 
+      // Use display_amount for allocated amounts in group entries
       const thisWeekTotal = combinedEntriesData
         .filter((e) => e.date >= weekStart)
-        .reduce((sum, e) => sum + (e.total_amount || 0), 0);
+        .reduce((sum, e) => sum + ((e as any).display_amount || e.total_amount || 0), 0);
 
       const thisMonthTotal = combinedEntriesData
         .filter((e) => e.date >= monthStart)
-        .reduce((sum, e) => sum + (e.total_amount || 0), 0);
+        .reduce((sum, e) => sum + ((e as any).display_amount || e.total_amount || 0), 0);
 
       const totalTea = combinedEntriesData.reduce((sum, e) => sum + (e.tea_total || 0), 0);
       const totalSnacks = combinedEntriesData.reduce((sum, e) => sum + (e.snacks_total || 0), 0);
@@ -190,7 +195,7 @@ export default function TeaShopPage() {
         : null;
 
       return {
-        totalEntries: combinedEntriesData.reduce((sum, e) => sum + (e.total_amount || 0), 0),
+        totalEntries: combinedEntriesData.reduce((sum, e) => sum + ((e as any).display_amount || e.total_amount || 0), 0),
         totalTea,
         totalSnacks,
         pendingBalance: combinedPendingBalance,
@@ -399,19 +404,11 @@ export default function TeaShopPage() {
   // Create combined entries view with holidays and missing entries
   const combinedEntries = useMemo((): CombinedEntryType[] => {
     // Use combined data when in a group
-    let entriesToUse = isInGroup && combinedEntriesData
+    // Note: Site filtering is now handled in the useCombinedTeaShopEntries hook
+    // which properly handles group entries with allocations
+    const entriesToUse = isInGroup && combinedEntriesData
       ? combinedEntriesData
       : filteredEntries;
-
-    // Apply site filter when in group mode (filter by specific site, or show all if "all" selected)
-    if (isInGroup && siteFilter && siteFilter !== "all" && combinedEntriesData) {
-      entriesToUse = combinedEntriesData.filter((e) => {
-        const combined = e as CombinedTeaShopEntry;
-        // Match by site_id if available, otherwise by site_name
-        return combined.site_id === siteFilter ||
-               groupSites.find(s => s.id === siteFilter)?.name === combined.site_name;
-      });
-    }
 
     const entryDates = new Set(entriesToUse.map((e) => e.date));
     const holidayDates = new Set(holidays.map((h) => (h as any).date));
@@ -452,7 +449,7 @@ export default function TeaShopPage() {
 
     // Sort by date descending
     return result.sort((a, b) => b.date.localeCompare(a.date));
-  }, [filteredEntries, holidays, attendanceByDate, dateFrom, dateTo, isAllTime, isInGroup, combinedEntriesData, siteFilter, groupSites]);
+  }, [filteredEntries, holidays, attendanceByDate, dateFrom, dateTo, isAllTime, isInGroup, combinedEntriesData]);
 
   if (!selectedSite) {
     return (
@@ -906,9 +903,16 @@ export default function TeaShopPage() {
                             })()}
                           </TableCell>
                           <TableCell align="right">
-                            <Typography fontWeight={600} sx={{ fontSize: { xs: '0.7rem', sm: '0.875rem' } }}>
-                              ₹{(entry.total_amount || 0).toLocaleString()}
-                            </Typography>
+                            <Box sx={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 0.5 }}>
+                              {(entry as any).isGroupEntry && (
+                                <Tooltip title={`Group entry - showing this site's allocated share (Total: ₹${((entry as any).original_total_amount || entry.total_amount || 0).toLocaleString()})`}>
+                                  <GroupsIcon fontSize="small" color="primary" sx={{ fontSize: { xs: '0.8rem', sm: '1rem' } }} />
+                                </Tooltip>
+                              )}
+                              <Typography fontWeight={600} sx={{ fontSize: { xs: '0.7rem', sm: '0.875rem' } }}>
+                                ₹{((entry as any).display_amount || entry.total_amount || 0).toLocaleString()}
+                              </Typography>
+                            </Box>
                           </TableCell>
                           {/* Payment Status Column */}
                           <TableCell align="center">

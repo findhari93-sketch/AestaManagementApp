@@ -248,6 +248,16 @@ export const queryKeys = {
     byPO: (poId: string) => ['deliveries', 'po', poId] as const,
   },
 
+  // ==================== STORE CATALOG ====================
+
+  storeCatalog: {
+    all: ['store-catalog'] as const,
+    byVendor: (vendorId: string) => ['store-catalog', 'vendor', vendorId] as const,
+    categories: (vendorId: string) => ['store-catalog', 'vendor', vendorId, 'categories'] as const,
+    search: (vendorId: string, query: string) => ['store-catalog', 'vendor', vendorId, 'search', query] as const,
+    priceComparison: (materialId: string) => ['store-catalog', 'price-comparison', materialId] as const,
+  },
+
   // ==================== DASHBOARD / AGGREGATED DATA (2min cache) ====================
   // Frequently viewed, needs to be relatively fresh
   

@@ -768,6 +768,28 @@ export interface VendorInventoryWithDetails extends VendorInventory {
   total_landed_cost?: number;
 }
 
+// ============================================
+// STORE CATALOG TYPES
+// ============================================
+
+export interface LowestCompetingPrice {
+  price: number;
+  vendorName: string;
+  vendorId: string;
+}
+
+export interface StoreCatalogItem extends VendorInventoryWithDetails {
+  lowestCompetingPrice?: LowestCompetingPrice | null;
+  isBestPrice: boolean;
+  category?: MaterialCategory | null;
+}
+
+export interface StoreCatalogFilter {
+  categoryId?: string | null;
+  searchQuery?: string;
+  sortBy?: 'price_asc' | 'price_desc' | 'name' | 'recent';
+}
+
 export interface PriceHistoryWithDetails extends PriceHistory {
   vendor?: Vendor;
   material?: Material;

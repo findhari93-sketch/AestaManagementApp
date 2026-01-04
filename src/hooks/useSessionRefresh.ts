@@ -33,10 +33,10 @@ export function useSessionRefresh() {
       // Get singleton client inside effect to avoid dependency issues
       const supabase = createClient();
 
-      // Add timeout to prevent hanging (10s for slower connections)
+      // Add timeout to prevent hanging (5s for consistency with ensureFreshSession)
       const timeoutId = setTimeout(() => {
         console.warn("Session refresh timed out");
-      }, 10000);
+      }, 5000);
 
       try {
         const { data: { session }, error } = await supabase.auth.getSession();

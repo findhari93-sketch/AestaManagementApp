@@ -92,22 +92,14 @@ export function useCompanyTeaShops() {
     queryFn: async () => {
       const { data, error } = await (supabase as any)
         .from("tea_shops")
-        .select(`
-          *,
-          tea_shop_site_assignments(
-            id,
-            site_id,
-            site_group_id,
-            is_active,
-            assigned_at,
-            site:sites(id, name),
-            site_group:site_groups(id, name)
-          )
-        `)
+        .select("*, tea_shop_site_assignments(id, site_id, site_group_id, is_active, assigned_at, site:sites(id, name), site_group:site_groups(id, name))")
         .eq("is_active", true)
         .order("name");
 
-      if (error) throw error;
+      if (error) {
+        console.warn("Error fetching company tea shops:", error.message);
+        return [];
+      }
 
       return (data || []).map((shop: any) => ({
         ...shop,
@@ -130,22 +122,16 @@ export function useCompanyTeaShop(id: string | undefined) {
 
       const { data, error } = await (supabase as any)
         .from("tea_shops")
-        .select(`
-          *,
-          tea_shop_site_assignments(
-            id,
-            site_id,
-            site_group_id,
-            is_active,
-            assigned_at,
-            site:sites(id, name),
-            site_group:site_groups(id, name)
-          )
-        `)
+        .select("*, tea_shop_site_assignments(id, site_id, site_group_id, is_active, assigned_at, site:sites(id, name), site_group:site_groups(id, name))")
         .eq("id", id)
-        .single();
+        .maybeSingle();
 
-      if (error) throw error;
+      if (error) {
+        console.warn("Error fetching company tea shop:", error.message);
+        return null;
+      }
+
+      if (!data) return null;
 
       return {
         ...data,
@@ -168,37 +154,43 @@ export function useTeaShopForSite(siteId: string | undefined) {
       if (!siteId) return null;
 
       // First check direct site assignment
-      const { data: directAssignment } = await (supabase as any)
+      const { data: directAssignment, error: directError } = await (supabase as any)
         .from("tea_shop_site_assignments")
-        .select(`
-          tea_shop_id,
-          tea_shop:tea_shops(*)
-        `)
+        .select("tea_shop_id, tea_shop:tea_shops(*)")
         .eq("site_id", siteId)
         .eq("is_active", true)
-        .single();
+        .maybeSingle();
+
+      if (directError) {
+        console.warn("Error fetching direct tea shop assignment:", directError.message);
+      }
 
       if (directAssignment?.tea_shop) {
         return directAssignment.tea_shop as CompanyTeaShop;
       }
 
       // Check if site is in a group with assigned tea shop
-      const { data: site } = await (supabase as any)
+      const { data: site, error: siteError } = await (supabase as any)
         .from("sites")
         .select("site_group_id")
         .eq("id", siteId)
-        .single();
+        .maybeSingle();
+
+      if (siteError) {
+        console.warn("Error fetching site:", siteError.message);
+      }
 
       if (site?.site_group_id) {
-        const { data: groupAssignment } = await (supabase as any)
+        const { data: groupAssignment, error: groupError } = await (supabase as any)
           .from("tea_shop_site_assignments")
-          .select(`
-            tea_shop_id,
-            tea_shop:tea_shops(*)
-          `)
+          .select("tea_shop_id, tea_shop:tea_shops(*)")
           .eq("site_group_id", site.site_group_id)
           .eq("is_active", true)
-          .single();
+          .maybeSingle();
+
+        if (groupError) {
+          console.warn("Error fetching group tea shop assignment:", groupError.message);
+        }
 
         if (groupAssignment?.tea_shop) {
           return groupAssignment.tea_shop as CompanyTeaShop;
@@ -222,15 +214,16 @@ export function useTeaShopForGroup(groupId: string | undefined) {
     queryFn: async () => {
       if (!groupId) return null;
 
-      const { data } = await (supabase as any)
+      const { data, error } = await (supabase as any)
         .from("tea_shop_site_assignments")
-        .select(`
-          tea_shop_id,
-          tea_shop:tea_shops(*)
-        `)
+        .select("tea_shop_id, tea_shop:tea_shops(*)")
         .eq("site_group_id", groupId)
         .eq("is_active", true)
-        .single();
+        .maybeSingle();
+
+      if (error) {
+        console.warn("Error fetching group tea shop:", error.message);
+      }
 
       return data?.tea_shop as CompanyTeaShop | null;
     },
@@ -251,16 +244,15 @@ export function useTeaShopAssignments(teaShopId: string | undefined) {
 
       const { data, error } = await (supabase as any)
         .from("tea_shop_site_assignments")
-        .select(`
-          *,
-          site:sites(id, name),
-          site_group:site_groups(id, name)
-        `)
+        .select("*, site:sites(id, name), site_group:site_groups(id, name)")
         .eq("tea_shop_id", teaShopId)
         .eq("is_active", true)
         .order("assigned_at", { ascending: false });
 
-      if (error) throw error;
+      if (error) {
+        console.warn("Error fetching tea shop assignments:", error.message);
+        return [];
+      }
       return (data || []) as TeaShopSiteAssignment[];
     },
     enabled: !!teaShopId,
@@ -298,7 +290,7 @@ export function useDayUnitsForDate(
           .from("sites")
           .select("id, name")
           .eq("site_group_id", siteGroupId)
-          .eq("is_active", true);
+          .eq("status", "active");
 
         if (sitesError) {
           console.warn("Failed to fetch sites for group, using fallback:", sitesError.message);
@@ -422,14 +414,14 @@ export function useEntryAllocations(entryId: string | undefined) {
 
       const { data, error } = await (supabase as any)
         .from("tea_shop_entry_allocations")
-        .select(`
-          *,
-          site:sites(id, name)
-        `)
+        .select("*, site:sites(id, name)")
         .eq("entry_id", entryId)
         .order("allocated_amount", { ascending: false });
 
-      if (error) throw error;
+      if (error) {
+        console.warn("Error fetching entry allocations:", error.message);
+        return [];
+      }
       return (data || []) as TeaShopEntryAllocation[];
     },
     enabled: !!entryId,

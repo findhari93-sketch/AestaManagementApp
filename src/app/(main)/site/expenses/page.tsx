@@ -34,6 +34,7 @@ import {
   AttachMoney,
   TrendingUp,
   Category as CategoryIcon,
+  OpenInNew,
 } from "@mui/icons-material";
 import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
 import RedirectConfirmDialog from "@/components/common/RedirectConfirmDialog";
@@ -693,6 +694,7 @@ export default function ExpensesPage() {
                       <th style={{ textAlign: "right" }}>Records</th>
                       <th style={{ textAlign: "right" }}>Balance</th>
                       <th>Status</th>
+                      <th style={{ textAlign: "center", width: 50 }}></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -735,6 +737,15 @@ export default function ExpensesPage() {
                             variant="outlined"
                           />
                         </td>
+                        <td style={{ textAlign: "center" }}>
+                          <IconButton
+                            size="small"
+                            onClick={() => router.push("/site/subcontracts")}
+                            title="View subcontract details"
+                          >
+                            <OpenInNew fontSize="small" />
+                          </IconButton>
+                        </td>
                       </tr>
                     ))}
                     {/* Total Row */}
@@ -764,6 +775,7 @@ export default function ExpensesPage() {
                           Rs.{subcontracts.reduce((sum, sc) => sum + sc.balance, 0).toLocaleString('en-IN')}
                         </Typography>
                       </td>
+                      <td></td>
                       <td></td>
                     </tr>
                   </tbody>

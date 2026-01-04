@@ -72,10 +72,12 @@ export async function calculateSubcontractTotals(
   }
 
   // Fetch all direct subcontract_payments (these are separate from expenses)
+  // Filter out deleted payments to ensure accurate totals
   const { data: directPayments } = await supabase
     .from("subcontract_payments")
     .select("subcontract_id, amount")
-    .in("subcontract_id", subcontractIds);
+    .in("subcontract_id", subcontractIds)
+    .eq("is_deleted", false);
 
   // Fetch ALL cleared expenses from v_all_expenses linked to subcontracts
   // This includes: Daily Salary, Contract Salary, Advance, Material, etc.

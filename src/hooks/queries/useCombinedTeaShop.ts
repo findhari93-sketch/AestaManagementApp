@@ -13,6 +13,12 @@ export interface CombinedTeaShopEntry extends TeaShopEntry {
   site_id: string;
   site_name: string;
   source: "individual" | "group";
+  /** Display amount - for group entries, shows allocated amount for current site filter */
+  display_amount?: number;
+  /** Original total amount before allocation */
+  original_total_amount?: number;
+  /** Whether this is a group entry with allocations */
+  isGroupEntry?: boolean;
 }
 
 export interface CombinedTeaShopSettlement extends TeaShopSettlement {
@@ -34,7 +40,7 @@ interface SiteWithShop {
 
 export function useCombinedTeaShopEntries(
   siteGroupId: string | undefined,
-  options?: { dateFrom?: string; dateTo?: string }
+  options?: { dateFrom?: string; dateTo?: string; filterBySiteId?: string }
 ) {
   const supabase = createClient();
 
@@ -78,16 +84,89 @@ export function useCombinedTeaShopEntries(
       const { data: entries, error: entriesError } = await query;
       if (entriesError) throw entriesError;
 
-      // 3. Map entries with site names (entries already have site_id)
-      const combinedEntries: CombinedTeaShopEntry[] = (entries || []).map(
-        (entry: any) => {
-          return {
+      // 3. Fetch allocations for group entries (is_group_entry=true)
+      const groupEntryIds = (entries || [])
+        .filter((e: any) => e.is_group_entry === true)
+        .map((e: any) => e.id);
+
+      // Build allocation map: entry_id -> { site_id -> { amount, siteName } }
+      const allocationMap = new Map<string, Map<string, { amount: number; siteName: string }>>();
+
+      if (groupEntryIds.length > 0) {
+        const { data: allocations, error: allocError } = await (supabase as any)
+          .from("tea_shop_entry_allocations")
+          .select("entry_id, site_id, allocated_amount, site:sites(id, name)")
+          .in("entry_id", groupEntryIds);
+
+        if (allocError) {
+          console.warn("Error fetching allocations:", allocError.message);
+        }
+
+        (allocations || []).forEach((a: any) => {
+          if (!allocationMap.has(a.entry_id)) {
+            allocationMap.set(a.entry_id, new Map());
+          }
+          allocationMap.get(a.entry_id)!.set(a.site_id, {
+            amount: a.allocated_amount,
+            siteName: a.site?.name || "Unknown"
+          });
+        });
+      }
+
+      // 4. Map entries with site names and handle group entry allocations
+      const combinedEntries: CombinedTeaShopEntry[] = [];
+
+      (entries || []).forEach((entry: any) => {
+        const isGroupEntry = entry.is_group_entry === true;
+
+        // For group entries, check if we have allocations
+        if (isGroupEntry && allocationMap.has(entry.id)) {
+          const siteAllocs = allocationMap.get(entry.id)!;
+
+          // If filtering by a specific site
+          if (options?.filterBySiteId) {
+            // Only include if this site has an allocation
+            if (siteAllocs.has(options.filterBySiteId)) {
+              const alloc = siteAllocs.get(options.filterBySiteId)!;
+              combinedEntries.push({
+                ...entry,
+                site_name: siteNameMap.get(entry.site_id) || "Unknown Site",
+                source: "individual" as const,
+                display_amount: alloc.amount,
+                original_total_amount: entry.total_amount,
+                isGroupEntry: true,
+              });
+            }
+            // Skip this entry if the filtered site doesn't have an allocation
+            return;
+          }
+
+          // No filter - show full amount with group marker
+          combinedEntries.push({
             ...entry,
             site_name: siteNameMap.get(entry.site_id) || "Unknown Site",
             source: "individual" as const,
-          };
+            display_amount: entry.total_amount,
+            original_total_amount: entry.total_amount,
+            isGroupEntry: true,
+          });
+          return;
         }
-      );
+
+        // For non-group entries, filter by site_id if filter is specified
+        if (options?.filterBySiteId && entry.site_id !== options.filterBySiteId) {
+          return; // Skip entries from other sites
+        }
+
+        // Non-group entry - show total_amount as display_amount
+        combinedEntries.push({
+          ...entry,
+          site_name: siteNameMap.get(entry.site_id) || "Unknown Site",
+          source: "individual" as const,
+          display_amount: entry.total_amount,
+          isGroupEntry: false,
+        });
+      });
 
       // 4. Also fetch any legacy group entries (for backward compat)
       const { data: groupEntries } = await (supabase as any)
@@ -129,6 +208,10 @@ export function useCombinedTeaShopEntries(
             // Include payment status from group entry
             amount_paid: ge.amount_paid,
             is_fully_paid: ge.is_fully_paid,
+            // New fields for display
+            display_amount: ge.total_amount,
+            original_total_amount: ge.total_amount,
+            isGroupEntry: true,
           } as unknown as CombinedTeaShopEntry);
         });
       }

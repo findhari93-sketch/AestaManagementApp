@@ -31,6 +31,7 @@ import {
   LocalShipping as ShippingIcon,
   CheckCircle as CheckIcon,
   Cancel as CancelIcon,
+  Storefront as StorefrontIcon,
 } from "@mui/icons-material";
 import PageHeader from "@/components/layout/PageHeader";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -145,6 +146,17 @@ export default function VendorDetailsPage() {
             >
               Back
             </Button>
+            {(vendor.has_physical_store || vendor.vendor_type === "shop") && (
+              <Button
+                variant="contained"
+                startIcon={<StorefrontIcon />}
+                onClick={() => router.push(`/company/vendors/${vendorId}/store`)}
+                size="small"
+                color="primary"
+              >
+                View Store {materialCount > 0 && `(${materialCount})`}
+              </Button>
+            )}
             {canEdit && (
               <>
                 <Button

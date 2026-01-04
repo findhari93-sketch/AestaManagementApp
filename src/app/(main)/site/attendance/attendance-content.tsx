@@ -76,6 +76,7 @@ import {
   ArrowBack as ArrowBackIcon,
   VisibilityOff as VisibilityOffIcon,
   EditCalendar as EditCalendarIcon,
+  Groups as GroupsIcon,
 } from "@mui/icons-material";
 import AttendanceDrawer from "@/components/attendance/AttendanceDrawer";
 import HolidayConfirmDialog from "@/components/attendance/HolidayConfirmDialog";
@@ -188,6 +189,9 @@ interface TeaShopData {
   nonWorkingTotal: number;
   marketCount: number;
   marketTotal: number;
+  // Group entry tracking
+  isGroupEntry?: boolean;
+  entryId?: string;
 }
 
 // Expanded market laborer record (individual rows like "Mason 1", "Mason 2")
@@ -583,22 +587,42 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
       return;
     }
 
-    const { dailyAttendance, marketAttendance, workSummaries: rawWorkSummaries, teaShopEntries } = attendanceQueryData;
+    const { dailyAttendance, marketAttendance, workSummaries: rawWorkSummaries, teaShopEntries, teaShopAllocations } = attendanceQueryData;
 
-    // Build tea shop map (by date)
+    // Build a set of entry IDs that have allocations for this site
+    // (to avoid double-counting when entry.site_id === current site AND has allocation)
+    const entryIdsWithAllocations = new Set<string>();
+    (teaShopAllocations || []).forEach((alloc: any) => {
+      if (alloc.entry?.id) {
+        entryIdsWithAllocations.add(alloc.entry.id);
+      }
+    });
+
+    // Build tea shop map (by date) - merge direct entries + allocations
     const teaShopMap = new Map<string, TeaShopData>();
+
+    // Helper to create empty tea shop data
+    const createEmptyTeaShopData = (): TeaShopData => ({
+      teaTotal: 0,
+      snacksTotal: 0,
+      total: 0,
+      workingCount: 0,
+      workingTotal: 0,
+      nonWorkingCount: 0,
+      nonWorkingTotal: 0,
+      marketCount: 0,
+      marketTotal: 0,
+    });
+
+    // Process direct entries (site's own entries)
     teaShopEntries.forEach((t: any) => {
-      const existing = teaShopMap.get(t.date) || {
-        teaTotal: 0,
-        snacksTotal: 0,
-        total: 0,
-        workingCount: 0,
-        workingTotal: 0,
-        nonWorkingCount: 0,
-        nonWorkingTotal: 0,
-        marketCount: 0,
-        marketTotal: 0,
-      };
+      // If this is a group entry that has allocations, skip it here
+      // (we'll use the allocation amount instead to show this site's share)
+      if (t.is_group_entry && entryIdsWithAllocations.has(t.id)) {
+        return;
+      }
+
+      const existing = teaShopMap.get(t.date) || createEmptyTeaShopData();
       existing.teaTotal += t.tea_total || 0;
       existing.snacksTotal += t.snacks_total || 0;
       existing.total += t.total_amount || 0;
@@ -608,7 +632,27 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
       existing.nonWorkingTotal += t.nonworking_laborer_total || 0;
       existing.marketCount += t.market_laborer_count || 0;
       existing.marketTotal += t.market_laborer_total || 0;
+      // Track if this is a group entry
+      if (t.is_group_entry) {
+        existing.isGroupEntry = true;
+        existing.entryId = t.id;
+      }
       teaShopMap.set(t.date, existing);
+    });
+
+    // Process allocations (this site's share of group entries)
+    (teaShopAllocations || []).forEach((alloc: any) => {
+      const entry = alloc.entry;
+      if (!entry?.date) return;
+
+      const date = entry.date;
+      const existing = teaShopMap.get(date) || createEmptyTeaShopData();
+      // Use allocated_amount for this site's share
+      existing.total += alloc.allocated_amount || 0;
+      // Mark as group entry for UI handling
+      existing.isGroupEntry = true;
+      existing.entryId = entry.id;
+      teaShopMap.set(date, existing);
     });
 
     // Build work summaries map
@@ -3738,10 +3782,16 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
                             >
                               {entry.summary.teaShop ? (
                                 <Chip
-                                  icon={<TeaIcon sx={{ fontSize: { xs: 14, sm: 20 } }} />}
+                                  icon={
+                                    entry.summary.teaShop.isGroupEntry ? (
+                                      <GroupsIcon sx={{ fontSize: { xs: 14, sm: 20 } }} />
+                                    ) : (
+                                      <TeaIcon sx={{ fontSize: { xs: 14, sm: 20 } }} />
+                                    )
+                                  }
                                   label={`₹${entry.summary.teaShop.total.toLocaleString()}`}
                                   size="small"
-                                  color="secondary"
+                                  color={entry.summary.teaShop.isGroupEntry ? "primary" : "secondary"}
                                   variant="outlined"
                                   onClick={(e) => {
                                     e.stopPropagation();
@@ -5372,92 +5422,106 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
       >
         {teaShopPopoverData && (
           <Box sx={{ p: 2, minWidth: 280 }}>
-            <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 1 }}>
-              Tea Shop: {dayjs(teaShopPopoverData.date).format("DD MMM YYYY")}
-            </Typography>
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
+              {teaShopPopoverData.data.isGroupEntry && (
+                <GroupsIcon fontSize="small" color="primary" />
+              )}
+              <Typography variant="subtitle2" fontWeight={700}>
+                {teaShopPopoverData.data.isGroupEntry ? "Group T&S" : "Tea Shop"}: {dayjs(teaShopPopoverData.date).format("DD MMM YYYY")}
+              </Typography>
+            </Box>
+            {teaShopPopoverData.data.isGroupEntry && (
+              <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
+                This site&apos;s allocated share from group entry
+              </Typography>
+            )}
             <Divider sx={{ mb: 1.5 }} />
 
-            <Box
-              sx={{ display: "flex", justifyContent: "space-between", mb: 0.5 }}
-            >
-              <Typography variant="body2">Tea:</Typography>
-              <Typography variant="body2" fontWeight={500}>
-                ₹{teaShopPopoverData.data.teaTotal.toLocaleString()}
-              </Typography>
-            </Box>
-            <Box
-              sx={{ display: "flex", justifyContent: "space-between", mb: 1 }}
-            >
-              <Typography variant="body2">Snacks:</Typography>
-              <Typography variant="body2" fontWeight={500}>
-                ₹{teaShopPopoverData.data.snacksTotal.toLocaleString()}
-              </Typography>
-            </Box>
+            {!teaShopPopoverData.data.isGroupEntry && (
+              <>
+                <Box
+                  sx={{ display: "flex", justifyContent: "space-between", mb: 0.5 }}
+                >
+                  <Typography variant="body2">Tea:</Typography>
+                  <Typography variant="body2" fontWeight={500}>
+                    ₹{teaShopPopoverData.data.teaTotal.toLocaleString()}
+                  </Typography>
+                </Box>
+                <Box
+                  sx={{ display: "flex", justifyContent: "space-between", mb: 1 }}
+                >
+                  <Typography variant="body2">Snacks:</Typography>
+                  <Typography variant="body2" fontWeight={500}>
+                    ₹{teaShopPopoverData.data.snacksTotal.toLocaleString()}
+                  </Typography>
+                </Box>
 
-            <Divider sx={{ my: 1 }} />
+                <Divider sx={{ my: 1 }} />
 
-            <Typography
-              variant="caption"
-              color="text.secondary"
-              sx={{ display: "block", mb: 0.5 }}
-            >
-              Consumption Breakdown:
-            </Typography>
-
-            {teaShopPopoverData.data.workingCount > 0 && (
-              <Box
-                sx={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  mb: 0.25,
-                }}
-              >
-                <Typography variant="caption">
-                  Working ({teaShopPopoverData.data.workingCount}):
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  sx={{ display: "block", mb: 0.5 }}
+                >
+                  Consumption Breakdown:
                 </Typography>
-                <Typography variant="caption">
-                  ₹{teaShopPopoverData.data.workingTotal.toLocaleString()}
-                </Typography>
-              </Box>
+
+                {teaShopPopoverData.data.workingCount > 0 && (
+                  <Box
+                    sx={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      mb: 0.25,
+                    }}
+                  >
+                    <Typography variant="caption">
+                      Working ({teaShopPopoverData.data.workingCount}):
+                    </Typography>
+                    <Typography variant="caption">
+                      ₹{teaShopPopoverData.data.workingTotal.toLocaleString()}
+                    </Typography>
+                  </Box>
+                )}
+                {teaShopPopoverData.data.nonWorkingCount > 0 && (
+                  <Box
+                    sx={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      mb: 0.25,
+                    }}
+                  >
+                    <Typography variant="caption">
+                      Non-Working ({teaShopPopoverData.data.nonWorkingCount}):
+                    </Typography>
+                    <Typography variant="caption">
+                      ₹{teaShopPopoverData.data.nonWorkingTotal.toLocaleString()}
+                    </Typography>
+                  </Box>
+                )}
+                {teaShopPopoverData.data.marketCount > 0 && (
+                  <Box
+                    sx={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      mb: 0.25,
+                    }}
+                  >
+                    <Typography variant="caption">
+                      Market ({teaShopPopoverData.data.marketCount}):
+                    </Typography>
+                    <Typography variant="caption">
+                      ₹{teaShopPopoverData.data.marketTotal.toLocaleString()}
+                    </Typography>
+                  </Box>
+                )}
+
+                <Divider sx={{ my: 1 }} />
+              </>
             )}
-            {teaShopPopoverData.data.nonWorkingCount > 0 && (
-              <Box
-                sx={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  mb: 0.25,
-                }}
-              >
-                <Typography variant="caption">
-                  Non-Working ({teaShopPopoverData.data.nonWorkingCount}):
-                </Typography>
-                <Typography variant="caption">
-                  ₹{teaShopPopoverData.data.nonWorkingTotal.toLocaleString()}
-                </Typography>
-              </Box>
-            )}
-            {teaShopPopoverData.data.marketCount > 0 && (
-              <Box
-                sx={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  mb: 0.25,
-                }}
-              >
-                <Typography variant="caption">
-                  Market ({teaShopPopoverData.data.marketCount}):
-                </Typography>
-                <Typography variant="caption">
-                  ₹{teaShopPopoverData.data.marketTotal.toLocaleString()}
-                </Typography>
-              </Box>
-            )}
-
-            <Divider sx={{ my: 1 }} />
 
             <Box sx={{ display: "flex", justifyContent: "space-between" }}>
               <Typography variant="body2" fontWeight={700}>
-                Total:
+                {teaShopPopoverData.data.isGroupEntry ? "Allocated Amount:" : "Total:"}
               </Typography>
               <Typography variant="body2" fontWeight={700} color="primary.main">
                 ₹{teaShopPopoverData.data.total.toLocaleString()}

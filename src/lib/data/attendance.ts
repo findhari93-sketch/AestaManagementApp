@@ -11,6 +11,7 @@ export interface AttendancePageData {
   marketLaborerRecords: any[];
   workSummaries: any[];
   teaShopEntries: any[];
+  teaShopAllocations: any[]; // Allocations for group entries
   holidays: any[];
   serverDateRange: {
     from: string;
@@ -44,6 +45,7 @@ export async function getAttendancePageData(
     marketResult,
     summaryResult,
     teaShopResult,
+    teaShopAllocationsResult,
     holidaysResult,
   ] = await Promise.all([
     // Daily attendance records with related data
@@ -85,13 +87,21 @@ export async function getAttendancePageData(
       .gte("date", defaultDateFrom)
       .lte("date", defaultDateTo),
 
-    // Tea shop entries
+    // Tea shop entries (direct entries for this site)
     supabase
       .from("tea_shop_entries")
-      .select("date, tea_total, snacks_total, total_amount")
+      .select("id, date, tea_total, snacks_total, total_amount, is_group_entry, site_group_id")
       .eq("site_id", siteId)
       .gte("date", defaultDateFrom)
       .lte("date", defaultDateTo),
+
+    // Tea shop allocations (this site's share of group entries from other sites)
+    (supabase as any)
+      .from("tea_shop_entry_allocations")
+      .select("allocated_amount, entry_id, entry:tea_shop_entries!inner(id, date, is_group_entry, site_group_id)")
+      .eq("site_id", siteId)
+      .gte("entry.date", defaultDateFrom)
+      .lte("entry.date", defaultDateTo),
 
     // Recent and upcoming holidays (30 days range)
     supabase
@@ -108,6 +118,7 @@ export async function getAttendancePageData(
     marketLaborerRecords: marketResult.data || [],
     workSummaries: summaryResult.data || [],
     teaShopEntries: teaShopResult.data || [],
+    teaShopAllocations: teaShopAllocationsResult.data || [],
     holidays: holidaysResult.data || [],
     serverDateRange: {
       from: defaultDateFrom,

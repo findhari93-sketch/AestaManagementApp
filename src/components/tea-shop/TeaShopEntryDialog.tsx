@@ -99,7 +99,7 @@ export default function TeaShopEntryDialog({
   const createAllocations = useCreateEntryAllocations();
 
   // Show group allocation section when site is in a group and has a company tea shop
-  const showGroupAllocation = isInGroup && companyTeaShop;
+  const showGroupAllocation = !!(isInGroup && companyTeaShop);
 
   // Handler for site percentage change
   const handleSitePercentChange = (primary: number, secondary: number) => {
