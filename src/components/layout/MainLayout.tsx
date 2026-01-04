@@ -242,6 +242,11 @@ const companyNavCategories: NavCategory[] = [
     items: [
       { text: "Laborers", icon: <PeopleIcon />, path: "/company/laborers" },
       { text: "Teams", icon: <GroupsIcon />, path: "/company/teams" },
+      {
+        text: "Market Laborer Rates",
+        icon: <PaymentsIcon />,
+        path: "/company/market-laborers",
+      },
     ],
   },
   {
@@ -982,7 +987,7 @@ export default function MainLayout({
               size="small"
               variant={dateRangeLabel === "This Week" ? "filled" : "outlined"}
               color={dateRangeLabel === "This Week" ? "primary" : "default"}
-              onClick={setLastWeek}
+              onClick={() => dateRangeLabel === "This Week" ? setAllTime() : setLastWeek()}
               sx={{
                 display: { xs: "none", sm: "flex" },
                 cursor: "pointer",
@@ -995,7 +1000,7 @@ export default function MainLayout({
               size="small"
               variant={dateRangeLabel === "This Month" ? "filled" : "outlined"}
               color={dateRangeLabel === "This Month" ? "primary" : "default"}
-              onClick={setLastMonth}
+              onClick={() => dateRangeLabel === "This Month" ? setAllTime() : setLastMonth()}
               sx={{
                 display: { xs: "none", sm: "flex" },
                 cursor: "pointer",

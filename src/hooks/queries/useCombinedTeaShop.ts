@@ -153,6 +153,23 @@ export function useCombinedTeaShopEntries(
           return;
         }
 
+        // For group entries WITHOUT allocations - show for all sites with equal split
+        if (isGroupEntry) {
+          // Calculate equal split amount for site filtering
+          const numSites = siteIds.length || 1;
+          const equalSplitAmount = Math.round((entry.total_amount || 0) / numSites);
+
+          combinedEntries.push({
+            ...entry,
+            site_name: siteNameMap.get(entry.site_id) || "Unknown Site",
+            source: "individual" as const,
+            display_amount: options?.filterBySiteId ? equalSplitAmount : entry.total_amount,
+            original_total_amount: entry.total_amount,
+            isGroupEntry: true,
+          });
+          return;
+        }
+
         // For non-group entries, filter by site_id if filter is specified
         if (options?.filterBySiteId && entry.site_id !== options.filterBySiteId) {
           return; // Skip entries from other sites
