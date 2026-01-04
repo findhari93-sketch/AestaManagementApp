@@ -22,10 +22,6 @@ import {
   TableRow,
   Tooltip,
   Fab,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
   Dialog,
   DialogTitle,
   DialogContent,
@@ -47,7 +43,6 @@ import {
   Visibility as ViewIcon,
   CheckCircle as CheckCircleIcon,
   Groups as GroupsIcon,
-  FilterList as FilterIcon,
 } from "@mui/icons-material";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
@@ -133,9 +128,6 @@ export default function TeaShopPage() {
   // Legacy group mode state (for backward compat dialogs)
   const [editingGroupEntry, setEditingGroupEntry] = useState<TeaShopGroupEntryWithAllocations | null>(null);
 
-  // Site filter for grouped sites - defaults to selected site, can change to "all" or other sites
-  const [siteFilter, setSiteFilter] = useState<string>("");
-
   // Check if site is in a group - AUTO-DETECT group mode
   const siteGroupId = selectedSite?.site_group_id as string | undefined;
   const isInGroup = !!siteGroupId;
@@ -144,17 +136,17 @@ export default function TeaShopPage() {
   // NEW: Get company tea shop for this site (checks direct assignment first, then group assignment)
   const { data: companyTeaShop, isLoading: loadingCompanyTeaShop } = useTeaShopForSite(selectedSite?.id);
 
-  // Get list of sites for filtering when in a group
-  const groupSites = useMemo(() => {
-    if (!isInGroup || !siteGroup?.sites) return [];
-    return siteGroup.sites.map((s: any) => ({ id: s.id, name: s.name }));
-  }, [isInGroup, siteGroup]);
-
   // Combined tea shop data (fetched when site is in a group)
-  // Pass filterBySiteId to get allocated amounts for group entries
+  // Always filter by the selected site to show only that site's entries
+  // For group entries, this shows the allocated amount for this site
+  const effectiveFilterBySiteId = useMemo(() => {
+    // Always filter by the selected site's ID
+    return selectedSite?.id;
+  }, [selectedSite?.id]);
+
   const { data: combinedEntriesData } = useCombinedTeaShopEntries(
     isInGroup ? siteGroupId : undefined,
-    { filterBySiteId: siteFilter && siteFilter !== "all" ? siteFilter : selectedSite?.id }
+    { filterBySiteId: effectiveFilterBySiteId }
   );
   const { data: combinedPendingData } = useCombinedTeaShopPendingBalance(isInGroup ? siteGroupId : undefined);
   const { data: combinedSettlementsData } = useCombinedTeaShopSettlements(isInGroup ? siteGroupId : undefined);
@@ -176,17 +168,43 @@ export default function TeaShopPage() {
       const weekStart = dayjs().startOf("week").format("YYYY-MM-DD");
       const monthStart = dayjs().startOf("month").format("YYYY-MM-DD");
 
+      // Filter entries by site when effectiveFilterBySiteId is set
+      let entriesToCalc = combinedEntriesData;
+      if (effectiveFilterBySiteId) {
+        entriesToCalc = combinedEntriesData.filter(
+          (e) => e.site_id === effectiveFilterBySiteId
+        );
+      }
+
       // Use display_amount for allocated amounts in group entries
-      const thisWeekTotal = combinedEntriesData
+      const thisWeekTotal = entriesToCalc
         .filter((e) => e.date >= weekStart)
         .reduce((sum, e) => sum + ((e as any).display_amount || e.total_amount || 0), 0);
 
-      const thisMonthTotal = combinedEntriesData
+      const thisMonthTotal = entriesToCalc
         .filter((e) => e.date >= monthStart)
         .reduce((sum, e) => sum + ((e as any).display_amount || e.total_amount || 0), 0);
 
-      const totalTea = combinedEntriesData.reduce((sum, e) => sum + (e.tea_total || 0), 0);
-      const totalSnacks = combinedEntriesData.reduce((sum, e) => sum + (e.snacks_total || 0), 0);
+      const totalTea = entriesToCalc.reduce((sum, e) => sum + (e.tea_total || 0), 0);
+      const totalSnacks = entriesToCalc.reduce((sum, e) => sum + (e.snacks_total || 0), 0);
+
+      // Calculate pending balance from filtered entries (site-specific when filtered)
+      const allEntriesTotal = entriesToCalc.reduce(
+        (sum, e) => sum + ((e as any).display_amount || e.total_amount || 0), 0
+      );
+      const allPaidTotal = entriesToCalc.reduce((sum, e) => {
+        const entryAny = e as any;
+        const amountPaid = entryAny.amount_paid || 0;
+
+        // For group entries with allocation, proportionally calculate paid amount
+        if (entryAny.isGroupEntry && entryAny.display_amount && entryAny.original_total_amount && entryAny.original_total_amount > 0) {
+          const ratio = entryAny.display_amount / entryAny.original_total_amount;
+          return sum + (amountPaid * ratio);
+        }
+
+        return sum + amountPaid;
+      }, 0);
+      const pendingBalance = Math.round(allEntriesTotal - allPaidTotal);
 
       const lastSettlement = combinedSettlementsData && combinedSettlementsData.length > 0
         ? combinedSettlementsData.reduce((latest, s) =>
@@ -195,10 +213,10 @@ export default function TeaShopPage() {
         : null;
 
       return {
-        totalEntries: combinedEntriesData.reduce((sum, e) => sum + ((e as any).display_amount || e.total_amount || 0), 0),
+        totalEntries: allEntriesTotal,
         totalTea,
         totalSnacks,
-        pendingBalance: combinedPendingBalance,
+        pendingBalance,
         thisWeekTotal,
         thisMonthTotal,
         lastSettlement,
@@ -249,7 +267,7 @@ export default function TeaShopPage() {
       thisMonthTotal,
       lastSettlement,
     };
-  }, [entries, settlements, dateFrom, dateTo, isAllTime, isInGroup, combinedEntriesData, combinedSettlementsData, combinedPendingBalance]);
+  }, [entries, settlements, dateFrom, dateTo, isAllTime, isInGroup, combinedEntriesData, combinedSettlementsData, combinedPendingBalance, effectiveFilterBySiteId]);
 
   const fetchData = async () => {
     if (!selectedSite) return;
@@ -359,13 +377,6 @@ export default function TeaShopPage() {
     fetchData();
   }, [selectedSite]);
 
-  // Set default site filter to selected site when site changes (for grouped sites)
-  useEffect(() => {
-    if (selectedSite?.id && isInGroup) {
-      setSiteFilter(selectedSite.id);
-    }
-  }, [selectedSite?.id, isInGroup]);
-
   const handleDeleteEntry = async (id: string) => {
     if (!confirm("Are you sure you want to delete this entry?")) return;
 
@@ -404,11 +415,15 @@ export default function TeaShopPage() {
   // Create combined entries view with holidays and missing entries
   const combinedEntries = useMemo((): CombinedEntryType[] => {
     // Use combined data when in a group
-    // Note: Site filtering is now handled in the useCombinedTeaShopEntries hook
-    // which properly handles group entries with allocations
-    const entriesToUse = isInGroup && combinedEntriesData
+    let entriesToUse = isInGroup && combinedEntriesData
       ? combinedEntriesData
       : filteredEntries;
+
+    // SAFEGUARD: Apply strict page-level filtering for grouped sites
+    // Only show entries that belong to the selected site
+    if (isInGroup && combinedEntriesData && effectiveFilterBySiteId) {
+      entriesToUse = combinedEntriesData.filter((entry) => entry.site_id === effectiveFilterBySiteId);
+    }
 
     const entryDates = new Set(entriesToUse.map((e) => e.date));
     const holidayDates = new Set(holidays.map((h) => (h as any).date));
@@ -449,7 +464,19 @@ export default function TeaShopPage() {
 
     // Sort by date descending
     return result.sort((a, b) => b.date.localeCompare(a.date));
-  }, [filteredEntries, holidays, attendanceByDate, dateFrom, dateTo, isAllTime, isInGroup, combinedEntriesData]);
+  }, [filteredEntries, holidays, attendanceByDate, dateFrom, dateTo, isAllTime, isInGroup, combinedEntriesData, effectiveFilterBySiteId]);
+
+  // Filter settlements by site when in group mode
+  const filteredSettlements = useMemo(() => {
+    if (!isInGroup) return settlements;
+    if (!combinedSettlementsData) return [];
+    if (!effectiveFilterBySiteId) return combinedSettlementsData;
+
+    // Filter settlements by site_id, but keep group settlements (source === "group")
+    return combinedSettlementsData.filter((s: any) =>
+      s.site_id === effectiveFilterBySiteId || s.source === "group"
+    );
+  }, [isInGroup, settlements, combinedSettlementsData, effectiveFilterBySiteId]);
 
   if (!selectedSite) {
     return (
@@ -478,23 +505,6 @@ export default function TeaShopPage() {
         }
         actions={
           <Box sx={{ display: "flex", gap: 0.5, alignItems: "center" }}>
-            {/* Site Filter - only show when in group with multiple sites */}
-            {isInGroup && groupSites.length > 1 && (
-              <FormControl size="small" sx={{ minWidth: 120, mr: 1, display: { xs: 'none', sm: 'block' } }}>
-                <Select
-                  value={siteFilter}
-                  onChange={(e) => setSiteFilter(e.target.value)}
-                  displayEmpty
-                  startAdornment={<FilterIcon fontSize="small" sx={{ mr: 0.5, color: 'action.active' }} />}
-                  sx={{ fontSize: '0.875rem' }}
-                >
-                  <MenuItem value="all">All Sites</MenuItem>
-                  {groupSites.map((site) => (
-                    <MenuItem key={site.id} value={site.id}>{site.name}</MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            )}
             {/* Group indicator (no toggle - automatic grouping) */}
             {isInGroup && (
               <Tooltip title={`Grouped with ${siteGroup?.sites?.length || 0} sites`}>
@@ -645,8 +655,7 @@ export default function TeaShopPage() {
             <strong>Grouped Sites:</strong> {siteGroup.sites?.map((s: any) => s.name).join(", ")}
           </Typography>
           <Typography variant="caption" color="text.secondary">
-            Tea shop costs are split based on day units across all sites.
-            {siteFilter !== "all" && ` Filtered to show only ${groupSites.find(s => s.id === siteFilter)?.name}`}
+            Tea shop costs are split based on day units across all sites. Filtered to show only {selectedSite?.name}.
           </Typography>
         </Alert>
       )}
@@ -662,7 +671,7 @@ export default function TeaShopPage() {
             <strong>Grouped Sites:</strong> {siteGroup.sites?.map((s: any) => s.name).join(", ")}
           </Typography>
           <Typography variant="caption" color="text.secondary">
-            Showing combined tea shop data for all sites in this group
+            Showing tea shop data for {selectedSite?.name} only
           </Typography>
         </Alert>
       )}
@@ -1010,7 +1019,7 @@ export default function TeaShopPage() {
           <TabPanel value={tabValue} index={1}>
             <Box sx={{ mb: 2 }}>
               <Chip
-                label={`${(isInGroup ? combinedSettlementsData : settlements)?.length || 0} records`}
+                label={`${filteredSettlements?.length || 0} records`}
                 size="small"
                 variant="outlined"
                 sx={{ fontWeight: 500 }}
@@ -1035,7 +1044,7 @@ export default function TeaShopPage() {
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {(isInGroup ? combinedSettlementsData || [] : settlements).map((settlement) => {
+                  {filteredSettlements.map((settlement) => {
                     const settlementAny = settlement as any;
                     const proofUrl = settlementAny.proof_url;
                     const subcontract = settlementAny.subcontracts;
@@ -1181,7 +1190,7 @@ export default function TeaShopPage() {
                       </TableRow>
                     );
                   })}
-                  {(isInGroup ? combinedSettlementsData || [] : settlements).length === 0 && (
+                  {filteredSettlements.length === 0 && (
                     <TableRow>
                       <TableCell colSpan={isInGroup ? 10 : 9} align="center" sx={{ py: 4 }}>
                         <Typography color="text.secondary">
@@ -1229,16 +1238,26 @@ export default function TeaShopPage() {
       {/* Site-level dialogs - always use site dialogs, entries are site-specific */}
       {/* Create a compatible shop object from company tea shop if needed */}
       {(() => {
+        // Get best available QR code and UPI ID from any source
+        // Priority: site shop > group shop > company tea shop
+        const bestQrCode = (shop as any)?.qr_code_url || groupShop?.qr_code_url || companyTeaShop?.qr_code_url || null;
+        const bestUpiId = (shop as any)?.upi_id || groupShop?.upi_id || companyTeaShop?.upi_id || null;
+
         // Use legacy shop if available, otherwise create from company tea shop
-        const effectiveShop: TeaShopAccount | null = shop || (companyTeaShop ? {
+        // Always override qr_code_url and upi_id with best available values
+        const effectiveShop: TeaShopAccount | null = shop ? {
+          ...shop,
+          qr_code_url: bestQrCode,
+          upi_id: bestUpiId,
+        } : (companyTeaShop ? {
           id: companyTeaShop.id,
           site_id: selectedSite.id, // Use current site for entries
           shop_name: companyTeaShop.name,
           owner_name: companyTeaShop.owner_name,
           contact_phone: companyTeaShop.contact_phone,
           address: companyTeaShop.address,
-          upi_id: companyTeaShop.upi_id,
-          qr_code_url: companyTeaShop.qr_code_url,
+          upi_id: bestUpiId,
+          qr_code_url: bestQrCode,
           notes: companyTeaShop.notes,
           is_active: companyTeaShop.is_active,
           created_at: companyTeaShop.created_at,
@@ -1279,6 +1298,7 @@ export default function TeaShopPage() {
               settlement={editingSettlement}
               isInGroup={isInGroup}
               siteGroupId={siteGroupId}
+              filterBySiteId={effectiveFilterBySiteId}
               onSuccess={() => {
                 setSettlementDialogOpen(false);
                 setEditingSettlement(null);
