@@ -1785,9 +1785,9 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
   // Fetch group allocations for popover display
   const fetchGroupEntryAllocations = async (entryId: string) => {
     const { data } = await (supabase as any)
-      .from("tea_shop_group_allocations")
+      .from("tea_shop_entry_allocations")
       .select("*, site:sites(id, name)")
-      .eq("group_entry_id", entryId);
+      .eq("entry_id", entryId);
     setPopoverGroupAllocations(data);
   };
 

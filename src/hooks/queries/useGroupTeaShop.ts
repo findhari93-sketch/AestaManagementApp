@@ -96,6 +96,7 @@ export function useGroupTeaShopEntries(
 
 /**
  * Fetch a single group entry with allocations
+ * This queries tea_shop_entries (with is_group_entry=true) and tea_shop_entry_allocations
  */
 export function useGroupTeaShopEntry(entryId: string | undefined) {
   const supabase = createClient();
@@ -107,20 +108,55 @@ export function useGroupTeaShopEntry(entryId: string | undefined) {
     queryFn: async () => {
       if (!entryId) return null;
 
-      const { data, error } = await (supabase as any)
-        .from("tea_shop_group_entries")
-        .select(`
-          *,
-          allocations:tea_shop_group_allocations(
-            *,
-            site:sites(id, name)
-          )
-        `)
+      // Fetch entry from tea_shop_entries
+      const { data: entry, error: entryError } = await (supabase as any)
+        .from("tea_shop_entries")
+        .select("*")
         .eq("id", entryId)
         .single();
 
-      if (error) throw error;
-      return data as TeaShopGroupEntryWithAllocations;
+      if (entryError) throw entryError;
+      if (!entry) return null;
+
+      // Fetch allocations from tea_shop_entry_allocations
+      const { data: allocations, error: allocError } = await (supabase as any)
+        .from("tea_shop_entry_allocations")
+        .select("*, site:sites(id, name)")
+        .eq("entry_id", entryId);
+
+      if (allocError) {
+        console.warn("Error fetching allocations:", allocError.message);
+      }
+
+      // Transform to the expected format
+      const transformedAllocations = (allocations || []).map((alloc: any) => ({
+        id: alloc.id,
+        group_entry_id: entryId,
+        site_id: alloc.site_id,
+        site: alloc.site,
+        // Use worker_count for attendance_count
+        named_laborer_count: alloc.worker_count || 0,
+        market_laborer_count: 0,
+        attendance_count: alloc.worker_count || 0,
+        allocation_percentage: alloc.allocation_percentage,
+        allocated_amount: alloc.allocated_amount,
+      }));
+
+      return {
+        id: entry.id,
+        tea_shop_id: entry.tea_shop_id,
+        site_group_id: entry.site_group_id || null,
+        date: entry.date,
+        total_amount: entry.total_amount,
+        is_percentage_override: false,
+        percentage_split: null,
+        notes: entry.notes,
+        entered_by: entry.entered_by,
+        entered_by_user_id: entry.entered_by_user_id,
+        created_at: entry.created_at,
+        updated_at: entry.updated_at,
+        allocations: transformedAllocations,
+      } as TeaShopGroupEntryWithAllocations;
     },
     enabled: !!entryId,
   });
