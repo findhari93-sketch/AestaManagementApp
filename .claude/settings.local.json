@@ -174,7 +174,12 @@
       "Bash(timeout 30 npm run build:*)",
       "Bash(timeout 60 npm run build:*)",
       "Bash(timeout 90 npm run build)",
-      "Bash(ls -la \"c:\\\\Users\\\\Haribabu\\\\Documents\\\\AppsCopilot\\\\AestaManagementApp\\\\supabase\"\" 2>/dev/null || echo \"Supabase dir check \")"
+      "Bash(ls -la \"c:\\\\Users\\\\Haribabu\\\\Documents\\\\AppsCopilot\\\\AestaManagementApp\\\\supabase\"\" 2>/dev/null || echo \"Supabase dir check \")",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nAdd Store Catalog feature for vendors with price comparison\n\n- Add Store Catalog page accessible via \"View Store\" button on vendor detail page\n- Create ProductCard component with photo display and price comparison badges\n- Add CategoryFilterTabs for filtering products by material categories\n- Implement ProductDetailDrawer showing full details and competing vendor prices\n- Add AddProductDialog to link existing materials to vendor inventory\n- Add image upload capability to MaterialDialog for product photos\n- Create useStoreCatalog hook with price comparison logic\n- Add storeCatalog query keys for React Query caching\n\n🤖 Generated with [Claude Code]\\(https://claude.com/claude-code\\)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(timeout 90 npm run build:*)",
+      "Bash(timeout 120 npm run build:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nFix group tea shop entry editing and session handling\n\n- Fix group entry editing when context is not available by fetching tea shop and site group from entry IDs\n- Use correct table names \\(tea_shop_entries, tea_shop_entry_allocations\\)\n- Preserve is_percentage_override and percentage_split fields when editing\n- Increase session timeout from 5s to 10s and expiry buffer from 2 to 5 minutes\n- Add session refresh logging and validation checks\n- Remove debug console.log statements\n\n🤖 Generated with [Claude Code]\\(https://claude.com/claude-code\\)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nFilter tea-shop page to show only selected site''s data\n\n- Remove \"All Sites\" dropdown filter from tea-shop page\n- Always filter entries and settlements by the currently selected site\n- For group entries, show only the allocated amount for the selected site\n- Update info banners to clarify site-specific filtering\n- Clean up unused imports and state variables\n\n🤖 Generated with [Claude Code]\\(https://claude.com/claude-code\\)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")"
     ],
     "deny": [],
     "ask": []
