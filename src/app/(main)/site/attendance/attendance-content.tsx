@@ -85,7 +85,7 @@ import TeaShopEntryDialog from "@/components/tea-shop/TeaShopEntryDialog";
 import TeaShopEntryModeDialog from "@/components/tea-shop/TeaShopEntryModeDialog";
 import GroupTeaShopEntryDialog from "@/components/tea-shop/GroupTeaShopEntryDialog";
 import { useSiteGroup } from "@/hooks/queries/useSiteGroups";
-import { useGroupTeaShopAccount, useGroupTeaShopEntry } from "@/hooks/queries/useGroupTeaShop";
+import { useGroupTeaShopAccount } from "@/hooks/queries/useGroupTeaShop";
 import type { SiteGroupWithSites } from "@/types/material.types";
 import PaymentDialog from "@/components/payments/PaymentDialog";
 import type { UnifiedSettlementConfig, SettlementRecord } from "@/types/settlement.types";
@@ -379,11 +379,9 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
   const [teaShopEditingEntry, setTeaShopEditingEntry] = useState<any>(null);
   const [teaShopEntryModeDialogOpen, setTeaShopEntryModeDialogOpen] = useState(false);
   const [groupTeaShopDialogOpen, setGroupTeaShopDialogOpen] = useState(false);
-  const [editingGroupEntryId, setEditingGroupEntryId] = useState<string | null>(null);
   const [popoverGroupAllocations, setPopoverGroupAllocations] = useState<any[] | null>(null);
-
-  // Fetch group entry data for editing
-  const { data: editingGroupEntry } = useGroupTeaShopEntry(editingGroupEntryId || undefined);
+  // Pre-fetched group entry data for editing (sync fetch approach)
+  const [editingGroupEntryData, setEditingGroupEntryData] = useState<any>(null);
 
   // Work update viewer state
   const [workUpdateViewerOpen, setWorkUpdateViewerOpen] = useState(false);
@@ -1789,6 +1787,63 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
       .select("*, site:sites(id, name)")
       .eq("entry_id", entryId);
     setPopoverGroupAllocations(data);
+  };
+
+  // Fetch group entry data synchronously before opening edit dialog
+  const handleEditGroupEntry = async (entryId: string, date: string) => {
+    try {
+      // Fetch entry from tea_shop_entries
+      const { data: entry, error: entryError } = await (supabase as any)
+        .from("tea_shop_entries")
+        .select("*")
+        .eq("id", entryId)
+        .single();
+
+      if (entryError) {
+        console.error("Error fetching entry:", entryError);
+        return;
+      }
+
+      // Fetch allocations from tea_shop_entry_allocations
+      const { data: allocations } = await (supabase as any)
+        .from("tea_shop_entry_allocations")
+        .select("*, site:sites(id, name)")
+        .eq("entry_id", entryId);
+
+      // Transform to expected format for GroupTeaShopEntryDialog
+      const fullEntry = {
+        id: entry.id,
+        tea_shop_id: entry.tea_shop_id,
+        site_group_id: entry.site_group_id || null,
+        date: entry.date,
+        total_amount: entry.total_amount,
+        is_percentage_override: false,
+        percentage_split: null,
+        notes: entry.notes,
+        entered_by: entry.entered_by,
+        entered_by_user_id: entry.entered_by_user_id,
+        created_at: entry.created_at,
+        updated_at: entry.updated_at,
+        allocations: (allocations || []).map((a: any) => ({
+          id: a.id,
+          group_entry_id: entryId,
+          site_id: a.site_id,
+          site: a.site,
+          named_laborer_count: a.worker_count || 0,
+          market_laborer_count: 0,
+          attendance_count: a.worker_count || 0,
+          allocation_percentage: a.allocation_percentage,
+          allocated_amount: a.allocated_amount,
+        })),
+      };
+
+      // Set data and open dialog
+      setEditingGroupEntryData(fullEntry);
+      setTeaShopDialogDate(date);
+      setGroupTeaShopDialogOpen(true);
+    } catch (err) {
+      console.error("Error in handleEditGroupEntry:", err);
+    }
   };
 
   // Handler to open tea shop dialog directly
@@ -5140,17 +5195,17 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
           onClose={() => {
             setGroupTeaShopDialogOpen(false);
             setTeaShopDialogDate(undefined);
-            setEditingGroupEntryId(null);
+            setEditingGroupEntryData(null);
           }}
           shop={groupTeaShop}
           siteGroup={siteGroup as SiteGroupWithSites}
           initialDate={teaShopDialogDate}
-          entry={editingGroupEntry}
+          entry={editingGroupEntryData}
           onSuccess={() => {
             invalidateAttendance();
             setGroupTeaShopDialogOpen(false);
             setTeaShopDialogDate(undefined);
-            setEditingGroupEntryId(null);
+            setEditingGroupEntryData(null);
           }}
         />
       )}
@@ -5578,15 +5633,23 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
               size="small"
               variant="outlined"
               sx={{ mt: 1.5 }}
-              onClick={() => {
+              onClick={async () => {
                 const dateToEdit = teaShopPopoverData.date;
-                // Set entry ID for editing if it's a group entry
-                if (teaShopPopoverData.data.isGroupEntry && teaShopPopoverData.data.entryId) {
-                  setEditingGroupEntryId(teaShopPopoverData.data.entryId);
-                }
+                const isGroupEntry = teaShopPopoverData.data.isGroupEntry;
+                const entryId = teaShopPopoverData.data.entryId;
+
+                // Close popover first
                 setTeaShopPopoverAnchor(null);
                 setTeaShopPopoverData(null);
                 setPopoverGroupAllocations(null);
+
+                // For group entries: fetch data and open dialog directly (skip mode dialog)
+                if (isGroupEntry && entryId) {
+                  await handleEditGroupEntry(entryId, dateToEdit);
+                  return;
+                }
+
+                // For non-group entries: use normal flow
                 handleOpenTeaShopDialog(dateToEdit);
               }}
             >
