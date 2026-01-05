@@ -146,7 +146,11 @@ export default function TeaShopPage() {
 
   const { data: combinedEntriesData } = useCombinedTeaShopEntries(
     isInGroup ? siteGroupId : undefined,
-    { filterBySiteId: effectiveFilterBySiteId }
+    {
+      filterBySiteId: effectiveFilterBySiteId,
+      dateFrom: isAllTime ? undefined : dateFrom ?? undefined,
+      dateTo: isAllTime ? undefined : dateTo ?? undefined,
+    }
   );
   const { data: combinedPendingData } = useCombinedTeaShopPendingBalance(isInGroup ? siteGroupId : undefined);
   const { data: combinedSettlementsData } = useCombinedTeaShopSettlements(isInGroup ? siteGroupId : undefined);
@@ -274,9 +278,10 @@ export default function TeaShopPage() {
 
     setLoading(true);
     try {
-      // Determine date range for fetching
-      const fetchDateFrom = dateFrom || dayjs().subtract(30, "day").format("YYYY-MM-DD");
-      const fetchDateTo = dateTo || dayjs().format("YYYY-MM-DD");
+      // For "All Time", don't apply date filtering; otherwise use selected date range
+      const shouldFilterByDate = !isAllTime && dateFrom && dateTo;
+      const fetchDateFrom = shouldFilterByDate ? dateFrom : null;
+      const fetchDateTo = shouldFilterByDate ? dateTo : null;
 
       // Fetch shop for this site
       const { data: shopData } = await (supabase
@@ -289,34 +294,50 @@ export default function TeaShopPage() {
       const typedShopData = shopData as TeaShopAccount | null;
       setShop(typedShopData);
 
-      // Fetch holidays for this site (within date range)
-      const { data: holidaysData } = await (supabase
+      // Fetch holidays for this site (filter by date range if specified)
+      let holidaysQuery = (supabase
         .from("site_holidays") as any)
         .select("*")
         .eq("site_id", selectedSite.id)
-        .gte("holiday_date", fetchDateFrom)
-        .lte("holiday_date", fetchDateTo)
         .order("holiday_date", { ascending: false });
+
+      if (fetchDateFrom && fetchDateTo) {
+        holidaysQuery = holidaysQuery
+          .gte("holiday_date", fetchDateFrom)
+          .lte("holiday_date", fetchDateTo);
+      }
+      const { data: holidaysData } = await holidaysQuery;
 
       setHolidays((holidaysData || []).map((h: any) => ({
         ...h,
         date: h.holiday_date, // Normalize field name
       })) as SiteHoliday[]);
 
-      // Fetch attendance for all dates in range (to detect missing entries)
-      const { data: attendanceData } = await (supabase
+      // Fetch attendance for all dates (to detect missing entries)
+      // Only filter by date range if not "All Time"
+      let attendanceQuery = (supabase
         .from("daily_attendance") as any)
         .select("date")
-        .eq("site_id", selectedSite.id)
-        .gte("date", fetchDateFrom)
-        .lte("date", fetchDateTo);
+        .eq("site_id", selectedSite.id);
 
-      const { data: marketData } = await (supabase
+      if (fetchDateFrom && fetchDateTo) {
+        attendanceQuery = attendanceQuery
+          .gte("date", fetchDateFrom)
+          .lte("date", fetchDateTo);
+      }
+      const { data: attendanceData } = await attendanceQuery;
+
+      let marketQuery = (supabase
         .from("market_laborer_attendance") as any)
         .select("date, count")
-        .eq("site_id", selectedSite.id)
-        .gte("date", fetchDateFrom)
-        .lte("date", fetchDateTo);
+        .eq("site_id", selectedSite.id);
+
+      if (fetchDateFrom && fetchDateTo) {
+        marketQuery = marketQuery
+          .gte("date", fetchDateFrom)
+          .lte("date", fetchDateTo);
+      }
+      const { data: marketData } = await marketQuery;
 
       // Build attendance map
       const attMap = new Map<string, { named: number; market: number }>();
@@ -375,7 +396,7 @@ export default function TeaShopPage() {
 
   useEffect(() => {
     fetchData();
-  }, [selectedSite]);
+  }, [selectedSite, dateFrom, dateTo, isAllTime]);
 
   const handleDeleteEntry = async (id: string) => {
     if (!confirm("Are you sure you want to delete this entry?")) return;
@@ -420,9 +441,18 @@ export default function TeaShopPage() {
       : filteredEntries;
 
     // SAFEGUARD: Apply strict page-level filtering for grouped sites
-    // Only show entries that belong to the selected site
+    // Only show entries that belong to the selected site OR are group entries
+    // Group entries have site_id = null but the hook already filters them to include
+    // only entries with allocations for the selected site
     if (isInGroup && combinedEntriesData && effectiveFilterBySiteId) {
-      entriesToUse = combinedEntriesData.filter((entry) => entry.site_id === effectiveFilterBySiteId);
+      entriesToUse = combinedEntriesData.filter((entry) =>
+        entry.site_id === effectiveFilterBySiteId || (entry as any).isGroupEntry === true
+      );
+    }
+
+    // Apply date filtering for grouped sites (non-group sites already have filteredEntries)
+    if (isInGroup && !isAllTime && dateFrom && dateTo) {
+      entriesToUse = entriesToUse.filter((e) => e.date >= dateFrom && e.date <= dateTo);
     }
 
     const entryDates = new Set(entriesToUse.map((e) => e.date));
@@ -465,6 +495,29 @@ export default function TeaShopPage() {
     // Sort by date descending
     return result.sort((a, b) => b.date.localeCompare(a.date));
   }, [filteredEntries, holidays, attendanceByDate, dateFrom, dateTo, isAllTime, isInGroup, combinedEntriesData, effectiveFilterBySiteId]);
+
+  // Calculate table-specific stats (date-filtered) for display in table header
+  const tableStats = useMemo(() => {
+    // combinedEntries is already date-filtered
+    const entryItems = combinedEntries.filter(item => item.type === "entry");
+
+    const totalTea = entryItems.reduce((sum, item) => {
+      const entry = item.entry as any;
+      return sum + (entry.tea_total || 0);
+    }, 0);
+
+    const totalSnacks = entryItems.reduce((sum, item) => {
+      const entry = item.entry as any;
+      return sum + (entry.snacks_total || 0);
+    }, 0);
+
+    const totalAmount = entryItems.reduce((sum, item) => {
+      const entry = item.entry as any;
+      return sum + (entry.display_amount || entry.total_amount || 0);
+    }, 0);
+
+    return { totalTea, totalSnacks, totalAmount, recordCount: entryItems.length };
+  }, [combinedEntries]);
 
   // Filter settlements by site when in group mode
   const filteredSettlements = useMemo(() => {
@@ -689,7 +742,7 @@ export default function TeaShopPage() {
             {/* Summary Chips */}
             <Box sx={{ display: "flex", gap: 2, mb: 2, flexWrap: "wrap", justifyContent: "space-between", alignItems: "center" }}>
               <Chip
-                label={`${entries.length} records`}
+                label={`${tableStats.recordCount} records`}
                 size="small"
                 variant="outlined"
                 sx={{ fontWeight: 500 }}
@@ -697,18 +750,18 @@ export default function TeaShopPage() {
               <Box sx={{ display: { xs: 'none', sm: 'flex' }, gap: 1, alignItems: "center" }}>
                 <Chip
                   icon={<LocalCafe />}
-                  label={`Tea: ₹${stats.totalTea.toLocaleString()}`}
+                  label={`Tea: ₹${tableStats.totalTea.toLocaleString()}`}
                   variant="outlined"
                   color="primary"
                 />
                 <Chip
                   icon={<Fastfood />}
-                  label={`Snacks: ₹${stats.totalSnacks.toLocaleString()}`}
+                  label={`Snacks: ₹${tableStats.totalSnacks.toLocaleString()}`}
                   variant="outlined"
                   color="secondary"
                 />
                 <Chip
-                  label={`Total: ₹${stats.totalEntries.toLocaleString()}`}
+                  label={`Total: ₹${tableStats.totalAmount.toLocaleString()}`}
                   color="primary"
                 />
               </Box>

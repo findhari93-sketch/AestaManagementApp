@@ -66,13 +66,22 @@ export function useCombinedTeaShopEntries(
       const siteNameMap = new Map<string, string>();
       sites.forEach((s: any) => siteNameMap.set(s.id, s.name));
 
-      // 2. Fetch entries for all sites in the group (by site_id, not tea_shop_id)
-      // This ensures we capture ALL historical entries regardless of which shop they belong to
+      // 2. Fetch entries for all sites in the group
+      // This includes:
+      // - Individual site entries (site_id in siteIds)
+      // - Group entries (site_group_id matches, site_id is null)
       let query = (supabase as any)
         .from("tea_shop_entries")
-        .select("*")
-        .in("site_id", siteIds)
-        .order("date", { ascending: false });
+        .select("*");
+
+      // Handle empty siteIds to avoid invalid .or() clause
+      if (siteIds.length > 0) {
+        query = query.or(`site_id.in.(${siteIds.join(",")}),site_group_id.eq.${siteGroupId}`);
+      } else {
+        query = query.eq("site_group_id", siteGroupId);
+      }
+
+      query = query.order("date", { ascending: false });
 
       if (options?.dateFrom) {
         query = query.gte("date", options.dateFrom);
@@ -130,7 +139,8 @@ export function useCombinedTeaShopEntries(
               const alloc = siteAllocs.get(options.filterBySiteId)!;
               combinedEntries.push({
                 ...entry,
-                site_name: siteNameMap.get(entry.site_id) || "Unknown Site",
+                site_id: options.filterBySiteId, // Set site_id to filtered site for consistency
+                site_name: alloc.siteName || siteNameMap.get(options.filterBySiteId) || "Unknown Site",
                 source: "individual" as const,
                 display_amount: alloc.amount,
                 original_total_amount: entry.total_amount,
@@ -144,7 +154,7 @@ export function useCombinedTeaShopEntries(
           // No filter - show full amount with group marker
           combinedEntries.push({
             ...entry,
-            site_name: siteNameMap.get(entry.site_id) || "Unknown Site",
+            site_name: "Group Entry",
             source: "individual" as const,
             display_amount: entry.total_amount,
             original_total_amount: entry.total_amount,
@@ -161,7 +171,10 @@ export function useCombinedTeaShopEntries(
 
           combinedEntries.push({
             ...entry,
-            site_name: siteNameMap.get(entry.site_id) || "Unknown Site",
+            site_id: options?.filterBySiteId || entry.site_id, // Set site_id if filtering
+            site_name: options?.filterBySiteId
+              ? siteNameMap.get(options.filterBySiteId) || "Unknown Site"
+              : "Group Entry",
             source: "individual" as const,
             display_amount: options?.filterBySiteId ? equalSplitAmount : entry.total_amount,
             original_total_amount: entry.total_amount,
@@ -271,12 +284,22 @@ export function useCombinedTeaShopPendingBalance(
 
       const siteIds = sites.map((s: any) => s.id);
 
-      // Get total entries amount from individual entries (by site_id, not tea_shop_id)
-      // This ensures we capture ALL historical entries regardless of which shop they belong to
-      const { data: entries } = await (supabase as any)
+      // Get total entries amount from entries
+      // This includes:
+      // - Individual site entries (site_id in siteIds)
+      // - Group entries (site_group_id matches, site_id is null)
+      let entriesQuery = (supabase as any)
         .from("tea_shop_entries")
-        .select("total_amount")
-        .in("site_id", siteIds);
+        .select("total_amount");
+
+      // Handle empty siteIds to avoid invalid .or() clause
+      if (siteIds.length > 0) {
+        entriesQuery = entriesQuery.or(`site_id.in.(${siteIds.join(",")}),site_group_id.eq.${siteGroupId}`);
+      } else {
+        entriesQuery = entriesQuery.eq("site_group_id", siteGroupId);
+      }
+
+      const { data: entries } = await entriesQuery;
 
       const individualEntriesTotal =
         entries?.reduce(
@@ -379,12 +402,22 @@ export function useCombinedTeaShopUnsettledEntries(
       const siteNameMap = new Map<string, string>();
       sites.forEach((s: any) => siteNameMap.set(s.id, s.name));
 
-      // Fetch unsettled individual entries by site_id (oldest first for waterfall)
-      // This ensures we capture ALL historical entries regardless of which shop they belong to
-      const { data: entries } = await (supabase as any)
+      // Fetch unsettled entries (oldest first for waterfall)
+      // This includes:
+      // - Individual site entries (site_id in siteIds)
+      // - Group entries (site_group_id matches, site_id is null)
+      let unsettledQuery = (supabase as any)
         .from("tea_shop_entries")
-        .select("*")
-        .in("site_id", siteIds)
+        .select("*");
+
+      // Handle empty siteIds to avoid invalid .or() clause
+      if (siteIds.length > 0) {
+        unsettledQuery = unsettledQuery.or(`site_id.in.(${siteIds.join(",")}),site_group_id.eq.${siteGroupId}`);
+      } else {
+        unsettledQuery = unsettledQuery.eq("site_group_id", siteGroupId);
+      }
+
+      const { data: entries } = await unsettledQuery
         .or("is_fully_paid.is.null,is_fully_paid.eq.false")
         .order("date", { ascending: true });
 
