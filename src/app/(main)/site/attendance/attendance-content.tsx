@@ -430,6 +430,8 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
     }>
   >([]);
 
+  const [selectedHolidayDate, setSelectedHolidayDate] = useState<string | null>(null);
+  const [selectedExistingHoliday, setSelectedExistingHoliday] = useState<typeof todayHoliday>(null);
   // Show/hide holidays toggle with session persistence
   const [showHolidays, setShowHolidays] = useState(() => {
     if (typeof window === "undefined") return true;
@@ -1484,19 +1486,22 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
   }, [selectedSite?.id, supabase, dateFrom, dateTo]);
 
   useEffect(() => {
-    checkTodayHoliday();
+      checkTodayHoliday();
   }, [checkTodayHoliday]);
 
   const handleHolidayClick = () => {
     if (todayHoliday) {
       setHolidayDialogMode("revoke");
     } else {
+      setSelectedHolidayDate(null); setSelectedExistingHoliday(null); // null means today's date
       setHolidayDialogMode("mark");
     }
     setHolidayDialogOpen(true);
   };
 
   const handleHolidaySuccess = () => {
+    setSelectedHolidayDate(null);
+    setSelectedExistingHoliday(null);
     checkTodayHoliday();
     invalidateAttendance();
   };
@@ -1517,22 +1522,40 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
     }
   }, [recentHolidays]);
 
-  // Handler for marking an unfilled date as holiday
-  const handleMarkUnfilledAsHoliday = useCallback((date: string) => {
+  // Handler for marking an unfilled date as holiday (or revoking if already a holiday)
+  const handleMarkUnfilledAsHoliday = useCallback(async (date: string) => {
+    if (!selectedSite?.id) return;
+
     // Check if this date has attendance
     const hasAttendance = dateSummaries.some((s) => s.date === date);
 
     if (hasAttendance) {
       // Show error - cannot mark as holiday if attendance exists
       setRestorationMessage("Cannot mark as holiday - attendance already exists for this date.");
-    } else {
-      // Open holiday dialog for this specific date
-      setHolidayDialogMode("mark");
-      setHolidayDialogOpen(true);
-      // Note: The HolidayConfirmDialog will need to be modified to accept a specific date
-      // For now, we'll use today's date behavior but this should be enhanced
+      return;
     }
-  }, [dateSummaries]);
+
+    // Check the database directly for existing holiday (more reliable than recentHolidays)
+    const { data: existingHolidayData } = await supabase
+      .from("site_holidays")
+      .select("*")
+      .eq("site_id", selectedSite.id)
+      .eq("date", date)
+      .maybeSingle();
+
+    setSelectedHolidayDate(date);
+    if (existingHolidayData) {
+      // Date is already a holiday - open revoke dialog
+      setSelectedExistingHoliday(existingHolidayData);
+      setHolidayDialogMode("revoke");
+    } else {
+      // Date is not a holiday - open mark dialog
+      setSelectedExistingHoliday(null);
+      setHolidayDialogMode("mark");
+    }
+    setHolidayDialogOpen(true);
+  }, [dateSummaries, selectedSite?.id, supabase]);
+
 
   // Handler for confirming to overwrite a holiday with attendance
   const handleConfirmOverwriteHoliday = useCallback(async () => {
@@ -6518,12 +6541,13 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
       {selectedSite && (
         <HolidayConfirmDialog
           open={holidayDialogOpen}
-          onClose={() => setHolidayDialogOpen(false)}
+          onClose={() => { setSelectedHolidayDate(null); setSelectedExistingHoliday(null); setHolidayDialogOpen(false); }}
           mode={holidayDialogMode}
           site={{ id: selectedSite.id, name: selectedSite.name }}
-          existingHoliday={todayHoliday}
+          existingHoliday={selectedExistingHoliday || todayHoliday}
           recentHolidays={recentHolidays}
           onSuccess={handleHolidaySuccess}
+          date={selectedHolidayDate || undefined}
         />
       )}
 

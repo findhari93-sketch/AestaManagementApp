@@ -55,6 +55,7 @@ export interface HolidayConfirmDialogProps {
   existingHoliday?: SiteHoliday | null;
   recentHolidays?: SiteHoliday[];
   onSuccess: () => void;
+  date?: string; // Optional date to mark as holiday (defaults to today)
 }
 
 export default function HolidayConfirmDialog({
@@ -65,6 +66,7 @@ export default function HolidayConfirmDialog({
   existingHoliday,
   recentHolidays = [],
   onSuccess,
+  date,
 }: HolidayConfirmDialogProps) {
   const supabase = createClient();
   const { userProfile } = useAuth();
@@ -73,8 +75,10 @@ export default function HolidayConfirmDialog({
   const [error, setError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  const today = dayjs().format("YYYY-MM-DD");
-  const todayFormatted = dayjs().format("dddd, DD MMMM YYYY");
+  // Use provided date or default to today
+  const targetDate = date || dayjs().format("YYYY-MM-DD");
+  const targetDateFormatted = dayjs(targetDate).format("dddd, DD MMMM YYYY");
+  const isToday = dayjs(targetDate).isSame(dayjs(), "day");
 
   const handleMarkHoliday = async () => {
     if (!reason.trim()) {
@@ -86,16 +90,30 @@ export default function HolidayConfirmDialog({
     setError(null);
 
     try {
-      // Check if attendance exists for today
+      // Check if this date is already marked as a holiday
+      const { data: existingHolidayData } = await supabase
+        .from("site_holidays")
+        .select("id")
+        .eq("site_id", site.id)
+        .eq("date", targetDate)
+        .maybeSingle();
+
+      if (existingHolidayData) {
+        setError("This date is already marked as a holiday. Use the revoke option to remove it first.");
+        setSaving(false);
+        return;
+      }
+
+      // Check if attendance exists for this date
       const { data: existingAttendance } = await supabase
         .from("daily_attendance")
         .select("date")
         .eq("site_id", site.id)
-        .eq("date", today)
+        .eq("date", targetDate)
         .limit(1);
 
       if (existingAttendance && existingAttendance.length > 0) {
-        setError("Cannot mark today as holiday - attendance already recorded for this date");
+        setError("Cannot mark as holiday - attendance already recorded for this date");
         setSaving(false);
         return;
       }
@@ -104,7 +122,7 @@ export default function HolidayConfirmDialog({
         .from("site_holidays")
         .insert({
           site_id: site.id,
-          date: today,
+          date: targetDate,
           reason: reason.trim(),
           created_by: userProfile?.id,
         });
@@ -210,15 +228,15 @@ export default function HolidayConfirmDialog({
             <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
               <CalendarIcon fontSize="small" color="action" />
               <Typography variant="body2" color="text.secondary">
-                {todayFormatted}
+                {targetDateFormatted}
               </Typography>
-              <Chip label="Today" size="small" color="success" sx={{ ml: 1 }} />
+              {isToday && <Chip label="Today" size="small" color="success" sx={{ ml: 1 }} />}
             </Box>
           </Box>
 
           <Alert severity="info" sx={{ mb: 2, borderRadius: 2 }}>
             <Typography variant="body2">
-              Marking today as a holiday will prevent attendance reminder notifications for this site.
+              Marking {isToday ? "today" : "this date"} as a holiday will prevent attendance reminder notifications for this site.
             </Typography>
           </Alert>
 
