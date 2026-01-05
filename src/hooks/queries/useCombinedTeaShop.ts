@@ -98,13 +98,18 @@ export function useCombinedTeaShopEntries(
         .filter((e: any) => e.is_group_entry === true)
         .map((e: any) => e.id);
 
-      // Build allocation map: entry_id -> { site_id -> { amount, siteName } }
-      const allocationMap = new Map<string, Map<string, { amount: number; siteName: string }>>();
+      // Build allocation map: entry_id -> { site_id -> { amount, siteName, amountPaid, isFullyPaid } }
+      const allocationMap = new Map<string, Map<string, {
+        amount: number;
+        siteName: string;
+        amountPaid: number;
+        isFullyPaid: boolean;
+      }>>();
 
       if (groupEntryIds.length > 0) {
         const { data: allocations, error: allocError } = await (supabase as any)
           .from("tea_shop_entry_allocations")
-          .select("entry_id, site_id, allocated_amount, site:sites(id, name)")
+          .select("entry_id, site_id, allocated_amount, amount_paid, is_fully_paid, site:sites(id, name)")
           .in("entry_id", groupEntryIds);
 
         if (allocError) {
@@ -117,7 +122,9 @@ export function useCombinedTeaShopEntries(
           }
           allocationMap.get(a.entry_id)!.set(a.site_id, {
             amount: a.allocated_amount,
-            siteName: a.site?.name || "Unknown"
+            siteName: a.site?.name || "Unknown",
+            amountPaid: a.amount_paid || 0,
+            isFullyPaid: a.is_fully_paid || false,
           });
         });
       }
@@ -145,6 +152,9 @@ export function useCombinedTeaShopEntries(
                 display_amount: alloc.amount,
                 original_total_amount: entry.total_amount,
                 isGroupEntry: true,
+                // Use per-site allocation payment status instead of entry-level
+                amount_paid: alloc.amountPaid,
+                is_fully_paid: alloc.isFullyPaid,
               });
             }
             // Skip this entry if the filtered site doesn't have an allocation
@@ -163,23 +173,34 @@ export function useCombinedTeaShopEntries(
           return;
         }
 
-        // For group entries WITHOUT allocations - show for all sites with equal split
+        // For group entries WITHOUT allocations
+        // FIXED: Show ₹0 for sites without allocations instead of equal split
+        // This ensures sites with no laborers (holidays) show ₹0, not an equal portion
         if (isGroupEntry) {
-          // Calculate equal split amount for site filtering
-          const numSites = siteIds.length || 1;
-          const equalSplitAmount = Math.round((entry.total_amount || 0) / numSites);
-
-          combinedEntries.push({
-            ...entry,
-            site_id: options?.filterBySiteId || entry.site_id, // Set site_id if filtering
-            site_name: options?.filterBySiteId
-              ? siteNameMap.get(options.filterBySiteId) || "Unknown Site"
-              : "Group Entry",
-            source: "individual" as const,
-            display_amount: options?.filterBySiteId ? equalSplitAmount : entry.total_amount,
-            original_total_amount: entry.total_amount,
-            isGroupEntry: true,
-          });
+          if (options?.filterBySiteId) {
+            // When filtering by site and no allocation exists, show ₹0
+            // This means either: the site had no laborers, or the entry predates the allocation system
+            combinedEntries.push({
+              ...entry,
+              site_id: options.filterBySiteId,
+              site_name: siteNameMap.get(options.filterBySiteId) || "Unknown Site",
+              source: "individual" as const,
+              display_amount: 0, // FIXED: Show 0 instead of equal split for missing allocations
+              original_total_amount: entry.total_amount,
+              isGroupEntry: true,
+              hasNoAllocation: true, // Flag to indicate missing allocation
+            });
+          } else {
+            // No filter - show full amount with group marker
+            combinedEntries.push({
+              ...entry,
+              site_name: "Group Entry",
+              source: "individual" as const,
+              display_amount: entry.total_amount,
+              original_total_amount: entry.total_amount,
+              isGroupEntry: true,
+            });
+          }
           return;
         }
 
@@ -402,26 +423,53 @@ export function useCombinedTeaShopUnsettledEntries(
       const siteNameMap = new Map<string, string>();
       sites.forEach((s: any) => siteNameMap.set(s.id, s.name));
 
-      // Fetch unsettled entries (oldest first for waterfall)
-      // This includes:
-      // - Individual site entries (site_id in siteIds)
-      // - Group entries (site_group_id matches, site_id is null)
-      let unsettledQuery = (supabase as any)
+      // FIXED: Fetch entries with proper filtering
+      // Step 1: Fetch individual site entries (site_id is set)
+      const { data: siteEntries } = await (supabase as any)
         .from("tea_shop_entries")
-        .select("*");
-
-      // Handle empty siteIds to avoid invalid .or() clause
-      if (siteIds.length > 0) {
-        unsettledQuery = unsettledQuery.or(`site_id.in.(${siteIds.join(",")}),site_group_id.eq.${siteGroupId}`);
-      } else {
-        unsettledQuery = unsettledQuery.eq("site_group_id", siteGroupId);
-      }
-
-      const { data: entries } = await unsettledQuery
-        .or("is_fully_paid.is.null,is_fully_paid.eq.false")
+        .select("*")
+        .in("site_id", siteIds)
+        .eq("is_group_entry", false)
         .order("date", { ascending: true });
 
-      const combinedEntries: CombinedTeaShopEntry[] = (entries || []).map(
+      // Step 2: Fetch group entries (is_group_entry = true) with allocations including payment status
+      const { data: groupEntriesNew } = await (supabase as any)
+        .from("tea_shop_entries")
+        .select(`
+          *,
+          allocations:tea_shop_entry_allocations(
+            site_id,
+            allocated_amount,
+            amount_paid,
+            is_fully_paid
+          )
+        `)
+        .eq("is_group_entry", true)
+        .eq("site_group_id", siteGroupId)
+        .order("date", { ascending: true });
+
+      // Step 3: Filter for unpaid status in JavaScript (to avoid PostgREST OR chaining issues)
+      const unpaidSiteEntries = (siteEntries || []).filter((entry: any) => {
+        const totalAmount = entry.total_amount || 0;
+        const amountPaid = entry.amount_paid || 0;
+        return entry.is_fully_paid !== true && amountPaid < totalAmount;
+      });
+
+      // For group entries, check if ANY allocation is unpaid (per-site basis)
+      // An entry is considered "has unpaid" if at least one site allocation is not fully paid
+      const groupEntriesWithUnpaid = (groupEntriesNew || []).filter((entry: any) => {
+        const allocations = entry.allocations || [];
+        // Check if any allocation for sites in this group is unpaid
+        return allocations.some((alloc: any) => {
+          if (!siteIds.includes(alloc.site_id)) return false;
+          const allocAmount = alloc.allocated_amount || 0;
+          const allocPaid = alloc.amount_paid || 0;
+          return alloc.is_fully_paid !== true && allocPaid < allocAmount && allocAmount > 0;
+        });
+      });
+
+      // Step 4: Build combined entries list
+      const combinedEntries: CombinedTeaShopEntry[] = unpaidSiteEntries.map(
         (entry: any) => {
           return {
             ...entry,
@@ -431,39 +479,73 @@ export function useCombinedTeaShopUnsettledEntries(
         }
       );
 
-      // Also fetch unsettled group entries
-      const { data: groupEntries } = await (supabase as any)
+      // Add group entries - expand each unpaid allocation as a separate entry
+      groupEntriesWithUnpaid.forEach((entry: any) => {
+        const allocations = entry.allocations || [];
+        // For each site with an unpaid allocation, add a combined entry
+        allocations.forEach((alloc: any) => {
+          if (!siteIds.includes(alloc.site_id)) return;
+          const allocAmount = alloc.allocated_amount || 0;
+          const allocPaid = alloc.amount_paid || 0;
+          const isUnpaid = alloc.is_fully_paid !== true && allocPaid < allocAmount && allocAmount > 0;
+          if (!isUnpaid) return;
+
+          combinedEntries.push({
+            ...entry,
+            allocations: undefined, // Remove the nested allocations
+            site_id: alloc.site_id,
+            site_name: siteNameMap.get(alloc.site_id) || "Unknown Site",
+            source: "group" as const,
+            isGroupEntry: true,
+            display_amount: allocAmount,
+            original_total_amount: entry.total_amount,
+            amount_paid: allocPaid,
+            is_fully_paid: alloc.is_fully_paid,
+          } as unknown as CombinedTeaShopEntry);
+        });
+      });
+
+      // Also fetch legacy group entries from tea_shop_group_entries (for backwards compatibility)
+      const { data: legacyGroupEntries } = await (supabase as any)
         .from("tea_shop_group_entries")
         .select("*")
         .eq("site_group_id", siteGroupId)
-        .or("is_fully_paid.is.null,is_fully_paid.eq.false")
         .order("date", { ascending: true });
 
-      if (groupEntries && groupEntries.length > 0) {
-        groupEntries.forEach((ge: any) => {
-          combinedEntries.push({
-            id: ge.id,
-            tea_shop_id: ge.tea_shop_id,
-            date: ge.date,
-            tea_count: null,
-            tea_rate: null,
-            tea_total: null,
-            snacks_count: null,
-            snacks_rate: null,
-            snacks_total: null,
-            total_amount: ge.total_amount,
-            notes: ge.notes,
-            entered_by: ge.entered_by,
-            created_at: ge.created_at,
-            updated_at: ge.updated_at,
-            site_id: siteGroupId,
-            site_name: "All Sites (Group)",
-            source: "group" as const,
-            amount_paid: ge.amount_paid,
-            is_fully_paid: ge.is_fully_paid,
-          } as unknown as CombinedTeaShopEntry);
-        });
-      }
+      // Filter and add legacy entries (avoid duplicates)
+      const existingDates = new Set(combinedEntries.map((e) => e.date));
+      (legacyGroupEntries || []).forEach((ge: any) => {
+        // Skip if fully paid
+        if (ge.is_fully_paid === true) return;
+        const totalAmount = ge.total_amount || 0;
+        const amountPaid = ge.amount_paid || 0;
+        if (amountPaid >= totalAmount) return;
+
+        // Skip if we already have a group entry for this date (avoid migration duplicates)
+        if (existingDates.has(ge.date)) return;
+
+        combinedEntries.push({
+          id: ge.id,
+          tea_shop_id: ge.tea_shop_id,
+          date: ge.date,
+          tea_count: null,
+          tea_rate: null,
+          tea_total: null,
+          snacks_count: null,
+          snacks_rate: null,
+          snacks_total: null,
+          total_amount: ge.total_amount,
+          notes: ge.notes,
+          entered_by: ge.entered_by,
+          created_at: ge.created_at,
+          updated_at: ge.updated_at,
+          site_id: siteGroupId,
+          site_name: "All Sites (Group)",
+          source: "group" as const,
+          amount_paid: ge.amount_paid,
+          is_fully_paid: ge.is_fully_paid,
+        } as unknown as CombinedTeaShopEntry);
+      });
 
       // Sort by date ascending for waterfall (oldest first)
       combinedEntries.sort((a, b) => a.date.localeCompare(b.date));
@@ -520,10 +602,12 @@ export function useCombinedTeaShopSettlements(
       const shopIds = Array.from(shopSiteMap.keys());
 
       // Fetch individual settlements (settlements don't have site_id, so we query by tea_shop_id)
+      // Include subcontract's site_id for proper site filtering - settlements are associated with
+      // subcontracts which belong to specific sites
       const { data: settlements } = shopIds.length > 0
         ? await (supabase as any)
             .from("tea_shop_settlements")
-            .select("*, subcontracts(id, title)")
+            .select("*, subcontracts(id, title, site_id)")
             .in("tea_shop_id", shopIds)
             .order("payment_date", { ascending: false })
         : { data: [] };
@@ -531,7 +615,10 @@ export function useCombinedTeaShopSettlements(
       const combinedSettlements: CombinedTeaShopSettlement[] = (
         settlements || []
       ).map((s: TeaShopSettlement) => {
-        const siteId = shopSiteMap.get(s.tea_shop_id) || "";
+        // Priority: Use subcontract's site_id if available, otherwise fall back to tea shop's site
+        const subcontractSiteId = (s as any).subcontracts?.site_id;
+        const teaShopSiteId = shopSiteMap.get(s.tea_shop_id) || "";
+        const siteId = subcontractSiteId || teaShopSiteId;
         return {
           ...s,
           site_id: siteId,
@@ -541,15 +628,24 @@ export function useCombinedTeaShopSettlements(
       });
 
       // Also fetch group settlements
+      // Include subcontract's site_id for proper filtering - each settlement is linked to a subcontract
+      // which belongs to a specific site within the group
       const { data: groupSettlements } = await (supabase as any)
         .from("tea_shop_group_settlements")
-        .select("*, subcontracts(id, title)")
+        .select("*, subcontracts(id, title, site_id)")
         .eq("site_group_id", siteGroupId)
         .eq("is_cancelled", false)
         .order("payment_date", { ascending: false });
 
       if (groupSettlements && groupSettlements.length > 0) {
         groupSettlements.forEach((gs: any) => {
+          // Use subcontract's site_id if available for proper site filtering
+          const subcontractSiteId = gs.subcontracts?.site_id;
+          const effectiveSiteId = subcontractSiteId || siteGroupId;
+          const effectiveSiteName = subcontractSiteId
+            ? siteNameMap.get(subcontractSiteId) || "Unknown Site"
+            : "All Sites (Group)";
+
           combinedSettlements.push({
             id: gs.id,
             tea_shop_id: gs.tea_shop_id,
@@ -560,9 +656,9 @@ export function useCombinedTeaShopSettlements(
             notes: gs.notes,
             created_at: gs.created_at,
             updated_at: gs.updated_at,
-            site_id: siteGroupId,
-            site_name: "All Sites (Group)",
-            source: "group" as const,
+            site_id: effectiveSiteId,
+            site_name: effectiveSiteName,
+            source: subcontractSiteId ? "individual" as const : "group" as const,
             // Include additional group settlement fields
             settlement_reference: gs.settlement_reference,
             proof_url: gs.proof_url,

@@ -383,15 +383,12 @@ export function useDayUnitsForDate(
           }
         }
       } else {
-        // Equal split if no attendance data
-        const equalPercent = Math.round((100 / results.length) * 100) / 100;
-        results.forEach((r, i) => {
-          r.percentage = i === results.length - 1
-            ? 100 - (equalPercent * (results.length - 1))
-            : equalPercent;
-          if (totalAmount) {
-            r.allocatedAmount = Math.round((r.percentage / 100) * totalAmount);
-          }
+        // FIXED: No attendance data (unfilled date) = zero allocation for all sites
+        // Previously did equal split which was incorrect - unfilled dates should show 0
+        results.forEach(r => {
+          r.percentage = 0;
+          r.allocatedAmount = 0;
+          // Keep workerCount and totalUnits at 0 as already set
         });
       }
 

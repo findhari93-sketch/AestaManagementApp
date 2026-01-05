@@ -128,22 +128,16 @@ export default function TeaShopEntryDialog({
         });
       }
 
-      // If no attendance data (all zeros), use equal split
+      // FIXED: If no attendance data (all zeros), return ZERO allocations (not equal split)
+      // Unfilled dates should show 0 tea allocation, not an equal split
       if (totalUnits === 0) {
-        const numSites = dayUnitsData.length;
-        const equalPercent = Math.round(100 / numSites);
-        let remainingAmount = simpleTotalCost;
-
-        return dayUnitsData.map((s, idx) => {
-          const isLast = idx === numSites - 1;
-          const amount = isLast ? remainingAmount : Math.round(simpleTotalCost / numSites);
-          remainingAmount -= amount;
+        return dayUnitsData.map((s) => {
           return {
             site_id: s.siteId,
             day_units_sum: 0,
             worker_count: 0,
-            allocation_percentage: isLast ? 100 - (equalPercent * (numSites - 1)) : equalPercent,
-            allocated_amount: amount,
+            allocation_percentage: 0,
+            allocated_amount: 0,
             is_manual_override: false,
           };
         });

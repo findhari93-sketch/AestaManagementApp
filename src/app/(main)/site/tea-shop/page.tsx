@@ -181,20 +181,23 @@ export default function TeaShopPage() {
       }
 
       // Use display_amount for allocated amounts in group entries
+      // NOTE: Use !== undefined check because display_amount can be 0 for unfilled dates
+      const getAmount = (e: any) => e.display_amount !== undefined ? e.display_amount : e.total_amount || 0;
+
       const thisWeekTotal = entriesToCalc
         .filter((e) => e.date >= weekStart)
-        .reduce((sum, e) => sum + ((e as any).display_amount || e.total_amount || 0), 0);
+        .reduce((sum, e) => sum + getAmount(e), 0);
 
       const thisMonthTotal = entriesToCalc
         .filter((e) => e.date >= monthStart)
-        .reduce((sum, e) => sum + ((e as any).display_amount || e.total_amount || 0), 0);
+        .reduce((sum, e) => sum + getAmount(e), 0);
 
       const totalTea = entriesToCalc.reduce((sum, e) => sum + (e.tea_total || 0), 0);
       const totalSnacks = entriesToCalc.reduce((sum, e) => sum + (e.snacks_total || 0), 0);
 
       // Calculate pending balance from filtered entries (site-specific when filtered)
       const allEntriesTotal = entriesToCalc.reduce(
-        (sum, e) => sum + ((e as any).display_amount || e.total_amount || 0), 0
+        (sum, e) => sum + getAmount(e), 0
       );
       const allPaidTotal = entriesToCalc.reduce((sum, e) => {
         const entryAny = e as any;
@@ -513,7 +516,7 @@ export default function TeaShopPage() {
 
     const totalAmount = entryItems.reduce((sum, item) => {
       const entry = item.entry as any;
-      return sum + (entry.display_amount || entry.total_amount || 0);
+      return sum + (entry.display_amount !== undefined ? entry.display_amount : entry.total_amount || 0);
     }, 0);
 
     return { totalTea, totalSnacks, totalAmount, recordCount: entryItems.length };
@@ -972,7 +975,7 @@ export default function TeaShopPage() {
                                 </Tooltip>
                               )}
                               <Typography fontWeight={600} sx={{ fontSize: { xs: '0.7rem', sm: '0.875rem' } }}>
-                                ₹{((entry as any).display_amount || entry.total_amount || 0).toLocaleString()}
+                                ₹{((entry as any).display_amount !== undefined ? (entry as any).display_amount : entry.total_amount || 0).toLocaleString()}
                               </Typography>
                             </Box>
                           </TableCell>
@@ -980,11 +983,21 @@ export default function TeaShopPage() {
                           <TableCell align="center">
                             {(() => {
                               const entryAny = entry as any;
-                              const totalAmount = entry.total_amount || 0;
+                              // For group entries, use display_amount (site allocation); for individual, use total_amount
+                              const effectiveAmount = entryAny.display_amount !== undefined ? entryAny.display_amount : entry.total_amount || 0;
                               const amountPaid = entryAny.amount_paid || 0;
                               const isFullyPaid = entryAny.is_fully_paid === true;
 
-                              if (isFullyPaid || amountPaid >= totalAmount) {
+                              // If amount is 0 (unfilled date), show holiday/N/A indicator
+                              if (effectiveAmount === 0 && entryAny.isGroupEntry) {
+                                return (
+                                  <Tooltip title="No allocation for this site (unfilled/holiday)">
+                                    <Typography variant="caption" color="text.secondary">-</Typography>
+                                  </Tooltip>
+                                );
+                              }
+
+                              if (isFullyPaid || (effectiveAmount > 0 && amountPaid >= effectiveAmount)) {
                                 return (
                                   <Tooltip title="Fully settled">
                                     <CheckCircleIcon fontSize="small" color="success" />
@@ -992,7 +1005,7 @@ export default function TeaShopPage() {
                                 );
                               } else if (amountPaid > 0) {
                                 return (
-                                  <Tooltip title={`Paid ₹${amountPaid.toLocaleString()} of ₹${totalAmount.toLocaleString()}`}>
+                                  <Tooltip title={`Paid ₹${amountPaid.toLocaleString()} of ₹${effectiveAmount.toLocaleString()}`}>
                                     <Chip
                                       label={`₹${amountPaid}`}
                                       size="small"

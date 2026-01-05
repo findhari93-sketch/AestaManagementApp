@@ -223,6 +223,7 @@ export default function TeaShopSettlementDialog({
 
   // Fetch unsettled entries (oldest first for waterfall)
   // When in group mode, fetches from ALL sites in the group (or filtered site if filterBySiteId is set)
+  // FIXED: Now includes group entries (is_group_entry=true) with their site allocations
   const fetchUnsettledEntries = async () => {
     setLoadingEntries(true);
     try {
@@ -238,40 +239,104 @@ export default function TeaShopSettlementDialog({
           return;
         }
 
-        // Filter to specific site if filterBySiteId is provided
-        let siteIds = sites.map((s: any) => s.id);
-        if (filterBySiteId && filterBySiteId !== "all") {
-          siteIds = siteIds.filter((id: string) => id === filterBySiteId);
-        }
-
+        const allSiteIds = sites.map((s: any) => s.id);
         const siteNameMap = new Map<string, string>();
         sites.forEach((s: any) => siteNameMap.set(s.id, s.name));
 
-        // Fetch unsettled entries directly by site_id (more reliable for group entries)
-        const { data } = await (supabase as any)
+        // Determine target site IDs based on filter
+        const targetSiteIds = (filterBySiteId && filterBySiteId !== "all")
+          ? [filterBySiteId]
+          : allSiteIds;
+
+        // 1. Fetch individual site entries (site_id is set, not group entries)
+        const { data: siteEntries } = await (supabase as any)
           .from("tea_shop_entries")
           .select("*")
-          .in("site_id", siteIds)
-          .or("is_fully_paid.is.null,is_fully_paid.eq.false")
+          .in("site_id", targetSiteIds)
+          .eq("is_group_entry", false)
           .order("date", { ascending: true });
 
-        // Filter and add site names
-        const filteredData = (data || [])
-          .filter((entry: any) => {
+        // Filter for unpaid individual entries
+        const unpaidSiteEntries = (siteEntries || []).filter((entry: any) => {
+          const totalAmount = entry.total_amount || 0;
+          const amountPaid = entry.amount_paid || 0;
+          return entry.is_fully_paid !== true && amountPaid < totalAmount;
+        });
+
+        // 2. Fetch group entries with their allocations for the target site(s)
+        const { data: groupEntries } = await (supabase as any)
+          .from("tea_shop_entries")
+          .select(`
+            *,
+            allocations:tea_shop_entry_allocations(
+              site_id,
+              allocated_amount,
+              day_units_sum,
+              worker_count
+            )
+          `)
+          .eq("is_group_entry", true)
+          .eq("site_group_id", siteGroupId)
+          .order("date", { ascending: true });
+
+        // Process group entries - include only if they have allocation for target site(s)
+        const processedGroupEntries: any[] = [];
+        (groupEntries || []).forEach((entry: any) => {
+          // Skip fully paid entries
+          if (entry.is_fully_paid === true) return;
+
+          const allocs = entry.allocations || [];
+
+          if (filterBySiteId && filterBySiteId !== "all") {
+            // Filtering to specific site - find allocation for this site
+            const siteAlloc = allocs.find((a: any) => a.site_id === filterBySiteId);
+            if (siteAlloc && siteAlloc.allocated_amount > 0) {
+              // Calculate proportional amount_paid for this site
+              const totalEntryAmount = entry.total_amount || 0;
+              const siteAmount = siteAlloc.allocated_amount || 0;
+              const ratio = totalEntryAmount > 0 ? siteAmount / totalEntryAmount : 0;
+              const siteAmountPaid = Math.round((entry.amount_paid || 0) * ratio);
+              const siteRemaining = siteAmount - siteAmountPaid;
+
+              // Only include if there's still unpaid amount for this site
+              if (siteRemaining > 0) {
+                processedGroupEntries.push({
+                  ...entry,
+                  // Override with site-specific values for waterfall calculation
+                  site_id: filterBySiteId,
+                  site_name: siteNameMap.get(filterBySiteId) || "Unknown",
+                  total_amount: siteAmount, // Use site's allocated portion
+                  amount_paid: siteAmountPaid, // Use proportional paid amount
+                  original_total_amount: totalEntryAmount,
+                  isGroupEntry: true,
+                });
+              }
+            }
+          } else {
+            // No filter - include full group entry if not fully paid
             const totalAmount = entry.total_amount || 0;
             const amountPaid = entry.amount_paid || 0;
-            return amountPaid < totalAmount;
-          })
-          .map((entry: any) => {
-            return {
-              ...entry,
-              site_name: siteNameMap.get(entry.site_id) || "Unknown",
-              // For group entries, the total is split across sites
-              isGroupEntry: entry.is_group_entry === true,
-            };
-          });
+            if (amountPaid < totalAmount) {
+              processedGroupEntries.push({
+                ...entry,
+                site_name: "Group Entry",
+                isGroupEntry: true,
+              });
+            }
+          }
+        });
 
-        setUnsettledEntries(filteredData);
+        // 3. Combine and sort by date (oldest first for FIFO waterfall)
+        const allEntries = [
+          ...unpaidSiteEntries.map((e: any) => ({
+            ...e,
+            site_name: siteNameMap.get(e.site_id) || "Unknown",
+            isGroupEntry: false,
+          })),
+          ...processedGroupEntries,
+        ].sort((a, b) => a.date.localeCompare(b.date));
+
+        setUnsettledEntries(allEntries);
       } else {
         // Single site mode - fetch only from current shop
         const { data } = await (supabase
@@ -386,8 +451,14 @@ export default function TeaShopSettlementDialog({
 
       // Settlement record data
       const isStandalone = settlementMode === "standalone";
+      // Determine site_id for per-site waterfall tracking
+      const effectiveSiteId = filterBySiteId && filterBySiteId !== "all"
+        ? filterBySiteId
+        : selectedSite?.id || null;
+
       const settlementData = {
         tea_shop_id: shop.id,
+        site_id: effectiveSiteId, // NEW: For per-site FIFO waterfall
         settlement_reference: settlementRef,
         // For standalone: period_start and period_end = payment_date
         period_start: isStandalone ? paymentDate : (allocationPreview.length > 0 ? allocationPreview[0].date : paymentDate),
