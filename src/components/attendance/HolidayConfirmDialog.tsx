@@ -32,7 +32,7 @@ import dayjs from "dayjs";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 
-interface SiteHoliday {
+export interface SiteHoliday {
   id: string;
   site_id: string;
   date: string;
@@ -54,7 +54,7 @@ export interface HolidayConfirmDialogProps {
   site: Site;
   existingHoliday?: SiteHoliday | null;
   recentHolidays?: SiteHoliday[];
-  onSuccess: () => void;
+  onSuccess: (newHoliday?: SiteHoliday) => void;
   date?: string; // Optional date to mark as holiday (defaults to today)
 }
 
@@ -118,18 +118,20 @@ export default function HolidayConfirmDialog({
         return;
       }
 
-      const { error: insertError } = await supabase
+      const { data: insertedHoliday, error: insertError } = await supabase
         .from("site_holidays")
         .insert({
           site_id: site.id,
           date: targetDate,
           reason: reason.trim(),
           created_by: userProfile?.id,
-        });
+        })
+        .select()
+        .single();
 
       if (insertError) throw insertError;
 
-      onSuccess();
+      onSuccess(insertedHoliday);
       handleClose();
     } catch (err) {
       console.error("Error marking holiday:", err);

@@ -79,7 +79,7 @@ import {
   Groups as GroupsIcon,
 } from "@mui/icons-material";
 import AttendanceDrawer from "@/components/attendance/AttendanceDrawer";
-import HolidayConfirmDialog from "@/components/attendance/HolidayConfirmDialog";
+import HolidayConfirmDialog, { type SiteHoliday } from "@/components/attendance/HolidayConfirmDialog";
 import UnifiedSettlementDialog from "@/components/settlement/UnifiedSettlementDialog";
 import TeaShopEntryDialog from "@/components/tea-shop/TeaShopEntryDialog";
 import TeaShopEntryModeDialog from "@/components/tea-shop/TeaShopEntryModeDialog";
@@ -1446,12 +1446,11 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
     }
 
     const today = dayjs().format("YYYY-MM-DD");
-    const thirtyDaysLater = dayjs().add(30, "day").format("YYYY-MM-DD");
 
     // Use dateFrom if available, otherwise default to 30 days ago
     const queryFrom = dateFrom || dayjs().subtract(30, "day").format("YYYY-MM-DD");
-    // Use dateTo or 30 days in future, whichever is later (to show upcoming holidays)
-    const queryTo = dateTo && dateTo > thirtyDaysLater ? dateTo : thirtyDaysLater;
+    // Use dateTo if available, otherwise default to 30 days in future
+    const queryTo = dateTo || dayjs().add(30, "day").format("YYYY-MM-DD");
 
     try {
       // Check today's holiday (use maybeSingle to avoid error when no holiday exists)
@@ -1499,9 +1498,16 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
     setHolidayDialogOpen(true);
   };
 
-  const handleHolidaySuccess = () => {
+  const handleHolidaySuccess = (newHoliday?: SiteHoliday) => {
     setSelectedHolidayDate(null);
     setSelectedExistingHoliday(null);
+
+    // Immediately add new holiday to state for instant UI update
+    if (newHoliday) {
+      setRecentHolidays(prev => [...prev, newHoliday]);
+    }
+
+    // Then refresh from database to ensure consistency
     checkTodayHoliday();
     invalidateAttendance();
   };
