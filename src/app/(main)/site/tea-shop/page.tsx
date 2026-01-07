@@ -199,34 +199,53 @@ export default function TeaShopPage() {
       const allEntriesTotal = entriesToCalc.reduce(
         (sum, e) => sum + getAmount(e), 0
       );
+      // For group entries filtered by site, amount_paid is already the per-allocation value
+      // (set by useCombinedTeaShopEntries from tea_shop_entry_allocations.amount_paid)
+      // So we don't need to apply any ratio calculation - just sum directly
       const allPaidTotal = entriesToCalc.reduce((sum, e) => {
         const entryAny = e as any;
-        const amountPaid = entryAny.amount_paid || 0;
-
-        // For group entries with allocation, proportionally calculate paid amount
-        if (entryAny.isGroupEntry && entryAny.display_amount && entryAny.original_total_amount && entryAny.original_total_amount > 0) {
-          const ratio = entryAny.display_amount / entryAny.original_total_amount;
-          return sum + (amountPaid * ratio);
-        }
-
-        return sum + amountPaid;
+        return sum + (entryAny.amount_paid || 0);
       }, 0);
-      const pendingBalance = Math.round(allEntriesTotal - allPaidTotal);
 
-      const lastSettlement = combinedSettlementsData && combinedSettlementsData.length > 0
-        ? combinedSettlementsData.reduce((latest, s) =>
+      // Calculate pending and overpaid amounts
+      const pendingBalance = Math.max(0, Math.round(allEntriesTotal - allPaidTotal));
+      const overpaidAmount = Math.max(0, Math.round(allPaidTotal - allEntriesTotal));
+
+      // Filter settlements by site when effectiveFilterBySiteId is set
+      let settlementsToCalc = combinedSettlementsData || [];
+      if (effectiveFilterBySiteId) {
+        settlementsToCalc = settlementsToCalc.filter(
+          (s: any) => s.site_id === effectiveFilterBySiteId
+        );
+      }
+
+      const lastSettlement = settlementsToCalc.length > 0
+        ? settlementsToCalc.reduce((latest, s) =>
             new Date(s.payment_date) > new Date(latest.payment_date) ? s : latest
           )
         : null;
 
+      // Total paid from settlements (actual money paid to shop) - site-specific when filtered
+      const totalPaid = settlementsToCalc.reduce(
+        (sum, s) => sum + (s.amount_paid || 0), 0
+      );
+
+      // Recalculate pending and overpaid using site-specific settlements
+      // This is more accurate than using entries' amount_paid field
+      const pendingFromSettlements = Math.max(0, Math.round(allEntriesTotal - totalPaid));
+      const overpaidFromSettlements = Math.max(0, Math.round(totalPaid - allEntriesTotal));
+
       return {
         totalEntries: allEntriesTotal,
+        totalAllTime: allEntriesTotal,
         totalTea,
         totalSnacks,
-        pendingBalance,
+        pendingBalance: pendingFromSettlements,
+        overpaidAmount: overpaidFromSettlements,
         thisWeekTotal,
         thisMonthTotal,
         lastSettlement,
+        totalPaid,
       };
     }
 
@@ -241,10 +260,14 @@ export default function TeaShopPage() {
     const totalTea = filteredEntries.reduce((sum, e) => sum + (e.tea_total || 0), 0);
     const totalSnacks = filteredEntries.reduce((sum, e) => sum + (e.snacks_total || 0), 0);
 
+    // Calculate total all time (unfiltered)
+    const totalAllTime = entries.reduce((sum, e) => sum + (e.total_amount || 0), 0);
+
     // Calculate pending balance (all entries minus all settlements)
     const allEntriesTotal = entries.reduce((sum, e) => sum + (e.total_amount || 0), 0);
     const allSettledTotal = settlements.reduce((sum, s) => sum + (s.amount_paid || 0), 0);
-    const pendingBalance = allEntriesTotal - allSettledTotal;
+    const pendingBalance = Math.max(0, allEntriesTotal - allSettledTotal);
+    const overpaidAmount = Math.max(0, allSettledTotal - allEntriesTotal);
 
     // This week
     const weekStart = dayjs().startOf("week").format("YYYY-MM-DD");
@@ -265,14 +288,21 @@ export default function TeaShopPage() {
         )
       : null;
 
+    // Total paid from settlements (actual money paid to shop)
+    // allSettledTotal was already calculated above at line 249
+    const totalPaid = allSettledTotal;
+
     return {
       totalEntries,
+      totalAllTime,
       totalTea,
       totalSnacks,
       pendingBalance,
+      overpaidAmount,
       thisWeekTotal,
       thisMonthTotal,
       lastSettlement,
+      totalPaid,
     };
   }, [entries, settlements, dateFrom, dateTo, isAllTime, isInGroup, combinedEntriesData, combinedSettlementsData, combinedPendingBalance, effectiveFilterBySiteId]);
 
@@ -458,17 +488,49 @@ export default function TeaShopPage() {
       entriesToUse = entriesToUse.filter((e) => e.date >= dateFrom && e.date <= dateTo);
     }
 
+    // WATERFALL CALCULATION: Apply total paid amount to entries (oldest first)
+    // This ensures the "Paid" column reflects actual settlement waterfall
+    const getAmount = (e: any) => e.display_amount !== undefined ? e.display_amount : e.total_amount || 0;
+
+    // Sort entries by date ascending for waterfall calculation
+    const sortedForWaterfall = [...entriesToUse].sort((a, b) => a.date.localeCompare(b.date));
+
+    // Apply waterfall: allocate totalPaid to oldest entries first
+    let remainingPaid = stats.totalPaid || 0;
+    const waterfallMap = new Map<string, { waterfallPaid: number; waterfallFullyPaid: boolean }>();
+
+    for (const entry of sortedForWaterfall) {
+      const entryAmount = getAmount(entry);
+      const allocatedToEntry = Math.min(remainingPaid, entryAmount);
+      waterfallMap.set(entry.id, {
+        waterfallPaid: allocatedToEntry,
+        waterfallFullyPaid: allocatedToEntry >= entryAmount && entryAmount > 0,
+      });
+      remainingPaid -= allocatedToEntry;
+    }
+
     const entryDates = new Set(entriesToUse.map((e) => e.date));
     const holidayDates = new Set(holidays.map((h) => (h as any).date));
     const result: CombinedEntryType[] = [];
 
-    // Add actual entries
+    // Add actual entries with waterfall-calculated paid status
     entriesToUse.forEach((entry) => {
       const combinedEntry = entry as CombinedTeaShopEntry;
+      const waterfall = waterfallMap.get(entry.id);
+
+      // Create entry with waterfall-calculated paid status for grouped sites
+      const entryWithWaterfall = isInGroup && effectiveFilterBySiteId && waterfall
+        ? {
+            ...entry,
+            amount_paid: waterfall.waterfallPaid,
+            is_fully_paid: waterfall.waterfallFullyPaid,
+          }
+        : entry;
+
       result.push({
         type: "entry",
         date: entry.date,
-        entry,
+        entry: entryWithWaterfall,
         siteName: combinedEntry.site_name,
         source: combinedEntry.source,
       });
@@ -497,7 +559,7 @@ export default function TeaShopPage() {
 
     // Sort by date descending
     return result.sort((a, b) => b.date.localeCompare(a.date));
-  }, [filteredEntries, holidays, attendanceByDate, dateFrom, dateTo, isAllTime, isInGroup, combinedEntriesData, effectiveFilterBySiteId]);
+  }, [filteredEntries, holidays, attendanceByDate, dateFrom, dateTo, isAllTime, isInGroup, combinedEntriesData, effectiveFilterBySiteId, stats.totalPaid]);
 
   // Calculate table-specific stats (date-filtered) for display in table header
   const tableStats = useMemo(() => {
@@ -595,7 +657,7 @@ export default function TeaShopPage() {
                     variant="outlined"
                     startIcon={<PaymentIcon />}
                     onClick={() => setSettlementDialogOpen(true)}
-                    disabled={!canEdit || stats.pendingBalance <= 0}
+                    disabled={!canEdit}
                     size="small"
                   >
                     Pay Shop
@@ -610,9 +672,21 @@ export default function TeaShopPage() {
         }
       />
 
-      {/* Summary Cards */}
+      {/* Summary Cards - All Time Stats */}
+      <Box sx={{ mb: 0.5, display: 'flex', alignItems: 'center', gap: 1 }}>
+        <Chip
+          label="All Time Stats"
+          size="small"
+          color="info"
+          variant="outlined"
+          sx={{ fontSize: '0.65rem', height: 20 }}
+        />
+        <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.6rem' }}>
+          (not affected by date filter)
+        </Typography>
+      </Box>
       <Grid container spacing={{ xs: 1, sm: 2 }} sx={{ mb: { xs: 2, sm: 3 } }}>
-        <Grid size={{ xs: 6, sm: 3 }}>
+        <Grid size={{ xs: 6, sm: 'grow' }}>
           <Paper sx={{ p: { xs: 1, sm: 2 }, textAlign: "center", bgcolor: stats.pendingBalance > 0 ? "error.50" : "success.50" }}>
             <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.65rem', sm: '0.75rem' } }}>
               Pending
@@ -627,7 +701,55 @@ export default function TeaShopPage() {
             </Typography>
           </Paper>
         </Grid>
-        <Grid size={{ xs: 6, sm: 3 }}>
+        {/* Extra Paid Card - only show when overpaid */}
+        {stats.overpaidAmount > 0 && (
+          <Grid size={{ xs: 6, sm: 'grow' }}>
+            <Paper sx={{ p: { xs: 1, sm: 2 }, textAlign: "center", bgcolor: "info.50" }}>
+              <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.65rem', sm: '0.75rem' } }}>
+                Extra Paid
+              </Typography>
+              <Typography
+                variant="h6"
+                fontWeight={700}
+                color="info.main"
+                sx={{ fontSize: { xs: '1rem', sm: '1.25rem' } }}
+              >
+                ₹{stats.overpaidAmount.toLocaleString()}
+              </Typography>
+            </Paper>
+          </Grid>
+        )}
+        <Grid size={{ xs: 6, sm: 'grow' }}>
+          <Paper sx={{ p: { xs: 1, sm: 2 }, textAlign: "center" }}>
+            <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.65rem', sm: '0.75rem' } }}>
+              Total Spent
+            </Typography>
+            <Typography
+              variant="h6"
+              fontWeight={700}
+              color="primary.main"
+              sx={{ fontSize: { xs: '1rem', sm: '1.25rem' } }}
+            >
+              ₹{(stats.totalAllTime || 0).toLocaleString()}
+            </Typography>
+          </Paper>
+        </Grid>
+        <Grid size={{ xs: 6, sm: 'grow' }}>
+          <Paper sx={{ p: { xs: 1, sm: 2 }, textAlign: "center", bgcolor: "success.50" }}>
+            <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.65rem', sm: '0.75rem' } }}>
+              Total Paid
+            </Typography>
+            <Typography
+              variant="h6"
+              fontWeight={700}
+              color="success.main"
+              sx={{ fontSize: { xs: '1rem', sm: '1.25rem' } }}
+            >
+              ₹{(stats.totalPaid || 0).toLocaleString()}
+            </Typography>
+          </Paper>
+        </Grid>
+        <Grid size={{ xs: 4, sm: 'grow' }}>
           <Paper sx={{ p: { xs: 1, sm: 2 }, textAlign: "center" }}>
             <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.65rem', sm: '0.75rem' } }}>
               This Week
@@ -635,14 +757,14 @@ export default function TeaShopPage() {
             <Typography
               variant="h6"
               fontWeight={700}
-              color="primary.main"
-              sx={{ fontSize: { xs: '1rem', sm: '1.25rem' } }}
+              color="text.primary"
+              sx={{ fontSize: { xs: '0.875rem', sm: '1.25rem' } }}
             >
               ₹{stats.thisWeekTotal.toLocaleString()}
             </Typography>
           </Paper>
         </Grid>
-        <Grid size={{ xs: 6, sm: 3 }}>
+        <Grid size={{ xs: 4, sm: 'grow' }}>
           <Paper sx={{ p: { xs: 1, sm: 2 }, textAlign: "center" }}>
             <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.65rem', sm: '0.75rem' } }}>
               This Month
@@ -650,14 +772,14 @@ export default function TeaShopPage() {
             <Typography
               variant="h6"
               fontWeight={700}
-              color="primary.main"
-              sx={{ fontSize: { xs: '1rem', sm: '1.25rem' } }}
+              color="text.primary"
+              sx={{ fontSize: { xs: '0.875rem', sm: '1.25rem' } }}
             >
               ₹{stats.thisMonthTotal.toLocaleString()}
             </Typography>
           </Paper>
         </Grid>
-        <Grid size={{ xs: 6, sm: 3 }}>
+        <Grid size={{ xs: 4, sm: 'grow' }}>
           <Paper sx={{ p: { xs: 1, sm: 2 }, textAlign: "center" }}>
             <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.65rem', sm: '0.75rem' } }}>
               Last Pay
@@ -665,7 +787,7 @@ export default function TeaShopPage() {
             <Typography
               variant="body1"
               fontWeight={600}
-              sx={{ fontSize: { xs: '0.875rem', sm: '1rem' } }}
+              sx={{ fontSize: { xs: '0.75rem', sm: '1rem' } }}
             >
               {stats.lastSettlement
                 ? `₹${stats.lastSettlement.amount_paid.toLocaleString()}`
@@ -674,7 +796,7 @@ export default function TeaShopPage() {
             <Typography
               variant="caption"
               color="text.secondary"
-              sx={{ display: { xs: 'none', sm: 'block' } }}
+              sx={{ display: { xs: 'none', sm: 'block' }, fontSize: '0.65rem' }}
             >
               {stats.lastSettlement
                 ? dayjs(stats.lastSettlement.payment_date).format("DD MMM")
@@ -683,6 +805,13 @@ export default function TeaShopPage() {
           </Paper>
         </Grid>
       </Grid>
+
+      {/* Overpaid Alert - show if there's overpaid amount */}
+      {stats.overpaidAmount > 0 && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          <strong>Credit Available:</strong> ₹{stats.overpaidAmount.toLocaleString()} extra has been paid. This will automatically apply to future entries.
+        </Alert>
+      )}
 
       {/* No Shop Alert */}
       {!shop && !companyTeaShop && !loading && !loadingCompanyTeaShop && (

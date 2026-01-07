@@ -22,6 +22,8 @@ import {
   Groups as GroupsIcon,
 } from "@mui/icons-material";
 import { createClient } from "@/lib/supabase/client";
+import { useQueryClient } from "@tanstack/react-query";
+import { queryKeys } from "@/lib/cache/keys";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSite } from "@/contexts/SiteContext";
 import type { TeaShopAccount, TeaShopEntry, LaborGroupPercentageSplit, TeaShopEntryExtended } from "@/types/database.types";
@@ -51,8 +53,10 @@ export default function TeaShopEntryDialog({
   const { userProfile } = useAuth();
   const { selectedSite, sites } = useSite();
   const supabase = createClient();
+  const queryClient = useQueryClient();
 
   const [loading, setLoading] = useState(false);
+  const [loadingMessage, setLoadingMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // Simple mode state
@@ -310,7 +314,29 @@ export default function TeaShopEntryDialog({
       };
 
       if (entry) {
-        // Update existing entry
+        // Get site_group_id for waterfall recalculation
+        const { data: currentEntry } = await (supabase
+          .from("tea_shop_entries") as any)
+          .select("site_group_id, site_id")
+          .eq("id", entry.id)
+          .single();
+
+        let effectiveSiteGroupId = currentEntry?.site_group_id || siteGroupId;
+        console.log("[TeaShopDialog] Checking waterfall. entry.site_group_id:", currentEntry?.site_group_id, "context.siteGroupId:", siteGroupId, "entry.site_id:", currentEntry?.site_id);
+
+        // If no site_group_id but entry has site_id, look up the site's group
+        if (!effectiveSiteGroupId && currentEntry?.site_id) {
+          const { data: siteData } = await (supabase as any)
+            .from("sites")
+            .select("site_group_id")
+            .eq("id", currentEntry.site_id)
+            .single();
+
+          effectiveSiteGroupId = siteData?.site_group_id;
+          console.log("[TeaShopDialog] Looked up site group from site_id:", effectiveSiteGroupId);
+        }
+
+        // Update existing entry (payment status will be recalculated via waterfall)
         const updateData = {
           ...entryData,
           updated_by: userProfile?.name || null,
@@ -336,6 +362,171 @@ export default function TeaShopEntryDialog({
             entryId: entry.id,
             allocations: calculatedAllocations,
           });
+        }
+
+        // Full waterfall recalculation from oldest to newest
+        // This ensures correct payment allocation regardless of which entry was modified
+        if (effectiveSiteGroupId) {
+          setLoadingMessage("Recalculating payment status...");
+          console.log("[TeaShopDialog] Triggering waterfall recalculation for:", effectiveSiteGroupId);
+          // 1a. Get total from GROUP settlements
+          const { data: groupSettlements } = await (supabase as any)
+            .from("tea_shop_group_settlements")
+            .select("amount_paid")
+            .eq("site_group_id", effectiveSiteGroupId)
+            .eq("is_cancelled", false);
+
+          const groupPaid = (groupSettlements || []).reduce(
+            (sum: number, s: { amount_paid: number }) => sum + (s.amount_paid || 0),
+            0
+          );
+
+          // 1b. Get sites in this group to fetch individual settlements
+          const { data: sites } = await (supabase as any)
+            .from("sites")
+            .select("id")
+            .eq("site_group_id", effectiveSiteGroupId);
+
+          const siteIds = (sites || []).map((s: { id: string }) => s.id);
+          console.log("[TeaShopDialog] Sites in group:", siteIds.length);
+
+          // 1c. Get total from INDIVIDUAL settlements for sites in this group
+          let individualPaid = 0;
+          if (siteIds.length > 0) {
+            const { data: shopAccounts } = await (supabase as any)
+              .from("tea_shop_accounts")
+              .select("id")
+              .in("site_id", siteIds);
+
+            const shopIds = (shopAccounts || []).map((s: { id: string }) => s.id);
+
+            if (shopIds.length > 0) {
+              const { data: individualSettlements } = await (supabase as any)
+                .from("tea_shop_settlements")
+                .select("amount_paid")
+                .in("tea_shop_id", shopIds)
+                .eq("is_cancelled", false);
+
+              individualPaid = (individualSettlements || []).reduce(
+                (sum: number, s: { amount_paid: number }) => sum + (s.amount_paid || 0),
+                0
+              );
+            }
+          }
+
+          const totalPaid = groupPaid + individualPaid;
+          console.log("[TeaShopDialog] Total paid:", totalPaid, "group:", groupPaid, "individual:", individualPaid);
+
+          // 2. Get ALL entries (group + individual) ordered by date, oldest first
+          let entriesQuery = (supabase as any)
+            .from("tea_shop_entries")
+            .select("id, total_amount, date, site_id, site_group_id");
+
+          const orFilterString = `site_group_id.eq.${effectiveSiteGroupId},site_id.in.(${siteIds.join(",")})`;
+          console.log("[TeaShopDialog] Query filter:", siteIds.length > 0 ? `OR: ${orFilterString}` : `EQ: site_group_id=${effectiveSiteGroupId}`);
+          console.log("[TeaShopDialog] Entry's current site_id:", currentEntry?.site_id, "Entry's site_group_id:", currentEntry?.site_group_id);
+
+          if (siteIds.length > 0) {
+            entriesQuery = entriesQuery.or(orFilterString);
+          } else {
+            entriesQuery = entriesQuery.eq("site_group_id", effectiveSiteGroupId);
+          }
+
+          const { data: allEntries, error: entriesError } = await entriesQuery.order("date", { ascending: true });
+          console.log("[TeaShopDialog] Entries found:", allEntries?.length, "Error:", entriesError?.message);
+          console.log("[TeaShopDialog] Entry being edited ID:", entry.id);
+
+          // Check if the entry being edited is in the list
+          const editedEntryInList = allEntries?.find((e: any) => e.id === entry.id);
+          console.log("[TeaShopDialog] Entry being edited found in list:", !!editedEntryInList, editedEntryInList);
+
+          if (allEntries && allEntries.length > 0) {
+            console.log("[TeaShopDialog] Entries found:", allEntries.length);
+
+            // OPTIMIZED: Fetch all allocations upfront in ONE query
+            const entryIds = allEntries.map((e: any) => e.id);
+            const { data: allAllocations } = await (supabase as any)
+              .from("tea_shop_entry_allocations")
+              .select("id, entry_id, allocated_amount")
+              .in("entry_id", entryIds);
+
+            // Group allocations by entry_id for quick lookup
+            const allocsByEntry = new Map<string, any[]>();
+            (allAllocations || []).forEach((a: any) => {
+              if (!allocsByEntry.has(a.entry_id)) {
+                allocsByEntry.set(a.entry_id, []);
+              }
+              allocsByEntry.get(a.entry_id)!.push(a);
+            });
+
+            // Calculate all updates in memory first
+            const entryUpdates: { id: string; amount_paid: number; is_fully_paid: boolean }[] = [];
+            const allocUpdates: { id: string; amount_paid: number; is_fully_paid: boolean }[] = [];
+
+            let remaining = totalPaid;
+            for (const e of allEntries) {
+              const eTotal = e.total_amount || 0;
+              const toAllocate = remaining > 0 ? Math.min(remaining, eTotal) : 0;
+              const isFullyPaid = toAllocate >= eTotal && eTotal > 0;
+
+              entryUpdates.push({ id: e.id, amount_paid: toAllocate, is_fully_paid: isFullyPaid });
+
+              // Calculate allocation updates
+              const entryAllocs = allocsByEntry.get(e.id) || [];
+              let allocRemaining = toAllocate;
+              for (const alloc of entryAllocs) {
+                const allocAmount = alloc.allocated_amount || 0;
+                const allocPaid = Math.min(allocRemaining, allocAmount);
+                const allocFullyPaid = allocPaid >= allocAmount && allocAmount > 0;
+
+                allocUpdates.push({ id: alloc.id, amount_paid: allocPaid, is_fully_paid: allocFullyPaid });
+                allocRemaining -= allocPaid;
+              }
+
+              remaining -= toAllocate;
+            }
+
+            // OPTIMIZED: Execute all updates in parallel batches
+            const BATCH_SIZE = 10;
+
+            // Update entries in parallel batches
+            for (let i = 0; i < entryUpdates.length; i += BATCH_SIZE) {
+              const batch = entryUpdates.slice(i, i + BATCH_SIZE);
+              await Promise.all(batch.map(upd =>
+                (supabase as any)
+                  .from("tea_shop_entries")
+                  .update({ amount_paid: upd.amount_paid, is_fully_paid: upd.is_fully_paid })
+                  .eq("id", upd.id)
+              ));
+            }
+
+            // Update allocations in parallel batches
+            for (let i = 0; i < allocUpdates.length; i += BATCH_SIZE) {
+              const batch = allocUpdates.slice(i, i + BATCH_SIZE);
+              await Promise.all(batch.map(upd =>
+                (supabase as any)
+                  .from("tea_shop_entry_allocations")
+                  .update({ amount_paid: upd.amount_paid, is_fully_paid: upd.is_fully_paid })
+                  .eq("id", upd.id)
+              ));
+            }
+
+            console.log("[TeaShopDialog] Waterfall complete. Entries updated:", entryUpdates.length, "Allocations updated:", allocUpdates.length);
+            setLoadingMessage(null);
+
+            // Invalidate combined tea shop queries to refresh UI
+            queryClient.invalidateQueries({
+              queryKey: queryKeys.combinedTeaShop.entries(effectiveSiteGroupId),
+            });
+            queryClient.invalidateQueries({
+              queryKey: queryKeys.combinedTeaShop.pending(effectiveSiteGroupId),
+            });
+            queryClient.invalidateQueries({
+              queryKey: queryKeys.combinedTeaShop.unsettled(effectiveSiteGroupId),
+            });
+          }
+        } else {
+          console.log("[TeaShopDialog] No effectiveSiteGroupId, skipping waterfall");
         }
       } else {
         // New entry
@@ -491,6 +682,12 @@ export default function TeaShopEntryDialog({
         {error && (
           <Alert severity="error" sx={{ mb: 2 }}>
             {error}
+          </Alert>
+        )}
+
+        {loadingMessage && (
+          <Alert severity="info" sx={{ mb: 2 }} icon={<CircularProgress size={18} />}>
+            {loadingMessage}
           </Alert>
         )}
 

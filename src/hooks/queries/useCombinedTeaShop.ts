@@ -144,6 +144,20 @@ export function useCombinedTeaShopEntries(
             // Only include if this site has an allocation
             if (siteAllocs.has(options.filterBySiteId)) {
               const alloc = siteAllocs.get(options.filterBySiteId)!;
+
+              // Calculate per-allocation paid amount
+              // Priority: use allocation-level amount_paid if set, otherwise calculate from entry-level
+              // This handles the case where settlements update entry-level but not allocation-level
+              let effectiveAmountPaid = alloc.amountPaid;
+              let effectiveIsFullyPaid = alloc.isFullyPaid;
+
+              // If allocation's amount_paid is 0 but entry has payments, calculate proportionally
+              if (effectiveAmountPaid === 0 && entry.amount_paid > 0 && entry.total_amount > 0) {
+                const ratio = alloc.amount / entry.total_amount;
+                effectiveAmountPaid = Math.round(entry.amount_paid * ratio);
+                effectiveIsFullyPaid = effectiveAmountPaid >= alloc.amount;
+              }
+
               combinedEntries.push({
                 ...entry,
                 site_id: options.filterBySiteId, // Set site_id to filtered site for consistency
@@ -152,9 +166,9 @@ export function useCombinedTeaShopEntries(
                 display_amount: alloc.amount,
                 original_total_amount: entry.total_amount,
                 isGroupEntry: true,
-                // Use per-site allocation payment status instead of entry-level
-                amount_paid: alloc.amountPaid,
-                is_fully_paid: alloc.isFullyPaid,
+                // Use calculated per-site allocation payment status
+                amount_paid: effectiveAmountPaid,
+                is_fully_paid: effectiveIsFullyPaid,
               });
             }
             // Skip this entry if the filtered site doesn't have an allocation
@@ -189,9 +203,14 @@ export function useCombinedTeaShopEntries(
               original_total_amount: entry.total_amount,
               isGroupEntry: true,
               hasNoAllocation: true, // Flag to indicate missing allocation
+              // FIXED: Set amount_paid to 0 for entries without allocations
+              // (entry-level amount_paid is for the whole group, not this site)
+              amount_paid: 0,
+              is_fully_paid: true, // No allocation means nothing to pay for this site
             });
           } else {
             // No filter - show full amount with group marker
+            // Keep entry-level amount_paid since we're showing the full group entry
             combinedEntries.push({
               ...entry,
               site_name: "Group Entry",

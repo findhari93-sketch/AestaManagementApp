@@ -697,9 +697,9 @@ export default function TeaShopSettlementDialog({
               control={<Radio size="small" />}
               label={
                 <Box>
-                  <Typography variant="body2">Historical/Standalone</Typography>
+                  <Typography variant="body2">Advance/Extra Payment</Typography>
                   <Typography variant="caption" color="text.secondary">
-                    For historical data - doesn&apos;t allocate to specific entries
+                    Pay extra or record advance - credits carry forward
                   </Typography>
                 </Box>
               }
@@ -711,8 +711,20 @@ export default function TeaShopSettlementDialog({
         {settlementMode === "standalone" && (
           <Alert severity="info" sx={{ mb: 3 }}>
             <Typography variant="body2">
-              This settlement counts toward total paid but won&apos;t link to specific entries.
-              Use for historical data where daily breakdown doesn&apos;t exist.
+              This payment counts toward total paid but won&apos;t link to specific entries.
+              Use for advance payments or when daily breakdown doesn&apos;t exist.
+            </Typography>
+          </Alert>
+        )}
+
+        {/* Alert when no unsettled entries in waterfall mode */}
+        {settlementMode === "waterfall" && !loadingEntries && unsettledEntries.length === 0 && (
+          <Alert severity="success" sx={{ mb: 3 }}>
+            <Typography variant="body2" fontWeight={600}>
+              All entries are fully settled!
+            </Typography>
+            <Typography variant="body2">
+              Switch to &quot;Advance/Extra Payment&quot; mode to make additional payments that will carry forward as credit.
             </Typography>
           </Alert>
         )}

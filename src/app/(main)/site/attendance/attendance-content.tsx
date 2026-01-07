@@ -85,7 +85,7 @@ import TeaShopEntryDialog from "@/components/tea-shop/TeaShopEntryDialog";
 import TeaShopEntryModeDialog from "@/components/tea-shop/TeaShopEntryModeDialog";
 import GroupTeaShopEntryDialog from "@/components/tea-shop/GroupTeaShopEntryDialog";
 import { useSiteGroup } from "@/hooks/queries/useSiteGroups";
-import { useGroupTeaShopAccount } from "@/hooks/queries/useGroupTeaShop";
+import { useTeaShopForGroup } from "@/hooks/queries/useCompanyTeaShops";
 import type { SiteGroupWithSites } from "@/types/material.types";
 import PaymentDialog from "@/components/payments/PaymentDialog";
 import type { UnifiedSettlementConfig, SettlementRecord } from "@/types/settlement.types";
@@ -129,6 +129,7 @@ import {
   formatUnfilledDayRange,
   type UnfilledGroup,
 } from "@/lib/utils/unfilledDatesUtils";
+import { allocateAmounts } from "@/hooks/queries/useGroupTeaShop";
 
 interface AttendanceContentProps {
   initialData: AttendancePageData | null;
@@ -292,7 +293,7 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
   // Group tea shop support
   const siteGroupId = (selectedSite as any)?.site_group_id as string | undefined;
   const { data: siteGroup } = useSiteGroup(siteGroupId);
-  const { data: groupTeaShop } = useGroupTeaShopAccount(siteGroupId);
+  const { data: groupTeaShop } = useTeaShopForGroup(siteGroupId);
 
   const { dateFrom, dateTo } = formatForApi();
 
@@ -656,8 +657,12 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
 
       const date = entry.date;
       const existing = teaShopMap.get(date) || createEmptyTeaShopData();
-      // Use allocated_amount for this site's share
-      existing.total += alloc.allocated_amount || 0;
+      // RECALCULATE: Use percentage and total_amount for accurate display
+      // This handles cases where stored allocated_amount is stale
+      const recalculatedAmount = entry.total_amount && alloc.allocation_percentage != null
+        ? Math.round((alloc.allocation_percentage / 100) * entry.total_amount)
+        : alloc.allocated_amount || 0;
+      existing.total += recalculatedAmount;
       // Mark as group entry for UI handling
       existing.isGroupEntry = true;
       existing.entryId = entry.id;
@@ -1447,8 +1452,9 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
 
     const today = dayjs().format("YYYY-MM-DD");
 
-    // Use dateFrom if available, otherwise default to 30 days ago
-    const queryFrom = dateFrom || dayjs().subtract(30, "day").format("YYYY-MM-DD");
+    // Use dateFrom if available, otherwise use site's start_date, or fall back to 1 year ago
+    // This ensures we fetch holidays for the entire visible date range, not just recent 30 days
+    const queryFrom = dateFrom || selectedSite?.start_date || dayjs().subtract(1, "year").format("YYYY-MM-DD");
     // Use dateTo if available, otherwise default to 30 days in future
     const queryTo = dateTo || dayjs().add(30, "day").format("YYYY-MM-DD");
 
@@ -1482,7 +1488,7 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
     } catch (err) {
       console.error("Error checking holidays:", err);
     }
-  }, [selectedSite?.id, supabase, dateFrom, dateTo]);
+  }, [selectedSite?.id, selectedSite?.start_date, supabase, dateFrom, dateTo]);
 
   useEffect(() => {
       checkTodayHoliday();
@@ -1498,19 +1504,22 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
     setHolidayDialogOpen(true);
   };
 
-  const handleHolidaySuccess = (newHoliday?: SiteHoliday) => {
+  const handleHolidaySuccess = useCallback(async (newHoliday?: SiteHoliday) => {
     setSelectedHolidayDate(null);
     setSelectedExistingHoliday(null);
 
-    // Immediately add new holiday to state for instant UI update
+    // Immediately update state for instant UI feedback
     if (newHoliday) {
       setRecentHolidays(prev => [...prev, newHoliday]);
     }
 
-    // Then refresh from database to ensure consistency
-    checkTodayHoliday();
+    // CRITICAL: Wait for holiday data to refresh from DB BEFORE invalidating attendance
+    // This prevents race condition where attendance refetches before holidays are updated
+    await checkTodayHoliday();
+
+    // Now safe to invalidate attendance - holidays state is guaranteed to be up-to-date
     invalidateAttendance();
-  };
+  }, [checkTodayHoliday, invalidateAttendance]);
 
   // Handler for filling attendance on an unfilled date
   const handleFillUnfilledDate = useCallback((date: string) => {
@@ -1815,11 +1824,31 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
 
   // Fetch group allocations for popover display
   const fetchGroupEntryAllocations = async (entryId: string) => {
-    const { data } = await (supabase as any)
+    // Fetch allocations with their percentages
+    const { data: allocations } = await (supabase as any)
       .from("tea_shop_entry_allocations")
       .select("*, site:sites(id, name)")
       .eq("entry_id", entryId);
-    setPopoverGroupAllocations(data);
+
+    // Fetch the entry to get total_amount for recalculation
+    const { data: entry } = await (supabase as any)
+      .from("tea_shop_entries")
+      .select("total_amount")
+      .eq("id", entryId)
+      .single();
+
+    // Recalculate allocated amounts based on current percentages and total
+    if (allocations && entry?.total_amount) {
+      const percentages = allocations.map((a: any) => a.allocation_percentage || 0);
+      const recalculatedAmounts = allocateAmounts(entry.total_amount, percentages);
+      const recalculatedAllocations = allocations.map((a: any, index: number) => ({
+        ...a,
+        allocated_amount: recalculatedAmounts[index],
+      }));
+      setPopoverGroupAllocations(recalculatedAllocations);
+    } else {
+      setPopoverGroupAllocations(allocations);
+    }
   };
 
   // Fetch group entry data synchronously before opening edit dialog
@@ -1866,6 +1895,10 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
       }
 
       // Transform to expected format for GroupTeaShopEntryDialog
+      // RECALCULATE allocations based on current total_amount and percentages
+      const percentages = (allocations || []).map((a: any) => a.allocation_percentage || 0);
+      const recalculatedAmounts = allocateAmounts(entry.total_amount, percentages);
+
       const fullEntry = {
         id: entry.id,
         tea_shop_id: entry.tea_shop_id,
@@ -1879,7 +1912,7 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
         entered_by_user_id: entry.entered_by_user_id,
         created_at: entry.created_at,
         updated_at: entry.updated_at,
-        allocations: (allocations || []).map((a: any) => ({
+        allocations: (allocations || []).map((a: any, index: number) => ({
           id: a.id,
           group_entry_id: entryId,
           site_id: a.site_id,
@@ -1888,7 +1921,8 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
           market_laborer_count: 0,
           attendance_count: a.worker_count || 0,
           allocation_percentage: a.allocation_percentage,
-          allocated_amount: a.allocated_amount,
+          // Use recalculated amount instead of potentially stale stored value
+          allocated_amount: recalculatedAmounts[index],
         })),
       };
 

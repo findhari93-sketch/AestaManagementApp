@@ -352,8 +352,178 @@ export function useCreateGroupTeaShopEntry() {
       queryClient.invalidateQueries({
         queryKey: queryKeys.groupTeaShop.pending(variables.siteGroupId),
       });
+      // Invalidate attendance cache to refresh table with new allocations
+      queryClient.invalidateQueries({
+        queryKey: ['attendance'],
+      });
     },
   });
+}
+
+// =============================================================================
+// HELPER: Full Waterfall Recalculation
+// =============================================================================
+
+/**
+ * Recalculates payment allocation for ALL entries in a site group from scratch.
+ * This ensures correct waterfall allocation from oldest to newest entry
+ * whenever any entry is modified.
+ *
+ * Steps:
+ * 1. Get total amount paid from ALL settlement tables (group + individual)
+ * 2. Reset all entries' payment status
+ * 3. Re-apply total paid using waterfall (oldest first)
+ */
+async function recalculateWaterfallForGroup(
+  supabase: any,
+  siteGroupId: string
+): Promise<void> {
+  console.log("[Waterfall] Starting recalculation for siteGroupId:", siteGroupId);
+  if (!siteGroupId) {
+    console.log("[Waterfall] No siteGroupId provided, skipping");
+    return;
+  }
+
+  // 1a. Get total from GROUP settlements
+  const { data: groupSettlements } = await (supabase as any)
+    .from("tea_shop_group_settlements")
+    .select("amount_paid")
+    .eq("site_group_id", siteGroupId)
+    .eq("is_cancelled", false);
+
+  const groupPaid = (groupSettlements || []).reduce(
+    (sum: number, s: { amount_paid: number }) => sum + (s.amount_paid || 0),
+    0
+  );
+
+  // 1b. Get sites in this group to fetch individual settlements
+  const { data: sites } = await (supabase as any)
+    .from("sites")
+    .select("id")
+    .eq("site_group_id", siteGroupId);
+
+  const siteIds = (sites || []).map((s: { id: string }) => s.id);
+
+  // 1c. Get total from INDIVIDUAL settlements for sites in this group
+  let individualPaid = 0;
+  if (siteIds.length > 0) {
+    // Get tea shop accounts for these sites
+    const { data: shopAccounts } = await (supabase as any)
+      .from("tea_shop_accounts")
+      .select("id")
+      .in("site_id", siteIds);
+
+    const shopIds = (shopAccounts || []).map((s: { id: string }) => s.id);
+
+    if (shopIds.length > 0) {
+      const { data: individualSettlements } = await (supabase as any)
+        .from("tea_shop_settlements")
+        .select("amount_paid")
+        .in("tea_shop_id", shopIds)
+        .eq("is_cancelled", false);
+
+      individualPaid = (individualSettlements || []).reduce(
+        (sum: number, s: { amount_paid: number }) => sum + (s.amount_paid || 0),
+        0
+      );
+    }
+  }
+
+  const totalPaid = groupPaid + individualPaid;
+  console.log("[Waterfall] Total paid:", totalPaid, "group:", groupPaid, "individual:", individualPaid);
+
+  // 2. Get ALL entries for this group (ordered by date, oldest first)
+  // Include both group entries AND individual entries for sites in the group
+  let entriesQuery = (supabase as any)
+    .from("tea_shop_entries")
+    .select("id, total_amount, date");
+
+  if (siteIds.length > 0) {
+    entriesQuery = entriesQuery.or(`site_group_id.eq.${siteGroupId},site_id.in.(${siteIds.join(",")})`);
+  } else {
+    entriesQuery = entriesQuery.eq("site_group_id", siteGroupId);
+  }
+
+  const { data: allEntries, error: entriesError } = await entriesQuery.order("date", { ascending: true });
+
+  console.log("[Waterfall] Entries found:", allEntries?.length, "Error:", entriesError?.message);
+
+  if (entriesError || !allEntries || allEntries.length === 0) {
+    console.error("Error fetching entries:", entriesError);
+    return;
+  }
+
+  console.log("[Waterfall] Entries found:", allEntries.length);
+
+  // OPTIMIZED: Fetch all allocations upfront in ONE query
+  const entryIds = allEntries.map((e: any) => e.id);
+  const { data: allAllocations } = await (supabase as any)
+    .from("tea_shop_entry_allocations")
+    .select("id, entry_id, allocated_amount")
+    .in("entry_id", entryIds);
+
+  // Group allocations by entry_id for quick lookup
+  const allocsByEntry = new Map<string, any[]>();
+  (allAllocations || []).forEach((a: any) => {
+    if (!allocsByEntry.has(a.entry_id)) {
+      allocsByEntry.set(a.entry_id, []);
+    }
+    allocsByEntry.get(a.entry_id)!.push(a);
+  });
+
+  // Calculate all updates in memory first
+  const entryUpdates: { id: string; amount_paid: number; is_fully_paid: boolean }[] = [];
+  const allocUpdates: { id: string; amount_paid: number; is_fully_paid: boolean }[] = [];
+
+  let remaining = totalPaid;
+  for (const entry of allEntries) {
+    const entryTotal = entry.total_amount || 0;
+    const toAllocate = remaining > 0 ? Math.min(remaining, entryTotal) : 0;
+    const isFullyPaid = toAllocate >= entryTotal && entryTotal > 0;
+
+    entryUpdates.push({ id: entry.id, amount_paid: toAllocate, is_fully_paid: isFullyPaid });
+
+    // Calculate allocation updates
+    const entryAllocs = allocsByEntry.get(entry.id) || [];
+    let allocRemaining = toAllocate;
+    for (const alloc of entryAllocs) {
+      const allocAmount = alloc.allocated_amount || 0;
+      const allocPaid = Math.min(allocRemaining, allocAmount);
+      const allocFullyPaid = allocPaid >= allocAmount && allocAmount > 0;
+
+      allocUpdates.push({ id: alloc.id, amount_paid: allocPaid, is_fully_paid: allocFullyPaid });
+      allocRemaining -= allocPaid;
+    }
+
+    remaining -= toAllocate;
+  }
+
+  // OPTIMIZED: Execute all updates in parallel batches
+  const BATCH_SIZE = 10;
+
+  // Update entries in parallel batches
+  for (let i = 0; i < entryUpdates.length; i += BATCH_SIZE) {
+    const batch = entryUpdates.slice(i, i + BATCH_SIZE);
+    await Promise.all(batch.map(upd =>
+      (supabase as any)
+        .from("tea_shop_entries")
+        .update({ amount_paid: upd.amount_paid, is_fully_paid: upd.is_fully_paid })
+        .eq("id", upd.id)
+    ));
+  }
+
+  // Update allocations in parallel batches
+  for (let i = 0; i < allocUpdates.length; i += BATCH_SIZE) {
+    const batch = allocUpdates.slice(i, i + BATCH_SIZE);
+    await Promise.all(batch.map(upd =>
+      (supabase as any)
+        .from("tea_shop_entry_allocations")
+        .update({ amount_paid: upd.amount_paid, is_fully_paid: upd.is_fully_paid })
+        .eq("id", upd.id)
+    ));
+  }
+
+  console.log("[Waterfall] Complete. Entries updated:", entryUpdates.length, "Allocations updated:", allocUpdates.length);
 }
 
 // =============================================================================
@@ -377,7 +547,7 @@ export function useUpdateGroupTeaShopEntry() {
         throw new Error("Session expired. Please refresh the page and try again.");
       }
 
-      // Update the entry in tea_shop_entries (not tea_shop_group_entries)
+      // 1. Update the entry in tea_shop_entries (payment status will be recalculated)
       const { data: entry, error: entryError } = await (supabase as any)
         .from("tea_shop_entries")
         .update({
@@ -393,13 +563,13 @@ export function useUpdateGroupTeaShopEntry() {
 
       if (entryError) throw entryError;
 
-      // Delete existing allocations from tea_shop_entry_allocations
+      // 2. Delete existing allocations from tea_shop_entry_allocations
       await (supabase as any)
         .from("tea_shop_entry_allocations")
         .delete()
         .eq("entry_id", data.id);
 
-      // Create new allocations in tea_shop_entry_allocations
+      // 3. Create new allocations in tea_shop_entry_allocations
       const allocationsToInsert = data.allocations.map((alloc) => ({
         entry_id: data.id,
         site_id: alloc.siteId,
@@ -414,6 +584,30 @@ export function useUpdateGroupTeaShopEntry() {
 
       if (allocError) throw allocError;
 
+      // 4. Full waterfall recalculation from oldest to newest
+      // This ensures correct payment allocation regardless of which entry was modified
+      let effectiveSiteGroupId = data.siteGroupId;
+      console.log("[UpdateGroupEntry] Checking waterfall. data.siteGroupId:", data.siteGroupId, "entry.site_id:", entry.site_id);
+
+      // If no siteGroupId provided, try to get it from the entry's site_id
+      if (!effectiveSiteGroupId && entry.site_id) {
+        const { data: siteData } = await (supabase as any)
+          .from("sites")
+          .select("site_group_id")
+          .eq("id", entry.site_id)
+          .single();
+
+        effectiveSiteGroupId = siteData?.site_group_id;
+        console.log("[UpdateGroupEntry] Looked up site group from site_id:", effectiveSiteGroupId);
+      }
+
+      if (effectiveSiteGroupId) {
+        console.log("[UpdateGroupEntry] Triggering waterfall recalculation");
+        await recalculateWaterfallForGroup(supabase, effectiveSiteGroupId);
+      } else {
+        console.log("[UpdateGroupEntry] No effectiveSiteGroupId, skipping waterfall");
+      }
+
       return entry as TeaShopGroupEntry;
     },
     onSuccess: (_, variables) => {
@@ -422,6 +616,20 @@ export function useUpdateGroupTeaShopEntry() {
       });
       queryClient.invalidateQueries({
         queryKey: queryKeys.groupTeaShop.pending(variables.siteGroupId),
+      });
+      // Invalidate combined tea shop queries to refresh UI with updated payment status
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.combinedTeaShop.entries(variables.siteGroupId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.combinedTeaShop.pending(variables.siteGroupId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.combinedTeaShop.unsettled(variables.siteGroupId),
+      });
+      // Invalidate attendance cache to refresh table with updated allocations
+      queryClient.invalidateQueries({
+        queryKey: ['attendance'],
       });
     },
   });
@@ -459,6 +667,10 @@ export function useDeleteGroupTeaShopEntry() {
       });
       queryClient.invalidateQueries({
         queryKey: queryKeys.groupTeaShop.pending(variables.siteGroupId),
+      });
+      // Invalidate attendance cache to refresh table after deletion
+      queryClient.invalidateQueries({
+        queryKey: ['attendance'],
       });
     },
   });

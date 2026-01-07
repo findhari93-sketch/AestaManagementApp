@@ -90,7 +90,7 @@ async function fetchAttendanceData(
 
   // Build tea shop allocations query (this site's share of group entries from other sites)
   let teaShopAllocationsQuery = ((supabase as any).from("tea_shop_entry_allocations"))
-    .select("allocated_amount, entry_id, entry:tea_shop_entries!inner(id, date, is_group_entry, site_group_id)")
+    .select("allocated_amount, allocation_percentage, entry_id, entry:tea_shop_entries!inner(id, date, total_amount, is_group_entry, site_group_id)")
     .eq("site_id", siteId);
 
   if (!isAllTime && dateFrom && dateTo) {
