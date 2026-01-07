@@ -97,10 +97,71 @@ export async function ensureFreshSession(): Promise<boolean> {
   // Add timeout to prevent hanging indefinitely
   const timeoutPromise = new Promise<boolean>((resolve) => {
     setTimeout(() => {
-      console.warn("ensureFreshSession timed out, proceeding anyway");
-      resolve(true); // Still proceed on timeout to avoid blocking user completely
+      console.warn("ensureFreshSession timed out - session may be expired");
+      resolve(false); // Return false on timeout - session validity unknown
     }, SESSION_TIMEOUT);
   });
 
   return Promise.race([sessionCheckPromise(), timeoutPromise]);
+}
+
+// Session refresh timer for keeping sessions alive during long form fills
+let sessionRefreshInterval: ReturnType<typeof setInterval> | null = null;
+let sessionRefreshStarted = false;
+
+/**
+ * Starts a background timer that refreshes the session every 45 minutes.
+ * This prevents session expiry while users are filling out forms.
+ * Call this once when the app initializes (e.g., in AuthContext).
+ */
+export function startSessionRefreshTimer(): void {
+  // Only start once
+  if (sessionRefreshStarted || typeof window === 'undefined') {
+    return;
+  }
+
+  sessionRefreshStarted = true;
+
+  // Refresh every 45 minutes (before 1-hour default expiry)
+  const REFRESH_INTERVAL = 45 * 60 * 1000;
+
+  sessionRefreshInterval = setInterval(async () => {
+    try {
+      const supabase = createClient();
+      const { data: { session } } = await supabase.auth.getSession();
+
+      if (!session) {
+        console.log("[SessionRefresh] No session to refresh");
+        return;
+      }
+
+      const { error } = await supabase.auth.refreshSession();
+      if (error) {
+        console.error("[SessionRefresh] Failed to refresh:", error);
+        // Dispatch event so UI can show warning
+        window.dispatchEvent(new CustomEvent('session-refresh-failed', {
+          detail: { error: error.message }
+        }));
+      } else {
+        console.log("[SessionRefresh] Session refreshed successfully");
+      }
+    } catch (err) {
+      console.error("[SessionRefresh] Error:", err);
+    }
+  }, REFRESH_INTERVAL);
+
+  console.log("[SessionRefresh] Timer started - will refresh every 45 minutes");
+}
+
+/**
+ * Stops the session refresh timer.
+ * Call this when user logs out.
+ */
+export function stopSessionRefreshTimer(): void {
+  if (sessionRefreshInterval) {
+    clearInterval(sessionRefreshInterval);
+    sessionRefreshInterval = null;
+    sessionRefreshStarted = false;
+    console.log("[SessionRefresh] Timer stopped");
+  }
 }

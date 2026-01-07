@@ -142,24 +142,30 @@ export default function SettlementFormDialog({
     setSubmitting(true);
     setError(null);
 
-    const { error } = await submitSettlement(
-      supabase,
-      transactionId,
-      settlementMode,
-      userProfile.id,
-      userProfile.name || userProfile.email,
-      proofFile?.url,
-      reason || undefined,
-      selectedSite?.name
-    );
+    try {
+      const { error } = await submitSettlement(
+        supabase,
+        transactionId,
+        settlementMode,
+        userProfile.id,
+        userProfile.name || userProfile.email,
+        proofFile?.url,
+        reason || undefined,
+        selectedSite?.name
+      );
 
-    setSubmitting(false);
-
-    if (error) {
-      setError(error.message || "Failed to submit settlement");
-    } else {
-      onSuccess?.();
-      handleClose();
+      if (error) {
+        setError(error.message || "Failed to submit settlement");
+      } else {
+        onSuccess?.();
+        handleClose();
+      }
+    } catch (err: any) {
+      console.error("[SettlementFormDialog] Submit error:", err);
+      setError(err.message || "An unexpected error occurred. Please try again.");
+    } finally {
+      // ALWAYS reset submitting state to prevent button from staying locked
+      setSubmitting(false);
     }
   };
 

@@ -235,6 +235,43 @@ export function SiteProvider({ children }: { children: React.ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authLoading, userProfile?.id]);
 
+  // Cross-tab sync: Listen for site changes from other tabs
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const handleStorageChange = (e: StorageEvent) => {
+      // Only handle changes to the selected site key
+      if (e.key !== SELECTED_SITE_KEY) return;
+
+      const newSiteId = e.newValue;
+      console.log("[SiteContext] Storage event - site changed in another tab:", newSiteId);
+
+      // If site was cleared in another tab
+      if (!newSiteId) {
+        setSelectedSiteState(null);
+        return;
+      }
+
+      // If site ID is the same as current, ignore
+      if (selectedSite?.id === newSiteId) return;
+
+      // Find the site in our list and update
+      const newSite = sites.find((s) => s.id === newSiteId);
+      if (newSite) {
+        console.log("[SiteContext] Syncing site from another tab:", newSite.name);
+        setSelectedSiteState(newSite);
+        setSelectedSiteCookie(newSite.id); // Sync cookie too
+      } else {
+        // Site not in our list - might need to refresh sites
+        console.log("[SiteContext] Site from another tab not in local list, refreshing...");
+        fetchSites();
+      }
+    };
+
+    window.addEventListener("storage", handleStorageChange);
+    return () => window.removeEventListener("storage", handleStorageChange);
+  }, [selectedSite?.id, sites, fetchSites]);
+
   const refreshSites = useCallback(async () => {
     await fetchSites();
   }, [fetchSites]);

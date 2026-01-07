@@ -23,6 +23,8 @@ import {
   useTheme,
   Switch,
   Chip,
+  Snackbar,
+  Alert,
 } from "@mui/material";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useSessionRefresh } from "@/hooks/useSessionRefresh";
@@ -362,6 +364,13 @@ export default function MainLayout({
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(
     new Set()
   );
+
+  // Snackbar state for refresh feedback
+  const [snackbar, setSnackbar] = useState<{
+    open: boolean;
+    message: string;
+    severity: "success" | "error" | "warning" | "info";
+  }>({ open: false, message: "", severity: "info" });
 
   const { userProfile, signOut } = useAuth();
   const router = useRouter();
@@ -1049,7 +1058,15 @@ export default function MainLayout({
                   bgcolor: "action.selected",
                 },
               }}
-              onClick={() => !syncStatus.isRefreshing && syncStatus.refresh()}
+              onClick={async () => {
+                if (syncStatus.isRefreshing) return;
+                const result = await syncStatus.refresh();
+                setSnackbar({
+                  open: true,
+                  message: result.message,
+                  severity: result.success ? "success" : "error",
+                });
+              }}
             >
               <IconButton
                 size="small"
@@ -1321,6 +1338,23 @@ export default function MainLayout({
 
       {/* Settlement Dialogs (managed via NotificationContext) */}
       <SettlementDialogManager />
+
+      {/* Refresh feedback snackbar */}
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={4000}
+        onClose={() => setSnackbar((prev) => ({ ...prev, open: false }))}
+        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+      >
+        <Alert
+          onClose={() => setSnackbar((prev) => ({ ...prev, open: false }))}
+          severity={snackbar.severity}
+          variant="filled"
+          sx={{ width: "100%" }}
+        >
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </Box>
   );
 }

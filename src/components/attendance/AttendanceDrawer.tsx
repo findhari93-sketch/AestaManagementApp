@@ -1343,14 +1343,26 @@ export default function AttendanceDrawer({
           "[AttendanceDrawer] Inserting named records:",
           namedRecords
         );
-        const { error: attendanceError } = await (
-          supabase.from("daily_attendance") as any
-        ).insert(namedRecords);
-        if (attendanceError) {
-          console.error("[AttendanceDrawer] Insert error:", attendanceError);
-          throw attendanceError;
+        // Add timeout to prevent hanging forever on slow networks
+        const insertPromise = (supabase.from("daily_attendance") as any).insert(namedRecords);
+        const insertTimeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("Insert attendance timed out after 30s")), 30000)
+        );
+
+        try {
+          const { error: attendanceError } = await Promise.race([
+            insertPromise,
+            insertTimeoutPromise,
+          ]) as { error: unknown };
+          if (attendanceError) {
+            console.error("[AttendanceDrawer] Insert error:", attendanceError);
+            throw attendanceError;
+          }
+          console.log("[AttendanceDrawer] Named records inserted successfully");
+        } catch (insertErr) {
+          console.error("[AttendanceDrawer] Insert failed or timed out:", insertErr);
+          throw insertErr;
         }
-        console.log("[AttendanceDrawer] Named records inserted successfully");
       }
 
       // 2. Save market laborers
@@ -1437,15 +1449,27 @@ export default function AttendanceDrawer({
           "[AttendanceDrawer] Inserting market records:",
           marketRecords
         );
-        const { error: marketError } = await (
-          supabase.from("market_laborer_attendance") as any
-        ).insert(marketRecords);
-        if (marketError) {
-          console.error("[AttendanceDrawer] Market insert error:", marketError);
-          // Surface detailed error to the UI to avoid infinite spinner
-          throw marketError;
+        // Add timeout to prevent hanging forever on slow networks
+        const marketInsertPromise = (supabase.from("market_laborer_attendance") as any).insert(marketRecords);
+        const marketInsertTimeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("Insert market attendance timed out after 30s")), 30000)
+        );
+
+        try {
+          const { error: marketError } = await Promise.race([
+            marketInsertPromise,
+            marketInsertTimeoutPromise,
+          ]) as { error: unknown };
+          if (marketError) {
+            console.error("[AttendanceDrawer] Market insert error:", marketError);
+            // Surface detailed error to the UI to avoid infinite spinner
+            throw marketError;
+          }
+          console.log("[AttendanceDrawer] Market records inserted successfully");
+        } catch (marketInsertErr) {
+          console.error("[AttendanceDrawer] Market insert failed or timed out:", marketInsertErr);
+          throw marketInsertErr;
         }
-        console.log("[AttendanceDrawer] Market records inserted successfully");
       }
 
       // 3. Save/Update daily work summary (non-critical)
@@ -1480,20 +1504,32 @@ export default function AttendanceDrawer({
         }
 
         console.log("[AttendanceDrawer] Saving work summary:", summaryRecord);
-        const { error: summaryError } = await (
-          supabase.from("daily_work_summary") as any
-        ).upsert(summaryRecord, { onConflict: "site_id,date" });
+        // Add timeout to work summary upsert (15s since it's non-critical)
+        const summaryUpsertPromise = (supabase.from("daily_work_summary") as any)
+          .upsert(summaryRecord, { onConflict: "site_id,date" });
+        const summaryTimeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("Work summary upsert timed out after 15s")), 15000)
+        );
 
-        if (summaryError) {
-          console.error("[AttendanceDrawer] Error saving work summary:", summaryError);
-          console.error("[AttendanceDrawer] Summary error details:", {
-            message: summaryError.message,
-            code: summaryError.code,
-            details: summaryError.details,
-            hint: summaryError.hint
-          });
-        } else {
-          console.log("[AttendanceDrawer] Work summary saved successfully");
+        try {
+          const { error: summaryError } = await Promise.race([
+            summaryUpsertPromise,
+            summaryTimeoutPromise,
+          ]) as { error: unknown };
+
+          if (summaryError) {
+            console.error("[AttendanceDrawer] Error saving work summary:", summaryError);
+            console.error("[AttendanceDrawer] Summary error details:", {
+              message: (summaryError as any).message,
+              code: (summaryError as any).code,
+              details: (summaryError as any).details,
+              hint: (summaryError as any).hint
+            });
+          } else {
+            console.log("[AttendanceDrawer] Work summary saved successfully");
+          }
+        } catch (summaryTimeoutErr) {
+          console.warn("[AttendanceDrawer] Work summary timed out (non-critical):", summaryTimeoutErr);
         }
       } catch (summaryErr) {
         console.error("[AttendanceDrawer] Work summary save exception:", summaryErr);

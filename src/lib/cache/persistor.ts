@@ -15,9 +15,10 @@ import { getTabCoordinator } from "@/lib/tab/coordinator";
 
 const CACHE_VERSION = 1;
 const CACHE_KEY = `aesta-query-cache-v${CACHE_VERSION}`;
-const MAX_AGE = 30 * 24 * 60 * 60 * 1000; // 30 days max retention (reduced for faster restoration)
-const RESTORE_TIMEOUT = 60000; // 60 seconds for restore (increased for slower devices/large caches)
-const MAX_RESTORE_RETRIES = 3;
+const SKIP_RESTORE_KEY = "aesta-skip-cache-restore"; // Session flag to skip slow cache
+const MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 days max retention
+const RESTORE_TIMEOUT = 5000; // 5 seconds - fail fast, fresh data is fine
+const MAX_RESTORE_RETRIES = 1; // Single retry only
 
 /**
  * Create an IndexedDB persister with automatic cleanup
@@ -64,6 +65,15 @@ export function createIDBPersister(): Persister {
     },
 
     restoreClient: async () => {
+      // Check if we should skip restoration (previous timeout in this session)
+      if (typeof window !== "undefined") {
+        const skipRestore = sessionStorage.getItem(SKIP_RESTORE_KEY);
+        if (skipRestore) {
+          console.log("Skipping cache restoration (previous timeout in this session)");
+          return undefined;
+        }
+      }
+
       // Retry logic for restore with exponential backoff
       const attemptRestore = async (attempt: number): Promise<PersistedClient | undefined> => {
         try {
@@ -136,11 +146,15 @@ export function createIDBPersister(): Persister {
       // Race between restore and timeout
       const timeoutPromise = new Promise<undefined>((resolve) => {
         setTimeout(async () => {
-          console.warn("Cache restoration timed out, clearing potentially corrupted cache and starting fresh");
+          console.warn("Cache restoration timed out - starting fresh");
           try {
-            // Clear the potentially corrupted cache to prevent future timeouts
+            // Set flag to skip restoration for rest of this session
+            if (typeof window !== "undefined") {
+              sessionStorage.setItem(SKIP_RESTORE_KEY, "true");
+            }
+            // Clear the potentially corrupted/slow cache
             await clear();
-            console.log("Cache cleared due to restoration timeout");
+            console.log("Cache cleared, will skip restoration for this session");
           } catch (clearError) {
             console.error("Failed to clear cache after timeout:", clearError);
           }
@@ -183,8 +197,9 @@ export async function forceResetAllCache(): Promise<boolean> {
     // Clear IndexedDB via idb-keyval
     await clear();
 
-    // Clear sessionStorage (tab-specific data)
+    // Clear session flags to allow fresh cache attempt
     if (typeof window !== "undefined") {
+      sessionStorage.removeItem(SKIP_RESTORE_KEY);
       sessionStorage.clear();
     }
 

@@ -399,12 +399,15 @@ let tabMessageUnsubscribe: (() => void) | null = null;
 
 /**
  * Get or create sync orchestrator instance
+ * Returns null if no orchestrator exists and no QueryClient provided
+ * (this is expected during initial app load - no warning needed)
  */
 export function getSyncOrchestrator(
   queryClient?: QueryClient
 ): BackgroundSyncOrchestrator | null {
+  // If no QueryClient provided and no instance exists, just return null
+  // This is expected during initial load when checking if orchestrator is ready
   if (!queryClient && !syncOrchestratorInstance) {
-    console.warn("Cannot create sync orchestrator without QueryClient");
     return null;
   }
 

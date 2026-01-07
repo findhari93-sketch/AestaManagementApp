@@ -24,7 +24,18 @@ export default function QueryProvider({
           queries: {
             staleTime: 5 * 60 * 1000, // 5 minutes - data considered fresh (increased to reduce refetches)
             gcTime: 30 * 60 * 1000, // 30 minutes - cache garbage collection
-            retry: 3, // Retry failed requests 3 times for better reliability
+            retry: (failureCount, error: any) => {
+              // Don't retry on 400 Bad Request - these are programming errors
+              if (error?.status === 400 || error?.message?.includes("400")) {
+                console.error("[QueryClient] 400 Bad Request - not retrying:", error);
+                return false;
+              }
+              // Don't retry on 401/403 - auth issues
+              if (error?.status === 401 || error?.status === 403) {
+                return false;
+              }
+              return failureCount < 3;
+            },
             retryDelay: (attemptIndex) =>
               Math.min(1000 * 2 ** attemptIndex, 30000), // Exponential backoff
             refetchOnWindowFocus: false, // Disabled - prevents refetch cascade on tab focus

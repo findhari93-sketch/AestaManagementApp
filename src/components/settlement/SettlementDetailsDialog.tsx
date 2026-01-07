@@ -100,20 +100,26 @@ export default function SettlementDetailsDialog({
     setSubmitting(true);
     setError(null);
 
-    const { error } = await confirmSettlement(
-      supabase,
-      transactionId,
-      userProfile.id,
-      userProfile.name || userProfile.email
-    );
+    try {
+      const { error } = await confirmSettlement(
+        supabase,
+        transactionId,
+        userProfile.id,
+        userProfile.name || userProfile.email
+      );
 
-    setSubmitting(false);
-
-    if (error) {
-      setError(error.message || "Failed to confirm settlement");
-    } else {
-      onSuccess?.();
-      handleClose();
+      if (error) {
+        setError(error.message || "Failed to confirm settlement");
+      } else {
+        onSuccess?.();
+        handleClose();
+      }
+    } catch (err: any) {
+      console.error("[SettlementDetailsDialog] Confirm error:", err);
+      setError(err.message || "An unexpected error occurred. Please try again.");
+    } finally {
+      // ALWAYS reset submitting state to prevent button from staying locked
+      setSubmitting(false);
     }
   };
 
@@ -126,19 +132,25 @@ export default function SettlementDetailsDialog({
     setSubmitting(true);
     setError(null);
 
-    const { error } = await disputeSettlement(
-      supabase,
-      transactionId,
-      disputeNotes
-    );
+    try {
+      const { error } = await disputeSettlement(
+        supabase,
+        transactionId,
+        disputeNotes
+      );
 
-    setSubmitting(false);
-
-    if (error) {
-      setError(error.message || "Failed to dispute settlement");
-    } else {
-      onSuccess?.();
-      handleClose();
+      if (error) {
+        setError(error.message || "Failed to dispute settlement");
+      } else {
+        onSuccess?.();
+        handleClose();
+      }
+    } catch (err: any) {
+      console.error("[SettlementDetailsDialog] Dispute error:", err);
+      setError(err.message || "An unexpected error occurred. Please try again.");
+    } finally {
+      // ALWAYS reset submitting state to prevent button from staying locked
+      setSubmitting(false);
     }
   };
 

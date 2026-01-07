@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useEffect, useState, useCallback } from "react";
 import { User as SupabaseUser } from "@supabase/supabase-js";
-import { createClient } from "@/lib/supabase/client";
+import { createClient, startSessionRefreshTimer, stopSessionRefreshTimer } from "@/lib/supabase/client";
 import { User } from "@/types/database.types";
 
 interface AuthContextType {
@@ -79,6 +79,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         if (session?.user) {
           await fetchUserProfile(session.user.id);
+          // Start session refresh timer to keep session alive during long form fills
+          startSessionRefreshTimer();
         }
       } catch (error) {
         console.error("[AuthContext] Error initializing auth:", error);
@@ -102,8 +104,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (session?.user) {
         await fetchUserProfile(session.user.id);
+        // Start session refresh timer when user signs in
+        startSessionRefreshTimer();
       } else {
         setUserProfile(null);
+        // Stop session refresh timer when user signs out
+        stopSessionRefreshTimer();
       }
 
       setLoading(false);
@@ -112,6 +118,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => {
       mounted = false;
       subscription.unsubscribe();
+      // Cleanup timer on unmount
+      stopSessionRefreshTimer();
     };
   }, [supabase, fetchUserProfile]);
 

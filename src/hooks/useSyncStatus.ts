@@ -7,17 +7,23 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { manualRefresh, getLastSyncTime } from "@/lib/cache/sync";
+import { manualRefresh, getLastSyncTime, getSyncOrchestrator } from "@/lib/cache/sync";
 
 export type SyncStatus = "idle" | "syncing" | "success" | "error";
+
+export interface RefreshResult {
+  success: boolean;
+  message: string;
+}
 
 export interface SyncStatusInfo {
   status: SyncStatus;
   lastSyncTime: number | null;
   lastSyncTimeFormatted: string | null;
   timeSinceLastSync: string | null;
-  refresh: () => Promise<void>;
+  refresh: () => Promise<RefreshResult>;
   isRefreshing: boolean;
+  isReady: boolean; // Whether sync orchestrator is initialized
 }
 
 /**
@@ -27,8 +33,33 @@ export function useSyncStatus(): SyncStatusInfo {
   const queryClient = useQueryClient();
   const [status, setStatus] = useState<SyncStatus>("idle");
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isReady, setIsReady] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<number | null>(null);
   const [currentTime, setCurrentTime] = useState<number>(Date.now());
+
+  // Check if sync orchestrator is ready
+  useEffect(() => {
+    const checkReady = () => {
+      const orchestrator = getSyncOrchestrator();
+      const ready = orchestrator !== null;
+      setIsReady(ready);
+      return ready;
+    };
+
+    // Check immediately
+    if (checkReady()) {
+      return; // Already ready, no need to poll
+    }
+
+    // Poll until ready (for initial app load), then stop
+    const interval = setInterval(() => {
+      if (checkReady()) {
+        clearInterval(interval); // Stop polling once ready
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, []);
 
   // Update current time every second to refresh "time ago" display
   useEffect(() => {
@@ -90,9 +121,17 @@ export function useSyncStatus(): SyncStatusInfo {
 
   /**
    * Manual refresh handler
-   * Now properly validates that refresh actually completed successfully
+   * Returns result with success status and user-friendly message
    */
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (): Promise<RefreshResult> => {
+    // Check if orchestrator is ready
+    if (!isReady) {
+      return {
+        success: false,
+        message: "App is still loading. Please wait a moment and try again.",
+      };
+    }
+
     setIsRefreshing(true);
     setStatus("syncing");
 
@@ -107,6 +146,11 @@ export function useSyncStatus(): SyncStatusInfo {
         setTimeout(() => {
           setStatus("idle");
         }, 2000);
+
+        return {
+          success: true,
+          message: "Data refreshed successfully",
+        };
       } else {
         // Refresh ran but some operations failed
         console.warn("Refresh completed with some failures");
@@ -116,8 +160,13 @@ export function useSyncStatus(): SyncStatusInfo {
         setTimeout(() => {
           setStatus("idle");
         }, 3000);
+
+        return {
+          success: false,
+          message: "Some data could not be refreshed. Please try again.",
+        };
       }
-    } catch (error) {
+    } catch (error: any) {
       // Orchestrator not initialized or critical failure
       console.error("Manual refresh failed:", error);
       setStatus("error");
@@ -126,10 +175,15 @@ export function useSyncStatus(): SyncStatusInfo {
       setTimeout(() => {
         setStatus("idle");
       }, 3000);
+
+      return {
+        success: false,
+        message: error.message || "Refresh failed. Please try again.",
+      };
     } finally {
       setIsRefreshing(false);
     }
-  }, []);
+  }, [isReady]);
 
   /**
    * Format last sync time
@@ -152,6 +206,7 @@ export function useSyncStatus(): SyncStatusInfo {
     timeSinceLastSync,
     refresh,
     isRefreshing,
+    isReady,
   };
 }
 
