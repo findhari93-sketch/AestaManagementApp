@@ -109,6 +109,9 @@ interface SelectedLaborer {
   breakHours: number;
   totalHours: number;
   dayUnits: number;
+  // Salary override
+  salaryOverride: number | null;
+  salaryOverrideReason: string;
 }
 
 // Extended to include time tracking
@@ -128,6 +131,9 @@ interface MarketLaborerEntry {
   breakHours: number;
   totalHours: number;
   dayUnits: number;
+  // Salary override
+  salaryOverridePerPerson: number | null;
+  salaryOverrideReason: string;
 }
 
 interface LaborRole {
@@ -199,6 +205,18 @@ const WORK_UNIT_PRESETS: WorkUnitPreset[] = [
     minHours: 12,
     maxHours: 16,
     description: "Full day + overtime",
+  },
+  {
+    value: 2.5,
+    label: "Extra",
+    shortLabel: "2.5",
+    inTime: "06:00",
+    outTime: "23:00",
+    lunchOut: "13:00",
+    lunchIn: "14:00",
+    minHours: 16,
+    maxHours: 18,
+    description: "6 AM - 11 PM extended shift",
   },
 ];
 
@@ -608,7 +626,7 @@ export default function AttendanceDrawer({
       const { data: attendanceData, error: attendanceError } = await supabase
         .from("daily_attendance")
         .select(
-          "laborer_id, work_days, daily_rate_applied, section_id, in_time, lunch_out, lunch_in, out_time, work_hours, break_hours, total_hours, day_units, entered_by, recorded_by_user_id, attendance_status, work_progress_percent"
+          "laborer_id, work_days, daily_rate_applied, section_id, in_time, lunch_out, lunch_in, out_time, work_hours, break_hours, total_hours, day_units, entered_by, recorded_by_user_id, attendance_status, work_progress_percent, salary_override, salary_override_reason"
         )
         .eq("site_id", siteId)
         .eq("date", dateToLoad);
@@ -648,6 +666,8 @@ export default function AttendanceDrawer({
           breakHours: record.break_hours || 0,
           totalHours: record.total_hours || 0,
           dayUnits: record.day_units || 1,
+          salaryOverride: record.salary_override ?? null,
+          salaryOverrideReason: record.salary_override_reason || "",
         });
         if (!loadedSectionId && record.section_id) {
           loadedSectionId = record.section_id;
@@ -664,7 +684,7 @@ export default function AttendanceDrawer({
         supabase.from("market_laborer_attendance") as any
       )
         .select(
-          "id, role_id, count, work_days, rate_per_person, in_time, lunch_out, lunch_in, out_time, work_hours, break_hours, total_hours, day_units, labor_roles(name)"
+          "id, role_id, count, work_days, rate_per_person, in_time, lunch_out, lunch_in, out_time, work_hours, break_hours, total_hours, day_units, salary_override_per_person, salary_override_reason, labor_roles(name)"
         )
         .eq("site_id", siteId)
         .eq("date", dateToLoad);
@@ -687,6 +707,8 @@ export default function AttendanceDrawer({
             breakHours: m.break_hours || 0,
             totalHours: m.total_hours || 0,
             dayUnits: m.day_units || 1,
+            salaryOverridePerPerson: m.salary_override_per_person ?? null,
+            salaryOverrideReason: m.salary_override_reason || "",
           })
         );
         setMarketLaborers(existingMarket);
@@ -838,7 +860,8 @@ export default function AttendanceDrawer({
     selectedLaborers.forEach((s) => {
       namedCount++;
       const laborer = laborers.find((l) => l.id === s.laborerId);
-      const salary = s.dayUnits * s.dailyRate;
+      // Use salary override if present, otherwise calculated
+      const salary = s.salaryOverride ?? (s.dayUnits * s.dailyRate);
       namedSalary += salary;
 
       if (laborer?.laborer_type === "contract") {
@@ -850,7 +873,9 @@ export default function AttendanceDrawer({
 
     marketLaborers.forEach((m) => {
       marketCount += m.count;
-      marketSalary += m.count * m.ratePerPerson * m.dayUnits;
+      // Use salary override per person if present
+      const ratePerPerson = m.salaryOverridePerPerson ?? m.ratePerPerson;
+      marketSalary += m.count * ratePerPerson * m.dayUnits;
     });
 
     const totalSalary = namedSalary + marketSalary;
@@ -892,6 +917,8 @@ export default function AttendanceDrawer({
           outTime: defaultOutTime,
           ...timeCalc,
           dayUnits: 1, // Default to Full Day
+          salaryOverride: null,
+          salaryOverrideReason: "",
         });
       }
       return newMap;
@@ -927,6 +954,8 @@ export default function AttendanceDrawer({
         outTime: defaultOutTime,
         ...timeCalc,
         dayUnits: 1, // Default to Full Day
+        salaryOverridePerPerson: null,
+        salaryOverrideReason: "",
       },
     ]);
   };
@@ -1007,7 +1036,7 @@ export default function AttendanceDrawer({
   const handleLaborerFieldChange = (
     laborerId: string,
     field: string,
-    value: string | number
+    value: string | number | null
   ) => {
     setSelectedLaborers((prev) => {
       const newMap = new Map(prev);
@@ -1018,6 +1047,7 @@ export default function AttendanceDrawer({
 
       if (field === "dayUnits") {
         // When work unit changes, auto-populate times from preset
+        // Also clear salary override since calculation base changed
         const newDayUnits = value as number;
         const preset = getPresetByValue(newDayUnits);
         const inTime = preset.inTime;
@@ -1033,6 +1063,8 @@ export default function AttendanceDrawer({
           lunchOut,
           lunchIn,
           ...timeCalc,
+          salaryOverride: null,
+          salaryOverrideReason: "",
         };
       } else if (["inTime", "lunchOut", "lunchIn", "outTime"].includes(field)) {
         // When times change, recalculate hours but preserve dayUnits
@@ -1044,6 +1076,11 @@ export default function AttendanceDrawer({
           field === "lunchIn" ? (value as string) : updated.lunchIn
         );
         updated = { ...updated, ...timeCalc }; // dayUnits NOT overwritten
+      } else if (field === "salaryOverride") {
+        // Handle salary override - can be null to clear
+        updated = { ...updated, salaryOverride: value as number | null };
+      } else if (field === "salaryOverrideReason") {
+        updated = { ...updated, salaryOverrideReason: value as string };
       } else {
         updated = { ...updated, [field]: value };
       }
@@ -1209,6 +1246,8 @@ export default function AttendanceDrawer({
       const now = new Date().toISOString();
 
       const namedRecords = Array.from(selectedLaborers.values()).map((s) => {
+        // Use salary override if present, otherwise calculated
+        const effectiveSalary = s.salaryOverride ?? (s.dayUnits * s.dailyRate);
         const record: Record<string, unknown> = {
           date: selectedDate,
           laborer_id: s.laborerId,
@@ -1217,7 +1256,7 @@ export default function AttendanceDrawer({
           work_days: s.dayUnits,
           hours_worked: s.workHours || 0,
           daily_rate_applied: s.dailyRate,
-          daily_earnings: s.dayUnits * s.dailyRate,
+          daily_earnings: effectiveSalary,
           recorded_by: userProfile?.name || "Unknown",
           is_paid: false,
           synced_to_expense: true,
@@ -1230,6 +1269,9 @@ export default function AttendanceDrawer({
           break_hours: s.breakHours || 0,
           total_hours: s.totalHours || 0,
           day_units: s.dayUnits,
+          // Salary override fields
+          salary_override: s.salaryOverride,
+          salary_override_reason: s.salaryOverrideReason || null,
           // Two-phase attendance fields
           attendance_status: attendanceStatus,
           work_progress_percent: workProgressPercent,
@@ -1345,6 +1387,8 @@ export default function AttendanceDrawer({
       if (marketLaborers.length > 0) {
         console.log("[AttendanceDrawer] Preparing market laborer records...");
         const marketRecords = marketLaborers.map((m) => {
+          // Use salary override per person if present
+          const effectiveRate = m.salaryOverridePerPerson ?? m.ratePerPerson;
           const record: Record<string, unknown> = {
             site_id: siteId,
             section_id: sectionId,
@@ -1353,7 +1397,10 @@ export default function AttendanceDrawer({
             count: m.count,
             work_days: m.dayUnits,
             rate_per_person: m.ratePerPerson,
-            total_cost: m.count * m.ratePerPerson * m.dayUnits,
+            total_cost: m.count * effectiveRate * m.dayUnits,
+            // Salary override fields
+            salary_override_per_person: m.salaryOverridePerPerson,
+            salary_override_reason: m.salaryOverrideReason || null,
             // Audit fields: entered_by stores the human-readable name, entered_by_user_id stores the uuid
             entered_by: userProfile?.name || "Unknown",
             // Time tracking fields
@@ -2648,19 +2695,35 @@ export default function AttendanceDrawer({
                                       fontWeight={700}
                                       color="success.main"
                                     >
-                                      ₹
-                                      {(
-                                        selection.dayUnits * selection.dailyRate
-                                      ).toLocaleString()}
+                                      {selection.salaryOverride ? (
+                                        <>
+                                          ₹{selection.salaryOverride.toLocaleString()}
+                                          <Typography
+                                            component="span"
+                                            variant="caption"
+                                            color="text.secondary"
+                                            sx={{ ml: 0.5, textDecoration: "line-through" }}
+                                          >
+                                            (₹{(selection.dayUnits * selection.dailyRate).toLocaleString()})
+                                          </Typography>
+                                        </>
+                                      ) : (
+                                        <>
+                                          ₹
+                                          {(
+                                            selection.dayUnits * selection.dailyRate
+                                          ).toLocaleString()}
+                                        </>
+                                      )}
                                     </Typography>
-                                    {/* Settings button to expand time fields */}
+                                    {/* Settings button to expand time & salary fields */}
                                     <Tooltip
                                       title={
                                         expandedLaborerTimes.has(
                                           selection.laborerId
                                         )
-                                          ? "Hide custom times"
-                                          : "Set custom times"
+                                          ? "Hide settings"
+                                          : "Custom time & salary"
                                       }
                                     >
                                       <IconButton
@@ -2804,6 +2867,81 @@ export default function AttendanceDrawer({
                                     </Grid>
                                     )}
                                   </Grid>
+
+                                  {/* Salary Override Section - Only show in non-morning mode */}
+                                  {mode !== "morning" && (
+                                    <>
+                                      <Divider sx={{ my: 2 }} />
+                                      <Typography
+                                        variant="caption"
+                                        color="text.secondary"
+                                        sx={{ mb: 1, display: "block" }}
+                                      >
+                                        Salary Override (optional)
+                                      </Typography>
+                                      <Grid container spacing={1.5}>
+                                        <Grid size={6}>
+                                          <TextField
+                                            fullWidth
+                                            size="small"
+                                            type="number"
+                                            label="Final Salary"
+                                            placeholder={String(
+                                              selection.dayUnits * selection.dailyRate
+                                            )}
+                                            value={selection.salaryOverride ?? ""}
+                                            onChange={(e) => {
+                                              const value =
+                                                e.target.value === ""
+                                                  ? null
+                                                  : parseFloat(e.target.value);
+                                              handleLaborerFieldChange(
+                                                selection.laborerId,
+                                                "salaryOverride",
+                                                value
+                                              );
+                                            }}
+                                            slotProps={{
+                                              input: {
+                                                startAdornment: (
+                                                  <InputAdornment position="start">
+                                                    ₹
+                                                  </InputAdornment>
+                                                ),
+                                              },
+                                              inputLabel: { shrink: true },
+                                            }}
+                                            helperText={
+                                              selection.salaryOverride
+                                                ? `Calculated: ₹${(
+                                                    selection.dayUnits * selection.dailyRate
+                                                  ).toLocaleString()}`
+                                                : undefined
+                                            }
+                                          />
+                                        </Grid>
+                                        <Grid size={6}>
+                                          <TextField
+                                            fullWidth
+                                            size="small"
+                                            label="Reason"
+                                            placeholder="e.g., Festival bonus"
+                                            value={selection.salaryOverrideReason}
+                                            onChange={(e) =>
+                                              handleLaborerFieldChange(
+                                                selection.laborerId,
+                                                "salaryOverrideReason",
+                                                e.target.value
+                                              )
+                                            }
+                                            slotProps={{
+                                              inputLabel: { shrink: true },
+                                            }}
+                                          />
+                                        </Grid>
+                                      </Grid>
+                                    </>
+                                  )}
                                 </Box>
                               </Collapse>
                             </Box>
@@ -2843,6 +2981,8 @@ export default function AttendanceDrawer({
                           outTime: defaultOutTime,
                           ...timeCalc,
                           dayUnits: 1, // Default to Full Day for new selections
+                          salaryOverride: null,
+                          salaryOverrideReason: "",
                         });
                       }
                     });
@@ -3498,6 +3638,8 @@ export default function AttendanceDrawer({
             outTime: defaultOutTime,
             ...timeCalc,
             dayUnits: group.dayUnits,
+            salaryOverridePerPerson: null,
+            salaryOverrideReason: "",
           }));
 
           setMarketLaborers((prev) => [...prev, ...newMarketLaborers]);

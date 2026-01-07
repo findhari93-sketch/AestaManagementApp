@@ -620,6 +620,8 @@ export type Database = {
           payment_proof_url: string | null
           recorded_by: string | null
           recorded_by_user_id: string | null
+          salary_override: number | null
+          salary_override_reason: string | null
           section_id: string | null
           settlement_group_id: string | null
           site_id: string
@@ -677,6 +679,8 @@ export type Database = {
           payment_proof_url?: string | null
           recorded_by?: string | null
           recorded_by_user_id?: string | null
+          salary_override?: number | null
+          salary_override_reason?: string | null
           section_id?: string | null
           settlement_group_id?: string | null
           site_id: string
@@ -734,6 +738,8 @@ export type Database = {
           payment_proof_url?: string | null
           recorded_by?: string | null
           recorded_by_user_id?: string | null
+          salary_override?: number | null
+          salary_override_reason?: string | null
           section_id?: string | null
           settlement_group_id?: string | null
           site_id?: string
@@ -3432,6 +3438,8 @@ export type Database = {
           payment_proof_url: string | null
           rate_per_person: number
           role_id: string
+          salary_override_per_person: number | null
+          salary_override_reason: string | null
           section_id: string | null
           settlement_group_id: string | null
           site_id: string
@@ -3475,6 +3483,8 @@ export type Database = {
           payment_proof_url?: string | null
           rate_per_person: number
           role_id: string
+          salary_override_per_person?: number | null
+          salary_override_reason?: string | null
           section_id?: string | null
           settlement_group_id?: string | null
           site_id: string
@@ -3518,6 +3528,8 @@ export type Database = {
           payment_proof_url?: string | null
           rate_per_person?: number
           role_id?: string
+          salary_override_per_person?: number | null
+          salary_override_reason?: string | null
           section_id?: string | null
           settlement_group_id?: string | null
           site_id?: string
@@ -11083,7 +11095,7 @@ export type Database = {
         | "manufacturer"
         | "individual"
         | "rental_store"
-      work_days_value: "0.5" | "1" | "1.5" | "2"
+      work_days_value: "0.5" | "1" | "1.5" | "2" | "2.5"
       work_variance: "overtime" | "standard" | "undertime"
     }
     CompositeTypes: {
@@ -11333,7 +11345,7 @@ export const Constants = {
         "individual",
         "rental_store",
       ],
-      work_days_value: ["0.5", "1", "1.5", "2"],
+      work_days_value: ["0.5", "1", "1.5", "2", "2.5"],
       work_variance: ["overtime", "standard", "undertime"],
     },
   },

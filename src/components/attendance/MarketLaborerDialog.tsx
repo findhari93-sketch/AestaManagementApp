@@ -59,6 +59,7 @@ const DAY_UNIT_OPTIONS = [
   { value: 1, label: "1" },
   { value: 1.5, label: "1½" },
   { value: 2, label: "2" },
+  { value: 2.5, label: "2½" },
 ];
 
 export default function MarketLaborerDialog({

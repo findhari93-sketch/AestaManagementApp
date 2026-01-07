@@ -12,7 +12,7 @@ import { TableConfig, MassUploadTableName, FieldConfig } from '@/types/mass-uplo
 const PAYMENT_MODES = ['cash', 'upi', 'bank_transfer', 'cheque', 'other'];
 
 // Work days allowed values
-const WORK_DAYS_VALUES = ['0.5', '1', '1.5', '2'];
+const WORK_DAYS_VALUES = ['0.5', '1', '1.5', '2', '2.5'];
 
 // Expense module enum values
 const EXPENSE_MODULES = ['labor', 'material', 'machinery', 'general'];
