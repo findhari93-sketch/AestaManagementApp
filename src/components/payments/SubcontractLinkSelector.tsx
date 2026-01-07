@@ -55,10 +55,10 @@ export default function SubcontractLinkSelector({
       try {
         // Fetch subcontracts with their payment totals
         // Fetch teams first to avoid FK ambiguity issues with PostgREST
+        // Note: teams table is global, not site-specific
         const { data: teamsData } = await supabase
           .from("teams")
-          .select("id, name")
-          .eq("site_id", selectedSite.id);
+          .select("id, name");
 
         const teamsMap = new Map<string, string>();
         (teamsData || []).forEach((t: any) => teamsMap.set(t.id, t.name));

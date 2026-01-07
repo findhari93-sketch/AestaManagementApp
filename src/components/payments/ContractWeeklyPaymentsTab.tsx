@@ -730,10 +730,10 @@ export default function ContractWeeklyPaymentsTab({
         .eq("site_id", selectedSite.id)
         .in("status", ["active", "on_hold"]);
 
+      // Note: teams table is global, not site-specific
       const { data: teamsData } = await supabase
         .from("teams")
         .select("id, name")
-        .eq("site_id", selectedSite.id)
         .eq("status", "active");
 
       setSubcontracts(subcontractsData || []);
