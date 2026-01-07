@@ -125,9 +125,12 @@ export function SiteProvider({ children }: { children: React.ReactNode }) {
 
       // Update selected site
       setSelectedSiteState((prevSelected) => {
-        // Keep existing selection if valid
-        if (prevSelected && sitesData.some((s) => s.id === prevSelected.id)) {
-          return prevSelected;
+        // Keep existing selection if valid, but use FRESH data from sitesData
+        if (prevSelected) {
+          const freshSite = sitesData.find((s) => s.id === prevSelected.id);
+          if (freshSite) {
+            return freshSite; // Return fresh data, not stale cached data
+          }
         }
 
         // No sites available

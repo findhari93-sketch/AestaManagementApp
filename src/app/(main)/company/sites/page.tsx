@@ -65,6 +65,7 @@ import {
 import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { useSite } from "@/contexts/SiteContext";
 import PageHeader from "@/components/layout/PageHeader";
 import type {
   Site,
@@ -147,6 +148,7 @@ export default function CompanySitesPage() {
   const [milestonesGenerated, setMilestonesGenerated] = useState(false);
 
   const { userProfile } = useAuth();
+  const { refreshSites: refreshSiteContext } = useSite();
   const supabase = createClient();
 
   const [form, setForm] = useState({
@@ -856,7 +858,10 @@ export default function CompanySitesPage() {
       setDialogOpen(false);
       setLoading(false);
       // Reload sites after dialog closes
-      setTimeout(() => fetchSites(), 100);
+      setTimeout(() => {
+        fetchSites();
+        refreshSiteContext(); // Also refresh global SiteContext so attendance page gets fresh data
+      }, 100);
     } catch (err: any) {
       setSnackbar({
         open: true,
