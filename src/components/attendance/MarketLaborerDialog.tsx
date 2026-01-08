@@ -155,6 +155,9 @@ export default function MarketLaborerDialog({
   const handleConfirm = () => {
     // Filter out groups with 0 count
     const validGroups = groups.filter((g) => g.count > 0);
+
+    // Allow multiple entries for the same role (each becomes a separate worker)
+    // No merging - each group is a separate worker with their own work days/rate
     if (validGroups.length > 0) {
       onConfirm(validGroups);
     }

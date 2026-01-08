@@ -114,7 +114,7 @@ interface SelectedLaborer {
   salaryOverrideReason: string;
 }
 
-// Extended to include time tracking
+// Extended to include time tracking and individual worker tracking
 interface MarketLaborerEntry {
   id: string;
   roleId: string;
@@ -122,7 +122,9 @@ interface MarketLaborerEntry {
   count: number;
   workDays: number;
   ratePerPerson: number;
-  // Time tracking (group-level)
+  // Worker index for multiple workers of same role (Mason #1, Mason #2, etc.)
+  workerIndex: number;
+  // Time tracking (per-worker)
   inTime: string;
   lunchOut: string;
   lunchIn: string;
@@ -684,10 +686,11 @@ export default function AttendanceDrawer({
         supabase.from("market_laborer_attendance") as any
       )
         .select(
-          "id, role_id, count, work_days, rate_per_person, in_time, lunch_out, lunch_in, out_time, work_hours, break_hours, total_hours, day_units, salary_override_per_person, salary_override_reason, labor_roles(name)"
+          "id, role_id, worker_index, count, work_days, rate_per_person, in_time, lunch_out, lunch_in, out_time, work_hours, break_hours, total_hours, day_units, salary_override_per_person, salary_override_reason, labor_roles(name)"
         )
         .eq("site_id", siteId)
-        .eq("date", dateToLoad);
+        .eq("date", dateToLoad)
+        .order("worker_index", { ascending: true });
 
       let marketCount = 0;
       if (!marketError && marketData) {
@@ -696,7 +699,8 @@ export default function AttendanceDrawer({
             id: m.id,
             roleId: m.role_id,
             roleName: m.labor_roles?.name || "Unknown",
-            count: m.count,
+            workerIndex: m.worker_index || 1,
+            count: m.count || 1,
             workDays: m.work_days || 1,
             ratePerPerson: m.rate_per_person,
             inTime: m.in_time || "08:00",
@@ -712,7 +716,7 @@ export default function AttendanceDrawer({
           })
         );
         setMarketLaborers(existingMarket);
-        marketCount = existingMarket.reduce((acc, m) => acc + m.count, 0);
+        marketCount = existingMarket.length; // Each entry is 1 worker now
       } else {
         setMarketLaborers([]);
       }
@@ -928,10 +932,18 @@ export default function AttendanceDrawer({
   const handleAddMarketLaborer = () => {
     if (laborRoles.length === 0) return;
 
+    // Prefer unused role, but allow adding same role again (will get next worker index)
     const unusedRole = laborRoles.find(
       (role) => !marketLaborers.some((m) => m.roleId === role.id)
     );
     const role = unusedRole || laborRoles[0];
+
+    // Calculate next worker index for this role
+    const existingForRole = marketLaborers.filter((m) => m.roleId === role.id);
+    const nextWorkerIndex = existingForRole.length > 0
+      ? Math.max(...existingForRole.map((m) => m.workerIndex || 1)) + 1
+      : 1;
+
     const timeCalc = calculateTimeHours(
       defaultInTime,
       defaultOutTime,
@@ -945,7 +957,8 @@ export default function AttendanceDrawer({
         id: `new-${Date.now()}`,
         roleId: role.id,
         roleName: role.name,
-        count: 1,
+        count: 1, // Each entry is 1 worker
+        workerIndex: nextWorkerIndex,
         workDays: 1,
         ratePerPerson: role.default_daily_rate,
         inTime: defaultInTime,
@@ -1388,12 +1401,19 @@ export default function AttendanceDrawer({
             "[AttendanceDrawer] Error deleting existing market attendance:",
             marketDeleteError
           );
-          // Continue anyway
+          // If delete fails and we have market laborers to insert, throw error to prevent duplicates
+          if (marketLaborers.length > 0) {
+            throw new Error("Failed to delete existing market attendance. Please try again.");
+          }
         } else {
           console.log("[AttendanceDrawer] Market attendance delete completed");
         }
       } catch (marketTimeoutErr) {
         console.error("[AttendanceDrawer] Market delete timed out:", marketTimeoutErr);
+        // If delete times out and we have market laborers to insert, throw error to prevent duplicates
+        if (marketLaborers.length > 0) {
+          throw marketTimeoutErr;
+        }
       }
 
       if (marketLaborers.length > 0) {
@@ -1406,10 +1426,11 @@ export default function AttendanceDrawer({
             section_id: sectionId,
             date: selectedDate,
             role_id: m.roleId,
-            count: m.count,
+            worker_index: m.workerIndex || 1, // Worker index for same-role differentiation
+            count: 1, // Each entry is now 1 worker
             work_days: m.dayUnits,
             rate_per_person: m.ratePerPerson,
-            total_cost: m.count * effectiveRate * m.dayUnits,
+            total_cost: effectiveRate * m.dayUnits, // 1 worker * rate * days
             // Salary override fields
             salary_override_per_person: m.salaryOverridePerPerson,
             salary_override_reason: m.salaryOverrideReason || null,
@@ -3087,8 +3108,7 @@ export default function AttendanceDrawer({
                         color="text.secondary"
                         fontWeight={600}
                       >
-                        Market Laborers (
-                        {marketLaborers.reduce((acc, m) => acc + m.count, 0)})
+                        Market Laborers ({marketLaborers.length})
                       </Typography>
                       <Button
                         size="small"
@@ -3130,6 +3150,20 @@ export default function AttendanceDrawer({
                         },
                       }}
                     >
+                      {/* Worker Title - shows "Mason #1", "Mason #2" etc. */}
+                      <Box sx={{ display: "flex", alignItems: "center", mb: 1.5, gap: 1 }}>
+                        <Typography variant="subtitle2" fontWeight={600} color="warning.dark">
+                          {entry.roleName} #{entry.workerIndex || 1}
+                        </Typography>
+                        <IconButton
+                          size="small"
+                          color="error"
+                          onClick={() => handleRemoveMarketLaborer(entry.id)}
+                          sx={{ ml: "auto" }}
+                        >
+                          <DeleteIcon fontSize="small" />
+                        </IconButton>
+                      </Box>
                       {/* Header Row with Role, Count, Rate */}
                       <Grid container spacing={2} alignItems="flex-start">
                         <Grid size={4}>
@@ -3137,13 +3171,18 @@ export default function AttendanceDrawer({
                             <InputLabel>Role</InputLabel>
                             <Select
                               value={entry.roleId}
-                              onChange={(e) =>
+                              onChange={(e) => {
+                                const newRole = laborRoles.find(r => r.id === e.target.value);
                                 handleMarketLaborerChange(
                                   entry.id,
                                   "roleId",
                                   e.target.value
-                                )
-                              }
+                                );
+                                // Update roleName when role changes
+                                if (newRole) {
+                                  handleMarketLaborerChange(entry.id, "roleName", newRole.name);
+                                }
+                              }}
                               label="Role"
                             >
                               {laborRoles.map((role) => (
@@ -3154,23 +3193,7 @@ export default function AttendanceDrawer({
                             </Select>
                           </FormControl>
                         </Grid>
-                        <Grid size={2}>
-                          <TextField
-                            fullWidth
-                            size="small"
-                            label="Count"
-                            type="number"
-                            value={entry.count}
-                            onChange={(e) =>
-                              handleMarketLaborerChange(
-                                entry.id,
-                                "count",
-                                Number(e.target.value)
-                              )
-                            }
-                            slotProps={{ htmlInput: { min: 1 } }}
-                          />
-                        </Grid>
+                        {/* Count field removed - each entry is now 1 worker */}
                         {/* Salary Badge - Morning mode only */}
                         {mode === "morning" && (
                           <Grid size={5}>
@@ -3244,18 +3267,6 @@ export default function AttendanceDrawer({
                             </Box>
                           </Grid>
                         )}
-                        <Grid
-                          size={1}
-                          sx={{ display: "flex", justifyContent: "center" }}
-                        >
-                          <IconButton
-                            size="small"
-                            color="error"
-                            onClick={() => handleRemoveMarketLaborer(entry.id)}
-                          >
-                            <DeleteIcon fontSize="small" />
-                          </IconButton>
-                        </Grid>
                       </Grid>
 
                       {/* Work Unit Selection - Now visible in all modes */}
@@ -3660,25 +3671,43 @@ export default function AttendanceDrawer({
             defaultLunchIn
           );
 
-          // Add groups as market laborers
-          const newMarketLaborers: MarketLaborerEntry[] = groups.map((group) => ({
-            id: `new-${Date.now()}-${group.id}`,
-            roleId: group.roleId,
-            roleName: group.roleName,
-            count: group.count,
-            workDays: group.dayUnits, // Use dayUnits as workDays
-            ratePerPerson: group.rate,
-            inTime: defaultInTime,
-            lunchOut: defaultLunchOut,
-            lunchIn: defaultLunchIn,
-            outTime: defaultOutTime,
-            ...timeCalc,
-            dayUnits: group.dayUnits,
-            salaryOverridePerPerson: null,
-            salaryOverrideReason: "",
-          }));
+          // Add groups as market laborers - each group becomes a separate worker entry
+          setMarketLaborers((prev) => {
+            // Calculate max worker index for each role
+            const maxIndexByRole = new Map<string, number>();
+            prev.forEach((m) => {
+              const current = maxIndexByRole.get(m.roleId) || 0;
+              maxIndexByRole.set(m.roleId, Math.max(current, m.workerIndex || 1));
+            });
 
-          setMarketLaborers((prev) => [...prev, ...newMarketLaborers]);
+            // Create new entries with proper worker indices
+            const newEntries: MarketLaborerEntry[] = groups.map((group, idx) => {
+              const currentMax = maxIndexByRole.get(group.roleId) || 0;
+              // Count how many of this role we've added in this batch
+              const sameRoleBefore = groups.slice(0, idx).filter((g) => g.roleId === group.roleId).length;
+              const workerIndex = currentMax + sameRoleBefore + 1;
+
+              return {
+                id: `new-${Date.now()}-${group.id}`,
+                roleId: group.roleId,
+                roleName: group.roleName,
+                count: 1, // Each entry is 1 worker
+                workerIndex,
+                workDays: group.dayUnits,
+                ratePerPerson: group.rate,
+                inTime: defaultInTime,
+                lunchOut: defaultLunchOut,
+                lunchIn: defaultLunchIn,
+                outTime: defaultOutTime,
+                ...timeCalc,
+                dayUnits: group.dayUnits,
+                salaryOverridePerPerson: null,
+                salaryOverrideReason: "",
+              };
+            });
+
+            return [...prev, ...newEntries];
+          });
         }}
         defaultTimes={{
           inTime: defaultInTime,

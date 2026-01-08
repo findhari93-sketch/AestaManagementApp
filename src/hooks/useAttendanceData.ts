@@ -89,13 +89,11 @@ async function fetchAttendanceData(
   }
 
   // Build tea shop allocations query (this site's share of group entries from other sites)
-  let teaShopAllocationsQuery = ((supabase as any).from("tea_shop_entry_allocations"))
+  // Note: We fetch all allocations and filter by date client-side since Supabase
+  // doesn't support filtering on nested relation fields like entry.date
+  const teaShopAllocationsQuery = ((supabase as any).from("tea_shop_entry_allocations"))
     .select("allocated_amount, allocation_percentage, entry_id, entry:tea_shop_entries!inner(id, date, total_amount, is_group_entry, site_group_id)")
     .eq("site_id", siteId);
-
-  if (!isAllTime && dateFrom && dateTo) {
-    teaShopAllocationsQuery = teaShopAllocationsQuery.gte("entry.date", dateFrom).lte("entry.date", dateTo);
-  }
 
   // Execute all queries in parallel
   const [attendanceResult, marketResult, summaryResult, teaShopResult, teaShopAllocationsResult] =
@@ -128,12 +126,21 @@ async function fetchAttendanceData(
     console.warn("Tea shop allocations query failed:", teaShopAllocationsResult.error);
   }
 
+  // Filter tea shop allocations by date client-side (since Supabase doesn't support nested field filtering)
+  let filteredAllocations = teaShopAllocationsResult.data || [];
+  if (!isAllTime && dateFrom && dateTo) {
+    filteredAllocations = filteredAllocations.filter((allocation: any) => {
+      const entryDate = allocation.entry?.date;
+      return entryDate && entryDate >= dateFrom && entryDate <= dateTo;
+    });
+  }
+
   return {
     dailyAttendance: attendanceResult.data || [],
     marketAttendance: marketResult.data || [],
     workSummaries: summaryResult.data || [],
     teaShopEntries: teaShopResult.data || [],
-    teaShopAllocations: teaShopAllocationsResult.data || [],
+    teaShopAllocations: filteredAllocations,
   };
 }
 

@@ -5352,6 +5352,7 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
                   <MenuItem value={1}>1 (Full Day)</MenuItem>
                   <MenuItem value={1.5}>1.5</MenuItem>
                   <MenuItem value={2}>2</MenuItem>
+                  <MenuItem value={2.5}>2.5 (Extra)</MenuItem>
                 </Select>
               </FormControl>
 
@@ -5488,6 +5489,7 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
                   <MenuItem value={1}>1 (Full Day)</MenuItem>
                   <MenuItem value={1.5}>1.5</MenuItem>
                   <MenuItem value={2}>2</MenuItem>
+                  <MenuItem value={2.5}>2.5 (Extra)</MenuItem>
                 </Select>
               </FormControl>
 
