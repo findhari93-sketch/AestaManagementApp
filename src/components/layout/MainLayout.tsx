@@ -908,8 +908,9 @@ export default function MainLayout({
               noWrap
               sx={{ fontSize: "0.7rem" }}
             >
-              {userProfile?.role?.charAt(0).toUpperCase() +
-                (userProfile?.role?.slice(1) || "")}
+              {userProfile?.role
+                ? userProfile.role.charAt(0).toUpperCase() + userProfile.role.slice(1)
+                : ""}
             </Typography>
           </Box>
           <ThemeToggle />

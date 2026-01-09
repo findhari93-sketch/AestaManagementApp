@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState, useCallback } from "react";
+import { createContext, useContext, useEffect, useState, useCallback, useRef } from "react";
 import { User as SupabaseUser } from "@supabase/supabase-js";
 import { createClient, startSessionRefreshTimer, stopSessionRefreshTimer } from "@/lib/supabase/client";
 import { User } from "@/types/database.types";
@@ -21,6 +21,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [userProfile, setUserProfile] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [supabase] = useState(() => createClient());
+  const userProfileRef = useRef<User | null>(null);
+
+  // Keep ref in sync with state
+  useEffect(() => {
+    userProfileRef.current = userProfile;
+  }, [userProfile]);
 
   const fetchUserProfile = useCallback(async (userId: string) => {
     try {
@@ -103,7 +109,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(session?.user ?? null);
 
       if (session?.user) {
-        await fetchUserProfile(session.user.id);
+        // Skip profile fetch on TOKEN_REFRESHED if we already have the profile
+        // This prevents unnecessary API calls on token refresh
+        if (_event === "TOKEN_REFRESHED" && userProfileRef.current) {
+          console.log("[AuthContext] Skipping profile fetch on TOKEN_REFRESHED - already loaded");
+        } else {
+          await fetchUserProfile(session.user.id);
+        }
         // Start session refresh timer when user signs in
         startSessionRefreshTimer();
       } else {
