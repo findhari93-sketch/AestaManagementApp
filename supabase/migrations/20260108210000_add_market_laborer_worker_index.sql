@@ -10,11 +10,20 @@ ADD COLUMN IF NOT EXISTS worker_index INTEGER NOT NULL DEFAULT 1;
 ALTER TABLE market_laborer_attendance
 DROP CONSTRAINT IF EXISTS market_laborer_attendance_site_id_date_role_id_key;
 
--- Step 3: Add new unique constraint that includes worker_index
+-- Step 3: Add new unique constraint that includes worker_index (if not exists)
 -- This allows: (site_1, 2026-01-06, mason_role, 1) AND (site_1, 2026-01-06, mason_role, 2)
-ALTER TABLE market_laborer_attendance
-ADD CONSTRAINT market_laborer_attendance_site_date_role_worker_key
-UNIQUE (site_id, date, role_id, worker_index);
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'market_laborer_attendance_site_date_role_worker_key'
+    ) THEN
+        ALTER TABLE market_laborer_attendance
+        ADD CONSTRAINT market_laborer_attendance_site_date_role_worker_key
+        UNIQUE (site_id, date, role_id, worker_index);
+    END IF;
+END
+$$;
 
 -- Step 4: For existing records with count > 1, we'll keep them as-is
 -- The application will handle individual workers going forward

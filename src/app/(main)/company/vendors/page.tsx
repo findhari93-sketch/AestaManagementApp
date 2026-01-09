@@ -1,8 +1,6 @@
 "use client";
 
-export const dynamic = 'force-dynamic';
-
-import { useMemo, useState, useCallback } from "react";
+import { useMemo, useState, useCallback, useDeferredValue } from "react";
 import { useRouter } from "next/navigation";
 import {
   Box,
@@ -26,13 +24,13 @@ import {
   WhatsApp as WhatsAppIcon,
   Inventory as InventoryIcon,
 } from "@mui/icons-material";
-import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
+import DataTable, { type MRT_ColumnDef, type PaginationState } from "@/components/common/DataTable";
 import PageHeader from "@/components/layout/PageHeader";
 import { useAuth } from "@/contexts/AuthContext";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { hasEditPermission } from "@/lib/permissions";
 import {
-  useVendors,
+  usePaginatedVendors,
   useDeleteVendor,
 } from "@/hooks/queries/useVendors";
 import { useMaterialCategories } from "@/hooks/queries/useMaterials";
@@ -44,30 +42,34 @@ export default function VendorsPage() {
   const router = useRouter();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingVendor, setEditingVendor] = useState<VendorWithCategories | null>(null);
-  const [searchTerm, setSearchTerm] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+  const [pagination, setPagination] = useState<PaginationState>({ pageIndex: 0, pageSize: 50 });
 
   const { userProfile } = useAuth();
   const isMobile = useIsMobile();
   const canEdit = hasEditPermission(userProfile?.role);
 
-  const { data: vendors = [], isLoading } = useVendors();
+  // Debounce search input
+  const deferredSearch = useDeferredValue(searchInput);
+
+  // Server-side paginated vendors with search
+  const { data: paginatedData, isLoading } = usePaginatedVendors(
+    pagination,
+    undefined, // categoryId
+    deferredSearch.length >= 2 ? deferredSearch : undefined
+  );
+
+  const vendors = paginatedData?.data || [];
+  const totalCount = paginatedData?.totalCount || 0;
+
   const { data: categories = [] } = useMaterialCategories();
   const { data: materialCounts = {} } = useVendorMaterialCounts();
   const deleteVendor = useDeleteVendor();
 
-  // Filter vendors by search term
-  const filteredVendors = useMemo(() => {
-    if (!searchTerm) return vendors;
-    const term = searchTerm.toLowerCase();
-    return vendors.filter(
-      (v) =>
-        v.name.toLowerCase().includes(term) ||
-        v.code?.toLowerCase().includes(term) ||
-        v.contact_person?.toLowerCase().includes(term) ||
-        v.city?.toLowerCase().includes(term) ||
-        v.phone?.includes(term)
-    );
-  }, [vendors, searchTerm]);
+  // Handle pagination change
+  const handlePaginationChange = useCallback((newPagination: PaginationState) => {
+    setPagination(newPagination);
+  }, []);
 
   const handleOpenDialog = useCallback((vendor?: VendorWithCategories) => {
     if (vendor) {
@@ -276,12 +278,15 @@ export default function VendorsPage() {
       />
 
       {/* Search */}
-      <Box sx={{ mb: 2 }}>
+      <Box sx={{ mb: 2, display: "flex", alignItems: "center", gap: 2 }}>
         <TextField
           size="small"
-          placeholder="Search vendors..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
+          placeholder="Search vendors (min 2 chars)..."
+          value={searchInput}
+          onChange={(e) => {
+            setSearchInput(e.target.value);
+            setPagination(prev => ({ ...prev, pageIndex: 0 }));
+          }}
           slotProps={{
             input: {
               startAdornment: (
@@ -293,12 +298,15 @@ export default function VendorsPage() {
           }}
           sx={{ minWidth: 300 }}
         />
+        <Typography variant="caption" color="text.secondary">
+          {totalCount} vendor{totalCount !== 1 ? "s" : ""}
+        </Typography>
       </Box>
 
-      {/* Data Table */}
+      {/* Data Table with Server-Side Pagination */}
       <DataTable
         columns={columns}
-        data={filteredVendors}
+        data={vendors}
         isLoading={isLoading}
         enableRowActions={canEdit}
         renderRowActions={renderRowActions}
@@ -306,6 +314,11 @@ export default function VendorsPage() {
         initialState={{
           sorting: [{ id: "name", desc: false }],
         }}
+        // Server-side pagination
+        manualPagination={true}
+        rowCount={totalCount}
+        pagination={pagination}
+        onPaginationChange={handlePaginationChange}
       />
 
       {/* Mobile FAB */}

@@ -28,13 +28,24 @@ import {
 import PageHeader from "@/components/layout/PageHeader";
 import CategoryDialog, { type CategoryFormData } from "@/components/categories/CategoryDialog";
 import {
-  useMaterialCategories,
   useMaterialCategoryTree,
   useCreateMaterialCategory,
   useUpdateMaterialCategory,
   useDeleteMaterialCategory,
 } from "@/hooks/queries/useMaterials";
 import type { MaterialCategory, MaterialCategoryWithChildren } from "@/types/material.types";
+
+// Helper to count total categories from tree
+function countCategories(categories: MaterialCategoryWithChildren[]): number {
+  let count = 0;
+  for (const cat of categories) {
+    count += 1;
+    if (cat.children && cat.children.length > 0) {
+      count += countCategories(cat.children as MaterialCategoryWithChildren[]);
+    }
+  }
+  return count;
+}
 
 export default function CategoriesPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -46,16 +57,21 @@ export default function CategoriesPage() {
     severity: "success" | "error";
   }>({ open: false, message: "", severity: "success" });
 
+  // Only fetch tree - derive total count from it (eliminates duplicate query)
   const { data: categoriesTree, isLoading } = useMaterialCategoryTree();
-  const { data: allCategories } = useMaterialCategories();
   const createCategory = useCreateMaterialCategory();
   const updateCategory = useUpdateMaterialCategory();
   const deleteCategory = useDeleteMaterialCategory();
 
-  // Count materials per category
+  // Total count derived from tree instead of separate query
+  const totalCategoryCount = useMemo(() => {
+    if (!categoriesTree) return 0;
+    return countCategories(categoriesTree);
+  }, [categoriesTree]);
+
+  // Count materials per category (placeholder - would need actual data)
   const materialCounts = useMemo(() => {
     const counts: Record<string, number> = {};
-    // This would need actual material data - for now just placeholder
     return counts;
   }, []);
 
@@ -304,7 +320,7 @@ export default function CategoriesPage() {
                 Total Categories
               </Typography>
               <Typography variant="h4" fontWeight={700}>
-                {allCategories?.length || 0}
+                {totalCategoryCount}
               </Typography>
             </CardContent>
           </Card>

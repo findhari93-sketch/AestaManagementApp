@@ -1427,10 +1427,10 @@ export default function AttendanceDrawer({
             date: selectedDate,
             role_id: m.roleId,
             worker_index: m.workerIndex || 1, // Worker index for same-role differentiation
-            count: 1, // Each entry is now 1 worker
+            count: m.count, // Use actual count from entry (grouped entry support)
             work_days: m.dayUnits,
             rate_per_person: m.ratePerPerson,
-            total_cost: effectiveRate * m.dayUnits, // 1 worker * rate * days
+            total_cost: effectiveRate * m.count * m.dayUnits, // count * rate * days
             // Salary override fields
             salary_override_per_person: m.salaryOverridePerPerson,
             salary_override_reason: m.salaryOverrideReason || null,
@@ -3134,7 +3134,7 @@ export default function AttendanceDrawer({
                       key={entry.id}
                       sx={{
                         mb: 2,
-                        p: 2,
+                        p: { xs: 1.5, sm: 2 },
                         bgcolor: (theme) =>
                           theme.palette.mode === "dark"
                             ? "rgba(237, 108, 2, 0.08)"
@@ -3150,10 +3150,10 @@ export default function AttendanceDrawer({
                         },
                       }}
                     >
-                      {/* Worker Title - shows "Mason #1", "Mason #2" etc. */}
+                      {/* Worker Title - shows "Mason (3)" for grouped, "Mason #1" for individual */}
                       <Box sx={{ display: "flex", alignItems: "center", mb: 1.5, gap: 1 }}>
                         <Typography variant="subtitle2" fontWeight={600} color="warning.dark">
-                          {entry.roleName} #{entry.workerIndex || 1}
+                          {entry.roleName} {entry.count > 1 ? `(${entry.count})` : `#${entry.workerIndex || 1}`}
                         </Typography>
                         <IconButton
                           size="small"
@@ -3165,8 +3165,8 @@ export default function AttendanceDrawer({
                         </IconButton>
                       </Box>
                       {/* Header Row with Role, Count, Rate */}
-                      <Grid container spacing={2} alignItems="flex-start">
-                        <Grid size={4}>
+                      <Grid container spacing={{ xs: 1, sm: 2 }} alignItems="flex-start">
+                        <Grid size={{ xs: 6, sm: 5 }}>
                           <FormControl fullWidth size="small">
                             <InputLabel>Role</InputLabel>
                             <Select
@@ -3193,10 +3193,9 @@ export default function AttendanceDrawer({
                             </Select>
                           </FormControl>
                         </Grid>
-                        {/* Count field removed - each entry is now 1 worker */}
                         {/* Salary Badge - Morning mode only */}
                         {mode === "morning" && (
-                          <Grid size={5}>
+                          <Grid size={{ xs: 6, sm: 5 }}>
                             <Box sx={{ display: "flex", alignItems: "center", height: "100%", pt: 0.5 }}>
                               <Typography
                                 variant="caption"
@@ -3561,7 +3560,7 @@ export default function AttendanceDrawer({
             </Typography>
           </Box>
 
-          <Box sx={{ display: 'flex', gap: 1, flexDirection: { xs: 'column', sm: 'row' } }}>
+          <Box sx={{ display: 'flex', gap: 1 }}>
             <Button
               variant="outlined"
               color="warning"
@@ -3572,12 +3571,14 @@ export default function AttendanceDrawer({
                 savingDraft ||
                 (selectedLaborers.size === 0 && marketLaborers.length === 0)
               }
-              sx={{ flex: { xs: 'auto', sm: 1 } }}
+              sx={{ flex: 1 }}
             >
               {savingDraft ? (
                 <CircularProgress size={24} color="inherit" />
               ) : (
-                "Save as Draft"
+                <>
+                  <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>Save as </Box>Draft
+                </>
               )}
             </Button>
             <Button
@@ -3589,16 +3590,22 @@ export default function AttendanceDrawer({
                 savingDraft ||
                 (selectedLaborers.size === 0 && marketLaborers.length === 0)
               }
-              sx={{ flex: { xs: 'auto', sm: 2 } }}
+              sx={{ flex: 2 }}
             >
               {saving ? (
                 <CircularProgress size={24} color="inherit" />
               ) : mode === "morning" ? (
-                "Save Morning Entry"
+                <>
+                  <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>Save </Box>Morning
+                </>
               ) : mode === "evening" ? (
-                "Evening Closing"
+                <>
+                  <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>Evening </Box>Closing
+                </>
               ) : (
-                "Save Attendance"
+                <>
+                  <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>Save </Box>Attendance
+                </>
               )}
             </Button>
           </Box>
@@ -3691,7 +3698,7 @@ export default function AttendanceDrawer({
                 id: `new-${Date.now()}-${group.id}`,
                 roleId: group.roleId,
                 roleName: group.roleName,
-                count: 1, // Each entry is 1 worker
+                count: group.count, // Use actual count from dialog (grouped entry)
                 workerIndex,
                 workDays: group.dayUnits,
                 ratePerPerson: group.rate,

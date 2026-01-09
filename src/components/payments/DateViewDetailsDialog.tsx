@@ -37,9 +37,55 @@ import {
   AccountBalanceWallet,
   ArrowForward,
   Notes,
+  Wallet as WalletIcon,
+  Link as LinkIcon,
+  Receipt as ReceiptIcon,
+  Payment as PaymentIcon,
 } from "@mui/icons-material";
 import type { DateGroup, DailyPaymentRecord } from "@/types/payment.types";
 import dayjs from "dayjs";
+
+function getPayerSourceLabel(
+  source: string | null | undefined,
+  customName?: string | null
+): string {
+  if (!source) return "N/A";
+  switch (source) {
+    case "own_money":
+      return "Own Money";
+    case "amma_money":
+    case "mothers_money":
+      return "Amma Money";
+    case "client_money":
+      return "Client Money";
+    case "trust_account":
+      return "Trust Account";
+    case "other_site_money":
+      return customName || "Other Site Money";
+    case "custom":
+      return customName || "Custom";
+    default:
+      return source;
+  }
+}
+
+function getPaymentModeLabel(mode: string | null | undefined): string {
+  if (!mode) return "N/A";
+  switch (mode) {
+    case "upi":
+      return "UPI";
+    case "cash":
+      return "Cash";
+    case "net_banking":
+      return "Net Banking";
+    case "company_direct_online":
+      return "Direct (Online)";
+    case "via_site_engineer":
+      return "Via Engineer";
+    default:
+      return mode;
+  }
+}
 
 interface DateViewDetailsDialogProps {
   open: boolean;
@@ -130,6 +176,27 @@ export default function DateViewDetailsDialog({
       }
     });
 
+    // Get settlement details from records (money source, subcontract, reference, notes)
+    const recordWithMoneySource = settledRecords.find((r) => r.moneySource);
+    const moneySourceInfo = recordWithMoneySource ? {
+      source: recordWithMoneySource.moneySource,
+      sourceName: recordWithMoneySource.moneySourceName,
+    } : null;
+
+    const recordWithSubcontract = allRecords.find((r) => r.subcontractId);
+    const subcontractInfo = recordWithSubcontract ? {
+      id: recordWithSubcontract.subcontractId,
+      title: recordWithSubcontract.subcontractTitle,
+    } : null;
+
+    const settlementRef = allRecords.find((r) => r.settlementReference)?.settlementReference || null;
+
+    // Get payment notes from first record that has notes
+    const paymentNotes = allRecords.find((r) => r.paymentNotes)?.paymentNotes || null;
+
+    // Get payment mode from settled records
+    const paymentMode = settledRecords.find((r) => r.paymentMode)?.paymentMode || null;
+
     return {
       totalAmount,
       pendingAmount,
@@ -143,6 +210,11 @@ export default function DateViewDetailsDialog({
       paidCount: paidRecords.length,
       settlementInfo,
       proofs,
+      moneySourceInfo,
+      subcontractInfo,
+      settlementRef,
+      paymentNotes,
+      paymentMode,
     };
   }, [group]);
 
@@ -293,6 +365,112 @@ export default function DateViewDetailsDialog({
                   )}
                 </Box>
               </Paper>
+
+              {/* Settlement Details Section */}
+              {(summary.moneySourceInfo || summary.subcontractInfo || summary.settlementRef || summary.paymentMode || summary.paymentNotes) && (
+                <Box sx={{ mb: 3 }}>
+                  <Typography
+                    variant="subtitle2"
+                    fontWeight={600}
+                    gutterBottom
+                    sx={{ display: "flex", alignItems: "center", gap: 1 }}
+                  >
+                    <ReceiptIcon fontSize="small" />
+                    Settlement Details
+                  </Typography>
+                  <Paper variant="outlined" sx={{ p: 2 }}>
+                    <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                      {/* Money Source / Paid By */}
+                      {summary.moneySourceInfo && (
+                        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                          <WalletIcon fontSize="small" color="action" />
+                          <Typography variant="body2" color="text.secondary">
+                            Paid By:
+                          </Typography>
+                          <Chip
+                            size="small"
+                            label={getPayerSourceLabel(
+                              summary.moneySourceInfo.source,
+                              summary.moneySourceInfo.sourceName
+                            )}
+                            color="primary"
+                            variant="outlined"
+                          />
+                        </Box>
+                      )}
+
+                      {/* Payment Mode */}
+                      {summary.paymentMode && (
+                        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                          <PaymentIcon fontSize="small" color="action" />
+                          <Typography variant="body2" color="text.secondary">
+                            Payment Mode:
+                          </Typography>
+                          <Typography variant="body2" fontWeight={500}>
+                            {getPaymentModeLabel(summary.paymentMode)}
+                          </Typography>
+                        </Box>
+                      )}
+
+                      {/* Subcontract Link */}
+                      {summary.subcontractInfo?.title && (
+                        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                          <LinkIcon fontSize="small" color="action" />
+                          <Typography variant="body2" color="text.secondary">
+                            Linked to:
+                          </Typography>
+                          <Chip
+                            size="small"
+                            label={summary.subcontractInfo.title}
+                            color="info"
+                            variant="outlined"
+                            icon={<LinkIcon sx={{ fontSize: 14 }} />}
+                          />
+                        </Box>
+                      )}
+
+                      {/* Settlement Reference */}
+                      {summary.settlementRef && (
+                        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                          <ReceiptIcon fontSize="small" color="action" />
+                          <Typography variant="body2" color="text.secondary">
+                            Reference:
+                          </Typography>
+                          <Chip
+                            size="small"
+                            label={summary.settlementRef}
+                            variant="outlined"
+                            sx={{ fontFamily: "monospace", fontSize: "0.75rem" }}
+                          />
+                        </Box>
+                      )}
+
+                      {/* Payment Notes */}
+                      {summary.paymentNotes && (
+                        <Box>
+                          <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.5 }}>
+                            <Notes fontSize="small" color="action" />
+                            <Typography variant="body2" color="text.secondary">
+                              Notes:
+                            </Typography>
+                          </Box>
+                          <Typography
+                            variant="body2"
+                            sx={{
+                              p: 1,
+                              bgcolor: "action.hover",
+                              borderRadius: 1,
+                              whiteSpace: "pre-wrap",
+                            }}
+                          >
+                            {summary.paymentNotes}
+                          </Typography>
+                        </Box>
+                      )}
+                    </Box>
+                  </Paper>
+                </Box>
+              )}
 
               {/* Settlement Timeline */}
               {summary.settlementInfo && (

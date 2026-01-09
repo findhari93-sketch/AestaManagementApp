@@ -495,29 +495,36 @@ export interface PaginatedResult<T> {
 }
 
 /**
+ * Sort options for paginated materials
+ */
+export type MaterialSortOption = "alphabetical" | "recently_added" | "frequently_used" | "most_vendors" | "lowest_price";
+
+/**
  * Fetch materials with server-side pagination
  * Use this for large datasets where client-side pagination is not efficient
  */
 export function usePaginatedMaterials(
   pagination: PaginationParams,
-  categoryId?: string | null,
-  searchTerm?: string
+  categoryIds?: string[] | null,
+  searchTerm?: string,
+  sortBy: MaterialSortOption = "alphabetical"
 ) {
   const supabase = createClient();
   const { pageIndex, pageSize } = pagination;
   const offset = pageIndex * pageSize;
 
   return useQuery({
-    queryKey: ["materials", "paginated", { pageIndex, pageSize, categoryId, searchTerm }],
+    queryKey: ["materials", "paginated", { pageIndex, pageSize, categoryIds, searchTerm, sortBy }],
     queryFn: async (): Promise<PaginatedResult<MaterialWithDetails>> => {
       // First, get total count
       let countQuery = supabase
         .from("materials")
         .select("*", { count: "exact", head: true })
-        .eq("is_active", true);
+        .eq("is_active", true)
+        .is("parent_id", null); // Only parent materials (exclude variants)
 
-      if (categoryId) {
-        countQuery = countQuery.eq("category_id", categoryId);
+      if (categoryIds && categoryIds.length > 0) {
+        countQuery = countQuery.in("category_id", categoryIds);
       }
 
       if (searchTerm && searchTerm.length >= 2) {
@@ -540,11 +547,21 @@ export function usePaginatedMaterials(
         `
         )
         .eq("is_active", true)
-        .order("name")
-        .range(offset, offset + pageSize - 1);
+        .is("parent_id", null); // Only parent materials (exclude variants)
 
-      if (categoryId) {
-        dataQuery = dataQuery.eq("category_id", categoryId);
+      // Apply server-side sorting (only alphabetical and recently_added can be done server-side)
+      // Other sort options require client-side sorting with supplementary data
+      if (sortBy === "recently_added") {
+        dataQuery = dataQuery.order("created_at", { ascending: false });
+      } else {
+        // Default to alphabetical
+        dataQuery = dataQuery.order("name", { ascending: true });
+      }
+
+      dataQuery = dataQuery.range(offset, offset + pageSize - 1);
+
+      if (categoryIds && categoryIds.length > 0) {
+        dataQuery = dataQuery.in("category_id", categoryIds);
       }
 
       if (searchTerm && searchTerm.length >= 2) {
@@ -556,8 +573,33 @@ export function usePaginatedMaterials(
       const { data, error: dataError } = await dataQuery;
       if (dataError) throw dataError;
 
+      // Fetch variant counts for each parent material
+      const materialIds = data?.map((m: any) => m.id) || [];
+      let variantCountsMap: Record<string, number> = {};
+
+      if (materialIds.length > 0) {
+        const { data: variantData } = await supabase
+          .from("materials")
+          .select("parent_id")
+          .in("parent_id", materialIds)
+          .eq("is_active", true);
+
+        // Count variants per parent
+        (variantData || []).forEach((v: { parent_id: string | null }) => {
+          if (v.parent_id) {
+            variantCountsMap[v.parent_id] = (variantCountsMap[v.parent_id] || 0) + 1;
+          }
+        });
+      }
+
+      // Attach variant count to materials
+      const materialsWithVariantCount = (data || []).map((m: any) => ({
+        ...m,
+        variant_count: variantCountsMap[m.id] || 0,
+      })) as MaterialWithDetails[];
+
       return {
-        data: data as MaterialWithDetails[],
+        data: materialsWithVariantCount,
         totalCount: totalCount || 0,
         pageCount: Math.ceil((totalCount || 0) / pageSize),
       };

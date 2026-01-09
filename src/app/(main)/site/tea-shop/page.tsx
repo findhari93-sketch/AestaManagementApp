@@ -332,19 +332,16 @@ export default function TeaShopPage() {
         .from("site_holidays") as any)
         .select("*")
         .eq("site_id", selectedSite.id)
-        .order("holiday_date", { ascending: false });
+        .order("date", { ascending: false });
 
       if (fetchDateFrom && fetchDateTo) {
         holidaysQuery = holidaysQuery
-          .gte("holiday_date", fetchDateFrom)
-          .lte("holiday_date", fetchDateTo);
+          .gte("date", fetchDateFrom)
+          .lte("date", fetchDateTo);
       }
       const { data: holidaysData } = await holidaysQuery;
 
-      setHolidays((holidaysData || []).map((h: any) => ({
-        ...h,
-        date: h.holiday_date, // Normalize field name
-      })) as SiteHoliday[]);
+      setHolidays((holidaysData || []) as SiteHoliday[]);
 
       // Fetch attendance for all dates (to detect missing entries)
       // Only filter by date range if not "All Time"

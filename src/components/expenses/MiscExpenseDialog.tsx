@@ -1,0 +1,602 @@
+"use client";
+
+import React, { useState, useEffect } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import {
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Box,
+  Typography,
+  TextField,
+  Button,
+  IconButton,
+  Alert,
+  CircularProgress,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  FormControlLabel,
+  Radio,
+  RadioGroup,
+  Paper,
+  Checkbox,
+  Chip,
+} from "@mui/material";
+import { Close as CloseIcon } from "@mui/icons-material";
+import { createClient } from "@/lib/supabase/client";
+import FileUploader, { UploadedFile } from "@/components/common/FileUploader";
+import PayerSourceSelector from "@/components/settlement/PayerSourceSelector";
+import BatchSelector from "@/components/wallet/BatchSelector";
+import { useAuth } from "@/contexts/AuthContext";
+import { useSite } from "@/contexts/SiteContext";
+import { createMiscExpense, updateMiscExpense } from "@/lib/services/miscExpenseService";
+import type { MiscExpense, SubcontractOption, SiteEngineerOption } from "@/types/misc-expense.types";
+import type { PayerSource } from "@/types/settlement.types";
+import type { PaymentMode } from "@/types/database.types";
+import type { BatchAllocation } from "@/types/wallet.types";
+import dayjs from "dayjs";
+
+interface ExpenseCategory {
+  id: string;
+  name: string;
+  module: string;
+}
+
+interface MiscExpenseDialogProps {
+  open: boolean;
+  onClose: () => void;
+  expense?: MiscExpense | null; // For edit mode
+  onSuccess?: () => void;
+}
+
+export default function MiscExpenseDialog({
+  open,
+  onClose,
+  expense,
+  onSuccess,
+}: MiscExpenseDialogProps) {
+  const isEditMode = !!expense;
+  const { userProfile } = useAuth();
+  const { selectedSite } = useSite();
+  const supabase = createClient();
+  const queryClient = useQueryClient();
+
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Form state
+  const [date, setDate] = useState(dayjs().format("YYYY-MM-DD"));
+  const [amount, setAmount] = useState<number>(0);
+  const [categoryId, setCategoryId] = useState<string>("");
+  const [description, setDescription] = useState<string>("");
+  const [vendorName, setVendorName] = useState<string>("");
+  const [paymentMode, setPaymentMode] = useState<PaymentMode>("cash");
+  const [payerType, setPayerType] = useState<"site_engineer" | "company_direct">("company_direct");
+  const [selectedEngineerId, setSelectedEngineerId] = useState("");
+  const [createWalletTransaction, setCreateWalletTransaction] = useState(true);
+  const [payerSource, setPayerSource] = useState<PayerSource>("own_money");
+  const [customPayerName, setCustomPayerName] = useState("");
+  const [subcontractId, setSubcontractId] = useState<string>("");
+  const [notes, setNotes] = useState("");
+  const [proofUrl, setProofUrl] = useState<string | null>(null);
+
+  // Batch allocations for engineer wallet
+  const [batchAllocations, setBatchAllocations] = useState<BatchAllocation[]>([]);
+
+  // Data lists
+  const [categories, setCategories] = useState<ExpenseCategory[]>([]);
+  const [engineers, setEngineers] = useState<SiteEngineerOption[]>([]);
+  const [subcontracts, setSubcontracts] = useState<SubcontractOption[]>([]);
+
+  useEffect(() => {
+    if (open) {
+      fetchCategories();
+      fetchEngineers();
+      fetchSubcontracts();
+
+      if (isEditMode && expense) {
+        // Edit mode - populate from expense
+        setDate(expense.date);
+        setAmount(expense.amount);
+        setCategoryId(expense.category_id || "");
+        setDescription(expense.description || "");
+        setVendorName(expense.vendor_name || "");
+        setPaymentMode((expense.payment_mode as PaymentMode) || "cash");
+        setPayerType(expense.payer_type || "company_direct");
+        setSelectedEngineerId(expense.site_engineer_id || "");
+        setCreateWalletTransaction(false); // Don't create new transaction when editing
+        setPayerSource((expense.payer_source as PayerSource) || "own_money");
+        setCustomPayerName(expense.payer_name || "");
+        setSubcontractId(expense.subcontract_id || "");
+        setNotes(expense.notes || "");
+        setProofUrl(expense.proof_url || null);
+      } else {
+        // New expense - reset form
+        setDate(dayjs().format("YYYY-MM-DD"));
+        setAmount(0);
+        setCategoryId("");
+        setDescription("");
+        setVendorName("");
+        setPaymentMode("cash");
+        setPayerType("company_direct");
+        setSelectedEngineerId("");
+        setCreateWalletTransaction(true);
+        setPayerSource("own_money");
+        setCustomPayerName("");
+        setSubcontractId("");
+        setNotes("");
+        setProofUrl(null);
+        setBatchAllocations([]);
+      }
+      setError(null);
+    }
+  }, [open, expense, isEditMode]);
+
+  const fetchCategories = async () => {
+    try {
+      const { data } = await supabase
+        .from("expense_categories")
+        .select("id, name, module")
+        .eq("is_active", true)
+        .in("module", ["general", "material", "machinery"])
+        .order("module")
+        .order("name");
+
+      setCategories(data || []);
+    } catch (err) {
+      console.error("Error fetching categories:", err);
+    }
+  };
+
+  const fetchEngineers = async () => {
+    if (!selectedSite) return;
+
+    try {
+      const { data } = await supabase
+        .from("users")
+        .select("id, name")
+        .in("role", ["site_engineer", "admin", "office"]);
+
+      // Calculate wallet balances for engineers
+      const engineersWithBalance: SiteEngineerOption[] = [];
+      for (const eng of data || []) {
+        const { data: transactions } = await (supabase as any)
+          .from("site_engineer_transactions")
+          .select("amount, transaction_type")
+          .eq("user_id", eng.id)
+          .eq("site_id", selectedSite.id);
+
+        const balance = (transactions || []).reduce((sum: number, t: any) => {
+          if (t.transaction_type === "credit" || t.transaction_type === "received_from_company") {
+            return sum + (t.amount || 0);
+          }
+          if (t.transaction_type === "debit" || t.transaction_type === "spent_on_behalf") {
+            return sum - (t.amount || 0);
+          }
+          return sum;
+        }, 0);
+
+        engineersWithBalance.push({
+          id: eng.id,
+          name: eng.name,
+          wallet_balance: balance,
+        });
+      }
+
+      setEngineers(engineersWithBalance);
+    } catch (err) {
+      console.error("Error fetching engineers:", err);
+    }
+  };
+
+  const fetchSubcontracts = async () => {
+    if (!selectedSite) return;
+
+    try {
+      const { data: teamsData } = await supabase
+        .from("teams")
+        .select("id, name")
+        .eq("site_id", selectedSite.id);
+
+      const teamsMap = new Map<string, string>();
+      (teamsData || []).forEach((t: any) => teamsMap.set(t.id, t.name));
+
+      const { data } = await supabase
+        .from("subcontracts")
+        .select("id, title, team_id")
+        .eq("site_id", selectedSite.id)
+        .in("status", ["draft", "active"]);
+
+      const options: SubcontractOption[] = (data || []).map((sc: any) => ({
+        id: sc.id,
+        title: sc.title,
+        team_name: sc.team_id ? teamsMap.get(sc.team_id) : undefined,
+      }));
+      setSubcontracts(options);
+    } catch (err) {
+      console.error("Error fetching subcontracts:", err);
+    }
+  };
+
+  const handleSave = async () => {
+    if (amount <= 0) {
+      setError("Please enter a valid amount");
+      return;
+    }
+
+    if (payerType === "site_engineer" && !selectedEngineerId) {
+      setError("Please select a site engineer");
+      return;
+    }
+
+    if (payerType === "site_engineer" && createWalletTransaction && batchAllocations.length === 0) {
+      setError("Please select wallet batches to allocate from");
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      if (isEditMode && expense) {
+        // Update existing expense
+        const result = await updateMiscExpense(
+          supabase,
+          expense.id,
+          {
+            date,
+            amount,
+            category_id: categoryId || null,
+            description: description || null,
+            vendor_name: vendorName || null,
+            payment_mode: paymentMode,
+            payer_source: payerSource,
+            custom_payer_name: customPayerName,
+            subcontract_id: subcontractId || null,
+            notes: notes || null,
+            proof_url: proofUrl,
+          },
+          userProfile?.id || "",
+          userProfile?.name || "System"
+        );
+
+        if (!result.success) {
+          throw new Error(result.error);
+        }
+      } else {
+        // Create new expense
+        const result = await createMiscExpense(supabase, {
+          siteId: selectedSite?.id || "",
+          formData: {
+            date,
+            amount,
+            category_id: categoryId,
+            description,
+            vendor_name: vendorName,
+            payment_mode: paymentMode,
+            payer_source: payerSource,
+            custom_payer_name: customPayerName,
+            payer_type: payerType,
+            site_engineer_id: selectedEngineerId,
+            subcontract_id: subcontractId || null,
+            notes,
+          },
+          proofUrl: proofUrl || undefined,
+          userId: userProfile?.id || "",
+          userName: userProfile?.name || "System",
+          batchAllocations: payerType === "site_engineer" ? batchAllocations : undefined,
+        });
+
+        if (!result.success) {
+          throw new Error(result.error);
+        }
+      }
+
+      // Invalidate queries
+      queryClient.invalidateQueries({ queryKey: ["misc-expenses"] });
+      queryClient.invalidateQueries({ queryKey: ["v_all_expenses"] });
+      queryClient.invalidateQueries({ queryKey: ["subcontract-totals"] });
+
+      onSuccess?.();
+      onClose();
+    } catch (err: any) {
+      console.error("Error saving expense:", err);
+      setError(err.message || "Failed to save expense");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const selectedEngineer = engineers.find((e) => e.id === selectedEngineerId);
+
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
+      <DialogTitle>
+        <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <Typography variant="h6" fontWeight={700}>
+            {isEditMode ? "Edit Expense" : "Add Miscellaneous Expense"}
+          </Typography>
+          <IconButton onClick={onClose} size="small">
+            <CloseIcon />
+          </IconButton>
+        </Box>
+      </DialogTitle>
+
+      <DialogContent dividers>
+        {error && (
+          <Alert severity="error" sx={{ mb: 2 }}>
+            {error}
+          </Alert>
+        )}
+
+        {/* Amount */}
+        <TextField
+          label="Amount"
+          type="number"
+          value={amount || ""}
+          onChange={(e) => setAmount(Math.max(0, parseFloat(e.target.value) || 0))}
+          fullWidth
+          size="small"
+          sx={{ mb: 2 }}
+          slotProps={{
+            htmlInput: { min: 0 },
+            input: { startAdornment: <Typography sx={{ mr: 0.5 }}>₹</Typography> },
+          }}
+          required
+        />
+
+        {/* Date */}
+        <TextField
+          label="Date"
+          type="date"
+          value={date}
+          onChange={(e) => setDate(e.target.value)}
+          fullWidth
+          size="small"
+          slotProps={{ inputLabel: { shrink: true } }}
+          sx={{ mb: 2 }}
+          required
+        />
+
+        {/* Category */}
+        <FormControl fullWidth size="small" sx={{ mb: 2 }}>
+          <InputLabel>Category</InputLabel>
+          <Select
+            value={categoryId}
+            onChange={(e) => setCategoryId(e.target.value)}
+            label="Category"
+          >
+            <MenuItem value="">
+              <em>None</em>
+            </MenuItem>
+            {categories.map((cat) => (
+              <MenuItem key={cat.id} value={cat.id}>
+                <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                  <Chip
+                    label={cat.module}
+                    size="small"
+                    sx={{ height: 18, fontSize: "0.65rem", textTransform: "capitalize" }}
+                  />
+                  {cat.name}
+                </Box>
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+
+        {/* Vendor/Recipient Name */}
+        <TextField
+          label="Vendor / Recipient"
+          value={vendorName}
+          onChange={(e) => setVendorName(e.target.value)}
+          fullWidth
+          size="small"
+          placeholder="e.g., Hardware Store, Electrician"
+          sx={{ mb: 2 }}
+        />
+
+        {/* Description */}
+        <TextField
+          label="Description"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          fullWidth
+          size="small"
+          multiline
+          rows={2}
+          placeholder="Brief description of the expense"
+          sx={{ mb: 3 }}
+        />
+
+        {/* Who is Paying */}
+        <Paper variant="outlined" sx={{ p: 2, mb: 3 }}>
+          <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>
+            WHO IS PAYING?
+          </Typography>
+
+          <RadioGroup
+            value={payerType}
+            onChange={(e) => {
+              setPayerType(e.target.value as "site_engineer" | "company_direct");
+              if (e.target.value === "company_direct") {
+                setSelectedEngineerId("");
+                setBatchAllocations([]);
+              }
+            }}
+          >
+            <FormControlLabel
+              value="company_direct"
+              control={<Radio size="small" />}
+              label="Company Direct"
+              disabled={isEditMode}
+            />
+            <FormControlLabel
+              value="site_engineer"
+              control={<Radio size="small" />}
+              label="Via Site Engineer"
+              disabled={isEditMode}
+            />
+          </RadioGroup>
+
+          {payerType === "site_engineer" && (
+            <Box sx={{ mt: 2, pl: 3 }}>
+              <FormControl fullWidth size="small" sx={{ mb: 2 }}>
+                <InputLabel>Select Engineer</InputLabel>
+                <Select
+                  value={selectedEngineerId}
+                  onChange={(e) => {
+                    setSelectedEngineerId(e.target.value);
+                    setBatchAllocations([]);
+                  }}
+                  label="Select Engineer"
+                  disabled={isEditMode}
+                >
+                  {engineers.map((eng) => (
+                    <MenuItem key={eng.id} value={eng.id}>
+                      {eng.name}
+                      {eng.wallet_balance !== undefined && (
+                        <Typography
+                          component="span"
+                          variant="caption"
+                          color={eng.wallet_balance >= amount ? "success.main" : "error.main"}
+                          sx={{ ml: 1 }}
+                        >
+                          (₹{eng.wallet_balance?.toLocaleString()} available)
+                        </Typography>
+                      )}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+
+              {!isEditMode && selectedEngineerId && (
+                <>
+                  <FormControlLabel
+                    control={
+                      <Checkbox
+                        checked={createWalletTransaction}
+                        onChange={(e) => setCreateWalletTransaction(e.target.checked)}
+                        size="small"
+                      />
+                    }
+                    label={
+                      <Box>
+                        <Typography variant="body2">Deduct from wallet</Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          Record as &quot;Spent on Behalf&quot; in engineer wallet
+                        </Typography>
+                      </Box>
+                    }
+                  />
+
+                  {createWalletTransaction && amount > 0 && (
+                    <Box sx={{ mt: 2 }}>
+                      <BatchSelector
+                        engineerId={selectedEngineerId}
+                        siteId={selectedSite?.id || null}
+                        requiredAmount={amount}
+                        selectedBatches={batchAllocations}
+                        onSelectionChange={setBatchAllocations}
+                      />
+                    </Box>
+                  )}
+                </>
+              )}
+            </Box>
+          )}
+        </Paper>
+
+        {/* Payment Source */}
+        <PayerSourceSelector
+          value={payerSource}
+          customName={customPayerName}
+          onChange={setPayerSource}
+          onCustomNameChange={setCustomPayerName}
+          compact
+        />
+
+        {/* Payment Mode */}
+        <FormControl fullWidth size="small" sx={{ mb: 3 }}>
+          <InputLabel>Payment Mode</InputLabel>
+          <Select
+            value={paymentMode}
+            onChange={(e) => setPaymentMode(e.target.value as PaymentMode)}
+            label="Payment Mode"
+          >
+            <MenuItem value="cash">Cash</MenuItem>
+            <MenuItem value="upi">UPI</MenuItem>
+            <MenuItem value="bank_transfer">Bank Transfer</MenuItem>
+            <MenuItem value="cheque">Cheque</MenuItem>
+          </Select>
+        </FormControl>
+
+        {/* Proof Upload - especially for UPI */}
+        {paymentMode === "upi" && (
+          <Box sx={{ mb: 3 }}>
+            <FileUploader
+              supabase={supabase}
+              bucketName="settlement-proofs"
+              folderPath={`misc-expenses/${selectedSite?.id}`}
+              fileNamePrefix="misc-expense"
+              accept="image"
+              label="Payment Screenshot"
+              helperText="Upload screenshot of UPI payment confirmation"
+              compact
+              uploadOnSelect
+              value={proofUrl ? { name: "Payment Proof", size: 0, url: proofUrl } : null}
+              onUpload={(file: UploadedFile) => setProofUrl(file.url)}
+              onRemove={() => setProofUrl(null)}
+            />
+          </Box>
+        )}
+
+        {/* Link to Subcontract (Optional) */}
+        <FormControl fullWidth size="small" sx={{ mb: 3 }}>
+          <InputLabel>Link to Subcontract (Optional)</InputLabel>
+          <Select
+            value={subcontractId}
+            onChange={(e) => setSubcontractId(e.target.value)}
+            label="Link to Subcontract (Optional)"
+          >
+            <MenuItem value="">
+              <em>None - General Site Expense</em>
+            </MenuItem>
+            {subcontracts.map((sc) => (
+              <MenuItem key={sc.id} value={sc.id}>
+                {sc.title}{sc.team_name ? ` (${sc.team_name})` : ""}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+
+        {/* Notes */}
+        <TextField
+          label="Notes"
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          fullWidth
+          multiline
+          rows={2}
+          size="small"
+          placeholder="Additional notes..."
+        />
+      </DialogContent>
+
+      <DialogActions sx={{ p: 2 }}>
+        <Button onClick={onClose} disabled={loading}>
+          Cancel
+        </Button>
+        <Button
+          variant="contained"
+          onClick={handleSave}
+          disabled={loading || amount <= 0}
+        >
+          {loading ? <CircularProgress size={24} /> : isEditMode ? "Update Expense" : "Add Expense"}
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+}

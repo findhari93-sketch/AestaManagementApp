@@ -72,7 +72,7 @@ interface ExpenseWithCategory extends Expense {
   payer_name?: string;
   subcontract_title?: string;
   settlement_reference?: string | null;
-  source_type?: "expense" | "settlement";
+  source_type?: "expense" | "settlement" | "misc_expense" | "tea_shop_settlement" | "subcontract_payment";
   source_id?: string;
   expense_type?: string;
   recorded_date?: string;
@@ -92,7 +92,7 @@ export default function ExpensesPage() {
   const [loading, setLoading] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
-  const [activeTab, setActiveTab] = useState<ExpenseModule | "all">("all");
+  const [activeTab, setActiveTab] = useState<ExpenseModule | "all" | "miscellaneous">("all");
 
   // Multi-payer state
   const [hasMultiplePayers, setHasMultiplePayers] = useState(false);
@@ -252,6 +252,21 @@ export default function ExpensesPage() {
       alert("Salary settlement expenses cannot be edited here. Please use the Salary Settlement page to modify.");
       return;
     }
+    // Prevent editing of miscellaneous expenses from this page
+    if (expense?.source_type === "misc_expense") {
+      router.push(`/site/expenses/miscellaneous?highlight=${encodeURIComponent(expense.settlement_reference || "")}`);
+      return;
+    }
+    // Prevent editing of tea shop settlements from this page
+    if (expense?.source_type === "tea_shop_settlement") {
+      router.push(`/site/tea-shop?highlight=${encodeURIComponent(expense.settlement_reference || "")}`);
+      return;
+    }
+    // Prevent editing of subcontract direct payments from this page
+    if (expense?.source_type === "subcontract_payment") {
+      router.push(`/site/subcontracts`);
+      return;
+    }
 
     if (expense) {
       setEditingExpense(expense);
@@ -269,7 +284,7 @@ export default function ExpensesPage() {
     } else {
       setEditingExpense(null);
       setForm({
-        module: activeTab === "all" ? "general" : activeTab,
+        module: (activeTab === "all" || activeTab === "miscellaneous") ? "general" : activeTab,
         category_id: "",
         date: dayjs().format("YYYY-MM-DD"),
         amount: 0,
@@ -327,6 +342,13 @@ export default function ExpensesPage() {
       return;
     }
 
+    // Subcontract direct payments can't be deleted from here
+    if (expense.source_type === "subcontract_payment") {
+      alert("Direct subcontract payments cannot be deleted here. Please use the Subcontracts page to modify.");
+      router.push(`/site/subcontracts`);
+      return;
+    }
+
     // Legacy: Check if expense came from salary settlement via engineer_transaction_id
     if (expense.engineer_transaction_id) {
       // Show redirect dialog instead of allowing delete
@@ -373,24 +395,45 @@ export default function ExpensesPage() {
         enablePinning: true,
         Cell: ({ cell, row }) => {
           const ref = cell.getValue<string>();
-          return ref ? (
+          if (!ref) {
+            return <Typography variant="body2" color="text.disabled">-</Typography>;
+          }
+
+          // Determine chip color based on reference type or source type
+          const sourceType = row.original.source_type;
+          const chipColor = ref.startsWith("MISC-") ? "error" as const
+            : ref.startsWith("TSS-") ? "warning" as const
+            : ref.startsWith("SCP-") || sourceType === "subcontract_payment" ? "info" as const
+            : "primary" as const;
+
+          return (
             <Chip
               label={ref}
               size="small"
-              color="primary"
+              color={chipColor}
               variant="outlined"
               clickable
               onClick={() => {
-                // Use expense_type to determine which tab to navigate to
-                // "Contract Salary" goes to contract tab, all others (Daily Salary, etc) go to salary tab
-                const isContractSettlement = row.original.expense_type === "Contract Salary";
-                const tab = isContractSettlement ? "contract" : "salary";
-                router.push(`/site/payments?tab=${tab}&highlight=${encodeURIComponent(ref)}`);
+                // Route based on reference type or source type
+                if (ref.startsWith("MISC-")) {
+                  // Navigate to miscellaneous expenses page
+                  router.push(`/site/expenses/miscellaneous?highlight=${encodeURIComponent(ref)}`);
+                } else if (ref.startsWith("TSS-")) {
+                  // Navigate to tea shop page
+                  router.push(`/site/tea-shop?highlight=${encodeURIComponent(ref)}`);
+                } else if (ref.startsWith("SCP-") || sourceType === "subcontract_payment") {
+                  // Navigate to subcontracts page for direct payments
+                  router.push(`/site/subcontracts`);
+                } else {
+                  // Use expense_type to determine which tab to navigate to
+                  // "Contract Salary" goes to contract tab, all others (Daily Salary, etc) go to salary tab
+                  const isContractSettlement = row.original.expense_type === "Contract Salary";
+                  const tab = isContractSettlement ? "contract" : "salary";
+                  router.push(`/site/payments?tab=${tab}&highlight=${encodeURIComponent(ref)}`);
+                }
               }}
               sx={{ fontFamily: "monospace", fontWeight: 600, cursor: "pointer" }}
             />
-          ) : (
-            <Typography variant="body2" color="text.disabled">-</Typography>
           );
         },
       },
@@ -442,16 +485,19 @@ export default function ExpensesPage() {
         header: "Type",
         size: 130,
         filterVariant: "select",
-        filterSelectOptions: ["Daily Salary", "Contract Salary", "Advance", "Material", "Machinery", "General"],
+        filterSelectOptions: ["Daily Salary", "Contract Salary", "Advance", "Direct Payment", "Material", "Machinery", "General", "Miscellaneous", "Tea & Snacks"],
         Cell: ({ cell }) => {
           const type = cell.getValue<string>();
-          const colorMap: Record<string, "primary" | "secondary" | "warning" | "info" | "success" | "default"> = {
+          const colorMap: Record<string, "primary" | "secondary" | "warning" | "info" | "success" | "default" | "error"> = {
             "Daily Salary": "primary",
             "Contract Salary": "secondary",
             "Advance": "warning",
+            "Direct Payment": "secondary",
             "Material": "info",
             "Machinery": "success",
             "General": "default",
+            "Miscellaneous": "error",
+            "Tea & Snacks": "warning",
           };
           return (
             <Chip
@@ -577,7 +623,7 @@ export default function ExpensesPage() {
   if (!selectedSite)
     return (
       <Box>
-        <PageHeader title="Daily Expenses" />
+        <PageHeader title="All Site Expenses" />
         <Alert severity="warning">Please select a site</Alert>
       </Box>
     );
@@ -585,7 +631,7 @@ export default function ExpensesPage() {
   return (
     <Box>
       <PageHeader
-        title="Daily Expenses"
+        title="All Site Expenses"
         subtitle={`Track expenses for ${selectedSite.name}`}
         actions={
           <Button
@@ -797,6 +843,7 @@ export default function ExpensesPage() {
             <Tab label="Material" value="material" />
             <Tab label="Machinery" value="machinery" />
             <Tab label="General" value="general" />
+            <Tab label="Miscellaneous" value="miscellaneous" />
           </Tabs>
         </CardContent>
       </Card>

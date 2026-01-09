@@ -18,11 +18,6 @@ export interface SubcontractTotals {
   totalRecordCount: number;
 }
 
-interface PaymentRecord {
-  subcontract_id: string;
-  amount: number;
-}
-
 interface ViewExpenseRecord {
   contract_id: string;
   amount: number;
@@ -38,15 +33,16 @@ interface SubcontractRecord {
 }
 
 /**
- * Calculate subcontract totals using v_all_expenses for consistency:
- * totalPaid = subcontract_payments + v_all_expenses (where cleared)
+ * Calculate subcontract totals using v_all_expenses for consistency.
  *
- * Uses v_all_expenses view which includes:
+ * Uses v_all_expenses view which now includes ALL expense types:
  * - Daily Salary (aggregated by date)
  * - Contract Salary
  * - Advance
  * - Material/Machinery/General expenses
  * - Tea Shop settlements
+ * - Miscellaneous expenses
+ * - Subcontract direct payments (Direct Payment type)
  *
  * This ensures counts match what's shown in the Daily Expenses page.
  */
@@ -71,16 +67,8 @@ export async function calculateSubcontractTotals(
     return results;
   }
 
-  // Fetch all direct subcontract_payments (these are separate from expenses)
-  // Filter out deleted payments to ensure accurate totals
-  const { data: directPayments } = await supabase
-    .from("subcontract_payments")
-    .select("subcontract_id, amount")
-    .in("subcontract_id", subcontractIds)
-    .eq("is_deleted", false);
-
   // Fetch ALL cleared expenses from v_all_expenses linked to subcontracts
-  // This includes: Daily Salary, Contract Salary, Advance, Material, etc.
+  // This now includes: Direct Payments, Daily Salary, Contract Salary, Advance, Material, etc.
   const { data: allExpenses } = await (supabase as any)
     .from("v_all_expenses")
     .select("contract_id, amount, source_type, expense_type, is_cleared")
@@ -88,26 +76,24 @@ export async function calculateSubcontractTotals(
     .eq("is_deleted", false)
     .eq("is_cleared", true);
 
-  // Aggregate direct payments by subcontract
-  const directPaymentMap = new Map<string, { total: number; count: number }>();
-  for (const p of (directPayments as PaymentRecord[] | null) || []) {
-    const current = directPaymentMap.get(p.subcontract_id) || { total: 0, count: 0 };
-    current.total += p.amount || 0;
-    current.count += 1;
-    directPaymentMap.set(p.subcontract_id, current);
-  }
-
   // Aggregate expenses from v_all_expenses by subcontract
-  // Split into labor (settlements) and non-labor (regular expenses)
+  // Split into: direct payments, labor (settlements), and other (regular expenses)
+  const directPaymentMap = new Map<string, { total: number; count: number }>();
   const laborExpenseMap = new Map<string, { total: number; count: number }>();
   const otherExpenseMap = new Map<string, { total: number; count: number }>();
 
   for (const e of (allExpenses as ViewExpenseRecord[] | null) || []) {
     if (!e.contract_id) continue;
 
-    // Determine if it's a labor expense (settlement) or other expense
-    const isLabor = e.source_type === "settlement" || e.source_type === "tea_shop_settlement";
-    const targetMap = isLabor ? laborExpenseMap : otherExpenseMap;
+    // Determine category based on source_type
+    let targetMap: Map<string, { total: number; count: number }>;
+    if (e.source_type === "subcontract_payment") {
+      targetMap = directPaymentMap;
+    } else if (e.source_type === "settlement" || e.source_type === "tea_shop_settlement") {
+      targetMap = laborExpenseMap;
+    } else {
+      targetMap = otherExpenseMap;
+    }
 
     const current = targetMap.get(e.contract_id) || { total: 0, count: 0 };
     current.total += e.amount || 0;

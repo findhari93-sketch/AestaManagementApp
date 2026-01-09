@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useDeferredValue } from "react";
 import {
   Box,
   Button,
@@ -26,14 +26,14 @@ import {
   Delete as DeleteIcon,
   Search as SearchIcon,
 } from "@mui/icons-material";
-import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
+import DataTable, { type MRT_ColumnDef, type PaginationState } from "@/components/common/DataTable";
 import PageHeader from "@/components/layout/PageHeader";
 import { useAuth } from "@/contexts/AuthContext";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { hasEditPermission } from "@/lib/permissions";
 import { formatCurrency, formatDate } from "@/lib/formatters";
 import {
-  useRentalItems,
+  usePaginatedRentalItems,
   useRentalCategories,
   useDeleteRentalItem,
 } from "@/hooks/queries/useRentals";
@@ -62,8 +62,9 @@ export default function CompanyRentalsPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<RentalItemWithDetails | null>(null);
   const [selectedTab, setSelectedTab] = useState<RentalType | "all">("all");
-  const [searchTerm, setSearchTerm] = useState("");
+  const [searchInput, setSearchInput] = useState("");
   const [sortBy, setSortBy] = useState<SortOption>("alphabetical");
+  const [pagination, setPagination] = useState<PaginationState>({ pageIndex: 0, pageSize: 50 });
   const [deleteConfirm, setDeleteConfirm] = useState<{
     open: boolean;
     item: RentalItemWithDetails | null;
@@ -78,47 +79,36 @@ export default function CompanyRentalsPage() {
   const isMobile = useIsMobile();
   const canEdit = hasEditPermission(userProfile?.role);
 
-  // Fetch data
-  const { data: rentalItems = [], isLoading } = useRentalItems();
+  // Debounce search
+  const deferredSearch = useDeferredValue(searchInput);
+
+  // Fetch data with server-side pagination
+  const { data: paginatedData, isLoading } = usePaginatedRentalItems(
+    pagination,
+    selectedTab !== "all" ? selectedTab : undefined,
+    deferredSearch.length >= 2 ? deferredSearch : undefined,
+    sortBy
+  );
+
+  const rentalItems = paginatedData?.data || [];
+  const totalCount = paginatedData?.totalCount || 0;
+
   const { data: categories = [] } = useRentalCategories();
   const deleteItem = useDeleteRentalItem();
 
-  // Filter items
-  const filteredItems = useMemo(() => {
-    let filtered = rentalItems;
+  // Handle pagination change
+  const handlePaginationChange = useCallback((newPagination: PaginationState) => {
+    setPagination(newPagination);
+  }, []);
 
-    // Filter by rental type tab
-    if (selectedTab !== "all") {
-      filtered = filtered.filter((item) => item.rental_type === selectedTab);
-    }
+  // Handle tab change - reset pagination
+  const handleTabChange = useCallback((_event: React.SyntheticEvent, newValue: RentalType | "all") => {
+    setSelectedTab(newValue);
+    setPagination(prev => ({ ...prev, pageIndex: 0 }));
+  }, []);
 
-    // Filter by search term
-    if (searchTerm) {
-      const term = searchTerm.toLowerCase();
-      filtered = filtered.filter(
-        (item) =>
-          item.name.toLowerCase().includes(term) ||
-          item.code?.toLowerCase().includes(term) ||
-          item.local_name?.toLowerCase().includes(term)
-      );
-    }
-
-    // Sort items
-    return [...filtered].sort((a, b) => {
-      switch (sortBy) {
-        case "alphabetical":
-          return a.name.localeCompare(b.name);
-        case "recently_added":
-          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
-        case "by_rate":
-          const aRate = a.default_daily_rate || 0;
-          const bRate = b.default_daily_rate || 0;
-          return bRate - aRate;
-        default:
-          return a.name.localeCompare(b.name);
-      }
-    });
-  }, [rentalItems, selectedTab, searchTerm, sortBy]);
+  // No need for client-side filtering since server handles it
+  const filteredItems = rentalItems;
 
   const handleOpenDialog = useCallback((item?: RentalItemWithDetails) => {
     setEditingItem(item || null);
@@ -158,13 +148,6 @@ export default function CompanyRentalsPage() {
   const handleDeleteCancel = useCallback(() => {
     setDeleteConfirm({ open: false, item: null });
   }, []);
-
-  const handleTabChange = useCallback(
-    (_: React.SyntheticEvent, newValue: RentalType | "all") => {
-      setSelectedTab(newValue);
-    },
-    []
-  );
 
   // Table columns
   const columns = useMemo<MRT_ColumnDef<RentalItemWithDetails>[]>(
@@ -339,9 +322,12 @@ export default function CompanyRentalsPage() {
       >
         <TextField
           size="small"
-          placeholder="Search items..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
+          placeholder="Search items (min 2 chars)..."
+          value={searchInput}
+          onChange={(e) => {
+            setSearchInput(e.target.value);
+            setPagination(prev => ({ ...prev, pageIndex: 0 }));
+          }}
           slotProps={{
             input: {
               startAdornment: (
@@ -358,7 +344,10 @@ export default function CompanyRentalsPage() {
           <Select
             value={sortBy}
             label="Sort by"
-            onChange={(e) => setSortBy(e.target.value as SortOption)}
+            onChange={(e) => {
+              setSortBy(e.target.value as SortOption);
+              setPagination(prev => ({ ...prev, pageIndex: 0 }));
+            }}
           >
             {SORT_OPTIONS.map((opt) => (
               <MenuItem key={opt.value} value={opt.value}>
@@ -371,10 +360,10 @@ export default function CompanyRentalsPage() {
 
       {/* Count */}
       <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: "block" }}>
-        {filteredItems.length} item{filteredItems.length !== 1 ? "s" : ""}
+        {totalCount} item{totalCount !== 1 ? "s" : ""}
       </Typography>
 
-      {/* Data Table */}
+      {/* Data Table with Server-Side Pagination */}
       <DataTable
         columns={columns}
         data={filteredItems}
@@ -382,8 +371,12 @@ export default function CompanyRentalsPage() {
         enableRowActions={canEdit}
         renderRowActions={renderRowActions}
         mobileHiddenColumns={["local_name", "category", "created_at"]}
-        pageSize={50}
         enableSorting={false}
+        // Server-side pagination
+        manualPagination={true}
+        rowCount={totalCount}
+        pagination={pagination}
+        onPaginationChange={handlePaginationChange}
       />
 
       {/* Mobile FAB */}

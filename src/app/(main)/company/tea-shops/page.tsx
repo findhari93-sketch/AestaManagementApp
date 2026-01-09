@@ -1,7 +1,5 @@
 "use client";
 
-export const dynamic = 'force-dynamic';
-
 import { useMemo, useState, useCallback } from "react";
 import {
   Box,

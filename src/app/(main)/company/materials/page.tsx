@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useCallback } from "react";
+import { useMemo, useState, useCallback, useDeferredValue } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Box,
@@ -30,16 +30,17 @@ import {
   Store as StoreIcon,
   Whatshot as FireIcon,
 } from "@mui/icons-material";
-import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
+import DataTable, { type MRT_ColumnDef, type PaginationState } from "@/components/common/DataTable";
 import PageHeader from "@/components/layout/PageHeader";
 import { useAuth } from "@/contexts/AuthContext";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { hasEditPermission } from "@/lib/permissions";
 import { formatCurrency, formatDate } from "@/lib/formatters";
 import {
-  useMaterials,
+  usePaginatedMaterials,
   useMaterialCategories,
   useDeleteMaterial,
+  type MaterialSortOption,
 } from "@/hooks/queries/useMaterials";
 import { useMaterialVendorCounts } from "@/hooks/queries/useVendorInventory";
 import {
@@ -97,9 +98,7 @@ const CATEGORY_TABS = [
   { id: "tiles", label: "Tiles" },
 ];
 
-type SortOption = "frequently_used" | "alphabetical" | "recently_added" | "most_vendors" | "lowest_price";
-
-const SORT_OPTIONS: { value: SortOption; label: string }[] = [
+const SORT_OPTIONS: { value: MaterialSortOption; label: string }[] = [
   { value: "frequently_used", label: "Frequently Used" },
   { value: "alphabetical", label: "Alphabetical" },
   { value: "recently_added", label: "Recently Added" },
@@ -113,8 +112,8 @@ export default function MaterialsPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingMaterial, setEditingMaterial] = useState<MaterialWithDetails | null>(null);
   const [selectedTab, setSelectedTab] = useState<string>(searchParams.get("tab") || "all");
-  const [searchTerm, setSearchTerm] = useState("");
-  const [sortBy, setSortBy] = useState<SortOption>("frequently_used");
+  const [searchInput, setSearchInput] = useState("");
+  const [sortBy, setSortBy] = useState<MaterialSortOption>("alphabetical");
   const [vendorDrawerMaterial, setVendorDrawerMaterial] = useState<MaterialWithDetails | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<{ open: boolean; material: MaterialWithDetails | null }>({
     open: false,
@@ -125,19 +124,18 @@ export default function MaterialsPage() {
     message: "",
     severity: "success",
   });
+  // Server-side pagination state
+  const [pagination, setPagination] = useState<PaginationState>({ pageIndex: 0, pageSize: 50 });
 
   const { userProfile } = useAuth();
   const isMobile = useIsMobile();
   const canEdit = hasEditPermission(userProfile?.role);
 
-  // Fetch data
-  const { data: materials = [], isLoading } = useMaterials(null);
+  // Debounce search input for server-side filtering
+  const deferredSearch = useDeferredValue(searchInput);
+
+  // Fetch categories first (needed for tab filtering)
   const { data: categories = [] } = useMaterialCategories();
-  const { data: vendorCounts = {} } = useMaterialVendorCounts();
-  const { data: orderStats } = useMaterialOrderStats();
-  const { data: bestPrices } = useMaterialBestPrices();
-  const { data: auditInfo } = useMaterialAuditInfo();
-  const deleteMaterial = useDeleteMaterial();
 
   // Get category IDs for selected tab
   const tabCategoryIds = useMemo(() => {
@@ -149,29 +147,56 @@ export default function MaterialsPage() {
       .map((c) => c.id);
   }, [selectedTab, categories]);
 
-  // Filter materials by tab and search
-  const filteredMaterials = useMemo(() => {
-    let filtered = materials;
+  // Fetch paginated materials with server-side filtering
+  const { data: paginatedData, isLoading } = usePaginatedMaterials(
+    pagination,
+    tabCategoryIds,
+    deferredSearch.length >= 2 ? deferredSearch : undefined,
+    sortBy
+  );
 
-    // Filter by category tab
-    if (tabCategoryIds && tabCategoryIds.length > 0) {
-      filtered = filtered.filter((m) => m.category_id && tabCategoryIds.includes(m.category_id));
+  const materials = paginatedData?.data || [];
+  const totalCount = paginatedData?.totalCount || 0;
+
+  // Defer loading of supplementary data until materials are loaded
+  const materialsReady = !isLoading && materials.length > 0;
+  const { data: vendorCounts = {} } = useMaterialVendorCounts();
+  const { data: orderStats } = useMaterialOrderStats();
+  const { data: bestPrices } = useMaterialBestPrices();
+  const { data: auditInfo } = useMaterialAuditInfo();
+  const deleteMaterial = useDeleteMaterial();
+
+  // Reset pagination when filters change
+  const handleTabChange = useCallback((event: React.SyntheticEvent, newValue: string) => {
+    setSelectedTab(newValue);
+    setPagination(prev => ({ ...prev, pageIndex: 0 })); // Reset to first page
+    // Update URL without navigation
+    const params = new URLSearchParams(window.location.search);
+    if (newValue === "all") {
+      params.delete("tab");
+    } else {
+      params.set("tab", newValue);
+    }
+    const newUrl = params.toString() ? `?${params.toString()}` : window.location.pathname;
+    window.history.replaceState({}, "", newUrl);
+  }, []);
+
+  // Handle pagination change
+  const handlePaginationChange = useCallback((newPagination: PaginationState) => {
+    setPagination(newPagination);
+  }, []);
+
+  // Client-side sorting for sort options that need supplementary data
+  // Server-side handles: alphabetical, recently_added
+  // Client-side handles: frequently_used, most_vendors, lowest_price
+  const sortedMaterials = useMemo(() => {
+    // If using server-side sort options, return as-is
+    if (sortBy === "alphabetical" || sortBy === "recently_added") {
+      return materials;
     }
 
-    // Filter by search term
-    if (searchTerm) {
-      const term = searchTerm.toLowerCase();
-      filtered = filtered.filter(
-        (m) =>
-          m.name.toLowerCase().includes(term) ||
-          m.code?.toLowerCase().includes(term) ||
-          m.category?.name?.toLowerCase().includes(term) ||
-          m.local_name?.toLowerCase().includes(term)
-      );
-    }
-
-    // Sort materials
-    return [...filtered].sort((a, b) => {
+    // Client-side sort for options requiring supplementary data
+    return [...materials].sort((a, b) => {
       switch (sortBy) {
         case "frequently_used": {
           const aOrders = orderStats?.get(a.id)?.order_count || 0;
@@ -179,10 +204,6 @@ export default function MaterialsPage() {
           if (bOrders !== aOrders) return bOrders - aOrders;
           return a.name.localeCompare(b.name);
         }
-        case "alphabetical":
-          return a.name.localeCompare(b.name);
-        case "recently_added":
-          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
         case "most_vendors": {
           const aVendors = vendorCounts[a.id] || 0;
           const bVendors = vendorCounts[b.id] || 0;
@@ -196,43 +217,21 @@ export default function MaterialsPage() {
           return a.name.localeCompare(b.name);
         }
         default:
-          return a.name.localeCompare(b.name);
+          return 0;
       }
     });
-  }, [materials, tabCategoryIds, searchTerm, sortBy, orderStats, vendorCounts, bestPrices]);
+  }, [materials, sortBy, orderStats, vendorCounts, bestPrices]);
 
-  // Group materials by base name to show variants as text
+  // Add variant count display text to materials (variant_count already from server)
   const materialsWithVariantText = useMemo(() => {
-    // Find materials that are variants (have parent_id)
-    const variantsByParent = new Map<string, MaterialWithDetails[]>();
-    const parentMaterials: MaterialWithDetails[] = [];
-
-    for (const m of filteredMaterials) {
-      if (m.parent_id) {
-        const variants = variantsByParent.get(m.parent_id) || [];
-        variants.push(m);
-        variantsByParent.set(m.parent_id, variants);
-      } else {
-        parentMaterials.push(m);
-      }
-    }
-
-    // Attach variant text to parents
-    return parentMaterials.map((parent) => {
-      const variants = variantsByParent.get(parent.id) || [];
-      const variantNames = variants.map((v) => {
-        // Extract just the size/variant part from the name
-        const sizePart = v.name.replace(parent.name, "").trim();
-        return sizePart || v.name;
-      });
-
-      return {
-        ...parent,
-        _variantText: variantNames.length > 0 ? variantNames.join(", ") : null,
-        _variantCount: variants.length,
-      };
-    });
-  }, [filteredMaterials]);
+    return sortedMaterials.map((material) => ({
+      ...material,
+      _variantText: material.variant_count && material.variant_count > 0
+        ? `${material.variant_count} variant${material.variant_count !== 1 ? "s" : ""}`
+        : null,
+      _variantCount: material.variant_count || 0,
+    }));
+  }, [sortedMaterials]);
 
   const handleOpenDialog = useCallback((material?: MaterialWithDetails) => {
     if (material) {
@@ -280,19 +279,6 @@ export default function MaterialsPage() {
 
   const handleSnackbarClose = useCallback(() => {
     setSnackbar((prev) => ({ ...prev, open: false }));
-  }, []);
-
-  const handleTabChange = useCallback((event: React.SyntheticEvent, newValue: string) => {
-    setSelectedTab(newValue);
-    // Update URL without navigation
-    const params = new URLSearchParams(window.location.search);
-    if (newValue === "all") {
-      params.delete("tab");
-    } else {
-      params.set("tab", newValue);
-    }
-    const newUrl = params.toString() ? `?${params.toString()}` : window.location.pathname;
-    window.history.replaceState({}, "", newUrl);
   }, []);
 
   const handleOpenVendorDrawer = useCallback((material: MaterialWithDetails) => {
@@ -583,9 +569,12 @@ export default function MaterialsPage() {
       >
         <TextField
           size="small"
-          placeholder="Search materials..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
+          placeholder="Search materials (min 2 chars)..."
+          value={searchInput}
+          onChange={(e) => {
+            setSearchInput(e.target.value);
+            setPagination(prev => ({ ...prev, pageIndex: 0 })); // Reset to first page on search
+          }}
           slotProps={{
             input: {
               startAdornment: (
@@ -602,7 +591,10 @@ export default function MaterialsPage() {
           <Select
             value={sortBy}
             label="Sort by"
-            onChange={(e) => setSortBy(e.target.value as SortOption)}
+            onChange={(e) => {
+              setSortBy(e.target.value as MaterialSortOption);
+              setPagination(prev => ({ ...prev, pageIndex: 0 })); // Reset to first page on sort change
+            }}
           >
             {SORT_OPTIONS.map((opt) => (
               <MenuItem key={opt.value} value={opt.value}>
@@ -622,11 +614,11 @@ export default function MaterialsPage() {
           </Typography>
         </Box>
         <Typography variant="caption" color="text.secondary">
-          {filteredMaterials.length} material{filteredMaterials.length !== 1 ? "s" : ""}
+          {totalCount} material{totalCount !== 1 ? "s" : ""}
         </Typography>
       </Box>
 
-      {/* Data Table */}
+      {/* Data Table with Server-Side Pagination */}
       <DataTable
         columns={columns}
         data={materialsWithVariantText}
@@ -634,8 +626,12 @@ export default function MaterialsPage() {
         enableRowActions={canEdit}
         renderRowActions={renderRowActions}
         mobileHiddenColumns={["variants", "best_price", "brands"]}
-        pageSize={100}
         enableSorting={false}
+        // Server-side pagination
+        manualPagination={true}
+        rowCount={totalCount}
+        pagination={pagination}
+        onPaginationChange={handlePaginationChange}
       />
 
       {/* Mobile FAB */}

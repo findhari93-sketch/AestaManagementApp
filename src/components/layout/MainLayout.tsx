@@ -71,6 +71,7 @@ import {
   AccountBalance as AccountBalanceIcon,
   TrendingUp as TrendingUpIcon,
   HomeWork as RentalIcon,
+  ReceiptLong as ReceiptLongIcon,
 } from "@mui/icons-material";
 import { useRouter, usePathname } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
@@ -141,9 +142,14 @@ const siteNavCategories: NavCategory[] = [
     emoji: "💰",
     items: [
       {
-        text: "Daily Expenses",
+        text: "All Site Expenses",
         icon: <AccountBalanceWalletIcon />,
         path: "/site/expenses",
+      },
+      {
+        text: "Miscellaneous",
+        icon: <ReceiptLongIcon />,
+        path: "/site/expenses/miscellaneous",
       },
       {
         text: "My Wallet",

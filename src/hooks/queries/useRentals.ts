@@ -23,6 +23,7 @@ import type {
   RentalPriceComparisonResult,
   RentalPriceHistory,
   RentalSummary,
+  RentalType,
 } from "@/types/rental.types";
 
 // ============================================
@@ -148,6 +149,106 @@ export function useRentalItems(categoryId?: string | null) {
       if (error) throw error;
       return data as RentalItemWithDetails[];
     },
+  });
+}
+
+/**
+ * Pagination parameters
+ */
+export interface RentalPaginationParams {
+  pageIndex: number;
+  pageSize: number;
+}
+
+/**
+ * Paginated result
+ */
+export interface RentalPaginatedResult<T> {
+  data: T[];
+  totalCount: number;
+  pageCount: number;
+}
+
+/**
+ * Fetch rental items with server-side pagination
+ */
+export function usePaginatedRentalItems(
+  pagination: RentalPaginationParams,
+  rentalType?: RentalType | "all" | null,
+  searchTerm?: string,
+  sortBy: "alphabetical" | "recently_added" | "by_rate" = "alphabetical"
+) {
+  const supabase = createClient();
+  const { pageIndex, pageSize } = pagination;
+  const offset = pageIndex * pageSize;
+
+  return useQuery({
+    queryKey: ["rentals", "items", "paginated", { pageIndex, pageSize, rentalType, searchTerm, sortBy }],
+    queryFn: async (): Promise<RentalPaginatedResult<RentalItemWithDetails>> => {
+      // Get total count
+      let countQuery = supabase
+        .from("rental_items")
+        .select("*", { count: "exact", head: true })
+        .eq("is_active", true);
+
+      if (rentalType && rentalType !== "all") {
+        countQuery = countQuery.eq("rental_type", rentalType);
+      }
+
+      if (searchTerm && searchTerm.length >= 2) {
+        countQuery = countQuery.or(
+          `name.ilike.%${searchTerm}%,code.ilike.%${searchTerm}%,local_name.ilike.%${searchTerm}%`
+        );
+      }
+
+      const { count: totalCount, error: countError } = await countQuery;
+      if (countError) throw countError;
+
+      // Get paginated data
+      let dataQuery = supabase
+        .from("rental_items")
+        .select(
+          `
+          *,
+          category:rental_item_categories(id, name, code)
+        `
+        )
+        .eq("is_active", true);
+
+      // Apply sorting
+      switch (sortBy) {
+        case "recently_added":
+          dataQuery = dataQuery.order("created_at", { ascending: false });
+          break;
+        case "by_rate":
+          dataQuery = dataQuery.order("daily_rate", { ascending: true });
+          break;
+        default:
+          dataQuery = dataQuery.order("name", { ascending: true });
+      }
+
+      dataQuery = dataQuery.range(offset, offset + pageSize - 1);
+
+      if (rentalType && rentalType !== "all") {
+        dataQuery = dataQuery.eq("rental_type", rentalType);
+      }
+
+      if (searchTerm && searchTerm.length >= 2) {
+        dataQuery = dataQuery.or(
+          `name.ilike.%${searchTerm}%,code.ilike.%${searchTerm}%,local_name.ilike.%${searchTerm}%`
+        );
+      }
+
+      const { data, error: dataError } = await dataQuery;
+      if (dataError) throw dataError;
+
+      return {
+        data: data as RentalItemWithDetails[],
+        totalCount: totalCount || 0,
+        pageCount: Math.ceil((totalCount || 0) / pageSize),
+      };
+    },
+    placeholderData: (previousData) => previousData,
   });
 }
 

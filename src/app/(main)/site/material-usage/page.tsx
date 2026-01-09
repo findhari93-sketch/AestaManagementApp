@@ -87,9 +87,10 @@ export default function MaterialUsagePage() {
   // Calculate date range for queries
   const dateRange = useMemo(() => {
     if (isAllTime) {
-      // For "All Time", use a very old start date
+      // For "All Time", default to last 90 days for performance
+      // Users can still use custom date picker for longer ranges
       return {
-        startDate: "2020-01-01",
+        startDate: dayjs().subtract(90, "day").format("YYYY-MM-DD"),
         endDate: dayjs().format("YYYY-MM-DD"),
       };
     }

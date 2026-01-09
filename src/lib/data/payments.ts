@@ -271,8 +271,8 @@ export function transformToDailyPaymentRecords(
       subcontractId: r.subcontract_id || null,
       subcontractTitle: r.subcontracts?.title || null,
       expenseId: r.expense_id || null,
-      moneySource: tx?.money_source || null,
-      moneySourceName: tx?.money_source_name || null,
+      moneySource: tx?.money_source || r.payer_source || null,
+      moneySourceName: tx?.money_source_name || r.payer_name || null,
       settlementGroupId: r.settlement_group_id || null,
       settlementReference: r.settlement_groups?.settlement_reference || null,
     });
@@ -311,8 +311,8 @@ export function transformToDailyPaymentRecords(
       subcontractId: r.subcontract_id || r.expenses?.contract_id || null,
       subcontractTitle: r.subcontracts?.title || r.expenses?.subcontracts?.title || null,
       expenseId: r.expense_id || null,
-      moneySource: tx?.money_source || null,
-      moneySourceName: tx?.money_source_name || null,
+      moneySource: tx?.money_source || r.payer_source || null,
+      moneySourceName: tx?.money_source_name || r.payer_name || null,
       settlementGroupId: r.settlement_group_id || null,
       settlementReference: r.settlement_groups?.settlement_reference || null,
     });

@@ -211,8 +211,7 @@ export function useGroupAttendanceCounts(
           .from("market_laborer_attendance")
           .select("count")
           .eq("site_id", site.id)
-          .eq("date", date)
-          .eq("is_deleted", false);
+          .eq("date", date);
 
         const namedCount = namedData?.length || 0;
         const marketCount =
@@ -314,6 +313,7 @@ export function useCreateGroupTeaShopEntry() {
           site_group_id: data.siteGroupId,
           site_id: null, // Group entries don't have a single site
           date: data.date,
+          amount: data.totalAmount, // Required NOT NULL field
           total_amount: data.totalAmount,
           amount_paid: 0,
           is_fully_paid: false,
@@ -552,6 +552,7 @@ export function useUpdateGroupTeaShopEntry() {
         .from("tea_shop_entries")
         .update({
           date: data.date,
+          amount: data.totalAmount, // Keep in sync with total_amount
           total_amount: data.totalAmount,
           percentage_split: data.percentageSplit || null,
           notes: data.notes || null,

@@ -283,7 +283,8 @@ export default function DailyMarketPaymentsTab({
             money_source_name,
             user_id
           ),
-          settlement_groups(id, settlement_reference)
+          settlement_groups(id, settlement_reference),
+          expenses(contract_id, subcontracts(id, title))
         `
         )
         .eq("site_id", selectedSite.id)
@@ -381,8 +382,8 @@ export default function DailyMarketPaymentsTab({
           engineerUserId: r.site_engineer_transactions?.user_id || null,
           proofUrl: r.payment_proof_url,
           paymentNotes: r.payment_notes || null,
-          subcontractId: r.subcontract_id || null,
-          subcontractTitle: r.subcontracts?.title || null,
+          subcontractId: r.subcontract_id || r.expenses?.contract_id || null,
+          subcontractTitle: r.subcontracts?.title || r.expenses?.subcontracts?.title || null,
           expenseId: r.expense_id || null,
           settlementStatus: r.site_engineer_transactions?.settlement_status || null,
           // Settlement tracking fields from engineer transaction
