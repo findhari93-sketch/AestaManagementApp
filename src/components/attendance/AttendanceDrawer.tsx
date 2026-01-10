@@ -1196,33 +1196,50 @@ export default function AttendanceDrawer({
       return;
     }
 
-    // Check if a holiday exists for this date
-    const { data: existingHoliday } = await supabase
-      .from("site_holidays")
-      .select("date, reason")
-      .eq("site_id", siteId)
-      .eq("date", selectedDate)
-      .maybeSingle();
-
-    if (existingHoliday) {
-      setError(`Cannot record attendance - ${selectedDate} is marked as a holiday (${existingHoliday.reason || 'No reason specified'})`);
-      return;
-    }
-
-    // For new dates, check if attendance already exists
-    if (!initialDate) {
-      const { data: existingData } = await supabase
-        .from("daily_attendance")
-        .select("id")
+    try {
+      // Check if a holiday exists for this date
+      const { data: existingHoliday, error: holidayError } = await supabase
+        .from("site_holidays")
+        .select("date, reason")
         .eq("site_id", siteId)
         .eq("date", selectedDate)
-        .limit(1);
+        .maybeSingle();
 
-      setHasExistingAttendance(!!(existingData && existingData.length > 0));
+      if (holidayError) {
+        console.error("[AttendanceDrawer] Error checking holidays:", holidayError);
+        setError("Failed to check for holidays. Please try again.");
+        return;
+      }
+
+      if (existingHoliday) {
+        setError(`Cannot record attendance - ${selectedDate} is marked as a holiday (${existingHoliday.reason || 'No reason specified'})`);
+        return;
+      }
+
+      // For new dates, check if attendance already exists
+      if (!initialDate) {
+        const { data: existingData, error: existingError } = await supabase
+          .from("daily_attendance")
+          .select("id")
+          .eq("site_id", siteId)
+          .eq("date", selectedDate)
+          .limit(1);
+
+        if (existingError) {
+          console.error("[AttendanceDrawer] Error checking existing attendance:", existingError);
+          setError("Failed to check for existing attendance. Please try again.");
+          return;
+        }
+
+        setHasExistingAttendance(!!(existingData && existingData.length > 0));
+      }
+
+      // Show confirmation dialog
+      setConfirmDialogOpen(true);
+    } catch (err) {
+      console.error("[AttendanceDrawer] Unexpected error in handleSaveClick:", err);
+      setError("An unexpected error occurred. Please try again.");
     }
-
-    // Show confirmation dialog
-    setConfirmDialogOpen(true);
   };
 
   // Execute the actual save after confirmation
