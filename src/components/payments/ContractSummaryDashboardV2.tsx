@@ -59,7 +59,11 @@ export default function ContractSummaryDashboardV2({
 
   // Calculate derived values
   // Remaining balance = Salary earned - Salary settled (advances NOT included)
-  const remainingBalance = Math.max(0, totalSalaryEarned - totalSalarySettled);
+  // Can be negative if overpaid (excess)
+  const balanceDifference = totalSalaryEarned - totalSalarySettled;
+  const remainingBalance = Math.max(0, balanceDifference);
+  const excessPaid = balanceDifference < 0 ? Math.abs(balanceDifference) : 0;
+  const isExcessPaid = excessPaid > 0;
 
   // Total paid = Salary settled + Advances given
   const totalPaid = totalSalarySettled + totalAdvancesGiven;
@@ -206,42 +210,64 @@ export default function ContractSummaryDashboardV2({
           </Card>
         </Grid>
 
-        {/* Remaining Balance (Red if > 0) */}
+        {/* Remaining Balance / Excess Paid */}
         <Grid size={{ xs: 12, sm: 6, md: 2.4 }}>
           <Card
             sx={{
-              bgcolor: remainingBalance > 0 ? "error.50" : "success.50",
+              bgcolor: isExcessPaid
+                ? "info.50"
+                : remainingBalance > 0
+                  ? "error.50"
+                  : "success.50",
               borderLeft: 4,
-              borderColor: remainingBalance > 0 ? "error.main" : "success.main",
+              borderColor: isExcessPaid
+                ? "info.main"
+                : remainingBalance > 0
+                  ? "error.main"
+                  : "success.main",
             }}
           >
             <CardContent sx={{ py: 2, "&:last-child": { pb: 2 } }}>
               <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
                 <OutstandingIcon
-                  color={remainingBalance > 0 ? "error" : "success"}
+                  color={isExcessPaid ? "info" : remainingBalance > 0 ? "error" : "success"}
                   fontSize="small"
                 />
-                <Tooltip title="Remaining salary balance (advances not deducted)">
+                <Tooltip
+                  title={
+                    isExcessPaid
+                      ? "Amount paid in excess of salary earned (advances not included)"
+                      : "Remaining salary balance (advances not deducted)"
+                  }
+                >
                   <Typography variant="caption" color="text.secondary" sx={{ cursor: "help" }}>
-                    Remaining Balance
+                    {isExcessPaid ? "Excess Paid" : "Remaining Balance"}
                   </Typography>
                 </Tooltip>
               </Box>
               <Typography
                 variant="h5"
                 fontWeight={600}
-                color={remainingBalance > 0 ? "error.dark" : "success.dark"}
+                color={
+                  isExcessPaid
+                    ? "info.dark"
+                    : remainingBalance > 0
+                      ? "error.dark"
+                      : "success.dark"
+                }
               >
-                {formatCurrency(remainingBalance)}
+                {isExcessPaid ? `+${formatCurrency(excessPaid)}` : formatCurrency(remainingBalance)}
               </Typography>
               <Chip
                 label={
-                  remainingBalance > 0
-                    ? `${laborersWithDue} with due`
-                    : "All settled"
+                  isExcessPaid
+                    ? "Overpaid"
+                    : remainingBalance > 0
+                      ? `${laborersWithDue} with due`
+                      : "All settled"
                 }
                 size="small"
-                color={remainingBalance > 0 ? "error" : "success"}
+                color={isExcessPaid ? "info" : remainingBalance > 0 ? "error" : "success"}
                 variant="outlined"
                 sx={{ mt: 1 }}
               />

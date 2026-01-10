@@ -271,11 +271,8 @@ export default function ContractPaymentRecordDialog({
       return;
     }
 
-    // For salary payments, we need outstanding balance; for advances, we don't
-    if (paymentType === "salary" && weeksWithBalance.length === 0) {
-      setError("No outstanding balance to settle. Use 'Advance' for prepayments.");
-      return;
-    }
+    // Note: We allow salary payments even when no outstanding balance (excess/overpayment)
+    // The excess will be tracked in settlement_groups and shown as "Excess Paid"
 
     setProcessing(true);
     setError(null);
@@ -384,31 +381,42 @@ export default function ContractPaymentRecordDialog({
         )}
 
         {/* Outstanding Summary */}
-        <Box sx={{ mb: 3, p: 2, bgcolor: "warning.50", borderRadius: 1, border: 1, borderColor: "warning.main" }}>
-          <Typography variant="subtitle2" color="warning.dark" gutterBottom>
-            Outstanding Balance Summary
-          </Typography>
-          <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <Box>
-              <Typography variant="h5" fontWeight={600} color="error.main">
-                {formatCurrency(totalOutstanding)}
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                across {weeksWithBalance.length} week{weeksWithBalance.length !== 1 ? "s" : ""}
-              </Typography>
-            </Box>
-            {weeksWithBalance.length > 0 && (
-              <Box sx={{ textAlign: "right" }}>
-                <Typography variant="body2" color="text.secondary">
-                  Oldest: {weeksWithBalance[0].weekLabel}
+        {totalOutstanding > 0 ? (
+          <Box sx={{ mb: 3, p: 2, bgcolor: "warning.50", borderRadius: 1, border: 1, borderColor: "warning.main" }}>
+            <Typography variant="subtitle2" color="warning.dark" gutterBottom>
+              Outstanding Balance Summary
+            </Typography>
+            <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <Box>
+                <Typography variant="h5" fontWeight={600} color="error.main">
+                  {formatCurrency(totalOutstanding)}
                 </Typography>
                 <Typography variant="caption" color="text.secondary">
-                  Due: {formatCurrency(weeksWithBalance[0].totalDue)}
+                  across {weeksWithBalance.length} week{weeksWithBalance.length !== 1 ? "s" : ""}
                 </Typography>
               </Box>
-            )}
+              {weeksWithBalance.length > 0 && (
+                <Box sx={{ textAlign: "right" }}>
+                  <Typography variant="body2" color="text.secondary">
+                    Oldest: {weeksWithBalance[0].weekLabel}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Due: {formatCurrency(weeksWithBalance[0].totalDue)}
+                  </Typography>
+                </Box>
+              )}
+            </Box>
           </Box>
-        </Box>
+        ) : (
+          <Alert severity="success" sx={{ mb: 3 }}>
+            <Typography variant="body2" fontWeight={500}>
+              All salary dues are settled!
+            </Typography>
+            <Typography variant="caption">
+              Any payment recorded here will be saved as excess/prepayment. You can use "Salary" type for future salary prepayment or "Advance" for tracked advances.
+            </Typography>
+          </Alert>
+        )}
 
         {/* Payment Amount */}
         <Box sx={{ mb: 3 }}>
@@ -442,11 +450,14 @@ export default function ContractPaymentRecordDialog({
           {hasExcessPayment && paymentType === "salary" && (
             <Alert severity="info" sx={{ mt: 1 }}>
               <Typography variant="body2" fontWeight={500}>
-                Overpayment: {formatCurrency(amount - totalOutstanding)} excess
+                {totalOutstanding === 0
+                  ? `Excess Payment: ${formatCurrency(amount)}`
+                  : `Overpayment: ${formatCurrency(amount - totalOutstanding)} excess`}
               </Typography>
               <Typography variant="caption">
-                Excess amount will automatically carry forward to future weeks via waterfall allocation.
-                The balance will show as "Overpaid" until future salary is earned.
+                {totalOutstanding === 0
+                  ? "This entire amount will be recorded as excess payment. It will show as \"Excess Paid\" in the dashboard until future salary is earned."
+                  : "Excess amount will automatically carry forward to future weeks via waterfall allocation. The balance will show as \"Excess Paid\" until future salary is earned."}
               </Typography>
             </Alert>
           )}

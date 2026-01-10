@@ -1555,10 +1555,9 @@ export async function processWaterfallContractPayment(
     const paymentIds: string[] = [];
     const weekAllocations: { weekLabel: string; weekStart: string; allocated: number; laborerCount: number }[] = [];
 
-    // Only require weeks for salary payments - advance/other payments don't need week allocation
-    if (config.weeks.length === 0 && config.paymentType === "salary") {
-      return { success: false, error: "No weeks to process" };
-    }
+    // Note: We allow salary payments even with empty weeks (excess/overpayment)
+    // The payment will be recorded in settlement_groups and tracked as excess
+    // This allows users to prepay or overpay, which shows as "Excess Paid" in the dashboard
 
     // Count total laborers across all weeks (0 for advance/other with no weeks)
     const totalLaborers = config.weeks.reduce((sum, w) => sum + w.laborers.length, 0);
