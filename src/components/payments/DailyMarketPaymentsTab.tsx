@@ -236,7 +236,7 @@ export default function DailyMarketPaymentsTab({
             money_source_name,
             user_id
           ),
-          settlement_groups(id, settlement_reference)
+          settlement_groups(id, settlement_reference, is_cancelled)
         `
         )
         .eq("site_id", selectedSite.id)
@@ -283,7 +283,7 @@ export default function DailyMarketPaymentsTab({
             money_source_name,
             user_id
           ),
-          settlement_groups(id, settlement_reference),
+          settlement_groups(id, settlement_reference, is_cancelled),
           expenses(contract_id, subcontracts(id, title))
         `
         )
@@ -357,8 +357,14 @@ export default function DailyMarketPaymentsTab({
           moneySource: r.site_engineer_transactions?.money_source || r.payer_source || null,
           moneySourceName: r.site_engineer_transactions?.money_source_name || r.payer_name || null,
           // Settlement group tracking (new architecture)
-          settlementGroupId: r.settlement_group_id || null,
-          settlementReference: r.settlement_groups?.settlement_reference || null,
+          // Don't show settlement info for cancelled settlements OR for unpaid records (inconsistent state)
+          // A record should only show settlement ref if it's paid or sent to engineer
+          settlementGroupId: (r.settlement_groups?.is_cancelled || (!r.is_paid && r.paid_via !== "engineer_wallet"))
+            ? null
+            : (r.settlement_group_id || null),
+          settlementReference: (r.settlement_groups?.is_cancelled || (!r.is_paid && r.paid_via !== "engineer_wallet"))
+            ? null
+            : (r.settlement_groups?.settlement_reference || null),
         })
       );
 
@@ -398,8 +404,14 @@ export default function DailyMarketPaymentsTab({
           moneySource: r.site_engineer_transactions?.money_source || r.payer_source || null,
           moneySourceName: r.site_engineer_transactions?.money_source_name || r.payer_name || null,
           // Settlement group tracking (new architecture)
-          settlementGroupId: r.settlement_group_id || null,
-          settlementReference: r.settlement_groups?.settlement_reference || null,
+          // Don't show settlement info for cancelled settlements OR for unpaid records (inconsistent state)
+          // A record should only show settlement ref if it's paid or sent to engineer
+          settlementGroupId: (r.settlement_groups?.is_cancelled || (!r.is_paid && r.paid_via !== "engineer_wallet"))
+            ? null
+            : (r.settlement_group_id || null),
+          settlementReference: (r.settlement_groups?.is_cancelled || (!r.is_paid && r.paid_via !== "engineer_wallet"))
+            ? null
+            : (r.settlement_groups?.settlement_reference || null),
         })
       );
 

@@ -581,9 +581,13 @@ export default function MainLayout({
         {filteredNavCategories.map((category) => (
           <Box key={category.label} sx={{ mb: 0.5 }}>
             {category.items.map((item) => {
-              const isActive =
-                pathname === item.path ||
-                pathname.startsWith(`${item.path}/`);
+              // Check if another nav item has an exact match - if so, don't highlight this item via startsWith
+              const hasExactMatchElsewhere = filteredNavCategories.some(cat =>
+                cat.items.some(i => i.path !== item.path && pathname === i.path)
+              );
+              const isActive = hasExactMatchElsewhere
+                ? pathname === item.path
+                : pathname === item.path || pathname.startsWith(`${item.path}/`);
 
               return (
                 <ListItem key={item.text} disablePadding sx={{ mb: 0.5 }}>
@@ -822,9 +826,13 @@ export default function MainLayout({
               {/* Category Items - Only shown when expanded */}
               {isExpanded &&
                 category.items.map((item) => {
-                  const isActive =
-                    pathname === item.path ||
-                    pathname.startsWith(`${item.path}/`);
+                  // Check if another nav item has an exact match - if so, don't highlight this item via startsWith
+                  const hasExactMatchElsewhere = filteredNavCategories.some(cat =>
+                    cat.items.some(i => i.path !== item.path && pathname === i.path)
+                  );
+                  const isActive = hasExactMatchElsewhere
+                    ? pathname === item.path
+                    : pathname === item.path || pathname.startsWith(`${item.path}/`);
 
                   return (
                     <ListItem key={item.text} disablePadding sx={{ mb: 0.5 }}>

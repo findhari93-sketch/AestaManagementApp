@@ -196,7 +196,7 @@ export default function ContractSummaryDashboardV2({
                 {formatCurrency(totalPaid)}
               </Typography>
               <Chip
-                label={`${salaryRecordCount} settlement${salaryRecordCount !== 1 ? "s" : ""}`}
+                label={`${salaryRecordCount + advanceRecordCount} settlement${(salaryRecordCount + advanceRecordCount) !== 1 ? "s" : ""}`}
                 size="small"
                 color="info"
                 variant="outlined"

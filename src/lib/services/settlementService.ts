@@ -65,20 +65,53 @@ export async function processSettlement(
       effectiveSubcontractId = await getSubcontractFromAttendanceRecords(supabase, config.records) ?? undefined;
     }
 
-    // 1. Generate settlement reference FIRST (needed for wallet spending)
-    const { data: refData, error: refError } = await supabase.rpc(
-      "generate_settlement_reference",
-      { p_site_id: config.siteId }
+    // Calculate laborer count (market records may have count field)
+    const laborerCount = config.records.reduce((sum, r) => {
+      if (r.sourceType === "market" && r.count) {
+        return sum + r.count;
+      }
+      return sum + 1;
+    }, 0);
+
+    // Get the record date (use first record's date)
+    const recordDate = config.records.length > 0 ? config.records[0].date : paymentDate;
+
+    // 1. Create settlement_group FIRST using atomic function (guaranteed unique reference)
+    const { data: groupResult, error: groupError } = await supabase.rpc(
+      "create_settlement_group",
+      {
+        p_site_id: config.siteId,
+        p_settlement_date: recordDate,
+        p_total_amount: config.totalAmount,
+        p_laborer_count: laborerCount,
+        p_payment_channel: config.paymentChannel,
+        p_payment_mode: config.paymentMode,
+        p_payer_source: config.payerSource,
+        p_payer_name: config.payerSource === "custom" || config.payerSource === "other_site_money"
+          ? config.customPayerName
+          : null,
+        p_proof_url: config.proofUrl || null,
+        p_notes: config.notes || null,
+        p_subcontract_id: effectiveSubcontractId || null,
+        p_engineer_transaction_id: null, // Will be updated after wallet spending
+        p_created_by: config.userId,
+        p_created_by_name: config.userName,
+      }
     );
 
-    if (refError) {
-      console.warn("Could not generate settlement reference:", refError);
-      // Fallback reference with UUID-based suffix for uniqueness
-      const uniqueSuffix = crypto.randomUUID().slice(0, 8).toUpperCase();
-      settlementReference = `SET-${dayjs().format("YYMMDD")}-${uniqueSuffix}`;
-    } else {
-      settlementReference = refData as string;
+    if (groupError) {
+      console.error("Error creating settlement_group:", groupError);
+      throw groupError;
     }
+
+    // The RPC returns an array with one row containing id and settlement_reference
+    const groupData = Array.isArray(groupResult) ? groupResult[0] : groupResult;
+    if (!groupData || !groupData.id) {
+      throw new Error("Failed to create settlement group - no data returned");
+    }
+
+    settlementGroupId = groupData.id;
+    settlementReference = groupData.settlement_reference;
 
     // 2. If via engineer wallet, record spending transaction (deducts from wallet batches)
     if (config.paymentChannel === "engineer_wallet" && config.engineerId) {
@@ -106,68 +139,36 @@ export async function processSettlement(
         userName: config.userName,
         userId: config.userId,
         settlementReference: settlementReference,
-        // settlementGroupId will be updated after creating the group
+        settlementGroupId: settlementGroupId,
       });
 
       if (!spendingResult.success) {
+        // Rollback: cancel the settlement group since wallet spending failed
+        await supabase
+          .from("settlement_groups")
+          .update({
+            is_cancelled: true,
+            cancelled_at: new Date().toISOString(),
+            cancelled_by: config.userName,
+            cancelled_by_user_id: config.userId,
+            cancellation_reason: `Wallet spending failed: ${spendingResult.error}`,
+          })
+          .eq("id", settlementGroupId);
         throw new Error(spendingResult.error || "Failed to record wallet spending");
       }
 
       engineerTransactionId = spendingResult.transactionId || null;
-    }
 
-    // Calculate laborer count (market records may have count field)
-    const laborerCount = config.records.reduce((sum, r) => {
-      if (r.sourceType === "market" && r.count) {
-        return sum + r.count;
-      }
-      return sum + 1;
-    }, 0);
+      // Update settlement_group with the engineer_transaction_id
+      if (engineerTransactionId) {
+        const { error: updateError } = await supabase
+          .from("settlement_groups")
+          .update({ engineer_transaction_id: engineerTransactionId })
+          .eq("id", settlementGroupId);
 
-    // Get the record date (use first record's date)
-    const recordDate = config.records.length > 0 ? config.records[0].date : paymentDate;
-
-    // Create settlement_group as the single source of truth
-    const { data: groupData, error: groupError } = await (supabase
-      .from("settlement_groups") as any)
-      .insert({
-        settlement_reference: settlementReference,
-        site_id: config.siteId,
-        settlement_date: recordDate,
-        total_amount: config.totalAmount,
-        laborer_count: laborerCount,
-        payment_channel: config.paymentChannel,
-        payment_mode: config.paymentMode,
-        payer_source: config.payerSource,
-        payer_name: config.payerSource === "custom" || config.payerSource === "other_site_money"
-          ? config.customPayerName
-          : null,
-        proof_url: config.proofUrl || null,
-        notes: config.notes || null,
-        subcontract_id: effectiveSubcontractId || null,
-        engineer_transaction_id: engineerTransactionId,
-        created_by: config.userId,
-        created_by_name: config.userName,
-      })
-      .select()
-      .single();
-
-    if (groupError) {
-      console.error("Error creating settlement_group:", groupError);
-      throw groupError;
-    }
-
-    settlementGroupId = groupData.id;
-
-    // Update engineer transaction with settlement_group_id (for wallet spending)
-    if (engineerTransactionId && config.paymentChannel === "engineer_wallet") {
-      const { error: updateTxError } = await supabase
-        .from("site_engineer_transactions")
-        .update({ settlement_group_id: settlementGroupId })
-        .eq("id", engineerTransactionId);
-
-      if (updateTxError) {
-        console.warn("Could not update engineer transaction with settlement_group_id:", updateTxError);
+        if (updateError) {
+          console.warn("Could not update settlement_group with engineer_transaction_id:", updateError);
+        }
       }
     }
 
@@ -270,56 +271,7 @@ export async function processWeeklySettlement(
     let settlementGroupId: string | undefined;
     let settlementReference: string | undefined;
 
-    // 1. Generate settlement reference FIRST (needed for wallet spending)
-    const { data: refData, error: refError } = await supabase.rpc(
-      "generate_settlement_reference",
-      { p_site_id: config.siteId }
-    );
-
-    if (refError) {
-      console.warn("Could not generate settlement reference:", refError);
-      const uniqueSuffix = crypto.randomUUID().slice(0, 8).toUpperCase();
-      settlementReference = `SET-${dayjs().format("YYMMDD")}-${uniqueSuffix}`;
-    } else {
-      settlementReference = refData as string;
-    }
-
-    // 2. If via engineer wallet, record spending transaction (deducts from wallet batches)
-    if (config.paymentChannel === "engineer_wallet" && config.engineerId) {
-      // Validate batch allocations are provided
-      if (!config.batchAllocations || config.batchAllocations.length === 0) {
-        throw new Error("Batch allocation required for engineer wallet settlement. Please select which wallet batches to use.");
-      }
-
-      // Use walletService.recordWalletSpending for proper batch tracking
-      // Map payment mode for compatibility (net_banking -> bank_transfer)
-      const walletPaymentMode = config.paymentMode === "net_banking" ? "bank_transfer" : config.paymentMode;
-      const spendingResult = await recordWalletSpending(supabase, {
-        engineerId: config.engineerId,
-        amount: config.totalAmount,
-        siteId: config.siteId,
-        description: config.engineerReference || `Weekly settlement ${settlementReference} (${config.dateFrom} - ${config.dateTo})`,
-        recipientType: "laborer",
-        paymentMode: walletPaymentMode as any,
-        moneySource: "wallet",
-        batchAllocations: config.batchAllocations,
-        subcontractId: config.subcontractId,
-        proofUrl: config.proofUrl,
-        notes: config.notes,
-        transactionDate: paymentDate,
-        userName: config.userName,
-        userId: config.userId,
-        settlementReference: settlementReference,
-      });
-
-      if (!spendingResult.success) {
-        throw new Error(spendingResult.error || "Failed to record wallet spending");
-      }
-
-      engineerTransactionId = spendingResult.transactionId || null;
-    }
-
-    // 3. Count records that will be settled
+    // 1. Count records that will be settled FIRST
     let laborerCount = 0;
 
     if (config.settlementType === "daily" || config.settlementType === "all") {
@@ -357,51 +309,95 @@ export async function processWeeklySettlement(
       laborerCount += (marketData || []).reduce((sum, r) => sum + (r.count || 1), 0);
     }
 
-    // 4. Create settlement_group
-    const { data: groupData, error: groupError } = await (supabase
-      .from("settlement_groups") as any)
-      .insert({
-        settlement_reference: settlementReference,
-        site_id: config.siteId,
-        settlement_date: config.dateFrom,
-        total_amount: config.totalAmount,
-        laborer_count: laborerCount,
-        payment_channel: config.paymentChannel,
-        payment_mode: config.paymentMode,
-        payer_source: config.payerSource,
-        payer_name: config.payerSource === "custom" || config.payerSource === "other_site_money"
+    // 2. Create settlement_group using atomic function (guaranteed unique reference)
+    const { data: groupResult, error: groupError } = await supabase.rpc(
+      "create_settlement_group",
+      {
+        p_site_id: config.siteId,
+        p_settlement_date: config.dateFrom,
+        p_total_amount: config.totalAmount,
+        p_laborer_count: laborerCount,
+        p_payment_channel: config.paymentChannel,
+        p_payment_mode: config.paymentMode,
+        p_payer_source: config.payerSource,
+        p_payer_name: config.payerSource === "custom" || config.payerSource === "other_site_money"
           ? config.customPayerName
           : null,
-        proof_url: config.proofUrl || null,
-        notes: config.notes ? `Weekly (${config.dateFrom} - ${config.dateTo}): ${config.notes}` : `Weekly settlement (${config.dateFrom} - ${config.dateTo})`,
-        subcontract_id: config.subcontractId || null,
-        engineer_transaction_id: engineerTransactionId,
-        created_by: config.userId,
-        created_by_name: config.userName,
-      })
-      .select()
-      .single();
+        p_proof_url: config.proofUrl || null,
+        p_notes: config.notes ? `Weekly (${config.dateFrom} - ${config.dateTo}): ${config.notes}` : `Weekly settlement (${config.dateFrom} - ${config.dateTo})`,
+        p_subcontract_id: config.subcontractId || null,
+        p_engineer_transaction_id: null,
+        p_created_by: config.userId,
+        p_created_by_name: config.userName,
+      }
+    );
 
     if (groupError) {
       console.error("Error creating settlement_group:", groupError);
       throw groupError;
     }
 
+    const groupData = Array.isArray(groupResult) ? groupResult[0] : groupResult;
+    if (!groupData || !groupData.id) {
+      throw new Error("Failed to create settlement group - no data returned");
+    }
+
     settlementGroupId = groupData.id;
+    settlementReference = groupData.settlement_reference;
 
-    // Update engineer transaction with settlement_group_id (for wallet spending)
-    if (engineerTransactionId && config.paymentChannel === "engineer_wallet") {
-      const { error: updateTxError } = await supabase
-        .from("site_engineer_transactions")
-        .update({ settlement_group_id: settlementGroupId })
-        .eq("id", engineerTransactionId);
+    // 3. If via engineer wallet, record spending transaction (deducts from wallet batches)
+    if (config.paymentChannel === "engineer_wallet" && config.engineerId) {
+      if (!config.batchAllocations || config.batchAllocations.length === 0) {
+        throw new Error("Batch allocation required for engineer wallet settlement. Please select which wallet batches to use.");
+      }
 
-      if (updateTxError) {
-        console.warn("Could not update engineer transaction with settlement_group_id:", updateTxError);
+      const walletPaymentMode = config.paymentMode === "net_banking" ? "bank_transfer" : config.paymentMode;
+      const spendingResult = await recordWalletSpending(supabase, {
+        engineerId: config.engineerId,
+        amount: config.totalAmount,
+        siteId: config.siteId,
+        description: config.engineerReference || `Weekly settlement ${settlementReference} (${config.dateFrom} - ${config.dateTo})`,
+        recipientType: "laborer",
+        paymentMode: walletPaymentMode as any,
+        moneySource: "wallet",
+        batchAllocations: config.batchAllocations,
+        subcontractId: config.subcontractId,
+        proofUrl: config.proofUrl,
+        notes: config.notes,
+        transactionDate: paymentDate,
+        userName: config.userName,
+        userId: config.userId,
+        settlementReference: settlementReference,
+        settlementGroupId: settlementGroupId,
+      });
+
+      if (!spendingResult.success) {
+        // Rollback: cancel the settlement group
+        await supabase
+          .from("settlement_groups")
+          .update({
+            is_cancelled: true,
+            cancelled_at: new Date().toISOString(),
+            cancelled_by: config.userName,
+            cancelled_by_user_id: config.userId,
+            cancellation_reason: `Wallet spending failed: ${spendingResult.error}`,
+          })
+          .eq("id", settlementGroupId);
+        throw new Error(spendingResult.error || "Failed to record wallet spending");
+      }
+
+      engineerTransactionId = spendingResult.transactionId || null;
+
+      // Update settlement_group with engineer_transaction_id
+      if (engineerTransactionId) {
+        await supabase
+          .from("settlement_groups")
+          .update({ engineer_transaction_id: engineerTransactionId })
+          .eq("id", settlementGroupId);
       }
     }
 
-    // 5. Update attendance records with settlement_group_id
+    // 4. Update attendance records with settlement_group_id
     const updateData = {
       is_paid: config.paymentChannel === "direct",
       payment_date: paymentDate,
@@ -705,7 +701,43 @@ export async function processContractPayment(
     let paymentId: string | undefined;
     const allocations: PaymentWeekAllocation[] = [];
 
-    // 1. If via engineer wallet, create engineer transaction first
+    // 1. Create settlement_group FIRST using atomic function (guaranteed unique reference)
+    const { data: groupResult, error: groupError } = await supabase.rpc(
+      "create_settlement_group",
+      {
+        p_site_id: config.siteId,
+        p_settlement_date: config.actualPaymentDate,
+        p_total_amount: config.amount,
+        p_laborer_count: 1,
+        p_payment_channel: config.paymentChannel,
+        p_payment_mode: config.paymentMode,
+        p_payer_source: config.payerSource,
+        p_payer_name: config.payerSource === "custom" ? config.customPayerName : null,
+        p_proof_url: config.proofUrl || null,
+        p_notes: config.notes || null,
+        p_subcontract_id: config.subcontractId || null,
+        p_engineer_transaction_id: null,
+        p_created_by: config.userId,
+        p_created_by_name: config.userName,
+        p_payment_type: config.paymentType,
+        p_actual_payment_date: config.actualPaymentDate,
+      }
+    );
+
+    if (groupError) {
+      console.error("Error creating settlement_group:", groupError);
+      throw groupError;
+    }
+
+    const groupData = Array.isArray(groupResult) ? groupResult[0] : groupResult;
+    if (!groupData || !groupData.id) {
+      throw new Error("Failed to create settlement group - no data returned");
+    }
+
+    settlementGroupId = groupData.id;
+    settlementReference = groupData.settlement_reference;
+
+    // 2. If via engineer wallet, create engineer transaction
     if (config.paymentChannel === "engineer_wallet" && config.engineerId) {
       const { data: txData, error: txError } = await (supabase
         .from("site_engineer_transactions") as any)
@@ -722,26 +754,34 @@ export async function processContractPayment(
           recorded_by: config.userName,
           recorded_by_user_id: config.userId,
           related_subcontract_id: config.subcontractId || null,
+          settlement_group_id: settlementGroupId,
+          settlement_reference: settlementReference,
         })
         .select()
         .single();
 
-      if (txError) throw txError;
+      if (txError) {
+        // Rollback: cancel settlement group
+        await supabase
+          .from("settlement_groups")
+          .update({
+            is_cancelled: true,
+            cancelled_at: new Date().toISOString(),
+            cancelled_by: config.userName,
+            cancelled_by_user_id: config.userId,
+            cancellation_reason: `Engineer transaction failed: ${txError.message}`,
+          })
+          .eq("id", settlementGroupId);
+        throw txError;
+      }
+
       engineerTransactionId = txData.id;
-    }
 
-    // 2. Generate settlement reference for the settlement_group
-    const { data: refData, error: refError } = await supabase.rpc(
-      "generate_settlement_reference",
-      { p_site_id: config.siteId }
-    );
-
-    if (refError) {
-      console.warn("Could not generate settlement reference:", refError);
-      const uniqueSuffix = crypto.randomUUID().slice(0, 8).toUpperCase();
-      settlementReference = `SET-${dayjs().format("YYMMDD")}-${uniqueSuffix}`;
-    } else {
-      settlementReference = refData as string;
+      // Update settlement_group with engineer_transaction_id
+      await supabase
+        .from("settlement_groups")
+        .update({ engineer_transaction_id: engineerTransactionId })
+        .eq("id", settlementGroupId);
     }
 
     // 3. Generate unique payment reference for this payment
@@ -758,39 +798,7 @@ export async function processContractPayment(
       paymentReference = payRefData as string;
     }
 
-    // 4. Create settlement_group
-    const { data: groupData, error: groupError } = await (supabase
-      .from("settlement_groups") as any)
-      .insert({
-        settlement_reference: settlementReference,
-        site_id: config.siteId,
-        settlement_date: config.actualPaymentDate,
-        total_amount: config.amount,
-        laborer_count: 1,
-        payment_channel: config.paymentChannel,
-        payment_mode: config.paymentMode,
-        payment_type: config.paymentType,
-        actual_payment_date: config.actualPaymentDate,
-        payer_source: config.payerSource,
-        payer_name: config.payerSource === "custom" ? config.customPayerName : null,
-        proof_url: config.proofUrl || null,
-        notes: config.notes || null,
-        subcontract_id: config.subcontractId || null,
-        engineer_transaction_id: engineerTransactionId,
-        created_by: config.userId,
-        created_by_name: config.userName,
-      })
-      .select()
-      .single();
-
-    if (groupError) {
-      console.error("Error creating settlement_group:", groupError);
-      throw groupError;
-    }
-
-    settlementGroupId = groupData.id;
-
-    // 5. Create labor_payments record with unique payment_reference
+    // 4. Create labor_payments record with unique payment_reference
     const { data: paymentData, error: paymentError } = await (supabase
       .from("labor_payments") as any)
       .insert({
@@ -1017,7 +1025,7 @@ export async function getPaymentByReference(
           *,
           laborers(name, labor_roles(name)),
           subcontracts(title),
-          settlement_groups(settlement_reference, payer_source, payer_name)
+          settlement_groups(settlement_reference, payer_source, payer_name, is_cancelled)
         `)
         .eq("payment_reference", reference)
         .single();
@@ -1415,7 +1423,7 @@ export async function getContractPaymentHistory(
         settlement_group_id,
         laborers(name, labor_roles(name)),
         subcontracts(title),
-        settlement_groups(settlement_reference, payer_source, payer_name)
+        settlement_groups(settlement_reference, payer_source, payer_name, is_cancelled)
       `, { count: "exact" })
       .eq("site_id", siteId)
       .eq("is_under_contract", true);
@@ -1452,7 +1460,8 @@ export async function getContractPaymentHistory(
     const payments: ContractPaymentHistoryRecord[] = (data || []).map((p: any) => ({
       id: p.id,
       paymentReference: p.payment_reference,
-      settlementReference: p.settlement_groups?.settlement_reference || null,
+      // Don't show settlement info for cancelled settlements
+      settlementReference: p.settlement_groups?.is_cancelled ? null : (p.settlement_groups?.settlement_reference || null),
       laborerId: p.laborer_id,
       laborerName: p.laborers?.name || "Unknown",
       laborerRole: p.laborers?.labor_roles?.name || null,
@@ -1462,9 +1471,9 @@ export async function getContractPaymentHistory(
       paymentChannel: p.payment_channel,
       actualPaymentDate: p.actual_payment_date || p.payment_date,
       paymentDate: p.payment_date,
-      // Payment source from settlement_groups
-      payerSource: p.settlement_groups?.payer_source || null,
-      payerName: p.settlement_groups?.payer_name || null,
+      // Payment source from settlement_groups (don't show for cancelled)
+      payerSource: p.settlement_groups?.is_cancelled ? null : (p.settlement_groups?.payer_source || null),
+      payerName: p.settlement_groups?.is_cancelled ? null : (p.settlement_groups?.payer_name || null),
       // Audit fields
       recordedBy: p.recorded_by || p.paid_by || "Unknown",
       recordedByUserId: p.recorded_by_user_id || p.paid_by_user_id || null,
@@ -1561,7 +1570,49 @@ export async function processWaterfallContractPayment(
         ? config.weeks[0].weekLabel
         : `${config.weeks[0].weekLabel} to ${config.weeks[config.weeks.length - 1].weekLabel}`;
 
-    // 1. If via engineer wallet, create engineer transaction first
+    // 1. Create settlement_group FIRST using atomic function (guaranteed unique reference)
+    const notesText = config.notes
+      ? (config.weeks.length === 0 ? `${weekRangeDesc}: ${config.notes}` : `Waterfall (${weekRangeDesc}): ${config.notes}`)
+      : (config.weeks.length === 0 ? weekRangeDesc : `Contract payment covering ${config.weeks.length} week(s): ${weekRangeDesc}`);
+
+    const { data: groupResult, error: groupError } = await supabase.rpc(
+      "create_settlement_group",
+      {
+        p_site_id: config.siteId,
+        p_settlement_date: config.actualPaymentDate,
+        p_total_amount: config.totalAmount,
+        p_laborer_count: totalLaborers,
+        p_payment_channel: config.paymentChannel,
+        p_payment_mode: config.paymentMode,
+        p_payer_source: config.payerSource,
+        p_payer_name: config.payerSource === "custom" || config.payerSource === "other_site_money"
+          ? config.customPayerName
+          : null,
+        p_proof_url: config.proofUrl || null,
+        p_notes: notesText,
+        p_subcontract_id: config.subcontractId || null,
+        p_engineer_transaction_id: null,
+        p_created_by: config.userId,
+        p_created_by_name: config.userName,
+        p_payment_type: config.paymentType,
+        p_actual_payment_date: config.actualPaymentDate,
+      }
+    );
+
+    if (groupError) {
+      console.error("Error creating settlement_group:", groupError);
+      throw groupError;
+    }
+
+    const groupData = Array.isArray(groupResult) ? groupResult[0] : groupResult;
+    if (!groupData || !groupData.id) {
+      throw new Error("Failed to create settlement group - no data returned");
+    }
+
+    settlementGroupId = groupData.id;
+    settlementReference = groupData.settlement_reference;
+
+    // 2. If via engineer wallet, create engineer transaction
     if (config.paymentChannel === "engineer_wallet" && config.engineerId) {
       const { data: txData, error: txError } = await (supabase
         .from("site_engineer_transactions") as any)
@@ -1578,65 +1629,37 @@ export async function processWaterfallContractPayment(
           recorded_by: config.userName,
           recorded_by_user_id: config.userId,
           related_subcontract_id: config.subcontractId || null,
+          settlement_group_id: settlementGroupId,
+          settlement_reference: settlementReference,
         })
         .select()
         .single();
 
-      if (txError) throw txError;
+      if (txError) {
+        // Rollback: cancel settlement group
+        await supabase
+          .from("settlement_groups")
+          .update({
+            is_cancelled: true,
+            cancelled_at: new Date().toISOString(),
+            cancelled_by: config.userName,
+            cancelled_by_user_id: config.userId,
+            cancellation_reason: `Engineer transaction failed: ${txError.message}`,
+          })
+          .eq("id", settlementGroupId);
+        throw txError;
+      }
+
       engineerTransactionId = txData.id;
+
+      // Update settlement_group with engineer_transaction_id
+      await supabase
+        .from("settlement_groups")
+        .update({ engineer_transaction_id: engineerTransactionId })
+        .eq("id", settlementGroupId);
     }
 
-    // 2. Generate settlement reference for the settlement_group
-    const { data: refData, error: refError } = await supabase.rpc(
-      "generate_settlement_reference",
-      { p_site_id: config.siteId }
-    );
-
-    if (refError) {
-      console.warn("Could not generate settlement reference:", refError);
-      const uniqueSuffix = crypto.randomUUID().slice(0, 8).toUpperCase();
-      settlementReference = `SET-${dayjs().format("YYMMDD")}-${uniqueSuffix}`;
-    } else {
-      settlementReference = refData as string;
-    }
-
-    // 3. Create settlement_group (shared by all payments)
-    const { data: groupData, error: groupError } = await (supabase
-      .from("settlement_groups") as any)
-      .insert({
-        settlement_reference: settlementReference,
-        site_id: config.siteId,
-        settlement_date: config.actualPaymentDate,
-        total_amount: config.totalAmount,
-        laborer_count: totalLaborers,
-        payment_channel: config.paymentChannel,
-        payment_mode: config.paymentMode,
-        payment_type: config.paymentType,
-        actual_payment_date: config.actualPaymentDate,
-        payer_source: config.payerSource,
-        payer_name: config.payerSource === "custom" || config.payerSource === "other_site_money"
-          ? config.customPayerName
-          : null,
-        proof_url: config.proofUrl || null,
-        notes: config.notes
-          ? (config.weeks.length === 0 ? `${weekRangeDesc}: ${config.notes}` : `Waterfall (${weekRangeDesc}): ${config.notes}`)
-          : (config.weeks.length === 0 ? weekRangeDesc : `Contract payment covering ${config.weeks.length} week(s): ${weekRangeDesc}`),
-        subcontract_id: config.subcontractId || null,
-        engineer_transaction_id: engineerTransactionId,
-        created_by: config.userId,
-        created_by_name: config.userName,
-      })
-      .select()
-      .single();
-
-    if (groupError) {
-      console.error("Error creating settlement_group:", groupError);
-      throw groupError;
-    }
-
-    settlementGroupId = groupData.id;
-
-    // 4. Process each week (already sorted oldest first by the caller)
+    // 3. Process each week (already sorted oldest first by the caller)
     for (const week of config.weeks) {
       if (week.allocatedAmount <= 0 || week.laborers.length === 0) continue;
 
@@ -1917,46 +1940,7 @@ export async function processDateWiseContractSettlement(
       (a, b) => new Date(a.weekStart).getTime() - new Date(b.weekStart).getTime()
     );
 
-    // 4. If via engineer wallet, create engineer transaction
-    if (config.paymentChannel === "engineer_wallet" && config.engineerId) {
-      const { data: txData, error: txError } = await (supabase
-        .from("site_engineer_transactions") as any)
-        .insert({
-          user_id: config.engineerId,
-          site_id: config.siteId,
-          transaction_type: "received_from_company",
-          settlement_status: "pending_settlement",
-          amount: config.totalAmount,
-          description: `Contract settlement - Rs.${config.totalAmount.toLocaleString()}`,
-          payment_mode: config.paymentMode,
-          proof_url: config.proofUrls?.[0] || null,
-          is_settled: false,
-          recorded_by: config.userName,
-          recorded_by_user_id: config.userId,
-          related_subcontract_id: config.subcontractId || null,
-        })
-        .select()
-        .single();
-
-      if (txError) throw txError;
-      engineerTransactionId = txData.id;
-    }
-
-    // 5. Generate settlement reference
-    const { data: refData, error: refError } = await supabase.rpc(
-      "generate_settlement_reference",
-      { p_site_id: config.siteId }
-    );
-
-    if (refError) {
-      console.warn("Could not generate settlement reference:", refError);
-      const uniqueSuffix = crypto.randomUUID().slice(0, 8).toUpperCase();
-      settlementReference = `SET-${dayjs().format("YYMMDD")}-${uniqueSuffix}`;
-    } else {
-      settlementReference = refData as string;
-    }
-
-    // 6. Calculate week allocations (waterfall - oldest first)
+    // 4. Calculate week allocations FIRST (waterfall - oldest first)
     let totalLaborerCount = 0;
     for (const week of sortedWeeks) {
       if (remainingAmount <= 0) break;
@@ -1979,44 +1963,95 @@ export async function processDateWiseContractSettlement(
       }
     }
 
-    // 7. Create settlement_group with week_allocations JSONB
-    const { data: groupData, error: groupError } = await (supabase
-      .from("settlement_groups") as any)
-      .insert({
-        settlement_reference: settlementReference,
-        site_id: config.siteId,
-        settlement_date: config.settlementDate,
-        total_amount: config.totalAmount,
-        laborer_count: totalLaborerCount,
-        payment_channel: config.paymentChannel,
-        payment_mode: config.paymentMode,
-        payment_type: "salary",
-        actual_payment_date: config.settlementDate,
-        payer_source: config.payerSource,
-        payer_name: config.payerSource === "custom" || config.payerSource === "other_site_money"
+    // 5. Create settlement_group using atomic function (guaranteed unique reference)
+    const { data: groupResult, error: groupError } = await supabase.rpc(
+      "create_settlement_group",
+      {
+        p_site_id: config.siteId,
+        p_settlement_date: config.settlementDate,
+        p_total_amount: config.totalAmount,
+        p_laborer_count: totalLaborerCount,
+        p_payment_channel: config.paymentChannel,
+        p_payment_mode: config.paymentMode,
+        p_payer_source: config.payerSource,
+        p_payer_name: config.payerSource === "custom" || config.payerSource === "other_site_money"
           ? config.customPayerName
           : null,
-        proof_url: config.proofUrls?.[0] || null,
-        proof_urls: config.proofUrls || null,
-        notes: config.notes || null,
-        subcontract_id: config.subcontractId || null,
-        engineer_transaction_id: engineerTransactionId,
-        created_by: config.userId,
-        created_by_name: config.userName,
-        settlement_type: "date_wise",
-        week_allocations: weekAllocations,
-      })
-      .select()
-      .single();
+        p_proof_url: config.proofUrls?.[0] || null,
+        p_notes: config.notes || null,
+        p_subcontract_id: config.subcontractId || null,
+        p_engineer_transaction_id: null,
+        p_created_by: config.userId,
+        p_created_by_name: config.userName,
+        p_payment_type: "salary",
+        p_actual_payment_date: config.settlementDate,
+        p_settlement_type: "date_wise",
+        p_week_allocations: weekAllocations,
+        p_proof_urls: config.proofUrls || null,
+      }
+    );
 
     if (groupError) {
       console.error("Error creating settlement_group:", groupError);
       throw groupError;
     }
 
-    settlementGroupId = groupData.id;
+    const groupData = Array.isArray(groupResult) ? groupResult[0] : groupResult;
+    if (!groupData || !groupData.id) {
+      throw new Error("Failed to create settlement group - no data returned");
+    }
 
-    // 8. Create labor_payments and payment_week_allocations for each laborer
+    settlementGroupId = groupData.id;
+    settlementReference = groupData.settlement_reference;
+
+    // 6. If via engineer wallet, create engineer transaction
+    if (config.paymentChannel === "engineer_wallet" && config.engineerId) {
+      const { data: txData, error: txError } = await (supabase
+        .from("site_engineer_transactions") as any)
+        .insert({
+          user_id: config.engineerId,
+          site_id: config.siteId,
+          transaction_type: "received_from_company",
+          settlement_status: "pending_settlement",
+          amount: config.totalAmount,
+          description: `Contract settlement - Rs.${config.totalAmount.toLocaleString()}`,
+          payment_mode: config.paymentMode,
+          proof_url: config.proofUrls?.[0] || null,
+          is_settled: false,
+          recorded_by: config.userName,
+          recorded_by_user_id: config.userId,
+          related_subcontract_id: config.subcontractId || null,
+          settlement_group_id: settlementGroupId,
+          settlement_reference: settlementReference,
+        })
+        .select()
+        .single();
+
+      if (txError) {
+        // Rollback: cancel settlement group
+        await supabase
+          .from("settlement_groups")
+          .update({
+            is_cancelled: true,
+            cancelled_at: new Date().toISOString(),
+            cancelled_by: config.userName,
+            cancelled_by_user_id: config.userId,
+            cancellation_reason: `Engineer transaction failed: ${txError.message}`,
+          })
+          .eq("id", settlementGroupId);
+        throw txError;
+      }
+
+      engineerTransactionId = txData.id;
+
+      // Update settlement_group with engineer_transaction_id
+      await supabase
+        .from("settlement_groups")
+        .update({ engineer_transaction_id: engineerTransactionId })
+        .eq("id", settlementGroupId);
+    }
+
+    // 7. Create labor_payments and payment_week_allocations for each laborer
     let processedAmount = 0;
     for (const allocation of weekAllocations) {
       const week = weekDataMap.get(allocation.weekStart);

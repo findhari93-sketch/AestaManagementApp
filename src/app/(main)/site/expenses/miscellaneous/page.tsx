@@ -27,6 +27,7 @@ import {
   TrendingUp,
   Receipt,
   Cancel as CancelIcon,
+  Visibility as ViewIcon,
 } from "@mui/icons-material";
 import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
 import { createClient } from "@/lib/supabase/client";
@@ -36,6 +37,7 @@ import { useDateRange } from "@/contexts/DateRangeContext";
 import PageHeader from "@/components/layout/PageHeader";
 import { hasEditPermission } from "@/lib/permissions";
 import MiscExpenseDialog from "@/components/expenses/MiscExpenseDialog";
+import MiscExpenseViewDialog from "@/components/expenses/MiscExpenseViewDialog";
 import { getMiscExpenses, getMiscExpenseStats, cancelMiscExpense } from "@/lib/services/miscExpenseService";
 import { getPayerSourceLabel } from "@/components/settlement/PayerSourceSelector";
 import type { MiscExpenseWithDetails } from "@/types/misc-expense.types";
@@ -54,6 +56,8 @@ export default function MiscellaneousExpensesPage() {
   const [loading, setLoading] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingExpense, setEditingExpense] = useState<MiscExpenseWithDetails | null>(null);
+  const [viewDialogOpen, setViewDialogOpen] = useState(false);
+  const [viewingExpense, setViewingExpense] = useState<MiscExpenseWithDetails | null>(null);
 
   // Stats
   const [stats, setStats] = useState({
@@ -119,6 +123,11 @@ export default function MiscellaneousExpensesPage() {
   const handleEdit = (expense: MiscExpenseWithDetails) => {
     setEditingExpense(expense);
     setDialogOpen(true);
+  };
+
+  const handleView = (expense: MiscExpenseWithDetails) => {
+    setViewingExpense(expense);
+    setViewDialogOpen(true);
   };
 
   const handleCancelClick = (expense: MiscExpenseWithDetails) => {
@@ -280,16 +289,25 @@ export default function MiscellaneousExpensesPage() {
       {
         id: "actions",
         header: "Actions",
-        size: 100,
+        size: 130,
         enableSorting: false,
         enableColumnFilter: false,
         Cell: ({ row }) => (
           <Box sx={{ display: "flex", gap: 0.5 }}>
             <IconButton
               size="small"
+              onClick={() => handleView(row.original)}
+              color="info"
+              title="View Details"
+            >
+              <ViewIcon fontSize="small" />
+            </IconButton>
+            <IconButton
+              size="small"
               onClick={() => handleEdit(row.original)}
               disabled={!canEdit}
               color="primary"
+              title="Edit"
             >
               <Edit fontSize="small" />
             </IconButton>
@@ -298,6 +316,7 @@ export default function MiscellaneousExpensesPage() {
               onClick={() => handleCancelClick(row.original)}
               disabled={!canEdit}
               color="error"
+              title="Cancel"
             >
               <CancelIcon fontSize="small" />
             </IconButton>
@@ -466,6 +485,16 @@ export default function MiscellaneousExpensesPage() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* View Details Dialog */}
+      <MiscExpenseViewDialog
+        open={viewDialogOpen}
+        onClose={() => {
+          setViewDialogOpen(false);
+          setViewingExpense(null);
+        }}
+        expense={viewingExpense}
+      />
     </Box>
   );
 }

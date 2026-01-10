@@ -60,7 +60,7 @@ export async function getPaymentPageData(
         id, proof_url, settlement_proof_url, settlement_status,
         transaction_date, confirmed_at
       ),
-      settlement_groups(id, settlement_reference)
+      settlement_groups(id, settlement_reference, is_cancelled)
     `
     )
     .eq("site_id", siteId)
@@ -80,7 +80,7 @@ export async function getPaymentPageData(
         transaction_date, confirmed_at
       ),
       subcontracts(id, title),
-      settlement_groups(id, settlement_reference),
+      settlement_groups(id, settlement_reference, is_cancelled),
       expenses(contract_id, subcontracts(id, title))
     `
     )

@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nAdd settlement improvements, misc expense viewer, and UI enhancements\n\n- Add backfill settlements API endpoint\n- Add MiscExpenseViewDialog component for viewing expense details\n- Improve settlement service with atomic reference handling\n- Add database migrations for individual daily settlements display\n- Enhance PaymentDialog with better settlement handling\n- Update ThemeProvider with improved initialization\n- Fix DailyMarketPaymentsTab settlement display\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")"
+    ]
+  }
+}

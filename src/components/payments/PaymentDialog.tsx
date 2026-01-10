@@ -41,7 +41,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSite } from "@/contexts/SiteContext";
 import { createSalaryExpense } from "@/lib/services/notificationService";
-import { processContractPayment } from "@/lib/services/settlementService";
+import { processContractPayment, processSettlement } from "@/lib/services/settlementService";
 import FileUploader, { UploadedFile } from "@/components/common/FileUploader";
 import SubcontractLinkSelector from "./SubcontractLinkSelector";
 import PayerSourceSelector from "@/components/settlement/PayerSourceSelector";
@@ -54,7 +54,7 @@ import type {
   WeeklyContractLaborer,
   ContractPaymentType,
 } from "@/types/payment.types";
-import type { PayerSource } from "@/types/settlement.types";
+import type { PayerSource, SettlementRecord } from "@/types/settlement.types";
 
 interface Engineer {
   id: string;
@@ -267,8 +267,43 @@ export default function PaymentDialog({
         return;
       }
 
-      // For Daily/Market payments - use original flow with engineer transaction
-      if (paymentChannel === "engineer_wallet") {
+      // For Daily/Market payments
+      if (paymentChannel === "direct") {
+        // DIRECT PAYMENTS: Use processSettlement service for proper ref code and payer_source
+        const settlementRecords: SettlementRecord[] = dailyRecords.map(record => ({
+          id: record.id,
+          sourceType: record.sourceType,
+          sourceId: record.sourceId,
+          laborerName: record.laborerName,
+          laborerType: record.laborerType,
+          amount: record.amount,
+          date: record.date,
+          isPaid: record.isPaid,
+          role: record.role,
+          count: record.count,
+        }));
+
+        const result = await processSettlement(supabase, {
+          siteId: selectedSite.id,
+          records: settlementRecords,
+          totalAmount: paymentAmount,
+          paymentMode: paymentMode,
+          paymentChannel: "direct",
+          payerSource: moneySource,
+          customPayerName: (moneySource === "other_site_money" || moneySource === "custom")
+            ? moneySourceName : undefined,
+          proofUrl: proofUrl || undefined,
+          notes: notes || undefined,
+          subcontractId: subcontractId || undefined,
+          userId: userProfile.id,
+          userName: userProfile.name || userProfile.email || "Unknown",
+        });
+
+        if (!result.success) {
+          throw new Error(result.error || "Settlement failed");
+        }
+      } else {
+        // ENGINEER WALLET: Keep existing flow but create settlement_group for ref code
         const { data: txData, error: txError } = await (supabase
           .from("site_engineer_transactions") as any)
           .insert({
@@ -292,66 +327,58 @@ export default function PaymentDialog({
 
         if (txError) throw txError;
         engineerTransactionId = txData.id;
-      }
 
-      // Daily/Market laborer payments
-      await processDailyPayments(
-        dailyRecords,
-        paymentDate,
-        engineerTransactionId
-      );
+        // Generate settlement reference for tracking
+        const { data: refData } = await supabase.rpc(
+          "generate_settlement_reference",
+          { p_site_id: selectedSite.id }
+        );
+        const settlementReference = refData || `SET-${dayjs().format("YYMMDD")}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
 
-      // 3. Create salary expense for direct payments only (daily/market)
-      // (Via engineer expenses are created when engineer settles)
-      // Note: Weekly contract payments are handled above with return, so this only runs for daily/market
-      if (paymentChannel === "direct") {
+        // Create settlement_group for ref code and payer_source tracking
         const laborerCount = dailyRecords.reduce((sum, r) => sum + (r.count || 1), 0);
-        const laborerType = dailyRecords.length > 0 ? dailyRecords[0].laborerType : "daily";
         const recordDate = dailyRecords[0]?.date || paymentDate;
 
-        const expenseResult = await createSalaryExpense(supabase, {
-          siteId: selectedSite.id,
-          amount: paymentAmount,
-          date: recordDate,
-          description: `Laborer salary (${laborerCount} ${laborerType})`,
-          paymentMode,
-          paidBy: userProfile.name || "Unknown",
-          paidByUserId: userProfile.id,
-          proofUrl,
-          subcontractId,
-          isCleared: true, // Direct payments are immediately cleared
-          paymentSource: "direct",
-        });
+        const { data: groupData } = await (supabase
+          .from("settlement_groups") as any)
+          .insert({
+            settlement_reference: settlementReference,
+            site_id: selectedSite.id,
+            settlement_date: recordDate,
+            total_amount: paymentAmount,
+            laborer_count: laborerCount,
+            payment_channel: "engineer_wallet",
+            payment_mode: paymentMode,
+            payer_source: moneySource,
+            payer_name: (moneySource === "other_site_money" || moneySource === "custom")
+              ? moneySourceName : null,
+            proof_url: proofUrl,
+            notes: notes || null,
+            subcontract_id: subcontractId,
+            engineer_transaction_id: engineerTransactionId,
+            created_by: userProfile.id,
+            created_by_name: userProfile.name || "Unknown",
+          })
+          .select()
+          .single();
 
-        // Log warning if expense creation failed (payment still succeeds)
-        if (expenseResult.error) {
-          console.warn("Failed to create salary expense:", expenseResult.error.message);
+        const settlementGroupId = groupData?.id || null;
+
+        // Update engineer transaction with settlement_group_id
+        if (settlementGroupId && engineerTransactionId) {
+          await supabase
+            .from("site_engineer_transactions")
+            .update({ settlement_group_id: settlementGroupId })
+            .eq("id", engineerTransactionId);
         }
 
-        // Link expense to attendance records for easy cancellation
-        if (expenseResult.expenseId && dailyRecords.length > 0) {
-          // Update daily attendance records
-          const dailyIds = dailyRecords
-            .filter(r => r.sourceType === "daily")
-            .map(r => r.sourceId);
-          if (dailyIds.length > 0) {
-            await supabase
-              .from("daily_attendance")
-              .update({ expense_id: expenseResult.expenseId })
-              .in("id", dailyIds);
-          }
-
-          // Update market attendance records
-          const marketIds = dailyRecords
-            .filter(r => r.sourceType === "market")
-            .map(r => r.sourceId);
-          if (marketIds.length > 0) {
-            await supabase
-              .from("market_laborer_attendance")
-              .update({ expense_id: expenseResult.expenseId })
-              .in("id", marketIds);
-          }
-        }
+        // Update attendance records with payer_source and settlement_group_id
+        await processDailyPayments(
+          dailyRecords,
+          paymentDate,
+          engineerTransactionId,
+          settlementGroupId
+        );
       }
 
       onSuccess?.();
@@ -367,7 +394,8 @@ export default function PaymentDialog({
   const processDailyPayments = async (
     records: DailyPaymentRecord[],
     paymentDate: string,
-    engineerTransactionId: string | null
+    engineerTransactionId: string | null,
+    settlementGroupId: string | null
   ) => {
     const dailyIds = records
       .filter((r) => r.sourceType === "daily")
@@ -389,6 +417,10 @@ export default function PaymentDialog({
           payment_proof_url: proofUrl,
           payment_notes: notes || null,
           subcontract_id: subcontractId,
+          payer_source: moneySource,
+          payer_name: (moneySource === "other_site_money" || moneySource === "custom")
+            ? moneySourceName : null,
+          settlement_group_id: settlementGroupId,
         })
         .in("id", dailyIds);
 
@@ -407,6 +439,10 @@ export default function PaymentDialog({
           engineer_transaction_id: engineerTransactionId,
           payment_proof_url: proofUrl,
           payment_notes: notes || null,
+          payer_source: moneySource,
+          payer_name: (moneySource === "other_site_money" || moneySource === "custom")
+            ? moneySourceName : null,
+          settlement_group_id: settlementGroupId,
         })
         .in("id", marketIds);
 
