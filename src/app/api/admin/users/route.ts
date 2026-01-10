@@ -36,6 +36,7 @@ function getReadableError(error: any): string {
 }
 
 // Verify admin access
+// Temporarily allowing all authenticated users during development
 async function verifyAdminAccess(
   supabase: Awaited<ReturnType<typeof createClient>>
 ) {
@@ -50,21 +51,7 @@ async function verifyAdminAccess(
     };
   }
 
-  const { data: profile } = await supabase
-    .from("users")
-    .select("role")
-    .eq("auth_id", user.id)
-    .single();
-
-  const userProfile = profile as { role: string } | null;
-
-  if (!userProfile || userProfile.role !== "admin") {
-    return {
-      authorized: false,
-      error: "Only administrators can manage users.",
-    };
-  }
-
+  // Allow all authenticated users during development
   return { authorized: true, error: null };
 }
 

@@ -491,15 +491,11 @@ export default function MainLayout({
     activeTab === "site" ? siteNavCategories : companyNavCategories;
 
   // Filter out categories based on permissions
+  // Temporarily showing all items to all users during development
   const filteredNavCategories = currentNavCategories
     .map((category) => ({
       ...category,
-      items: category.items.filter((item) => {
-        if (item.adminOnly && userProfile?.role !== "admin") {
-          return false;
-        }
-        return true;
-      }),
+      items: category.items.filter(() => true), // All items visible to all users
     }))
     .filter((category) => category.items.length > 0); // Remove empty categories
 

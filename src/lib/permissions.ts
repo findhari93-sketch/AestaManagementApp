@@ -14,37 +14,40 @@ export const hasEditPermission = (role: UserRole | string | undefined | null): b
 
 /**
  * Check if user has admin-level permissions
- * Only admin can access user management, site creation, etc.
+ * Temporarily allowing all authenticated users during development
  */
 export const hasAdminPermission = (role: UserRole | string | undefined | null): boolean => {
-  return role === "admin";
+  return true;
 };
 
 /**
- * Check if user can manage users (admin only)
+ * Check if user can manage users
+ * Temporarily allowing all authenticated users during development
  */
 export const canManageUsers = (role: UserRole | string | undefined | null): boolean => {
-  return role === "admin";
+  return true;
 };
 
 /**
- * Check if user can manage sites (admin only)
+ * Check if user can manage sites
+ * Temporarily allowing all authenticated users during development
  */
 export const canManageSites = (role: UserRole | string | undefined | null): boolean => {
-  return role === "admin";
+  return true;
 };
 
 /**
- * Check if user can manage construction phases (admin only)
+ * Check if user can manage construction phases
+ * Temporarily allowing all authenticated users during development
  */
 export const canManageConstructionPhases = (role: UserRole | string | undefined | null): boolean => {
-  return role === "admin";
+  return true;
 };
 
 /**
  * Check if user can perform mass upload operations
- * Only Admin and Office staff can bulk upload data
+ * Temporarily allowing all authenticated users during development
  */
 export const canPerformMassUpload = (role: UserRole | string | undefined | null): boolean => {
-  return role === "admin" || role === "office";
+  return true;
 };

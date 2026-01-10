@@ -1559,6 +1559,10 @@ export async function processWaterfallContractPayment(
     // The payment will be recorded in settlement_groups and tracked as excess
     // This allows users to prepay or overpay, which shows as "Excess Paid" in the dashboard
 
+    // Map payment mode for database compatibility (net_banking -> bank_transfer)
+    // The labor_payments table only accepts: cash, upi, bank_transfer
+    const normalizedPaymentMode = config.paymentMode === "net_banking" ? "bank_transfer" : config.paymentMode;
+
     // Count total laborers across all weeks (0 for advance/other with no weeks)
     const totalLaborers = config.weeks.reduce((sum, w) => sum + w.laborers.length, 0);
 
@@ -1582,7 +1586,7 @@ export async function processWaterfallContractPayment(
         p_total_amount: config.totalAmount,
         p_laborer_count: totalLaborers,
         p_payment_channel: config.paymentChannel,
-        p_payment_mode: config.paymentMode,
+        p_payment_mode: normalizedPaymentMode,
         p_payer_source: config.payerSource,
         p_payer_name: config.payerSource === "custom" || config.payerSource === "other_site_money"
           ? config.customPayerName
@@ -1622,7 +1626,7 @@ export async function processWaterfallContractPayment(
           settlement_status: "pending_settlement",
           amount: config.totalAmount,
           description: `Contract payment (${weekRangeDesc}) - ${totalLaborers} laborers`,
-          payment_mode: config.paymentMode,
+          payment_mode: normalizedPaymentMode,
           proof_url: config.proofUrl || null,
           is_settled: false,
           recorded_by: config.userName,
@@ -1720,7 +1724,7 @@ export async function processWaterfallContractPayment(
             payment_for_date: week.weekStart,
             actual_payment_date: config.actualPaymentDate,
             amount: finalAmount,
-            payment_mode: config.paymentMode,
+            payment_mode: normalizedPaymentMode,
             payment_channel: config.paymentChannel,
             payment_type: config.paymentType,
             payment_reference: paymentReference,

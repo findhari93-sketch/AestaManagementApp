@@ -187,7 +187,10 @@
       "Bash(git commit -m \"$\\(cat <<''EOF''\nFix salary settlement 400 error by removing invalid site_id filter from teams query\n\n🤖 Generated with [Claude Code]\\(https://claude.com/claude-code\\)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
       "Bash(npx next lint:*)",
       "Bash(npm run db:push:*)",
-      "Bash(node scripts/test-expenses-view.mjs:*)"
+      "Bash(node scripts/test-expenses-view.mjs:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nFix attendance save failing silently due to missing error handling\n\nAdd try-catch and error checking to handleSaveClick function to properly\nhandle Supabase query failures when checking holidays and existing attendance.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(powershell -Command \"Remove-Item -Recurse -Force .next\")",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nRemove permission restrictions to allow full access for all users\n\n- Modify permissions.ts to return true for all permission checks\n- Remove adminOnly filter in MainLayout.tsx navigation\n- Update verifyAdminAccess in admin API to allow all authenticated users\n- Temporary change during early development phase\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")"
     ],
     "deny": [],
     "ask": []
