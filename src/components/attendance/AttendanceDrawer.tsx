@@ -1717,7 +1717,7 @@ export default function AttendanceDrawer({
           errorMessage =
             "Duplicate entry detected. Please refresh and try again";
         } else if (errMessage.includes("permission") || errCode === "42501") {
-          errorMessage = "Permission denied. Please contact administrator";
+          errorMessage = "Permission denied. Please log out and log back in to refresh your session. If issue persists, contact administrator.";
         } else if (errMessage.includes("violates check constraint")) {
           errorMessage =
             "Invalid data: Please check work days value (must be 0.5, 1, 1.5, or 2)";

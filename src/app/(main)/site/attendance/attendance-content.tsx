@@ -1245,7 +1245,7 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
 
   // Helper function to process server data into component state
   const processServerData = useCallback((data: AttendancePageData) => {
-    const { attendanceRecords: rawAttendance, marketLaborerRecords: rawMarket, workSummaries: rawSummaries, teaShopEntries: rawTeaShop } = data;
+    const { attendanceRecords: rawAttendance, marketLaborerRecords: rawMarket, workSummaries: rawSummaries, teaShopEntries: rawTeaShop, teaShopAllocations } = data;
 
     // Build work summaries map
     const summaryMap = new Map<string, DailyWorkSummary>();
@@ -1254,9 +1254,26 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
     });
     setWorkSummaries(summaryMap);
 
+    // Build a set of entry IDs that have allocations for this site
+    // (to avoid double-counting when entry.site_id === current site AND has allocation)
+    const entryIdsWithAllocations = new Set<string>();
+    (teaShopAllocations || []).forEach((alloc: any) => {
+      if (alloc.entry?.id) {
+        entryIdsWithAllocations.add(alloc.entry.id);
+      }
+    });
+
     // Build tea shop map
     const teaShopMap = new Map<string, TeaShopData>();
+
+    // Process direct entries (site's own entries)
     (rawTeaShop || []).forEach((t: any) => {
+      // If this is a group entry that has allocations, skip it here
+      // (we'll use the allocation amount instead to show this site's share)
+      if (t.is_group_entry && entryIdsWithAllocations.has(t.id)) {
+        return;
+      }
+
       const existing = teaShopMap.get(t.date) || {
         teaTotal: 0, snacksTotal: 0, total: 0,
         workingCount: 0, workingTotal: 0, nonWorkingCount: 0, nonWorkingTotal: 0,
@@ -1265,7 +1282,34 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
       existing.teaTotal += t.tea_total || 0;
       existing.snacksTotal += t.snacks_total || 0;
       existing.total += t.total_amount || 0;
+      // Track if this is a group entry
+      if (t.is_group_entry) {
+        existing.isGroupEntry = true;
+        existing.entryId = t.id;
+      }
       teaShopMap.set(t.date, existing);
+    });
+
+    // Process allocations (this site's share of group entries)
+    (teaShopAllocations || []).forEach((alloc: any) => {
+      const entry = alloc.entry;
+      if (!entry?.date) return;
+
+      const date = entry.date;
+      const existing = teaShopMap.get(date) || {
+        teaTotal: 0, snacksTotal: 0, total: 0,
+        workingCount: 0, workingTotal: 0, nonWorkingCount: 0, nonWorkingTotal: 0,
+        marketCount: 0, marketTotal: 0,
+      };
+      // Recalculate amount from percentage for accuracy
+      const recalculatedAmount = entry.total_amount && alloc.allocation_percentage != null
+        ? Math.round((alloc.allocation_percentage / 100) * entry.total_amount)
+        : alloc.allocated_amount || 0;
+      existing.total += recalculatedAmount;
+      // Mark as group entry for UI handling
+      existing.isGroupEntry = true;
+      existing.entryId = entry.id;
+      teaShopMap.set(date, existing);
     });
 
     // Build market data map
