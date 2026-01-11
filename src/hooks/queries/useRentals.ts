@@ -98,10 +98,7 @@ export function useCreateRentalCategory() {
 
   return useMutation({
     mutationFn: async (data: Partial<RentalItemCategory>) => {
-      const sessionValid = await ensureFreshSession();
-      if (!sessionValid) {
-        throw new Error("Session expired. Please refresh the page.");
-      }
+      await ensureFreshSession();
 
       const { data: result, error } = await supabase
         .from("rental_item_categories")
@@ -314,10 +311,7 @@ export function useCreateRentalItem() {
 
   return useMutation({
     mutationFn: async (data: RentalItemFormData) => {
-      const sessionValid = await ensureFreshSession();
-      if (!sessionValid) {
-        throw new Error("Session expired. Please refresh the page.");
-      }
+      await ensureFreshSession();
 
       // Generate code if not provided
       if (!data.code) {
@@ -365,10 +359,7 @@ export function useUpdateRentalItem() {
       id: string;
       data: Partial<RentalItemFormData>;
     }) => {
-      const sessionValid = await ensureFreshSession();
-      if (!sessionValid) {
-        throw new Error("Session expired. Please refresh the page.");
-      }
+      await ensureFreshSession();
 
       const { data: result, error } = await supabase
         .from("rental_items")
@@ -395,10 +386,7 @@ export function useDeleteRentalItem() {
 
   return useMutation({
     mutationFn: async (id: string) => {
-      const sessionValid = await ensureFreshSession();
-      if (!sessionValid) {
-        throw new Error("Session expired. Please refresh the page.");
-      }
+      await ensureFreshSession();
 
       // Soft delete
       const { error } = await supabase
@@ -714,10 +702,7 @@ export function useCreateRentalOrder() {
 
   return useMutation({
     mutationFn: async (data: RentalOrderFormData) => {
-      const sessionValid = await ensureFreshSession();
-      if (!sessionValid) {
-        throw new Error("Session expired. Please refresh the page.");
-      }
+      await ensureFreshSession();
 
       // Generate order number
       const { data: orderNumber, error: numError } = await supabase.rpc(
@@ -797,10 +782,7 @@ export function useUpdateRentalOrderStatus() {
       id: string;
       status: RentalOrder["status"];
     }) => {
-      const sessionValid = await ensureFreshSession();
-      if (!sessionValid) {
-        throw new Error("Session expired. Please refresh the page.");
-      }
+      await ensureFreshSession();
 
       const { data, error } = await supabase
         .from("rental_orders")
@@ -833,10 +815,7 @@ export function useCancelRentalOrder() {
       id: string;
       reason: string;
     }) => {
-      const sessionValid = await ensureFreshSession();
-      if (!sessionValid) {
-        throw new Error("Session expired. Please refresh the page.");
-      }
+      await ensureFreshSession();
 
       const {
         data: { user },
@@ -876,10 +855,7 @@ export function useRecordRentalReturn() {
 
   return useMutation({
     mutationFn: async (data: RentalReturnFormData) => {
-      const sessionValid = await ensureFreshSession();
-      if (!sessionValid) {
-        throw new Error("Session expired. Please refresh the page.");
-      }
+      await ensureFreshSession();
 
       // Create return record
       const { data: returnRecord, error: returnError } = await supabase
@@ -964,10 +940,7 @@ export function useRecordRentalAdvance() {
 
   return useMutation({
     mutationFn: async (data: RentalAdvanceFormData) => {
-      const sessionValid = await ensureFreshSession();
-      if (!sessionValid) {
-        throw new Error("Session expired. Please refresh the page.");
-      }
+      await ensureFreshSession();
 
       const { data: advance, error } = await supabase
         .from("rental_advances")
@@ -996,10 +969,7 @@ export function useSettleRental() {
 
   return useMutation({
     mutationFn: async (data: RentalSettlementFormData) => {
-      const sessionValid = await ensureFreshSession();
-      if (!sessionValid) {
-        throw new Error("Session expired. Please refresh the page.");
-      }
+      await ensureFreshSession();
 
       // Get site_id for reference generation
       const { data: order } = await supabase
@@ -1107,10 +1077,7 @@ export function useAddRentalStoreInventory() {
 
   return useMutation({
     mutationFn: async (data: RentalStoreInventoryFormData) => {
-      const sessionValid = await ensureFreshSession();
-      if (!sessionValid) {
-        throw new Error("Session expired. Please refresh the page.");
-      }
+      await ensureFreshSession();
 
       const { data: result, error } = await supabase
         .from("rental_store_inventory")

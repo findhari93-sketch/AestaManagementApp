@@ -300,10 +300,7 @@ export function useCreateGroupTeaShopEntry() {
 
   return useMutation({
     mutationFn: async (data: CreateGroupEntryData) => {
-      const isSessionValid = await ensureFreshSession();
-      if (!isSessionValid) {
-        throw new Error("Session expired. Please refresh the page and try again.");
-      }
+      await ensureFreshSession();
 
       // Create the entry in tea_shop_entries with is_group_entry = true
       const { data: entry, error: entryError } = await (supabase as any)
@@ -542,10 +539,7 @@ export function useUpdateGroupTeaShopEntry() {
 
   return useMutation({
     mutationFn: async (data: UpdateGroupEntryData) => {
-      const isSessionValid = await ensureFreshSession();
-      if (!isSessionValid) {
-        throw new Error("Session expired. Please refresh the page and try again.");
-      }
+      await ensureFreshSession();
 
       // 1. Update the entry in tea_shop_entries (payment status will be recalculated)
       const { data: entry, error: entryError } = await (supabase as any)

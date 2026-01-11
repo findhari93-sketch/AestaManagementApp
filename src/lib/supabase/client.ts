@@ -1,6 +1,17 @@
 import { createBrowserClient } from "@supabase/ssr";
 import { Database } from "@/types/database.types";
 
+/**
+ * Custom error for expired sessions.
+ * Thrown when session refresh fails or times out.
+ */
+export class SessionExpiredError extends Error {
+  constructor(message = "Session expired. Please log in again.") {
+    super(message);
+    this.name = "SessionExpiredError";
+  }
+}
+
 // Singleton instance for browser client
 let browserClient: ReturnType<typeof createBrowserClient<Database>> | null = null;
 
@@ -47,58 +58,50 @@ export function createClient() {
  * This prevents the "spinner keeps spinning" issue when sessions
  * expire while users are working on forms.
  *
- * Has a 5-second timeout to prevent hanging indefinitely.
+ * Throws SessionExpiredError if session is invalid or times out.
  */
-export async function ensureFreshSession(): Promise<boolean> {
-  const SESSION_TIMEOUT = 10000; // 10 seconds (increased from 5)
+export async function ensureFreshSession(): Promise<void> {
+  const SESSION_TIMEOUT = 10000; // 10 seconds
 
-  const sessionCheckPromise = async (): Promise<boolean> => {
+  const sessionCheckPromise = async (): Promise<void> => {
     const supabase = createClient();
 
-    try {
-      const { data: { session }, error } = await supabase.auth.getSession();
+    const { data: { session }, error } = await supabase.auth.getSession();
 
-      if (error) {
-        console.error("Session check error:", error);
-        return false;
-      }
+    if (error) {
+      console.error("Session check error:", error);
+      throw new SessionExpiredError();
+    }
 
-      if (!session) {
-        console.warn("No active session found");
-        return false;
-      }
+    if (!session) {
+      console.warn("No active session found");
+      throw new SessionExpiredError();
+    }
 
-      // Check if token is expired or about to expire (within 5 minutes for buffer)
-      const expiresAt = session.expires_at;
-      if (expiresAt) {
-        const fiveMinutesFromNow = Math.floor(Date.now() / 1000) + 300;
-        if (expiresAt < fiveMinutesFromNow) {
-          // Token is expired or about to expire, refresh it
-          console.log("Session expiring soon, refreshing...");
-          const { data, error: refreshError } = await supabase.auth.refreshSession();
-          if (refreshError) {
-            console.error("Session refresh failed:", refreshError);
-            // Try to sign in again if refresh fails
-            return false;
-          }
-          if (data.session) {
-            console.log("Session refreshed successfully");
-          }
+    // Check if token is expired or about to expire (within 5 minutes for buffer)
+    const expiresAt = session.expires_at;
+    if (expiresAt) {
+      const fiveMinutesFromNow = Math.floor(Date.now() / 1000) + 300;
+      if (expiresAt < fiveMinutesFromNow) {
+        // Token is expired or about to expire, refresh it
+        console.log("Session expiring soon, refreshing...");
+        const { data, error: refreshError } = await supabase.auth.refreshSession();
+        if (refreshError) {
+          console.error("Session refresh failed:", refreshError);
+          throw new SessionExpiredError();
+        }
+        if (data.session) {
+          console.log("Session refreshed successfully");
         }
       }
-
-      return true;
-    } catch (error) {
-      console.error("ensureFreshSession error:", error);
-      return false;
     }
   };
 
   // Add timeout to prevent hanging indefinitely
-  const timeoutPromise = new Promise<boolean>((resolve) => {
+  const timeoutPromise = new Promise<never>((_, reject) => {
     setTimeout(() => {
       console.warn("ensureFreshSession timed out - session may be expired");
-      resolve(false); // Return false on timeout - session validity unknown
+      reject(new SessionExpiredError("Session check timed out. Please log in again."));
     }, SESSION_TIMEOUT);
   });
 

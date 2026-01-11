@@ -11,15 +11,13 @@ import { createClient } from "@/lib/supabase/client";
  * doesn't trigger session refresh. This hook ensures the session is
  * validated and refreshed when navigating between pages.
  *
- * Optimized to:
- * - Use singleton client (no new instance per render)
- * - Debounce rapid navigation changes
- * - Add timeout to prevent hanging
+ * Redirects to login page if session is expired or times out.
  */
 export function useSessionRefresh() {
   const pathname = usePathname();
   const lastRefreshRef = useRef<number>(0);
   const DEBOUNCE_MS = 2000; // Don't refresh more than once every 2 seconds
+  const SESSION_TIMEOUT = 5000; // 5 seconds
 
   useEffect(() => {
     const now = Date.now();
@@ -29,21 +27,29 @@ export function useSessionRefresh() {
       return;
     }
 
+    let didTimeout = false;
+
     const refreshSession = async () => {
       // Get singleton client inside effect to avoid dependency issues
       const supabase = createClient();
 
-      // Add timeout to prevent hanging (5s for consistency with ensureFreshSession)
+      // Add timeout to prevent hanging and redirect on timeout
       const timeoutId = setTimeout(() => {
-        console.warn("Session refresh timed out");
-      }, 5000);
+        didTimeout = true;
+        console.warn("Session refresh timed out - redirecting to login");
+        window.location.href = "/login?session_expired=true";
+      }, SESSION_TIMEOUT);
 
       try {
         const { data: { session }, error } = await supabase.auth.getSession();
         clearTimeout(timeoutId);
 
+        if (didTimeout) return; // Already redirecting
+
         if (error || !session) {
-          // Session invalid - auth context will handle redirect
+          // Session invalid - redirect to login
+          console.warn("Session invalid - redirecting to login");
+          window.location.href = "/login?session_expired=true";
           return;
         }
 
@@ -52,14 +58,22 @@ export function useSessionRefresh() {
         if (expiresAt) {
           const fiveMinutesFromNow = Math.floor(Date.now() / 1000) + 300;
           if (expiresAt < fiveMinutesFromNow) {
-            await supabase.auth.refreshSession();
+            const { error: refreshError } = await supabase.auth.refreshSession();
+            if (refreshError) {
+              console.warn("Session refresh failed - redirecting to login");
+              window.location.href = "/login?session_expired=true";
+              return;
+            }
           }
         }
 
         lastRefreshRef.current = Date.now();
       } catch (error) {
         clearTimeout(timeoutId);
-        console.error("Session refresh error:", error);
+        if (!didTimeout) {
+          console.error("Session refresh error:", error);
+          window.location.href = "/login?session_expired=true";
+        }
       }
     };
 

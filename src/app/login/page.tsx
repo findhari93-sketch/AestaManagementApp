@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   Box,
   Button,
@@ -97,6 +97,8 @@ export default function LoginPage() {
 
   const { signIn, user, loading: authLoading } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const sessionExpired = searchParams.get("session_expired") === "true";
 
   // Load remembered email and check lockout on mount
   useEffect(() => {
@@ -402,6 +404,16 @@ export default function LoginPage() {
                 Construction & Labor Management System
               </Typography>
             </Box>
+
+            {/* Session Expired Message */}
+            {sessionExpired && (
+              <Alert
+                severity="warning"
+                sx={{ mb: 3 }}
+              >
+                Your session has expired. Please sign in again to continue.
+              </Alert>
+            )}
 
             {/* Success Message */}
             <Collapse in={!!successMessage}>

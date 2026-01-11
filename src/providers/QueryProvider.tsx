@@ -11,6 +11,46 @@ import {
 } from "@/lib/supabase/realtime";
 import { useSite } from "@/contexts/SiteContext";
 import { useTab } from "@/providers/TabProvider";
+import { SessionExpiredError } from "@/lib/supabase/client";
+
+/**
+ * Checks if an error is a session/auth related error that should redirect to login.
+ */
+function isSessionError(error: unknown): boolean {
+  if (error instanceof SessionExpiredError) {
+    return true;
+  }
+
+  if (error && typeof error === "object") {
+    const err = error as Record<string, unknown>;
+    // Check for Supabase auth error codes
+    if (err.code === "PGRST301" || err.code === "401" || err.code === "403") {
+      return true;
+    }
+    // Check for JWT-related error messages
+    const message = String(err.message || "").toLowerCase();
+    if (
+      message.includes("jwt") ||
+      message.includes("session") ||
+      message.includes("token") ||
+      message.includes("unauthorized") ||
+      message.includes("not authenticated")
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Redirects to login page with session expired flag.
+ */
+function redirectToLogin(): void {
+  if (typeof window !== "undefined") {
+    window.location.href = "/login?session_expired=true";
+  }
+}
 
 export default function QueryProvider({
   children,
@@ -46,6 +86,13 @@ export default function QueryProvider({
           mutations: {
             retry: 1,
             networkMode: "online",
+            onError: (error) => {
+              // Redirect to login on session/auth errors
+              if (isSessionError(error)) {
+                console.warn("[QueryClient] Session error detected, redirecting to login");
+                redirectToLogin();
+              }
+            },
           },
         },
       })
