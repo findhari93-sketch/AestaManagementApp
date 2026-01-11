@@ -190,7 +190,8 @@
       "Bash(node scripts/test-expenses-view.mjs:*)",
       "Bash(git commit -m \"$\\(cat <<''EOF''\nFix attendance save failing silently due to missing error handling\n\nAdd try-catch and error checking to handleSaveClick function to properly\nhandle Supabase query failures when checking holidays and existing attendance.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
       "Bash(powershell -Command \"Remove-Item -Recurse -Force .next\")",
-      "Bash(git commit -m \"$\\(cat <<''EOF''\nRemove permission restrictions to allow full access for all users\n\n- Modify permissions.ts to return true for all permission checks\n- Remove adminOnly filter in MainLayout.tsx navigation\n- Update verifyAdminAccess in admin API to allow all authenticated users\n- Temporary change during early development phase\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")"
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nRemove permission restrictions to allow full access for all users\n\n- Modify permissions.ts to return true for all permission checks\n- Remove adminOnly filter in MainLayout.tsx navigation\n- Update verifyAdminAccess in admin API to allow all authenticated users\n- Temporary change during early development phase\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nAdd comprehensive RLS policy fix for all tables\n\nDynamically creates permissive RLS policies for ALL tables in the\npublic schema, ensuring all authenticated users have full CRUD access.\nAlso grants table permissions to authenticated and anon roles.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")"
     ],
     "deny": [],
     "ask": []
