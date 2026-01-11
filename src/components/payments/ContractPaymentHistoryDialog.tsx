@@ -32,9 +32,12 @@ import {
   Link as LinkIcon,
   Notes as NotesIcon,
   CalendarMonth as CalendarMonthIcon,
+  Delete as DeleteIcon,
 } from "@mui/icons-material";
 import { createClient } from "@/lib/supabase/client";
 import { useSite } from "@/contexts/SiteContext";
+import { useAuth } from "@/contexts/AuthContext";
+import DeleteContractSettlementDialog from "./DeleteContractSettlementDialog";
 import dayjs from "dayjs";
 import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
 import { getPayerSourceLabel, getPayerSourceColor } from "@/components/settlement/PayerSourceSelector";
@@ -260,6 +263,7 @@ export default function ContractPaymentHistoryDialog({
 }: ContractPaymentHistoryDialogProps) {
   const supabase = createClient();
   const { selectedSite } = useSite();
+  const { userProfile } = useAuth();
   const theme = useTheme();
 
   // Data state
@@ -269,6 +273,15 @@ export default function ContractPaymentHistoryDialog({
   // Screenshot viewer state
   const [screenshotViewerOpen, setScreenshotViewerOpen] = useState(false);
   const [viewerImages, setViewerImages] = useState<string[]>([]);
+
+  // Delete dialog state
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [settlementToDelete, setSettlementToDelete] = useState<SettlementRecord | null>(null);
+
+  const handleDeleteClick = useCallback((settlement: SettlementRecord) => {
+    setSettlementToDelete(settlement);
+    setDeleteDialogOpen(true);
+  }, []);
 
   // Fetch settlement groups for contract payments
   // Hybrid approach: Use labor_payments to IDENTIFY salary settlements,
@@ -323,12 +336,12 @@ export default function ContractPaymentHistoryDialog({
         .eq("is_cancelled", false)
         .order("settlement_date", { ascending: false });
 
-      // If we have salary settlements, use OR to include them plus advances
-      // If no salary settlements, just fetch advances/other
+      // If we have salary settlements, use OR to include them plus advances/other/excess
+      // If no salary settlements, just fetch advances/other/excess
       if (contractSettlementIds.length > 0) {
-        query = query.or(`id.in.(${contractSettlementIds.join(",")}),payment_type.in.(advance,other)`);
+        query = query.or(`id.in.(${contractSettlementIds.join(",")}),payment_type.in.(advance,other,excess)`);
       } else {
-        query = query.in("payment_type", ["advance", "other"]);
+        query = query.in("payment_type", ["advance", "other", "excess"]);
       }
 
       const { data: settlementData, error } = await query;
@@ -380,6 +393,10 @@ export default function ContractPaymentHistoryDialog({
   }, [open, selectedSite, supabase]);
 
   useEffect(() => {
+    fetchSettlements();
+  }, [fetchSettlements]);
+
+  const handleDeleteSuccess = useCallback(() => {
     fetchSettlements();
   }, [fetchSettlements]);
 
@@ -461,17 +478,19 @@ export default function ContractPaymentHistoryDialog({
         filterSelectOptions: [
           { value: "salary", label: "Salary" },
           { value: "advance", label: "Advance" },
+          { value: "excess", label: "Excess" },
           { value: "other", label: "Other" },
         ],
         Cell: ({ cell }) => {
           const type = cell.getValue<string | null>();
           const isAdvance = type === "advance";
           const isOther = type === "other";
+          const isExcess = type === "excess";
           return (
             <Chip
               size="small"
-              label={isAdvance ? "Advance" : isOther ? "Other" : "Salary"}
-              color={isAdvance ? "warning" : isOther ? "info" : "success"}
+              label={isAdvance ? "Advance" : isOther ? "Other" : isExcess ? "Excess" : "Salary"}
+              color={isAdvance ? "warning" : isOther ? "info" : isExcess ? "secondary" : "success"}
               variant="outlined"
               sx={{ fontSize: "0.7rem" }}
             />
@@ -485,8 +504,8 @@ export default function ContractPaymentHistoryDialog({
         Cell: ({ row }) => {
           const count = row.original.laborerCount;
           const type = row.original.paymentType;
-          // For advance/other payments, show "-" since no laborers are linked
-          if ((type === "advance" || type === "other") && count === 0) {
+          // For advance/other/excess payments, show "-" since no laborers are linked
+          if ((type === "advance" || type === "other" || type === "excess") && count === 0) {
             return (
               <Typography variant="body2" color="text.secondary">
                 -
@@ -624,8 +643,34 @@ export default function ContractPaymentHistoryDialog({
         enableSorting: false,
         Cell: ({ row }) => <AuditInfoPopover settlement={row.original} />,
       },
+      {
+        id: "actions",
+        header: "Actions",
+        size: 70,
+        enableColumnFilter: false,
+        enableSorting: false,
+        Cell: ({ row }) => (
+          <Tooltip title="Delete settlement">
+            <IconButton
+              size="small"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleDeleteClick(row.original);
+              }}
+              sx={{
+                color: theme.palette.error.main,
+                "&:hover": {
+                  backgroundColor: alpha(theme.palette.error.main, 0.08),
+                },
+              }}
+            >
+              <DeleteIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        ),
+      },
     ],
-    []
+    [theme, handleDeleteClick]
   );
 
   // Calculate summary stats
@@ -764,6 +809,17 @@ export default function ContractPaymentHistoryDialog({
         onClose={() => setScreenshotViewerOpen(false)}
         images={viewerImages}
         title="Payment Proof"
+      />
+
+      {/* Delete Confirmation Dialog */}
+      <DeleteContractSettlementDialog
+        open={deleteDialogOpen}
+        onClose={() => {
+          setDeleteDialogOpen(false);
+          setSettlementToDelete(null);
+        }}
+        settlement={settlementToDelete}
+        onSuccess={handleDeleteSuccess}
       />
     </Dialog>
   );

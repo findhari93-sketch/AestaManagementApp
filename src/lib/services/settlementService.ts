@@ -1566,9 +1566,17 @@ export async function processWaterfallContractPayment(
     // Count total laborers across all weeks (0 for advance/other with no weeks)
     const totalLaborers = config.weeks.reduce((sum, w) => sum + w.laborers.length, 0);
 
+    // Determine effective payment type:
+    // If payment type is 'salary' but weeks is empty, it's an excess/overpayment
+    const effectivePaymentType = (config.paymentType === "salary" && config.weeks.length === 0)
+      ? "excess"
+      : config.paymentType;
+
     // Build description for settlement group
     const weekRangeDesc = config.weeks.length === 0
-      ? (config.paymentType === "advance" ? "Advance Payment" : "Other Payment")
+      ? (effectivePaymentType === "advance" ? "Advance Payment"
+         : effectivePaymentType === "excess" ? "Excess/Overpayment"
+         : "Other Payment")
       : config.weeks.length === 1
         ? config.weeks[0].weekLabel
         : `${config.weeks[0].weekLabel} to ${config.weeks[config.weeks.length - 1].weekLabel}`;
@@ -1597,7 +1605,7 @@ export async function processWaterfallContractPayment(
         p_engineer_transaction_id: null,
         p_created_by: config.userId,
         p_created_by_name: config.userName,
-        p_payment_type: config.paymentType,
+        p_payment_type: effectivePaymentType,
         p_actual_payment_date: config.actualPaymentDate,
       }
     );

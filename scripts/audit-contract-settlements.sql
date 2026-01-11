@@ -50,3 +50,8 @@ where sg.site_id = ':site_id'
   and sg.is_cancelled = false
   and sg.payment_type = 'advance'
   and sg.settlement_date between ':from_date' and ':to_date';
+EVENT3
+
+
+
+\\DELETE FROM][]

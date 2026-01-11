@@ -556,12 +556,12 @@ export default function ContractWeeklyPaymentsTab({
         .eq("site_id", selectedSite.id)
         .eq("is_cancelled", false);
 
-      // Use OR to include both salary settlements and advance/other payments
+      // Use OR to include both salary settlements and advance/other/excess payments
       if (contractSettlementIds.length > 0) {
-        sgQuery = sgQuery.or(`id.in.(${contractSettlementIds.join(",")}),payment_type.in.(advance,other)`);
+        sgQuery = sgQuery.or(`id.in.(${contractSettlementIds.join(",")}),payment_type.in.(advance,other,excess)`);
       } else {
-        // No salary settlements, just fetch advances/other
-        sgQuery = sgQuery.in("payment_type", ["advance", "other"]);
+        // No salary settlements, just fetch advances/other/excess
+        sgQuery = sgQuery.in("payment_type", ["advance", "other", "excess"]);
       }
 
       const { data: sgData } = await sgQuery;

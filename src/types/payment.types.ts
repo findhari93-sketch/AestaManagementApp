@@ -322,7 +322,8 @@ export interface WeeklyFilterState {
 // ============ CONTRACT PAYMENT TYPES (NEW) ============
 
 // Payment type for contract payments
-export type ContractPaymentType = "salary" | "advance" | "other";
+// "excess" is used when recording a salary payment with no outstanding balance (overpayment)
+export type ContractPaymentType = "salary" | "advance" | "other" | "excess";
 
 // Week allocation record (how salary payments are distributed across weeks)
 export interface PaymentWeekAllocation {
