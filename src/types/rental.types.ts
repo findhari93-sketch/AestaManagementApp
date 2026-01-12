@@ -539,6 +539,10 @@ export interface RentalSummary {
   totalAccruedCost: number;
   totalAdvancesPaid: number;
   totalDue: number;
+  // Completed rental stats
+  completedCount: number;
+  totalSettledAmount: number;
+  totalOutstandingBalance: number;
 }
 
 export interface RentalDashboardStats extends RentalSummary {

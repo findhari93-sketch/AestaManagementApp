@@ -40,6 +40,8 @@ import {
   Visibility as ViewIcon,
   CheckCircle as SettleIcon,
   Delete as DeleteIcon,
+  CheckCircleOutline as CompletedIcon,
+  Info as InfoIcon,
 } from "@mui/icons-material";
 import PageHeader from "@/components/layout/PageHeader";
 import { useSite } from "@/contexts/SiteContext";
@@ -222,7 +224,7 @@ export default function SiteRentalsPage() {
         </Box>
       ) : (
         <Grid container spacing={2} sx={{ mb: 3 }}>
-          <Grid size={{ xs: 6, sm: 6, md: 3 }}>
+          <Grid size={{ xs: 6, sm: 6, md: 2.4 }}>
             <StatCard
               title="Ongoing Rentals"
               value={summary?.ongoingCount || 0}
@@ -230,7 +232,7 @@ export default function SiteRentalsPage() {
               color="primary"
             />
           </Grid>
-          <Grid size={{ xs: 6, sm: 6, md: 3 }}>
+          <Grid size={{ xs: 6, sm: 6, md: 2.4 }}>
             <StatCard
               title="Overdue"
               value={summary?.overdueCount || 0}
@@ -239,7 +241,7 @@ export default function SiteRentalsPage() {
               color={summary?.overdueCount ? "error" : "success"}
             />
           </Grid>
-          <Grid size={{ xs: 6, sm: 6, md: 3 }}>
+          <Grid size={{ xs: 6, sm: 6, md: 2.4 }}>
             <StatCard
               title="Accrued Cost"
               value={formatCurrency(summary?.totalAccruedCost || 0)}
@@ -248,13 +250,22 @@ export default function SiteRentalsPage() {
               color="warning"
             />
           </Grid>
-          <Grid size={{ xs: 6, sm: 6, md: 3 }}>
+          <Grid size={{ xs: 6, sm: 6, md: 2.4 }}>
             <StatCard
               title="Balance Due"
               value={formatCurrency(summary?.totalDue || 0)}
               subtitle={`Advances: ${formatCurrency(summary?.totalAdvancesPaid || 0)}`}
               icon={<BalanceIcon />}
               color={summary?.totalDue && summary.totalDue > 0 ? "error" : "success"}
+            />
+          </Grid>
+          <Grid size={{ xs: 6, sm: 6, md: 2.4 }}>
+            <StatCard
+              title="Completed"
+              value={summary?.completedCount || 0}
+              subtitle={`Settled: ${formatCurrency(summary?.totalSettledAmount || 0)}`}
+              icon={<CompletedIcon />}
+              color="success"
             />
           </Grid>
         </Grid>
@@ -369,8 +380,6 @@ export default function SiteRentalsPage() {
                 </TableHead>
                 <TableBody>
                   {displayedRentals.map((rental) => {
-                    const totalPaid = rental.total_advance_paid || 0;
-
                     // Get item details
                     const items = rental.items || [];
 
@@ -394,7 +403,33 @@ export default function SiteRentalsPage() {
                       (rental.loading_cost_outward || 0) +
                       (rental.unloading_cost_outward || 0);
                     const estimatedTotal = itemsTotal + transportTotal;
-                    const balance = estimatedTotal - totalPaid;
+
+                    // Check for settlement data
+                    const settlement = rental.settlement;
+                    const isSettled = rental.status === "completed" && settlement;
+
+                    // Calculate paid and balance based on settlement status
+                    let totalPaid: number;
+                    let balance: number;
+                    let finalTotal: number;
+                    let wasNegotiated = false;
+
+                    if (isSettled) {
+                      // Settled order - use settlement data
+                      const settleData = settlement as any;
+                      const originalTotal = (settleData.total_rental_amount || 0) +
+                        (settleData.total_transport_amount || 0) +
+                        (settleData.total_damage_amount || 0);
+                      finalTotal = settleData.negotiated_final_amount || originalTotal;
+                      wasNegotiated = !!settleData.negotiated_final_amount && settleData.negotiated_final_amount !== originalTotal;
+                      totalPaid = finalTotal; // Total amount was paid in full (advances + balance)
+                      balance = 0; // Settled = no balance
+                    } else {
+                      // Not settled - use advances
+                      totalPaid = rental.total_advance_paid || 0;
+                      finalTotal = estimatedTotal;
+                      balance = estimatedTotal - totalPaid;
+                    }
 
                     // Get item summary
                     const itemSummary = items.map(item => {
@@ -416,6 +451,11 @@ export default function SiteRentalsPage() {
                           <Typography variant="body2" fontWeight={500}>
                             {rental.rental_order_number}
                           </Typography>
+                          {isSettled && (settlement as any)?.settlement_reference && (
+                            <Typography variant="caption" color="text.secondary" display="block">
+                              Ref: {(settlement as any).settlement_reference}
+                            </Typography>
+                          )}
                         </TableCell>
                         <TableCell>
                           <Typography variant="body2" fontWeight={500}>
@@ -461,18 +501,37 @@ export default function SiteRentalsPage() {
                           />
                         </TableCell>
                         <TableCell align="right">
-                          {formatCurrency(estimatedTotal)}
+                          <Box>
+                            {wasNegotiated ? (
+                              <>
+                                <Typography variant="body2" sx={{ textDecoration: "line-through", color: "text.secondary" }}>
+                                  {formatCurrency(estimatedTotal)}
+                                </Typography>
+                                <Typography variant="body2" color="success.main" fontWeight={500}>
+                                  {formatCurrency(finalTotal)}
+                                </Typography>
+                              </>
+                            ) : (
+                              formatCurrency(finalTotal)
+                            )}
+                          </Box>
                         </TableCell>
                         <TableCell align="right">
-                          {formatCurrency(totalPaid)}
-                        </TableCell>
-                        <TableCell align="right">
-                          <Typography
-                            color={balance > 0 ? "error.main" : "success.main"}
-                            fontWeight={500}
-                          >
-                            {formatCurrency(balance)}
+                          <Typography color={isSettled ? "success.main" : undefined}>
+                            {formatCurrency(totalPaid)}
                           </Typography>
+                        </TableCell>
+                        <TableCell align="right">
+                          {isSettled ? (
+                            <Chip size="small" label="Settled" color="success" variant="outlined" />
+                          ) : (
+                            <Typography
+                              color={balance > 0 ? "error.main" : "success.main"}
+                              fontWeight={500}
+                            >
+                              {formatCurrency(balance)}
+                            </Typography>
+                          )}
                         </TableCell>
                         <TableCell align="center" onClick={(e) => e.stopPropagation()}>
                           <Tooltip title="View Details">
@@ -483,6 +542,17 @@ export default function SiteRentalsPage() {
                               <ViewIcon fontSize="small" />
                             </IconButton>
                           </Tooltip>
+                          {isSettled && (settlement as any)?.upi_screenshot_url && (
+                            <Tooltip title="View Payment Proof">
+                              <IconButton
+                                size="small"
+                                color="info"
+                                onClick={() => window.open((settlement as any).upi_screenshot_url, "_blank")}
+                              >
+                                <InfoIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                          )}
                           {rental.status !== "completed" && rental.status !== "cancelled" && (
                             <Tooltip title="Settle">
                               <IconButton

@@ -470,7 +470,8 @@ export async function getRentalSummary(
 ): Promise<RentalSummary> {
   const today = dayjs().format("YYYY-MM-DD");
 
-  const { data: orders } = await supabase
+  // Fetch ongoing orders
+  const { data: ongoingOrders } = await supabase
     .from("rental_orders")
     .select(
       `
@@ -485,6 +486,27 @@ export async function getRentalSummary(
     .eq("site_id", siteId)
     .in("status", ["confirmed", "active", "partially_returned"]);
 
+  // Fetch completed orders with settlements
+  const { data: completedOrders } = await supabase
+    .from("rental_orders")
+    .select(
+      `
+      id,
+      status,
+      actual_total,
+      settlement:rental_settlements(
+        negotiated_final_amount,
+        total_rental_amount,
+        total_transport_amount,
+        total_damage_amount,
+        total_advance_paid,
+        balance_amount
+      )
+    `
+    )
+    .eq("site_id", siteId)
+    .eq("status", "completed");
+
   let ongoingCount = 0;
   let overdueCount = 0;
   let totalAccruedCost = 0;
@@ -492,7 +514,7 @@ export async function getRentalSummary(
 
   const now = new Date();
 
-  for (const order of orders || []) {
+  for (const order of ongoingOrders || []) {
     ongoingCount++;
 
     if (order.expected_return_date && order.expected_return_date < today) {
@@ -528,12 +550,34 @@ export async function getRentalSummary(
     }, 0);
   }
 
+  // Calculate completed stats
+  let completedCount = 0;
+  let totalSettledAmount = 0;
+  let totalOutstandingBalance = 0;
+
+  for (const order of completedOrders || []) {
+    completedCount++;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const settlement = order.settlement as any;
+    if (settlement) {
+      const finalAmount = settlement.negotiated_final_amount ||
+        (settlement.total_rental_amount + settlement.total_transport_amount + settlement.total_damage_amount);
+      totalSettledAmount += finalAmount;
+      totalOutstandingBalance += Math.max(0, settlement.balance_amount || 0);
+    } else {
+      totalSettledAmount += order.actual_total || 0;
+    }
+  }
+
   return {
     ongoingCount,
     overdueCount,
     totalAccruedCost,
     totalAdvancesPaid,
     totalDue: totalAccruedCost - totalAdvancesPaid,
+    completedCount,
+    totalSettledAmount,
+    totalOutstandingBalance,
   };
 }
 

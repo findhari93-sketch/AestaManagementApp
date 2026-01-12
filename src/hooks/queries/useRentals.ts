@@ -1076,18 +1076,22 @@ export function useSettleRental() {
     mutationFn: async (data: RentalSettlementFormData) => {
       await ensureFreshSession();
 
-      // Get site_id for reference generation
+      // Get order details including vendor info for expense creation
       const { data: order } = await supabase
         .from("rental_orders")
-        .select("site_id")
+        .select("site_id, vendor:vendors(name, shop_name, phone)")
         .eq("id", data.rental_order_id)
         .single();
+
+      if (!order?.site_id) {
+        throw new Error("Order not found or missing site_id");
+      }
 
       // Generate settlement reference
       const { data: settRef } = await supabase.rpc(
         "generate_rental_settlement_reference",
         {
-          p_site_id: order?.site_id || "",
+          p_site_id: order.site_id,
         }
       );
 
@@ -1113,6 +1117,76 @@ export function useSettleRental() {
         })
         .eq("id", data.rental_order_id);
 
+      // Create expense entry for the rental settlement
+      const finalAmount = data.negotiated_final_amount ||
+        (data.total_rental_amount + data.total_transport_amount + data.total_damage_amount);
+
+      // Find or create "Rental Settlement" category under machinery module
+      let categoryId: string | null = null;
+
+      // First try to find existing category
+      const { data: existingCategory } = await supabase
+        .from("expense_categories")
+        .select("id")
+        .eq("name", "Rental Settlement")
+        .eq("module", "machinery")
+        .eq("is_active", true)
+        .single();
+
+      if (existingCategory) {
+        categoryId = existingCategory.id;
+      } else {
+        // Create the category if it doesn't exist
+        const { data: newCategory, error: catError } = await supabase
+          .from("expense_categories")
+          .insert({
+            name: "Rental Settlement",
+            module: "machinery",
+            description: "Equipment and machinery rental settlements",
+            is_active: true,
+            display_order: 100,
+          })
+          .select("id")
+          .single();
+
+        if (catError) {
+          console.error("Failed to create expense category:", catError);
+        } else {
+          categoryId = newCategory?.id || null;
+        }
+      }
+
+      // Create expense if we have a category
+      if (categoryId && finalAmount > 0) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const vendor = order.vendor as any;
+        const vendorName = vendor?.shop_name || vendor?.name || "Unknown Vendor";
+
+        const { error: expenseError } = await supabase
+          .from("expenses")
+          .insert({
+            site_id: order.site_id,
+            category_id: categoryId,
+            module: "machinery",
+            date: data.settlement_date,
+            amount: finalAmount,
+            vendor_name: vendorName,
+            vendor_contact: vendor?.phone || null,
+            description: `Rental settlement ${settRef} - ${vendorName}`,
+            payment_mode: data.payment_mode as any,
+            is_cleared: true, // Settlement means it's already paid
+            cleared_date: data.settlement_date,
+            reference_number: settRef,
+            receipt_url: data.final_receipt_url || data.upi_screenshot_url || null,
+            contract_id: data.subcontract_id || null,
+          });
+
+        if (expenseError) {
+          console.error("Failed to create expense for rental settlement:", expenseError);
+          // Don't throw - settlement itself succeeded, expense is secondary
+        }
+      }
+
       return settlement;
     },
     onSuccess: (_, variables) => {
@@ -1120,6 +1194,8 @@ export function useSettleRental() {
         queryKey: rentalQueryKeys.orders.byId(variables.rental_order_id),
       });
       queryClient.invalidateQueries({ queryKey: rentalQueryKeys.orders.all });
+      // Also invalidate expenses since we created one
+      queryClient.invalidateQueries({ queryKey: ["expenses"] });
     },
   });
 }
@@ -1319,7 +1395,8 @@ export function useRentalSummary(siteId: string) {
   return useQuery({
     queryKey: rentalQueryKeys.summary(siteId),
     queryFn: async () => {
-      const { data: orders, error } = await supabase
+      // Fetch ongoing orders
+      const { data: ongoingOrders, error: ongoingError } = await supabase
         .from("rental_orders")
         .select(
           `
@@ -1334,7 +1411,31 @@ export function useRentalSummary(siteId: string) {
         .eq("site_id", siteId)
         .in("status", ["confirmed", "active", "partially_returned"]);
 
-      if (error) throw error;
+      if (ongoingError) throw ongoingError;
+
+      // Fetch completed orders with settlements
+      const { data: completedOrders, error: completedError } = await supabase
+        .from("rental_orders")
+        .select(
+          `
+          id,
+          status,
+          actual_total,
+          settlement:rental_settlements(
+            negotiated_final_amount,
+            total_rental_amount,
+            total_transport_amount,
+            total_damage_amount,
+            total_advance_paid,
+            balance_amount
+          ),
+          advances:rental_advances(amount)
+        `
+        )
+        .eq("site_id", siteId)
+        .eq("status", "completed");
+
+      if (completedError) throw completedError;
 
       let ongoingCount = 0;
       let overdueCount = 0;
@@ -1343,7 +1444,7 @@ export function useRentalSummary(siteId: string) {
 
       const now = new Date();
 
-      for (const order of orders || []) {
+      for (const order of ongoingOrders || []) {
         ongoingCount++;
 
         if (order.expected_return_date && order.expected_return_date < today) {
@@ -1397,12 +1498,37 @@ export function useRentalSummary(siteId: string) {
         );
       }
 
+      // Calculate completed stats
+      let completedCount = 0;
+      let totalSettledAmount = 0;
+      let totalOutstandingBalance = 0;
+
+      for (const order of completedOrders || []) {
+        completedCount++;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const settlement = order.settlement as any;
+        if (settlement) {
+          // Settlement exists - use negotiated or calculated amount
+          const finalAmount = settlement.negotiated_final_amount ||
+            (settlement.total_rental_amount + settlement.total_transport_amount + settlement.total_damage_amount);
+          totalSettledAmount += finalAmount;
+          // Balance that was actually paid at settlement (could be 0 if fully prepaid)
+          totalOutstandingBalance += Math.max(0, settlement.balance_amount || 0);
+        } else {
+          // No settlement yet but order is completed (shouldn't happen normally)
+          totalSettledAmount += order.actual_total || 0;
+        }
+      }
+
       return {
         ongoingCount,
         overdueCount,
         totalAccruedCost,
         totalAdvancesPaid,
         totalDue: totalAccruedCost - totalAdvancesPaid,
+        completedCount,
+        totalSettledAmount,
+        totalOutstandingBalance,
       } as RentalSummary;
     },
     enabled: !!siteId,
