@@ -19,13 +19,16 @@ import {
   InputLabel,
   Snackbar,
   Alert,
+  Avatar,
 } from "@mui/material";
 import {
   Add as AddIcon,
   Edit as EditIcon,
   Delete as DeleteIcon,
   Search as SearchIcon,
+  Inventory2 as InventoryIcon,
 } from "@mui/icons-material";
+import ScreenshotViewer from "@/components/common/ScreenshotViewer";
 import DataTable, { type MRT_ColumnDef, type PaginationState } from "@/components/common/DataTable";
 import PageHeader from "@/components/layout/PageHeader";
 import { useAuth } from "@/contexts/AuthContext";
@@ -78,6 +81,11 @@ export default function CompanyRentalsPage() {
     message: string;
     severity: "success" | "error";
   }>({ open: false, message: "", severity: "success" });
+  const [imageViewer, setImageViewer] = useState<{
+    open: boolean;
+    imageUrl: string | null;
+    title: string;
+  }>({ open: false, imageUrl: null, title: "" });
 
   const { userProfile } = useAuth();
   const isMobile = useIsMobile();
@@ -159,17 +167,45 @@ export default function CompanyRentalsPage() {
       {
         accessorKey: "name",
         header: "Item Name",
-        size: 200,
+        size: 250,
         Cell: ({ row }) => (
-          <Box>
-            <Typography variant="body2" fontWeight={500}>
-              {row.original.name}
-            </Typography>
-            {row.original.code && (
-              <Typography variant="caption" color="text.secondary">
-                {row.original.code}
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
+            <Avatar
+              src={row.original.image_url || undefined}
+              variant="rounded"
+              sx={{
+                width: 40,
+                height: 40,
+                bgcolor: "action.hover",
+                cursor: row.original.image_url ? "pointer" : "default",
+                "&:hover": row.original.image_url ? {
+                  opacity: 0.8,
+                  boxShadow: 1,
+                } : {},
+              }}
+              onClick={(e) => {
+                if (row.original.image_url) {
+                  e.stopPropagation();
+                  setImageViewer({
+                    open: true,
+                    imageUrl: row.original.image_url,
+                    title: row.original.name,
+                  });
+                }
+              }}
+            >
+              <InventoryIcon sx={{ fontSize: 20, color: "text.disabled" }} />
+            </Avatar>
+            <Box>
+              <Typography variant="body2" fontWeight={500}>
+                {row.original.name}
               </Typography>
-            )}
+              {row.original.code && (
+                <Typography variant="caption" color="text.secondary">
+                  {row.original.code}
+                </Typography>
+              )}
+            </Box>
           </Box>
         ),
       },
@@ -446,6 +482,14 @@ export default function CompanyRentalsPage() {
           {snackbar.message}
         </Alert>
       </Snackbar>
+
+      {/* Image Viewer */}
+      <ScreenshotViewer
+        open={imageViewer.open}
+        onClose={() => setImageViewer({ open: false, imageUrl: null, title: "" })}
+        images={imageViewer.imageUrl ? [imageViewer.imageUrl] : []}
+        title={imageViewer.title}
+      />
     </Box>
   );
 }

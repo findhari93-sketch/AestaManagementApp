@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import {
   Dialog,
   DialogTitle,
@@ -26,6 +26,8 @@ import {
   useUpdateRentalItem,
   useRentalCategories,
 } from "@/hooks/queries/useRentals";
+import { createClient } from "@/lib/supabase/client";
+import ImageUploadWithCrop from "@/components/common/ImageUploadWithCrop";
 import type {
   RentalItemWithDetails,
   RentalItemFormData,
@@ -66,6 +68,7 @@ export default function RentalItemDialog({
   const { data: categories = [] } = useRentalCategories();
   const createItem = useCreateRentalItem();
   const updateItem = useUpdateRentalItem();
+  const supabase = useMemo(() => createClient(), []);
 
   const [error, setError] = useState("");
   const [formData, setFormData] = useState<RentalItemFormData>({
@@ -179,6 +182,22 @@ export default function RentalItemDialog({
               value={formData.name}
               onChange={(e) => handleChange("name", e.target.value)}
               placeholder="e.g., 4ft Scaffolding Sheet"
+            />
+          </Grid>
+
+          <Grid size={12}>
+            <ImageUploadWithCrop
+              supabase={supabase}
+              bucketName="rental-items"
+              folderPath="item-photos"
+              fileNamePrefix="rental-item"
+              value={formData.image_url || null}
+              onChange={(url) => handleChange("image_url", url || "")}
+              disabled={isLoading}
+              label="Item Photo (Optional)"
+              aspectRatio={1}
+              maxSizeKB={300}
+              cropShape="rect"
             />
           </Grid>
 

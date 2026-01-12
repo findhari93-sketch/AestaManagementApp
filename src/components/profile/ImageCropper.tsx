@@ -130,14 +130,18 @@ export default function ImageCropper({
         croppedAreaPixels,
         rotation
       );
+      // Reset state before calling onCropComplete
+      setCrop({ x: 0, y: 0 });
+      setZoom(1);
+      setRotation(0);
+      // Let the parent handle closing via onCropComplete
       onCropComplete(croppedBlob);
-      onClose();
     } catch (error) {
       console.error("Error cropping image:", error);
     } finally {
       setIsProcessing(false);
     }
-  }, [croppedAreaPixels, imageSrc, rotation, onCropComplete, onClose]);
+  }, [croppedAreaPixels, imageSrc, rotation, onCropComplete]);
 
   const handleClose = () => {
     setCrop({ x: 0, y: 0 });
@@ -173,6 +177,7 @@ export default function ImageCropper({
       }}
     >
       <DialogTitle
+        component="div"
         sx={{
           display: "flex",
           justifyContent: "space-between",
@@ -180,7 +185,7 @@ export default function ImageCropper({
           pb: 1,
         }}
       >
-        <Typography variant="h6" fontWeight={600}>
+        <Typography variant="h6" component="span" fontWeight={600}>
           {title}
         </Typography>
         <IconButton onClick={handleClose} size="small">
