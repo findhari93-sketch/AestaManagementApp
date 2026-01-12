@@ -133,46 +133,54 @@ export async function getPaymentPageData(
 
 /**
  * Calculate payment summary statistics
+ * Counts are based on settlement groups, not individual laborer records
  */
 function calculateSummary(dailyRecords: any[], marketRecords: any[]): PaymentSummaryData {
   // Daily/Market Pending (not paid, not sent to engineer)
+  const pendingDailyRecords = dailyRecords.filter((r) => !r.is_paid && r.paid_via !== "engineer_wallet");
+  const pendingMarketRecords = marketRecords.filter((r) => !r.is_paid && r.paid_via !== "engineer_wallet");
   const dailyMarketPending =
-    dailyRecords
-      .filter((r) => !r.is_paid && r.paid_via !== "engineer_wallet")
-      .reduce((sum, r) => sum + (r.daily_earnings || 0), 0) +
-    marketRecords
-      .filter((r) => !r.is_paid && r.paid_via !== "engineer_wallet")
-      .reduce((sum, r) => sum + (r.total_cost || 0), 0);
+    pendingDailyRecords.reduce((sum, r) => sum + (r.daily_earnings || 0), 0) +
+    pendingMarketRecords.reduce((sum, r) => sum + (r.total_cost || 0), 0);
 
-  const dailyMarketPendingCount =
-    dailyRecords.filter((r) => !r.is_paid && r.paid_via !== "engineer_wallet").length +
-    marketRecords.filter((r) => !r.is_paid && r.paid_via !== "engineer_wallet").length;
+  // Count unique dates for pending (no settlement groups yet)
+  const pendingDates = new Set([
+    ...pendingDailyRecords.map((r) => r.date),
+    ...pendingMarketRecords.map((r) => r.date),
+  ]);
+  const dailyMarketPendingCount = pendingDates.size;
 
   // Daily/Market Sent to Engineer (not paid, via engineer wallet)
+  const sentDailyRecords = dailyRecords.filter((r) => !r.is_paid && r.paid_via === "engineer_wallet");
+  const sentMarketRecords = marketRecords.filter((r) => !r.is_paid && r.paid_via === "engineer_wallet");
   const dailyMarketSentToEngineer =
-    dailyRecords
-      .filter((r) => !r.is_paid && r.paid_via === "engineer_wallet")
-      .reduce((sum, r) => sum + (r.daily_earnings || 0), 0) +
-    marketRecords
-      .filter((r) => !r.is_paid && r.paid_via === "engineer_wallet")
-      .reduce((sum, r) => sum + (r.total_cost || 0), 0);
+    sentDailyRecords.reduce((sum, r) => sum + (r.daily_earnings || 0), 0) +
+    sentMarketRecords.reduce((sum, r) => sum + (r.total_cost || 0), 0);
 
-  const dailyMarketSentToEngineerCount =
-    dailyRecords.filter((r) => !r.is_paid && r.paid_via === "engineer_wallet").length +
-    marketRecords.filter((r) => !r.is_paid && r.paid_via === "engineer_wallet").length;
+  // Count unique settlement groups for sent to engineer (fallback to date for legacy)
+  const sentSettlementGroups = new Set([
+    ...sentDailyRecords.filter((r) => r.settlement_group_id).map((r) => r.settlement_group_id),
+    ...sentMarketRecords.filter((r) => r.settlement_group_id).map((r) => r.settlement_group_id),
+    ...sentDailyRecords.filter((r) => !r.settlement_group_id).map((r) => `legacy-${r.date}`),
+    ...sentMarketRecords.filter((r) => !r.settlement_group_id).map((r) => `legacy-${r.date}`),
+  ]);
+  const dailyMarketSentToEngineerCount = sentSettlementGroups.size;
 
   // Daily/Market Paid
+  const paidDailyRecords = dailyRecords.filter((r) => r.is_paid);
+  const paidMarketRecords = marketRecords.filter((r) => r.is_paid);
   const dailyMarketPaid =
-    dailyRecords
-      .filter((r) => r.is_paid)
-      .reduce((sum, r) => sum + (r.daily_earnings || 0), 0) +
-    marketRecords
-      .filter((r) => r.is_paid)
-      .reduce((sum, r) => sum + (r.total_cost || 0), 0);
+    paidDailyRecords.reduce((sum, r) => sum + (r.daily_earnings || 0), 0) +
+    paidMarketRecords.reduce((sum, r) => sum + (r.total_cost || 0), 0);
 
-  const dailyMarketPaidCount =
-    dailyRecords.filter((r) => r.is_paid).length +
-    marketRecords.filter((r) => r.is_paid).length;
+  // Count unique settlement groups for paid (fallback to date for legacy)
+  const paidSettlementGroups = new Set([
+    ...paidDailyRecords.filter((r) => r.settlement_group_id).map((r) => r.settlement_group_id),
+    ...paidMarketRecords.filter((r) => r.settlement_group_id).map((r) => r.settlement_group_id),
+    ...paidDailyRecords.filter((r) => !r.settlement_group_id).map((r) => `legacy-${r.date}`),
+    ...paidMarketRecords.filter((r) => !r.settlement_group_id).map((r) => `legacy-${r.date}`),
+  ]);
+  const dailyMarketPaidCount = paidSettlementGroups.size;
 
   // Group by subcontract
   const subcontractTotals = new Map<string, { title: string; paid: number; due: number }>();
@@ -200,18 +208,21 @@ function calculateSummary(dailyRecords: any[], marketRecords: any[]): PaymentSum
     totalDue: data.due,
   }));
 
-  // Unlinked (no subcontract) - counts all records without subcontract link
+  // Unlinked (no subcontract) - counts settlement groups without subcontract link
+  const unlinkedDailyRecords = dailyRecords.filter((r) => !r.subcontract_id);
+  const unlinkedMarketRecords = marketRecords.filter((r) => !r.subcontract_id && !r.expenses?.contract_id);
   const unlinkedTotal =
-    dailyRecords
-      .filter((r) => !r.subcontract_id)
-      .reduce((sum, r) => sum + (r.daily_earnings || 0), 0) +
-    marketRecords
-      .filter((r) => !r.subcontract_id && !r.expenses?.contract_id)
-      .reduce((sum, r) => sum + (r.total_cost || 0), 0);
+    unlinkedDailyRecords.reduce((sum, r) => sum + (r.daily_earnings || 0), 0) +
+    unlinkedMarketRecords.reduce((sum, r) => sum + (r.total_cost || 0), 0);
 
-  const unlinkedCount =
-    dailyRecords.filter((r) => !r.subcontract_id).length +
-    marketRecords.filter((r) => !r.subcontract_id && !r.expenses?.contract_id).length;
+  // Count unique settlement groups for unlinked records (fallback to date for legacy)
+  const unlinkedSettlementGroups = new Set([
+    ...unlinkedDailyRecords.filter((r) => r.settlement_group_id).map((r) => r.settlement_group_id),
+    ...unlinkedMarketRecords.filter((r) => r.settlement_group_id).map((r) => r.settlement_group_id),
+    ...unlinkedDailyRecords.filter((r) => !r.settlement_group_id).map((r) => `legacy-${r.date}`),
+    ...unlinkedMarketRecords.filter((r) => !r.settlement_group_id).map((r) => `legacy-${r.date}`),
+  ]);
+  const unlinkedCount = unlinkedSettlementGroups.size;
 
   return {
     dailyMarketPending,

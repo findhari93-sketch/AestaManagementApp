@@ -374,6 +374,18 @@ export default function ExpensesPage() {
     const clearedExpenses = expenses.filter((e) => e.is_cleared);
     const cleared = clearedExpenses.reduce((s, e) => s + e.amount, 0);
     const pendingExpenses = expenses.filter((e) => !e.is_cleared);
+
+    // Category breakdown by expense_type
+    const categoryBreakdown = expenses.reduce((acc, e) => {
+      const type = e.expense_type || 'Other';
+      if (!acc[type]) {
+        acc[type] = { amount: 0, count: 0 };
+      }
+      acc[type].amount += e.amount;
+      acc[type].count += 1;
+      return acc;
+    }, {} as Record<string, { amount: number; count: number }>);
+
     return {
       total,
       cleared,
@@ -381,6 +393,7 @@ export default function ExpensesPage() {
       totalCount: expenses.length,
       clearedCount: clearedExpenses.length,
       pendingCount: pendingExpenses.length,
+      categoryBreakdown,
     };
   }, [expenses]);
 
@@ -696,6 +709,39 @@ export default function ExpensesPage() {
             </CardContent>
           </Card>
         </Grid>
+
+        {/* Category Breakdown */}
+        {Object.keys(stats.categoryBreakdown).length > 0 && (
+          <Grid size={{ xs: 12 }}>
+            <Card>
+              <CardContent>
+                <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 2 }}>
+                  <CategoryIcon color="primary" />
+                  <Typography variant="h6">Expense Breakdown by Type</Typography>
+                </Box>
+                <Grid container spacing={2}>
+                  {Object.entries(stats.categoryBreakdown)
+                    .sort(([, a], [, b]) => b.amount - a.amount)
+                    .map(([type, data]) => (
+                      <Grid size={{ xs: 6, sm: 4, md: 3 }} key={type}>
+                        <Box sx={{ p: 1.5, bgcolor: 'action.hover', borderRadius: 1 }}>
+                          <Typography variant="body2" color="text.secondary">
+                            {type}
+                          </Typography>
+                          <Typography variant="h6" fontWeight={600}>
+                            ₹{data.amount.toLocaleString('en-IN')}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            ({data.count} records)
+                          </Typography>
+                        </Box>
+                      </Grid>
+                    ))}
+                </Grid>
+              </CardContent>
+            </Card>
+          </Grid>
+        )}
       </Grid>
 
       {/* Subcontract Summary Section */}

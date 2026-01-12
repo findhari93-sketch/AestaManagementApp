@@ -501,6 +501,24 @@ export default function DailyMarketPaymentsTab({
     const paidRecords = allRecords.filter((r) => r.isPaid);
     const unlinkedRecords = allRecords.filter((r) => !r.subcontractId);
 
+    // Count unique settlement groups instead of individual records
+    // For pending: count by date (records without settlement_group_id grouped by date)
+    const pendingDates = new Set(pendingRecords.map(r => r.date));
+    // For sent to engineer: count unique settlement groups (fallback to date for legacy)
+    const sentWithGroup = sentToEngineerRecords.filter(r => r.settlementGroupId);
+    const sentWithoutGroup = sentToEngineerRecords.filter(r => !r.settlementGroupId);
+    const sentToEngineerGroups = new Set([
+      ...sentWithGroup.map(r => r.settlementGroupId),
+      ...sentWithoutGroup.map(r => `legacy-${r.date}`), // Fallback: group by date
+    ]);
+    // For paid: count unique settlement groups (fallback to date for legacy)
+    const paidWithGroup = paidRecords.filter(r => r.settlementGroupId);
+    const paidWithoutGroup = paidRecords.filter(r => !r.settlementGroupId);
+    const paidSettlementGroups = new Set([
+      ...paidWithGroup.map(r => r.settlementGroupId),
+      ...paidWithoutGroup.map(r => `legacy-${r.date}`), // Fallback: group by date
+    ]);
+
     // Group by subcontract
     const subcontractMap = new Map<string, { title: string; paid: number; due: number }>();
     allRecords.forEach((r) => {
@@ -526,19 +544,27 @@ export default function DailyMarketPaymentsTab({
       totalDue: data.due,
     }));
 
+    // Count unique settlement groups for unlinked records (fallback to date for legacy)
+    const unlinkedWithGroup = unlinkedRecords.filter(r => r.settlementGroupId);
+    const unlinkedWithoutGroup = unlinkedRecords.filter(r => !r.settlementGroupId);
+    const unlinkedSettlementGroups = new Set([
+      ...unlinkedWithGroup.map(r => r.settlementGroupId),
+      ...unlinkedWithoutGroup.map(r => `legacy-${r.date}`),
+    ]);
+
     const summary: PaymentSummaryData = {
       dailyMarketPending: pendingRecords.reduce((sum, r) => sum + r.amount, 0),
-      dailyMarketPendingCount: pendingRecords.length,
+      dailyMarketPendingCount: pendingDates.size,
       dailyMarketSentToEngineer: sentToEngineerRecords.reduce((sum, r) => sum + r.amount, 0),
-      dailyMarketSentToEngineerCount: sentToEngineerRecords.length,
+      dailyMarketSentToEngineerCount: sentToEngineerGroups.size,
       dailyMarketPaid: paidRecords.reduce((sum, r) => sum + r.amount, 0),
-      dailyMarketPaidCount: paidRecords.length,
+      dailyMarketPaidCount: paidSettlementGroups.size,
       contractWeeklyDue: 0,
       contractWeeklyDueLaborerCount: 0,
       contractWeeklyPaid: 0,
       bySubcontract,
       unlinkedTotal: unlinkedRecords.reduce((sum, r) => sum + r.amount, 0),
-      unlinkedCount: unlinkedRecords.length,
+      unlinkedCount: unlinkedSettlementGroups.size,
     };
 
     onSummaryChange(summary);
@@ -548,18 +574,38 @@ export default function DailyMarketPaymentsTab({
   const dashboardSummary = useMemo(() => {
     const allRecords = dateGroups.flatMap((g) => [...g.dailyRecords, ...g.marketRecords]);
     const totalSalary = allRecords.reduce((sum, r) => sum + r.amount, 0);
-    const totalPaid = allRecords.filter((r) => r.isPaid).reduce((sum, r) => sum + r.amount, 0);
+    const paidRecords = allRecords.filter((r) => r.isPaid);
+    const totalPaid = paidRecords.reduce((sum, r) => sum + r.amount, 0);
     const pendingWithEngineerRecords = allRecords.filter((r) => !r.isPaid && r.paidVia === "engineer_wallet");
     const pendingWithEngineer = pendingWithEngineerRecords.reduce((sum, r) => sum + r.amount, 0);
-    const pendingWithEngineerCount = pendingWithEngineerRecords.length;
+    // Count unique settlement groups for pending with engineer (fallback to date for legacy)
+    const pendingEngWithGroup = pendingWithEngineerRecords.filter(r => r.settlementGroupId);
+    const pendingEngWithoutGroup = pendingWithEngineerRecords.filter(r => !r.settlementGroupId);
+    const pendingWithEngineerGroups = new Set([
+      ...pendingEngWithGroup.map(r => r.settlementGroupId),
+      ...pendingEngWithoutGroup.map(r => `legacy-${r.date}`),
+    ]);
+    const pendingWithEngineerCount = pendingWithEngineerGroups.size;
     const totalDue = totalSalary - totalPaid;
     const progress = totalSalary > 0 ? (totalPaid / totalSalary) * 100 : 0;
-    // Count unique settlement dates, not individual laborers (date-wise counting)
-    const recordCount = dateGroups.length;
-    const paidCount = dateGroups.filter(g =>
-      [...g.dailyRecords, ...g.marketRecords].length > 0 &&
-      [...g.dailyRecords, ...g.marketRecords].every(r => r.isPaid)
-    ).length;
+
+    // Count unique settlement groups from actual records (fallback to date for legacy)
+    const allWithGroup = allRecords.filter(r => r.settlementGroupId);
+    const allWithoutGroup = allRecords.filter(r => !r.settlementGroupId);
+    const allSettlementGroups = new Set([
+      ...allWithGroup.map(r => r.settlementGroupId),
+      ...allWithoutGroup.map(r => `legacy-${r.date}`),
+    ]);
+    const recordCount = allSettlementGroups.size;
+
+    // Count unique paid settlement groups (fallback to date for legacy)
+    const paidWithGroup = paidRecords.filter(r => r.settlementGroupId);
+    const paidWithoutGroup = paidRecords.filter(r => !r.settlementGroupId);
+    const paidSettlementGroups = new Set([
+      ...paidWithGroup.map(r => r.settlementGroupId),
+      ...paidWithoutGroup.map(r => `legacy-${r.date}`),
+    ]);
+    const paidCount = paidSettlementGroups.size;
 
     return {
       totalSalary,
@@ -627,9 +673,9 @@ export default function DailyMarketPaymentsTab({
   }, [dateGroups, filterStatus, filterSubcontract]);
 
   // Calculate money source summary from all paid/settled records
-  // Uses laborer-wise counting: transactionCount = individual laborer records
+  // Uses settlement-wise counting: transactionCount = unique settlement groups
   const moneySourceSummaries = useMemo(() => {
-    const summaryMap = new Map<string, MoneySourceSummary>();
+    const summaryMap = new Map<string, MoneySourceSummary & { settlementGroups: Set<string> }>();
 
     // Get all paid/settled records across all date groups
     const allPaidRecords = filteredDateGroups.flatMap(group =>
@@ -652,17 +698,32 @@ export default function DailyMarketPaymentsTab({
           totalAmount: 0,
           transactionCount: 0,
           laborerCount: 0,
+          settlementGroups: new Set(),
         });
       }
 
       const summary = summaryMap.get(key)!;
       summary.totalAmount += record.amount;
-      summary.transactionCount += 1; // Count each laborer record
+      // Track unique settlement groups for counting (fallback to date for legacy)
+      if (record.settlementGroupId) {
+        summary.settlementGroups.add(record.settlementGroupId);
+      } else {
+        summary.settlementGroups.add(`legacy-${record.date}`);
+      }
       summary.laborerCount += record.count || 1;
     });
 
+    // Convert to final format with transactionCount = unique settlement groups
+    const results: MoneySourceSummary[] = Array.from(summaryMap.values()).map(s => ({
+      source: s.source,
+      displayName: s.displayName,
+      totalAmount: s.totalAmount,
+      transactionCount: s.settlementGroups.size,
+      laborerCount: s.laborerCount,
+    }));
+
     // Sort by amount descending
-    return Array.from(summaryMap.values()).sort((a, b) => b.totalAmount - a.totalAmount);
+    return results.sort((a, b) => b.totalAmount - a.totalAmount);
   }, [filteredDateGroups]);
 
   // Helper functions
