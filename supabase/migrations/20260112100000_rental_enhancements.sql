@@ -1,0 +1,659 @@
+-- Migration: Rental System Enhancements
+-- Purpose: Add source type (store/contractor), rate type (hourly/daily),
+--          subcontract linking for settlements, and integrate rentals into expenses view
+
+-- ============================================================================
+-- PART 1: Create new enums
+-- ============================================================================
+
+-- Create source type enum (store or contractor)
+DO $$ BEGIN
+    CREATE TYPE rental_source_type AS ENUM ('store', 'contractor');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+-- Create rate type enum (hourly or daily)
+DO $$ BEGIN
+    CREATE TYPE rental_rate_type AS ENUM ('hourly', 'daily');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+-- ============================================================================
+-- PART 2: Alter rental_items table
+-- ============================================================================
+
+-- Add source_type column to rental_items
+ALTER TABLE rental_items
+ADD COLUMN IF NOT EXISTS source_type rental_source_type DEFAULT 'store';
+
+-- Add rate_type column to rental_items
+ALTER TABLE rental_items
+ADD COLUMN IF NOT EXISTS rate_type rental_rate_type DEFAULT 'daily';
+
+-- ============================================================================
+-- PART 3: Alter rental_order_items table
+-- ============================================================================
+
+-- Add rate_type to track what rate type was used for this order item
+ALTER TABLE rental_order_items
+ADD COLUMN IF NOT EXISTS rate_type rental_rate_type DEFAULT 'daily';
+
+-- Add hours_used for hourly rate items
+ALTER TABLE rental_order_items
+ADD COLUMN IF NOT EXISTS hours_used NUMERIC(10, 2);
+
+-- ============================================================================
+-- PART 4: Alter rental_settlements table
+-- ============================================================================
+
+-- Add subcontract linking
+ALTER TABLE rental_settlements
+ADD COLUMN IF NOT EXISTS subcontract_id UUID REFERENCES subcontracts(id);
+
+-- Add vendor bill URL
+ALTER TABLE rental_settlements
+ADD COLUMN IF NOT EXISTS vendor_bill_url TEXT;
+
+-- ============================================================================
+-- PART 5: Add Rental expense category
+-- ============================================================================
+
+INSERT INTO expense_categories (module, name, description, display_order, is_active)
+VALUES ('machinery', 'Rental', 'Equipment and machinery rentals', 10, true)
+ON CONFLICT DO NOTHING;
+
+-- ============================================================================
+-- PART 6: Update v_all_expenses view to include rental settlements
+-- ============================================================================
+
+DROP VIEW IF EXISTS "public"."v_all_expenses";
+
+CREATE VIEW "public"."v_all_expenses" AS
+-- Regular expenses (non-labor)
+SELECT "e"."id",
+    "e"."site_id",
+    "e"."date",
+    "e"."date" AS "recorded_date",
+    "e"."amount",
+    "e"."description",
+    "e"."category_id",
+    "ec"."name" AS "category_name",
+    ("e"."module")::"text" AS "module",
+    (
+        CASE "e"."module"
+            WHEN 'material'::"public"."expense_module" THEN 'Material'::character varying
+            WHEN 'machinery'::"public"."expense_module" THEN 'Machinery'::character varying
+            WHEN 'general'::"public"."expense_module" THEN 'General'::character varying
+            ELSE COALESCE("ec"."name", 'Other'::character varying)
+        END)::"text" AS "expense_type",
+    "e"."is_cleared",
+    "e"."cleared_date",
+    "e"."contract_id",
+    "sc"."title" AS "subcontract_title",
+    "e"."site_payer_id",
+    "sp"."name" AS "payer_name",
+    ("e"."payment_mode")::"text" AS "payment_mode",
+    "e"."vendor_name",
+    "e"."receipt_url",
+    "e"."paid_by",
+    "e"."entered_by",
+    "e"."entered_by_user_id",
+    NULL::"text" AS "settlement_reference",
+    NULL::"uuid" AS "settlement_group_id",
+    'expense'::"text" AS "source_type",
+    "e"."id" AS "source_id",
+    "e"."created_at",
+    "e"."is_deleted"
+FROM ((("public"."expenses" "e"
+    LEFT JOIN "public"."expense_categories" "ec" ON (("e"."category_id" = "ec"."id")))
+    LEFT JOIN "public"."subcontracts" "sc" ON (("e"."contract_id" = "sc"."id")))
+    LEFT JOIN "public"."site_payers" "sp" ON (("e"."site_payer_id" = "sp"."id")))
+WHERE (("e"."is_deleted" = false) AND ("e"."module" <> 'labor'::"public"."expense_module"))
+
+UNION ALL
+
+-- Daily Salary settlements (individual records, not aggregated by date)
+-- Excludes advance, excess, and contract laborers
+-- Also excludes orphaned settlement groups (no linked attendance records)
+SELECT "sg"."id",
+    "sg"."site_id",
+    "sg"."settlement_date" AS "date",
+    COALESCE("sg"."actual_payment_date", ("sg"."created_at")::"date") AS "recorded_date",
+    "sg"."total_amount" AS "amount",
+        CASE
+            WHEN (("sg"."notes" IS NOT NULL) AND ("sg"."notes" <> ''::"text")) THEN ((('Salary settlement ('::"text" || "sg"."laborer_count") || ' laborers) - '::"text") || "sg"."notes")
+            ELSE (('Salary settlement ('::"text" || "sg"."laborer_count") || ' laborers)'::"text")
+        END AS "description",
+    ( SELECT "expense_categories"."id"
+           FROM "public"."expense_categories"
+          WHERE (("expense_categories"."name")::"text" = 'Salary Settlement'::"text")
+         LIMIT 1) AS "category_id",
+    'Salary Settlement'::character varying AS "category_name",
+    'labor'::"text" AS "module",
+    'Daily Salary'::"text" AS "expense_type",
+        CASE
+            WHEN ("sg"."payment_channel" = 'direct'::"text") THEN true
+            WHEN ("sg"."engineer_transaction_id" IS NOT NULL) THEN COALESCE(( SELECT "site_engineer_transactions"."is_settled"
+               FROM "public"."site_engineer_transactions"
+              WHERE ("site_engineer_transactions"."id" = "sg"."engineer_transaction_id")), false)
+            ELSE false
+        END AS "is_cleared",
+        CASE
+            WHEN ("sg"."payment_channel" = 'direct'::"text") THEN "sg"."settlement_date"
+            WHEN ("sg"."engineer_transaction_id" IS NOT NULL) THEN ( SELECT ("site_engineer_transactions"."confirmed_at")::"date" AS "confirmed_at"
+               FROM "public"."site_engineer_transactions"
+              WHERE (("site_engineer_transactions"."id" = "sg"."engineer_transaction_id") AND ("site_engineer_transactions"."is_settled" = true)))
+            ELSE NULL::"date"
+        END AS "cleared_date",
+    "sg"."subcontract_id" AS "contract_id",
+    "sc"."title" AS "subcontract_title",
+    NULL::"uuid" AS "site_payer_id",
+        CASE
+            WHEN ("sg"."payer_source" IS NULL) THEN 'Own Money'::"text"
+            WHEN ("sg"."payer_source" = 'own_money'::"text") THEN 'Own Money'::"text"
+            WHEN ("sg"."payer_source" = 'amma_money'::"text") THEN 'Amma Money'::"text"
+            WHEN ("sg"."payer_source" = 'client_money'::"text") THEN 'Client Money'::"text"
+            WHEN ("sg"."payer_source" = 'other_site_money'::"text") THEN COALESCE("sg"."payer_name", 'Other Site'::"text")
+            WHEN ("sg"."payer_source" = 'custom'::"text") THEN COALESCE("sg"."payer_name", 'Other'::"text")
+            ELSE COALESCE("sg"."payer_name", 'Own Money'::"text")
+        END AS "payer_name",
+    "sg"."payment_mode",
+    NULL::"text" AS "vendor_name",
+    "sg"."proof_url" AS "receipt_url",
+    "sg"."created_by" AS "paid_by",
+    "sg"."created_by_name" AS "entered_by",
+    "sg"."created_by" AS "entered_by_user_id",
+    "sg"."settlement_reference",
+    "sg"."id" AS "settlement_group_id",
+    'settlement'::"text" AS "source_type",
+    "sg"."id" AS "source_id",
+    "sg"."created_at",
+    "sg"."is_cancelled" AS "is_deleted"
+FROM ("public"."settlement_groups" "sg"
+    LEFT JOIN "public"."subcontracts" "sc" ON (("sg"."subcontract_id" = "sc"."id")))
+WHERE (("sg"."is_cancelled" = false)
+    AND (COALESCE("sg"."payment_type", 'salary'::"text") NOT IN ('advance'::"text", 'excess'::"text"))
+    AND (NOT (EXISTS ( SELECT 1
+           FROM "public"."labor_payments" "lp"
+          WHERE (("lp"."settlement_group_id" = "sg"."id") AND ("lp"."is_under_contract" = true)))))
+    -- Only include if has at least one linked attendance record
+    AND (
+        EXISTS (SELECT 1 FROM "public"."daily_attendance" "da" WHERE "da"."settlement_group_id" = "sg"."id")
+        OR EXISTS (SELECT 1 FROM "public"."market_laborer_attendance" "ma" WHERE "ma"."settlement_group_id" = "sg"."id")
+        OR EXISTS (SELECT 1 FROM "public"."labor_payments" "lp" WHERE "lp"."settlement_group_id" = "sg"."id")
+    ))
+
+UNION ALL
+
+-- Contract Salary settlements (have linked labor_payments with is_under_contract = true)
+SELECT "sg"."id",
+    "sg"."site_id",
+    "sg"."settlement_date" AS "date",
+    COALESCE("sg"."actual_payment_date", ("sg"."created_at")::"date") AS "recorded_date",
+    "sg"."total_amount" AS "amount",
+        CASE
+            WHEN (("sg"."notes" IS NOT NULL) AND ("sg"."notes" <> ''::"text")) THEN ((('Salary settlement ('::"text" || "sg"."laborer_count") || ' laborers) - '::"text") || "sg"."notes")
+            ELSE (('Salary settlement ('::"text" || "sg"."laborer_count") || ' laborers)'::"text")
+        END AS "description",
+    ( SELECT "expense_categories"."id"
+           FROM "public"."expense_categories"
+          WHERE (("expense_categories"."name")::"text" = 'Salary Settlement'::"text")
+         LIMIT 1) AS "category_id",
+    'Salary Settlement'::character varying AS "category_name",
+    'labor'::"text" AS "module",
+    'Contract Salary'::"text" AS "expense_type",
+        CASE
+            WHEN ("sg"."payment_channel" = 'direct'::"text") THEN true
+            WHEN ("sg"."engineer_transaction_id" IS NOT NULL) THEN COALESCE(( SELECT "site_engineer_transactions"."is_settled"
+               FROM "public"."site_engineer_transactions"
+              WHERE ("site_engineer_transactions"."id" = "sg"."engineer_transaction_id")), false)
+            ELSE false
+        END AS "is_cleared",
+        CASE
+            WHEN ("sg"."payment_channel" = 'direct'::"text") THEN "sg"."settlement_date"
+            WHEN ("sg"."engineer_transaction_id" IS NOT NULL) THEN ( SELECT ("site_engineer_transactions"."confirmed_at")::"date" AS "confirmed_at"
+               FROM "public"."site_engineer_transactions"
+              WHERE (("site_engineer_transactions"."id" = "sg"."engineer_transaction_id") AND ("site_engineer_transactions"."is_settled" = true)))
+            ELSE NULL::"date"
+        END AS "cleared_date",
+    "sg"."subcontract_id" AS "contract_id",
+    "sc"."title" AS "subcontract_title",
+    NULL::"uuid" AS "site_payer_id",
+        CASE
+            WHEN ("sg"."payer_source" IS NULL) THEN 'Own Money'::"text"
+            WHEN ("sg"."payer_source" = 'own_money'::"text") THEN 'Own Money'::"text"
+            WHEN ("sg"."payer_source" = 'amma_money'::"text") THEN 'Amma Money'::"text"
+            WHEN ("sg"."payer_source" = 'client_money'::"text") THEN 'Client Money'::"text"
+            WHEN ("sg"."payer_source" = 'other_site_money'::"text") THEN COALESCE("sg"."payer_name", 'Other Site'::"text")
+            WHEN ("sg"."payer_source" = 'custom'::"text") THEN COALESCE("sg"."payer_name", 'Other'::"text")
+            ELSE COALESCE("sg"."payer_name", 'Own Money'::"text")
+        END AS "payer_name",
+    "sg"."payment_mode",
+    NULL::"text" AS "vendor_name",
+    "sg"."proof_url" AS "receipt_url",
+    "sg"."created_by" AS "paid_by",
+    "sg"."created_by_name" AS "entered_by",
+    "sg"."created_by" AS "entered_by_user_id",
+    "sg"."settlement_reference",
+    "sg"."id" AS "settlement_group_id",
+    'settlement'::"text" AS "source_type",
+    "sg"."id" AS "source_id",
+    "sg"."created_at",
+    "sg"."is_cancelled" AS "is_deleted"
+FROM ("public"."settlement_groups" "sg"
+    LEFT JOIN "public"."subcontracts" "sc" ON (("sg"."subcontract_id" = "sc"."id")))
+WHERE (("sg"."is_cancelled" = false) AND (EXISTS ( SELECT 1
+           FROM "public"."labor_payments" "lp"
+          WHERE (("lp"."settlement_group_id" = "sg"."id") AND ("lp"."is_under_contract" = true)))))
+
+UNION ALL
+
+-- Advance payments
+SELECT "sg"."id",
+    "sg"."site_id",
+    "sg"."settlement_date" AS "date",
+    COALESCE("sg"."actual_payment_date", ("sg"."created_at")::"date") AS "recorded_date",
+    "sg"."total_amount" AS "amount",
+        CASE
+            WHEN (("sg"."notes" IS NOT NULL) AND ("sg"."notes" <> ''::"text")) THEN ((('Advance payment ('::"text" || "sg"."laborer_count") || ' laborers) - '::"text") || "sg"."notes")
+            ELSE (('Advance payment ('::"text" || "sg"."laborer_count") || ' laborers)'::"text")
+        END AS "description",
+    ( SELECT "expense_categories"."id"
+           FROM "public"."expense_categories"
+          WHERE (("expense_categories"."name")::"text" = 'Salary Settlement'::"text")
+         LIMIT 1) AS "category_id",
+    'Salary Settlement'::character varying AS "category_name",
+    'labor'::"text" AS "module",
+    'Advance'::"text" AS "expense_type",
+        CASE
+            WHEN ("sg"."payment_channel" = 'direct'::"text") THEN true
+            WHEN ("sg"."engineer_transaction_id" IS NOT NULL) THEN COALESCE(( SELECT "site_engineer_transactions"."is_settled"
+               FROM "public"."site_engineer_transactions"
+              WHERE ("site_engineer_transactions"."id" = "sg"."engineer_transaction_id")), false)
+            ELSE false
+        END AS "is_cleared",
+        CASE
+            WHEN ("sg"."payment_channel" = 'direct'::"text") THEN "sg"."settlement_date"
+            WHEN ("sg"."engineer_transaction_id" IS NOT NULL) THEN ( SELECT ("site_engineer_transactions"."confirmed_at")::"date" AS "confirmed_at"
+               FROM "public"."site_engineer_transactions"
+              WHERE (("site_engineer_transactions"."id" = "sg"."engineer_transaction_id") AND ("site_engineer_transactions"."is_settled" = true)))
+            ELSE NULL::"date"
+        END AS "cleared_date",
+    "sg"."subcontract_id" AS "contract_id",
+    "sc"."title" AS "subcontract_title",
+    NULL::"uuid" AS "site_payer_id",
+        CASE
+            WHEN ("sg"."payer_source" IS NULL) THEN 'Own Money'::"text"
+            WHEN ("sg"."payer_source" = 'own_money'::"text") THEN 'Own Money'::"text"
+            WHEN ("sg"."payer_source" = 'amma_money'::"text") THEN 'Amma Money'::"text"
+            WHEN ("sg"."payer_source" = 'client_money'::"text") THEN 'Client Money'::"text"
+            WHEN ("sg"."payer_source" = 'other_site_money'::"text") THEN COALESCE("sg"."payer_name", 'Other Site'::"text")
+            WHEN ("sg"."payer_source" = 'custom'::"text") THEN COALESCE("sg"."payer_name", 'Other'::"text")
+            ELSE COALESCE("sg"."payer_name", 'Own Money'::"text")
+        END AS "payer_name",
+    "sg"."payment_mode",
+    NULL::"text" AS "vendor_name",
+    "sg"."proof_url" AS "receipt_url",
+    "sg"."created_by" AS "paid_by",
+    "sg"."created_by_name" AS "entered_by",
+    "sg"."created_by" AS "entered_by_user_id",
+    "sg"."settlement_reference",
+    "sg"."id" AS "settlement_group_id",
+    'settlement'::"text" AS "source_type",
+    "sg"."id" AS "source_id",
+    "sg"."created_at",
+    "sg"."is_cancelled" AS "is_deleted"
+FROM ("public"."settlement_groups" "sg"
+    LEFT JOIN "public"."subcontracts" "sc" ON (("sg"."subcontract_id" = "sc"."id")))
+WHERE (("sg"."is_cancelled" = false) AND ("sg"."payment_type" = 'advance'::"text"))
+
+UNION ALL
+
+-- Excess/Overpayment settlements (contract salary overpayments with no linked labor_payments)
+SELECT "sg"."id",
+    "sg"."site_id",
+    "sg"."settlement_date" AS "date",
+    COALESCE("sg"."actual_payment_date", ("sg"."created_at")::"date") AS "recorded_date",
+    "sg"."total_amount" AS "amount",
+        CASE
+            WHEN (("sg"."notes" IS NOT NULL) AND ("sg"."notes" <> ''::"text")) THEN ('Excess/Overpayment - '::"text" || "sg"."notes")
+            ELSE 'Excess/Overpayment'::"text"
+        END AS "description",
+    ( SELECT "expense_categories"."id"
+           FROM "public"."expense_categories"
+          WHERE (("expense_categories"."name")::"text" = 'Salary Settlement'::"text")
+         LIMIT 1) AS "category_id",
+    'Salary Settlement'::character varying AS "category_name",
+    'labor'::"text" AS "module",
+    'Contract Salary Excess'::"text" AS "expense_type",
+        CASE
+            WHEN ("sg"."payment_channel" = 'direct'::"text") THEN true
+            WHEN ("sg"."engineer_transaction_id" IS NOT NULL) THEN COALESCE(( SELECT "site_engineer_transactions"."is_settled"
+               FROM "public"."site_engineer_transactions"
+              WHERE ("site_engineer_transactions"."id" = "sg"."engineer_transaction_id")), false)
+            ELSE false
+        END AS "is_cleared",
+        CASE
+            WHEN ("sg"."payment_channel" = 'direct'::"text") THEN "sg"."settlement_date"
+            WHEN ("sg"."engineer_transaction_id" IS NOT NULL) THEN ( SELECT ("site_engineer_transactions"."confirmed_at")::"date" AS "confirmed_at"
+               FROM "public"."site_engineer_transactions"
+              WHERE (("site_engineer_transactions"."id" = "sg"."engineer_transaction_id") AND ("site_engineer_transactions"."is_settled" = true)))
+            ELSE NULL::"date"
+        END AS "cleared_date",
+    "sg"."subcontract_id" AS "contract_id",
+    "sc"."title" AS "subcontract_title",
+    NULL::"uuid" AS "site_payer_id",
+        CASE
+            WHEN ("sg"."payer_source" IS NULL) THEN 'Own Money'::"text"
+            WHEN ("sg"."payer_source" = 'own_money'::"text") THEN 'Own Money'::"text"
+            WHEN ("sg"."payer_source" = 'amma_money'::"text") THEN 'Amma Money'::"text"
+            WHEN ("sg"."payer_source" = 'client_money'::"text") THEN 'Client Money'::"text"
+            WHEN ("sg"."payer_source" = 'other_site_money'::"text") THEN COALESCE("sg"."payer_name", 'Other Site'::"text")
+            WHEN ("sg"."payer_source" = 'custom'::"text") THEN COALESCE("sg"."payer_name", 'Other'::"text")
+            ELSE COALESCE("sg"."payer_name", 'Own Money'::"text")
+        END AS "payer_name",
+    "sg"."payment_mode",
+    NULL::"text" AS "vendor_name",
+    "sg"."proof_url" AS "receipt_url",
+    "sg"."created_by" AS "paid_by",
+    "sg"."created_by_name" AS "entered_by",
+    "sg"."created_by" AS "entered_by_user_id",
+    "sg"."settlement_reference",
+    "sg"."id" AS "settlement_group_id",
+    'settlement'::"text" AS "source_type",
+    "sg"."id" AS "source_id",
+    "sg"."created_at",
+    "sg"."is_cancelled" AS "is_deleted"
+FROM ("public"."settlement_groups" "sg"
+    LEFT JOIN "public"."subcontracts" "sc" ON (("sg"."subcontract_id" = "sc"."id")))
+WHERE (("sg"."is_cancelled" = false) AND ("sg"."payment_type" = 'excess'::"text"))
+
+UNION ALL
+
+-- Tea Shop settlements
+-- Use subcontract's site_id when linked to a subcontract, otherwise use tea_shop_account's site_id
+SELECT "ts"."id",
+    COALESCE("sc"."site_id", "tsa"."site_id") AS "site_id",
+    "ts"."payment_date" AS "date",
+    "ts"."payment_date" AS "recorded_date",
+    "ts"."amount_paid" AS "amount",
+        CASE
+            WHEN (("ts"."notes" IS NOT NULL) AND ("ts"."notes" <> ''::"text")) THEN ((('Tea Shop - '::"text" || ("tsa"."shop_name")::"text") || ' - '::"text") || "ts"."notes")
+            ELSE ('Tea Shop - '::"text" || ("tsa"."shop_name")::"text")
+        END AS "description",
+    ( SELECT "expense_categories"."id"
+           FROM "public"."expense_categories"
+          WHERE (("expense_categories"."name")::"text" = 'Tea & Snacks'::"text")
+         LIMIT 1) AS "category_id",
+    'Tea & Snacks'::character varying AS "category_name",
+    'general'::"text" AS "module",
+    'Tea & Snacks'::"text" AS "expense_type",
+        CASE
+            WHEN (("ts"."payer_type")::"text" = 'company_direct'::"text") THEN true
+            WHEN ("ts"."site_engineer_transaction_id" IS NOT NULL) THEN COALESCE(( SELECT "site_engineer_transactions"."is_settled"
+               FROM "public"."site_engineer_transactions"
+              WHERE ("site_engineer_transactions"."id" = "ts"."site_engineer_transaction_id")), false)
+            ELSE true
+        END AS "is_cleared",
+        CASE
+            WHEN (("ts"."payer_type")::"text" = 'company_direct'::"text") THEN "ts"."payment_date"
+            WHEN ("ts"."site_engineer_transaction_id" IS NOT NULL) THEN ( SELECT ("site_engineer_transactions"."confirmed_at")::"date" AS "confirmed_at"
+               FROM "public"."site_engineer_transactions"
+              WHERE (("site_engineer_transactions"."id" = "ts"."site_engineer_transaction_id") AND ("site_engineer_transactions"."is_settled" = true)))
+            ELSE "ts"."payment_date"
+        END AS "cleared_date",
+    "ts"."subcontract_id" AS "contract_id",
+    "sc"."title" AS "subcontract_title",
+    NULL::"uuid" AS "site_payer_id",
+        CASE "ts"."payer_type"
+            WHEN 'company_direct'::"text" THEN 'Company Direct'::character varying
+            WHEN 'site_engineer'::"text" THEN COALESCE(( SELECT "users"."name"
+               FROM "public"."users"
+              WHERE ("users"."id" = "ts"."site_engineer_id")), 'Site Engineer'::character varying)
+            ELSE "ts"."payer_type"
+        END AS "payer_name",
+    "ts"."payment_mode",
+    "tsa"."shop_name" AS "vendor_name",
+    NULL::"text" AS "receipt_url",
+    "ts"."recorded_by_user_id" AS "paid_by",
+    "ts"."recorded_by" AS "entered_by",
+    "ts"."recorded_by_user_id" AS "entered_by_user_id",
+    "ts"."settlement_reference",
+    NULL::"uuid" AS "settlement_group_id",
+    'tea_shop_settlement'::"text" AS "source_type",
+    "ts"."id" AS "source_id",
+    "ts"."created_at",
+    COALESCE("ts"."is_cancelled", false) AS "is_deleted"
+FROM (("public"."tea_shop_settlements" "ts"
+    JOIN "public"."tea_shop_accounts" "tsa" ON (("ts"."tea_shop_id" = "tsa"."id")))
+    LEFT JOIN "public"."subcontracts" "sc" ON (("ts"."subcontract_id" = "sc"."id")))
+WHERE (COALESCE("ts"."is_cancelled", false) = false)
+
+UNION ALL
+
+-- Miscellaneous expenses
+-- Use subcontract's site_id when linked to a subcontract
+SELECT
+    "me"."id",
+    COALESCE("sc"."site_id", "me"."site_id") AS "site_id",
+    "me"."date",
+    "me"."date" AS "recorded_date",
+    "me"."amount",
+    CASE
+        WHEN (("me"."notes" IS NOT NULL) AND ("me"."notes" <> ''::"text")) THEN
+            CASE
+                WHEN ("me"."vendor_name" IS NOT NULL) THEN (('Misc - '::"text" || "me"."vendor_name") || ' - '::"text") || "me"."notes"
+                ELSE 'Misc - '::"text" || "me"."notes"
+            END
+        WHEN ("me"."vendor_name" IS NOT NULL) THEN 'Misc - '::"text" || "me"."vendor_name"
+        ELSE COALESCE("me"."description", 'Miscellaneous Expense'::"text")
+    END AS "description",
+    "me"."category_id",
+    COALESCE("ec"."name", 'Miscellaneous'::character varying) AS "category_name",
+    'miscellaneous'::"text" AS "module",
+    'Miscellaneous'::"text" AS "expense_type",
+    CASE
+        WHEN ("me"."payer_type" = 'company_direct'::"text") THEN true
+        WHEN ("me"."engineer_transaction_id" IS NOT NULL) THEN COALESCE((
+            SELECT "site_engineer_transactions"."is_settled"
+            FROM "public"."site_engineer_transactions"
+            WHERE ("site_engineer_transactions"."id" = "me"."engineer_transaction_id")), false)
+        ELSE true
+    END AS "is_cleared",
+    CASE
+        WHEN ("me"."payer_type" = 'company_direct'::"text") THEN "me"."date"
+        WHEN ("me"."engineer_transaction_id" IS NOT NULL) THEN (
+            SELECT ("site_engineer_transactions"."confirmed_at")::"date" AS "confirmed_at"
+            FROM "public"."site_engineer_transactions"
+            WHERE (("site_engineer_transactions"."id" = "me"."engineer_transaction_id")
+                AND ("site_engineer_transactions"."is_settled" = true)))
+        ELSE "me"."date"
+    END AS "cleared_date",
+    "me"."subcontract_id" AS "contract_id",
+    "sc"."title" AS "subcontract_title",
+    NULL::"uuid" AS "site_payer_id",
+    CASE
+        WHEN ("me"."payer_type" = 'site_engineer'::"text") THEN COALESCE((
+            SELECT "users"."name"
+            FROM "public"."users"
+            WHERE ("users"."id" = "me"."site_engineer_id")), 'Site Engineer'::character varying)
+        WHEN ("me"."payer_source" IS NULL) THEN 'Own Money'::"text"
+        WHEN ("me"."payer_source" = 'own_money'::"text") THEN 'Own Money'::"text"
+        WHEN ("me"."payer_source" = 'amma_money'::"text") THEN 'Amma Money'::"text"
+        WHEN ("me"."payer_source" = 'client_money'::"text") THEN 'Client Money'::"text"
+        WHEN ("me"."payer_source" = 'trust_account'::"text") THEN 'Trust Account'::"text"
+        WHEN ("me"."payer_source" = 'other_site_money'::"text") THEN COALESCE("me"."payer_name", 'Other Site'::"text")
+        WHEN ("me"."payer_source" = 'custom'::"text") THEN COALESCE("me"."payer_name", 'Other'::"text")
+        ELSE 'Own Money'::"text"
+    END AS "payer_name",
+    "me"."payment_mode",
+    "me"."vendor_name",
+    "me"."proof_url" AS "receipt_url",
+    "me"."created_by" AS "paid_by",
+    "me"."created_by_name" AS "entered_by",
+    "me"."created_by" AS "entered_by_user_id",
+    "me"."reference_number" AS "settlement_reference",
+    NULL::"uuid" AS "settlement_group_id",
+    'misc_expense'::"text" AS "source_type",
+    "me"."id" AS "source_id",
+    "me"."created_at",
+    "me"."is_cancelled" AS "is_deleted"
+FROM ("public"."misc_expenses" "me"
+    LEFT JOIN "public"."expense_categories" "ec" ON (("me"."category_id" = "ec"."id")))
+    LEFT JOIN "public"."subcontracts" "sc" ON (("me"."subcontract_id" = "sc"."id"))
+WHERE ("me"."is_cancelled" = false)
+
+UNION ALL
+
+-- Subcontract direct payments
+SELECT
+    "sp"."id",
+    "sc"."site_id",
+    "sp"."payment_date" AS "date",
+    ("sp"."created_at")::"date" AS "recorded_date",
+    "sp"."amount",
+    CASE
+        WHEN (("sp"."comments" IS NOT NULL) AND ("sp"."comments" <> ''::"text")) THEN
+            ('Contract Payment - '::"text" || ("sc"."title")::"text") || ' - '::"text" || "sp"."comments"
+        ELSE
+            'Contract Payment - '::"text" || ("sc"."title")::"text"
+    END AS "description",
+    ( SELECT "expense_categories"."id"
+           FROM "public"."expense_categories"
+          WHERE (("expense_categories"."name")::"text" = 'Contract Payment'::"text")
+         LIMIT 1) AS "category_id",
+    'Contract Payment'::character varying AS "category_name",
+    'labor'::"text" AS "module",
+    'Direct Payment'::"text" AS "expense_type",
+    CASE
+        WHEN ("sp"."payment_channel" = 'company_direct_online'::"text") THEN true
+        WHEN ("sp"."payment_channel" = 'mesthri_at_office'::"text") THEN true
+        WHEN ("sp"."site_engineer_transaction_id" IS NOT NULL) THEN COALESCE((
+            SELECT "site_engineer_transactions"."is_settled"
+            FROM "public"."site_engineer_transactions"
+            WHERE ("site_engineer_transactions"."id" = "sp"."site_engineer_transaction_id")), false)
+        ELSE true
+    END AS "is_cleared",
+    CASE
+        WHEN ("sp"."payment_channel" IN ('company_direct_online'::"text", 'mesthri_at_office'::"text")) THEN "sp"."payment_date"
+        WHEN ("sp"."site_engineer_transaction_id" IS NOT NULL) THEN (
+            SELECT ("site_engineer_transactions"."confirmed_at")::"date" AS "confirmed_at"
+            FROM "public"."site_engineer_transactions"
+            WHERE (("site_engineer_transactions"."id" = "sp"."site_engineer_transaction_id")
+                AND ("site_engineer_transactions"."is_settled" = true)))
+        ELSE "sp"."payment_date"
+    END AS "cleared_date",
+    "sp"."contract_id" AS "contract_id",
+    "sc"."title" AS "subcontract_title",
+    NULL::"uuid" AS "site_payer_id",
+    CASE
+        WHEN ("sp"."payment_channel" = 'company_direct_online'::"text") THEN 'Company Direct'::"text"
+        WHEN ("sp"."payment_channel" = 'mesthri_at_office'::"text") THEN 'Office'::"text"
+        WHEN ("sp"."payment_channel" = 'via_site_engineer'::"text") THEN COALESCE((
+            SELECT "users"."name"
+            FROM "public"."users"
+            WHERE ("users"."id" = "sp"."paid_by_user_id")), 'Site Engineer'::character varying)::"text"
+        ELSE 'Company'::"text"
+    END AS "payer_name",
+    ("sp"."payment_mode")::"text" AS "payment_mode",
+    NULL::"text" AS "vendor_name",
+    "sp"."receipt_url",
+    "sp"."paid_by_user_id" AS "paid_by",
+    "sp"."recorded_by" AS "entered_by",
+    "sp"."recorded_by_user_id" AS "entered_by_user_id",
+    COALESCE("sp"."reference_number", 'SCP-' || TO_CHAR("sp"."payment_date", 'YYMMDD') || '-' || LEFT("sp"."id"::text, 4)) AS "settlement_reference",
+    NULL::"uuid" AS "settlement_group_id",
+    'subcontract_payment'::"text" AS "source_type",
+    "sp"."id" AS "source_id",
+    "sp"."created_at",
+    COALESCE("sp"."is_deleted", false) AS "is_deleted"
+FROM ("public"."subcontract_payments" "sp"
+    JOIN "public"."subcontracts" "sc" ON (("sp"."contract_id" = "sc"."id")))
+WHERE (COALESCE("sp"."is_deleted", false) = false)
+
+UNION ALL
+
+-- Rental settlements (NEW)
+SELECT
+    "rs"."id",
+    "ro"."site_id",
+    "rs"."settlement_date" AS "date",
+    ("rs"."created_at")::"date" AS "recorded_date",
+    COALESCE("rs"."negotiated_final_amount", "rs"."balance_amount" + "rs"."total_advance_paid") AS "amount",
+    CASE
+        WHEN (("rs"."notes" IS NOT NULL) AND ("rs"."notes" <> ''::"text")) THEN
+            ('Rental - '::"text" || COALESCE("v"."shop_name", "v"."name")) || ' - '::"text" || "rs"."notes"
+        ELSE
+            'Rental - '::"text" || COALESCE("v"."shop_name", "v"."name")
+    END AS "description",
+    ( SELECT "expense_categories"."id"
+           FROM "public"."expense_categories"
+          WHERE (("expense_categories"."name")::"text" = 'Rental'::"text" AND "expense_categories"."module" = 'machinery')
+         LIMIT 1) AS "category_id",
+    'Rental'::character varying AS "category_name",
+    'machinery'::"text" AS "module",
+    'Rental'::"text" AS "expense_type",
+    CASE
+        WHEN ("rs"."payment_channel" = 'direct'::"text") THEN true
+        WHEN ("rs"."engineer_transaction_id" IS NOT NULL) THEN COALESCE((
+            SELECT "site_engineer_transactions"."is_settled"
+            FROM "public"."site_engineer_transactions"
+            WHERE ("site_engineer_transactions"."id" = "rs"."engineer_transaction_id")), false)
+        ELSE true
+    END AS "is_cleared",
+    CASE
+        WHEN ("rs"."payment_channel" = 'direct'::"text") THEN "rs"."settlement_date"
+        WHEN ("rs"."engineer_transaction_id" IS NOT NULL) THEN (
+            SELECT ("site_engineer_transactions"."confirmed_at")::"date" AS "confirmed_at"
+            FROM "public"."site_engineer_transactions"
+            WHERE (("site_engineer_transactions"."id" = "rs"."engineer_transaction_id")
+                AND ("site_engineer_transactions"."is_settled" = true)))
+        ELSE "rs"."settlement_date"
+    END AS "cleared_date",
+    "rs"."subcontract_id" AS "contract_id",
+    "sc"."title" AS "subcontract_title",
+    NULL::"uuid" AS "site_payer_id",
+    CASE
+        WHEN ("rs"."payer_source" IS NULL) THEN 'Own Money'::"text"
+        WHEN ("rs"."payer_source" = 'own_money'::"text") THEN 'Own Money'::"text"
+        WHEN ("rs"."payer_source" = 'amma_money'::"text") THEN 'Amma Money'::"text"
+        WHEN ("rs"."payer_source" = 'client_money'::"text") THEN 'Client Money'::"text"
+        WHEN ("rs"."payer_source" = 'other_site_money'::"text") THEN COALESCE("rs"."payer_name", 'Other Site'::"text")
+        WHEN ("rs"."payer_source" = 'custom'::"text") THEN COALESCE("rs"."payer_name", 'Other'::"text")
+        ELSE COALESCE("rs"."payer_name", 'Own Money'::"text")
+    END AS "payer_name",
+    "rs"."payment_mode",
+    COALESCE("v"."shop_name", "v"."name") AS "vendor_name",
+    "rs"."final_receipt_url" AS "receipt_url",
+    "rs"."settled_by" AS "paid_by",
+    "rs"."settled_by_name" AS "entered_by",
+    "rs"."settled_by" AS "entered_by_user_id",
+    "rs"."settlement_reference",
+    "rs"."settlement_group_id",
+    'rental_settlement'::"text" AS "source_type",
+    "rs"."id" AS "source_id",
+    "rs"."created_at",
+    false AS "is_deleted"
+FROM "public"."rental_settlements" "rs"
+JOIN "public"."rental_orders" "ro" ON ("rs"."rental_order_id" = "ro"."id")
+JOIN "public"."vendors" "v" ON ("ro"."vendor_id" = "v"."id")
+LEFT JOIN "public"."subcontracts" "sc" ON ("rs"."subcontract_id" = "sc"."id");
+
+-- Grant permissions on the view
+GRANT SELECT ON "public"."v_all_expenses" TO authenticated;
+GRANT SELECT ON "public"."v_all_expenses" TO service_role;
+
+-- ============================================================================
+-- PART 7: Add indexes for performance
+-- ============================================================================
+
+-- Index on rental_items for source_type filtering
+CREATE INDEX IF NOT EXISTS idx_rental_items_source_type ON rental_items(source_type);
+
+-- Index on rental_items for rate_type filtering
+CREATE INDEX IF NOT EXISTS idx_rental_items_rate_type ON rental_items(rate_type);
+
+-- Index on rental_settlements for subcontract linking
+CREATE INDEX IF NOT EXISTS idx_rental_settlements_subcontract_id ON rental_settlements(subcontract_id);

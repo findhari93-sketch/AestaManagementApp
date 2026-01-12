@@ -40,7 +40,11 @@ import {
 import { RentalItemDialog } from "@/components/rentals";
 import ConfirmDialog from "@/components/common/ConfirmDialog";
 import type { RentalItemWithDetails, RentalType } from "@/types/rental.types";
-import { RENTAL_TYPE_LABELS } from "@/types/rental.types";
+import {
+  RENTAL_TYPE_LABELS,
+  RENTAL_SOURCE_TYPE_LABELS,
+  RENTAL_RATE_TYPE_LABELS,
+} from "@/types/rental.types";
 
 const RENTAL_TYPE_TABS: { id: RentalType | "all"; label: string }[] = [
   { id: "all", label: "All Items" },
@@ -181,6 +185,19 @@ export default function CompanyRentalsPage() {
           ),
       },
       {
+        accessorKey: "source_type",
+        header: "Source",
+        size: 100,
+        Cell: ({ row }) => (
+          <Chip
+            size="small"
+            label={RENTAL_SOURCE_TYPE_LABELS[row.original.source_type] || "Store"}
+            variant="outlined"
+            color={row.original.source_type === "contractor" ? "secondary" : "default"}
+          />
+        ),
+      },
+      {
         accessorKey: "rental_type",
         header: "Type",
         size: 120,
@@ -222,13 +239,18 @@ export default function CompanyRentalsPage() {
       },
       {
         accessorKey: "default_daily_rate",
-        header: "Daily Rate",
-        size: 100,
+        header: "Default Rate",
+        size: 120,
         Cell: ({ row }) =>
           row.original.default_daily_rate ? (
-            <Typography variant="body2" fontWeight={500} color="primary">
-              {formatCurrency(row.original.default_daily_rate)}
-            </Typography>
+            <Box>
+              <Typography variant="body2" fontWeight={500} color="primary">
+                {formatCurrency(row.original.default_daily_rate)}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                /{RENTAL_RATE_TYPE_LABELS[row.original.rate_type] === "Hourly" ? "hr" : "day"}
+              </Typography>
+            </Box>
           ) : (
             <Typography variant="caption" color="text.secondary">
               -
@@ -370,7 +392,7 @@ export default function CompanyRentalsPage() {
         isLoading={isLoading}
         enableRowActions={canEdit}
         renderRowActions={renderRowActions}
-        mobileHiddenColumns={["local_name", "category", "created_at"]}
+        mobileHiddenColumns={["local_name", "source_type", "category", "created_at"]}
         enableSorting={false}
         // Server-side pagination
         manualPagination={true}

@@ -26,15 +26,17 @@ import {
   IconButton,
   Tabs,
   Tab,
+  Drawer,
+  Divider,
 } from "@mui/material";
 import {
   Add,
   Delete,
   Edit,
   AttachMoney,
-  TrendingUp,
-  Category as CategoryIcon,
   OpenInNew,
+  Close,
+  ChevronRight,
 } from "@mui/icons-material";
 import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
 import RedirectConfirmDialog from "@/components/common/RedirectConfirmDialog";
@@ -53,7 +55,6 @@ import dayjs from "dayjs";
 import { useRouter } from "next/navigation";
 import {
   Description as ContractIcon,
-  AccountBalance as BalanceIcon,
   Link as LinkIcon,
 } from "@mui/icons-material";
 import {
@@ -101,6 +102,7 @@ export default function ExpensesPage() {
   // Subcontract summary state
   const [subcontracts, setSubcontracts] = useState<SubcontractTotals[]>([]);
   const [subcontractsLoading, setSubcontractsLoading] = useState(false);
+  const [subcontractDrawerOpen, setSubcontractDrawerOpen] = useState(false);
 
   // Redirect dialog state for salary expenses that can't be deleted directly
   const [redirectDialog, setRedirectDialog] = useState<{
@@ -658,225 +660,178 @@ export default function ExpensesPage() {
         }
       />
 
-      <Grid container spacing={2} sx={{ mb: 3 }}>
-        <Grid size={{ xs: 12, sm: 4 }}>
-          <Card>
-            <CardContent>
-              <Box
-                sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}
-              >
-                <AttachMoney color="error" />
-                <Typography variant="body2" color="text.secondary">
-                  Total
+      {/* Unified Expense Summary */}
+      <Card sx={{ mb: 3 }}>
+        <CardContent sx={{ p: { xs: 2, md: 2.5 } }}>
+          <Box
+            sx={{
+              display: "flex",
+              flexDirection: { xs: "column", md: "row" },
+              gap: { xs: 2.5, md: 3 },
+              alignItems: { xs: "stretch", md: "stretch" },
+            }}
+          >
+            {/* Left: Total */}
+            <Box
+              sx={{
+                minWidth: { xs: "auto", md: 180 },
+                borderRight: { xs: 0, md: 1 },
+                borderBottom: { xs: 1, md: 0 },
+                borderColor: "divider",
+                pr: { xs: 0, md: 3 },
+                pb: { xs: 2, md: 0 },
+                display: "flex",
+                flexDirection: "column",
+                justifyContent: "center",
+              }}
+            >
+              <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.5 }}>
+                <AttachMoney sx={{ fontSize: 18, color: "error.main" }} />
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  sx={{ textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 500 }}
+                >
+                  Total Expenses
                 </Typography>
               </Box>
-              <Typography variant="h4" fontWeight={700}>
-                ₹{stats.total.toLocaleString('en-IN')}
+              <Typography variant="h4" fontWeight={700} color="error.main">
+                ₹{stats.total.toLocaleString("en-IN")}
               </Typography>
               <Typography variant="caption" color="text.secondary">
-                ({stats.totalCount} records)
+                {stats.totalCount} records
               </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid size={{ xs: 12, sm: 4 }}>
-          <Card>
-            <CardContent>
-              <Typography variant="body2" color="text.secondary">
-                Cleared
-              </Typography>
-              <Typography variant="h4" fontWeight={700} color="success.main">
-                ₹{stats.cleared.toLocaleString('en-IN')}
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                ({stats.clearedCount} records)
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid size={{ xs: 12, sm: 4 }}>
-          <Card>
-            <CardContent>
-              <Typography variant="body2" color="text.secondary">
-                Pending
-              </Typography>
-              <Typography variant="h4" fontWeight={700} color="warning.main">
-                ₹{stats.pending.toLocaleString('en-IN')}
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                ({stats.pendingCount} records)
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
+            </Box>
 
-        {/* Category Breakdown */}
-        {Object.keys(stats.categoryBreakdown).length > 0 && (
-          <Grid size={{ xs: 12 }}>
-            <Card>
-              <CardContent>
-                <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 2 }}>
-                  <CategoryIcon color="primary" />
-                  <Typography variant="h6">Expense Breakdown by Type</Typography>
-                </Box>
-                <Grid container spacing={2}>
+            {/* Middle: Breakdown */}
+            {Object.keys(stats.categoryBreakdown).length > 0 && (
+              <Box sx={{ flex: 1 }}>
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  sx={{
+                    mb: 1.5,
+                    display: "block",
+                    textTransform: "uppercase",
+                    letterSpacing: 0.5,
+                    fontWeight: 500,
+                  }}
+                >
+                  Breakdown by Type
+                </Typography>
+                <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1.5 }}>
                   {Object.entries(stats.categoryBreakdown)
                     .sort(([, a], [, b]) => b.amount - a.amount)
                     .map(([type, data]) => (
-                      <Grid size={{ xs: 6, sm: 4, md: 3 }} key={type}>
-                        <Box sx={{ p: 1.5, bgcolor: 'action.hover', borderRadius: 1 }}>
-                          <Typography variant="body2" color="text.secondary">
-                            {type}
-                          </Typography>
-                          <Typography variant="h6" fontWeight={600}>
-                            ₹{data.amount.toLocaleString('en-IN')}
-                          </Typography>
-                          <Typography variant="caption" color="text.secondary">
-                            ({data.count} records)
-                          </Typography>
-                        </Box>
-                      </Grid>
+                      <Box
+                        key={type}
+                        sx={{
+                          px: 2,
+                          py: 1.25,
+                          bgcolor: "action.hover",
+                          borderRadius: 1.5,
+                          minWidth: 110,
+                          flex: "1 1 auto",
+                          maxWidth: { xs: "100%", sm: 160 },
+                          transition: "background-color 0.2s",
+                          "&:hover": {
+                            bgcolor: "action.selected",
+                          },
+                        }}
+                      >
+                        <Typography
+                          variant="caption"
+                          color="text.secondary"
+                          noWrap
+                          sx={{ display: "block", mb: 0.25 }}
+                        >
+                          {type}
+                        </Typography>
+                        <Typography variant="subtitle1" fontWeight={600}>
+                          ₹{data.amount.toLocaleString("en-IN")}
+                        </Typography>
+                        <Typography variant="caption" color="text.disabled">
+                          {data.count} rec
+                        </Typography>
+                      </Box>
                     ))}
-                </Grid>
-              </CardContent>
-            </Card>
-          </Grid>
-        )}
-      </Grid>
+                </Box>
+              </Box>
+            )}
 
-      {/* Subcontract Summary Section */}
-      {subcontracts.length > 0 && (
-        <Card sx={{ mb: 3 }}>
-          <CardContent>
-            <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 2 }}>
-              <ContractIcon color="primary" />
-              <Typography variant="h6">Subcontracts Summary</Typography>
-            </Box>
-
-            {subcontractsLoading ? (
-              <Typography color="text.secondary">Loading...</Typography>
-            ) : (
-              <Box sx={{ overflowX: "auto" }}>
+            {/* Right: Subcontract Summary (Compact) */}
+            {subcontracts.length > 0 && (
+              <Box
+                sx={{
+                  minWidth: { xs: "auto", md: 200 },
+                  borderLeft: { xs: 0, md: 1 },
+                  borderTop: { xs: 1, md: 0 },
+                  borderColor: "divider",
+                  pl: { xs: 0, md: 3 },
+                  pt: { xs: 2, md: 0 },
+                  display: "flex",
+                  flexDirection: "column",
+                  justifyContent: "center",
+                }}
+              >
                 <Box
-                  component="table"
+                  onClick={() => setSubcontractDrawerOpen(true)}
                   sx={{
-                    width: "100%",
-                    borderCollapse: "collapse",
-                    "& th, & td": {
-                      px: 2,
-                      py: 1.5,
-                      textAlign: "left",
-                      borderBottom: "1px solid",
-                      borderColor: "divider",
-                    },
-                    "& th": {
-                      bgcolor: "action.hover",
-                      fontWeight: 600,
-                    },
-                    "& tr:hover td": {
+                    cursor: "pointer",
+                    borderRadius: 1.5,
+                    p: 1.5,
+                    mx: -1.5,
+                    transition: "background-color 0.2s",
+                    "&:hover": {
                       bgcolor: "action.hover",
                     },
                   }}
                 >
-                  <thead>
-                    <tr>
-                      <th>Subcontract</th>
-                      <th style={{ textAlign: "right" }}>Total Value</th>
-                      <th style={{ textAlign: "right" }}>Paid</th>
-                      <th style={{ textAlign: "right" }}>Records</th>
-                      <th style={{ textAlign: "right" }}>Balance</th>
-                      <th>Status</th>
-                      <th style={{ textAlign: "center", width: 50 }}></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {subcontracts.map((sc) => (
-                      <tr key={sc.subcontractId}>
-                        <td>
-                          <Typography variant="body2" fontWeight={500}>
-                            {sc.title}
-                          </Typography>
-                        </td>
-                        <td style={{ textAlign: "right" }}>
-                          <Typography variant="body2">
-                            Rs.{sc.totalValue.toLocaleString('en-IN')}
-                          </Typography>
-                        </td>
-                        <td style={{ textAlign: "right" }}>
-                          <Typography variant="body2" color="success.main" fontWeight={500}>
-                            Rs.{sc.totalPaid.toLocaleString('en-IN')}
-                          </Typography>
-                        </td>
-                        <td style={{ textAlign: "right" }}>
-                          <Typography variant="body2" color="text.secondary">
-                            {sc.totalRecordCount}
-                          </Typography>
-                        </td>
-                        <td style={{ textAlign: "right" }}>
-                          <Typography
-                            variant="body2"
-                            color={sc.balance > 0 ? "warning.main" : "success.main"}
-                            fontWeight={600}
-                          >
-                            Rs.{sc.balance.toLocaleString('en-IN')}
-                          </Typography>
-                        </td>
-                        <td>
-                          <Chip
-                            label={sc.status.toUpperCase()}
-                            size="small"
-                            color={sc.status === "active" ? "success" : "warning"}
-                            variant="outlined"
-                          />
-                        </td>
-                        <td style={{ textAlign: "center" }}>
-                          <IconButton
-                            size="small"
-                            onClick={() => router.push("/site/subcontracts")}
-                            title="View subcontract details"
-                          >
-                            <OpenInNew fontSize="small" />
-                          </IconButton>
-                        </td>
-                      </tr>
-                    ))}
-                    {/* Total Row */}
-                    <tr>
-                      <td>
-                        <Typography variant="body2" fontWeight={700}>
-                          TOTAL
-                        </Typography>
-                      </td>
-                      <td style={{ textAlign: "right" }}>
-                        <Typography variant="body2" fontWeight={700}>
-                          Rs.{subcontracts.reduce((sum, sc) => sum + sc.totalValue, 0).toLocaleString('en-IN')}
-                        </Typography>
-                      </td>
-                      <td style={{ textAlign: "right" }}>
-                        <Typography variant="body2" fontWeight={700} color="success.main">
-                          Rs.{subcontracts.reduce((sum, sc) => sum + sc.totalPaid, 0).toLocaleString('en-IN')}
-                        </Typography>
-                      </td>
-                      <td style={{ textAlign: "right" }}>
-                        <Typography variant="body2" fontWeight={700} color="text.secondary">
-                          {subcontracts.reduce((sum, sc) => sum + sc.totalRecordCount, 0)}
-                        </Typography>
-                      </td>
-                      <td style={{ textAlign: "right" }}>
-                        <Typography variant="body2" fontWeight={700} color="warning.main">
-                          Rs.{subcontracts.reduce((sum, sc) => sum + sc.balance, 0).toLocaleString('en-IN')}
-                        </Typography>
-                      </td>
-                      <td></td>
-                      <td></td>
-                    </tr>
-                  </tbody>
+                  <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 1 }}>
+                    <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                      <ContractIcon sx={{ fontSize: 16, color: "primary.main" }} />
+                      <Typography
+                        variant="caption"
+                        color="text.secondary"
+                        sx={{ textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 500 }}
+                      >
+                        Subcontracts
+                      </Typography>
+                    </Box>
+                    <ChevronRight sx={{ fontSize: 18, color: "text.secondary" }} />
+                  </Box>
+                  <Box sx={{ display: "flex", gap: 2 }}>
+                    <Box>
+                      <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
+                        Value
+                      </Typography>
+                      <Typography variant="body2" fontWeight={600}>
+                        ₹{subcontracts.reduce((sum, sc) => sum + sc.totalValue, 0).toLocaleString("en-IN")}
+                      </Typography>
+                    </Box>
+                    <Box>
+                      <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
+                        Paid
+                      </Typography>
+                      <Typography variant="body2" fontWeight={600} color="success.main">
+                        ₹{subcontracts.reduce((sum, sc) => sum + sc.totalPaid, 0).toLocaleString("en-IN")}
+                      </Typography>
+                    </Box>
+                    <Box>
+                      <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
+                        Balance
+                      </Typography>
+                      <Typography variant="body2" fontWeight={600} color="warning.main">
+                        ₹{subcontracts.reduce((sum, sc) => sum + sc.balance, 0).toLocaleString("en-IN")}
+                      </Typography>
+                    </Box>
+                  </Box>
                 </Box>
               </Box>
             )}
-          </CardContent>
-        </Card>
-      )}
+          </Box>
+        </CardContent>
+      </Card>
 
       <Card sx={{ mb: 3 }}>
         <CardContent>
@@ -1072,6 +1027,154 @@ export default function ExpensesPage() {
           transactionId: redirectDialog.expense?.engineer_transaction_id || undefined,
         }}
       />
+
+      {/* Subcontracts Summary Drawer */}
+      <Drawer
+        anchor="right"
+        open={subcontractDrawerOpen}
+        onClose={() => setSubcontractDrawerOpen(false)}
+        PaperProps={{
+          sx: { width: { xs: "100%", sm: 480, md: 560 } },
+        }}
+      >
+        <Box sx={{ p: 3 }}>
+          {/* Header */}
+          <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 3 }}>
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
+              <ContractIcon color="primary" />
+              <Typography variant="h6" fontWeight={600}>
+                Subcontracts Summary
+              </Typography>
+            </Box>
+            <IconButton onClick={() => setSubcontractDrawerOpen(false)} size="small">
+              <Close />
+            </IconButton>
+          </Box>
+
+          <Divider sx={{ mb: 3 }} />
+
+          {/* Summary Totals */}
+          <Box sx={{ display: "flex", gap: 2, mb: 3, flexWrap: "wrap" }}>
+            <Box sx={{ flex: 1, minWidth: 100, p: 2, bgcolor: "action.hover", borderRadius: 1.5 }}>
+              <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.5 }}>
+                Total Value
+              </Typography>
+              <Typography variant="h6" fontWeight={700}>
+                ₹{subcontracts.reduce((sum, sc) => sum + sc.totalValue, 0).toLocaleString("en-IN")}
+              </Typography>
+            </Box>
+            <Box sx={{ flex: 1, minWidth: 100, p: 2, bgcolor: "success.50", borderRadius: 1.5 }}>
+              <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.5 }}>
+                Total Paid
+              </Typography>
+              <Typography variant="h6" fontWeight={700} color="success.main">
+                ₹{subcontracts.reduce((sum, sc) => sum + sc.totalPaid, 0).toLocaleString("en-IN")}
+              </Typography>
+            </Box>
+            <Box sx={{ flex: 1, minWidth: 100, p: 2, bgcolor: "warning.50", borderRadius: 1.5 }}>
+              <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.5 }}>
+                Balance
+              </Typography>
+              <Typography variant="h6" fontWeight={700} color="warning.main">
+                ₹{subcontracts.reduce((sum, sc) => sum + sc.balance, 0).toLocaleString("en-IN")}
+              </Typography>
+            </Box>
+          </Box>
+
+          <Divider sx={{ mb: 3 }} />
+
+          {/* Subcontract List */}
+          <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 2, textTransform: "uppercase", letterSpacing: 0.5 }}>
+            Individual Subcontracts
+          </Typography>
+
+          {subcontractsLoading ? (
+            <Typography color="text.secondary">Loading...</Typography>
+          ) : (
+            <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              {subcontracts.map((sc) => (
+                <Box
+                  key={sc.subcontractId}
+                  sx={{
+                    p: 2,
+                    border: 1,
+                    borderColor: "divider",
+                    borderRadius: 1.5,
+                    "&:hover": { bgcolor: "action.hover" },
+                  }}
+                >
+                  <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 1.5 }}>
+                    <Typography variant="subtitle2" fontWeight={600}>
+                      {sc.title}
+                    </Typography>
+                    <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                      <Chip
+                        label={sc.status.toUpperCase()}
+                        size="small"
+                        color={sc.status === "active" ? "success" : "warning"}
+                        variant="outlined"
+                      />
+                      <IconButton
+                        size="small"
+                        onClick={() => router.push("/site/subcontracts")}
+                        title="View subcontract details"
+                      >
+                        <OpenInNew fontSize="small" />
+                      </IconButton>
+                    </Box>
+                  </Box>
+                  <Box sx={{ display: "flex", gap: 3, flexWrap: "wrap" }}>
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">
+                        Total Value
+                      </Typography>
+                      <Typography variant="body2" fontWeight={500}>
+                        ₹{sc.totalValue.toLocaleString("en-IN")}
+                      </Typography>
+                    </Box>
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">
+                        Paid
+                      </Typography>
+                      <Typography variant="body2" fontWeight={500} color="success.main">
+                        ₹{sc.totalPaid.toLocaleString("en-IN")}
+                      </Typography>
+                    </Box>
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">
+                        Balance
+                      </Typography>
+                      <Typography variant="body2" fontWeight={500} color={sc.balance > 0 ? "warning.main" : "success.main"}>
+                        ₹{sc.balance.toLocaleString("en-IN")}
+                      </Typography>
+                    </Box>
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">
+                        Records
+                      </Typography>
+                      <Typography variant="body2" fontWeight={500} color="text.secondary">
+                        {sc.totalRecordCount}
+                      </Typography>
+                    </Box>
+                  </Box>
+                </Box>
+              ))}
+            </Box>
+          )}
+
+          {/* View All Button */}
+          <Box sx={{ mt: 3 }}>
+            <Button
+              fullWidth
+              variant="outlined"
+              endIcon={<OpenInNew />}
+              onClick={() => router.push("/site/subcontracts")}
+            >
+              View All Subcontracts
+            </Button>
+          </Box>
+        </Box>
+      </Drawer>
     </Box>
   );
 }

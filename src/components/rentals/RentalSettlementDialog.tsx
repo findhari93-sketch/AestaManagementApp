@@ -27,6 +27,7 @@ import {
   useSettleRental,
   useRentalCostCalculation,
 } from "@/hooks/queries/useRentals";
+import { useSiteSubcontracts } from "@/hooks/queries/useSubcontracts";
 import FileUploader, { UploadedFile } from "@/components/common/FileUploader";
 import PayerSourceSelector from "@/components/settlement/PayerSourceSelector";
 import { createClient } from "@/lib/supabase/client";
@@ -81,8 +82,14 @@ export default function RentalSettlementDialog({
     payment_mode: "upi" as PaymentMode,
     payment_channel: "direct",
     final_receipt_url: "",
+    vendor_bill_url: "",
+    upi_screenshot_url: "",
+    subcontract_id: "",
     notes: "",
   });
+
+  // Get site subcontracts for linking
+  const { data: subcontracts = [] } = useSiteSubcontracts(order.site_id);
 
   // Calculate totals from cost calculation
   const totalRentalAmount = costCalc?.subtotal || 0;
@@ -107,6 +114,9 @@ export default function RentalSettlementDialog({
         payment_mode: "upi",
         payment_channel: "direct",
         final_receipt_url: "",
+        vendor_bill_url: "",
+        upi_screenshot_url: "",
+        subcontract_id: "",
         notes: "",
       });
       setUseNegotiatedAmount(false);
@@ -150,6 +160,9 @@ export default function RentalSettlementDialog({
             ? customPayerName
             : undefined,
         final_receipt_url: formData.final_receipt_url || undefined,
+        vendor_bill_url: formData.vendor_bill_url || undefined,
+        upi_screenshot_url: formData.upi_screenshot_url || undefined,
+        subcontract_id: formData.subcontract_id || undefined,
         notes: formData.notes || undefined,
       };
 
@@ -423,6 +436,27 @@ export default function RentalSettlementDialog({
             </FormControl>
           </Grid>
 
+          {/* Link to Subcontract */}
+          <Grid size={12}>
+            <FormControl fullWidth>
+              <InputLabel>Link to Subcontract (Optional)</InputLabel>
+              <Select
+                value={formData.subcontract_id}
+                label="Link to Subcontract (Optional)"
+                onChange={(e) => handleChange("subcontract_id", e.target.value)}
+              >
+                <MenuItem value="">No subcontract</MenuItem>
+                {subcontracts
+                  .filter((sc) => sc.status === "active" || sc.status === "on_hold")
+                  .map((sc) => (
+                    <MenuItem key={sc.id} value={sc.id}>
+                      {sc.title}
+                    </MenuItem>
+                  ))}
+              </Select>
+            </FormControl>
+          </Grid>
+
           {/* Payer Source */}
           <Grid size={12}>
             <PayerSourceSelector
@@ -434,6 +468,64 @@ export default function RentalSettlementDialog({
             />
           </Grid>
 
+          {/* Vendor Bill */}
+          <Grid size={12}>
+            <FileUploader
+              supabase={supabase}
+              bucketName="payment-proofs"
+              folderPath={`rentals/${order.id}`}
+              fileNamePrefix="vendor-bill"
+              accept="image"
+              label="Vendor Bill (Optional)"
+              helperText="Upload the bill/invoice from the vendor"
+              compact
+              uploadOnSelect
+              value={
+                formData.vendor_bill_url
+                  ? {
+                      name: "Vendor Bill",
+                      size: 0,
+                      url: formData.vendor_bill_url,
+                    }
+                  : null
+              }
+              onUpload={(file: UploadedFile) =>
+                handleChange("vendor_bill_url", file.url)
+              }
+              onRemove={() => handleChange("vendor_bill_url", "")}
+            />
+          </Grid>
+
+          {/* UPI Payment Screenshot - show only for UPI payment mode */}
+          {formData.payment_mode === "upi" && (
+            <Grid size={12}>
+              <FileUploader
+                supabase={supabase}
+                bucketName="payment-proofs"
+                folderPath={`rentals/${order.id}`}
+                fileNamePrefix="upi-proof"
+                accept="image"
+                label="UPI Payment Screenshot"
+                helperText="Upload screenshot of UPI payment confirmation"
+                compact
+                uploadOnSelect
+                value={
+                  formData.upi_screenshot_url
+                    ? {
+                        name: "UPI Screenshot",
+                        size: 0,
+                        url: formData.upi_screenshot_url,
+                      }
+                    : null
+                }
+                onUpload={(file: UploadedFile) =>
+                  handleChange("upi_screenshot_url", file.url)
+                }
+                onRemove={() => handleChange("upi_screenshot_url", "")}
+              />
+            </Grid>
+          )}
+
           {/* Final Receipt */}
           <Grid size={12}>
             <FileUploader
@@ -442,14 +534,14 @@ export default function RentalSettlementDialog({
               folderPath={`rentals/${order.id}`}
               fileNamePrefix="settlement"
               accept="image"
-              label="Final Receipt"
-              helperText="Upload the final settlement receipt"
+              label="Payment Receipt (Optional)"
+              helperText="Upload the payment receipt/proof"
               compact
               uploadOnSelect
               value={
                 formData.final_receipt_url
                   ? {
-                      name: "Final Receipt",
+                      name: "Payment Receipt",
                       size: 0,
                       url: formData.final_receipt_url,
                     }

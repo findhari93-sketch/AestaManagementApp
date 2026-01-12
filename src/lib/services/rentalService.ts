@@ -58,6 +58,9 @@ export interface RentalSettlementConfig {
   customPayerName?: string;
   engineerId?: string;
   proofUrl?: string;
+  vendorBillUrl?: string;
+  upiScreenshotUrl?: string;
+  subcontractId?: string;
   notes?: string;
   userId: string;
   userName: string;
@@ -291,6 +294,9 @@ export async function processRentalSettlement(
         payer_source: config.payerSource || null,
         payer_name: config.payerSource === "custom" ? config.customPayerName : null,
         final_receipt_url: config.proofUrl,
+        vendor_bill_url: config.vendorBillUrl || null,
+        upi_screenshot_url: config.upiScreenshotUrl || null,
+        subcontract_id: config.subcontractId || null,
         engineer_transaction_id: engineerTransactionId,
         settlement_group_id: settlementGroupId,
         notes: config.notes,
@@ -367,6 +373,19 @@ export function calculateRentalCost(
       Math.ceil((now.getTime() - itemStartDate.getTime()) / (1000 * 60 * 60 * 24))
     );
 
+    const rateType = item.rate_type || "daily";
+    const hoursUsed = item.hours_used || null;
+
+    // Calculate subtotal based on rate type
+    let subtotal: number;
+    if (rateType === "hourly" && hoursUsed) {
+      // Hourly items: qty × rate × hours
+      subtotal = item.quantity_outstanding * item.daily_rate_actual * hoursUsed;
+    } else {
+      // Daily items: qty × rate × days
+      subtotal = item.quantity_outstanding * item.daily_rate_actual * daysRented;
+    }
+
     return {
       itemId: item.id,
       itemName: item.rental_item?.name || "Unknown",
@@ -374,8 +393,10 @@ export function calculateRentalCost(
       quantityReturned: item.quantity_returned,
       quantityOutstanding: item.quantity_outstanding,
       dailyRate: item.daily_rate_actual,
+      rateType,
       daysRented,
-      subtotal: item.quantity_outstanding * item.daily_rate_actual * daysRented,
+      hoursUsed,
+      subtotal,
     };
   });
 

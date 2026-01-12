@@ -470,6 +470,17 @@ export function useRentalOrders(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const accruedRentalCost = (order.items || []).reduce(
           (sum: number, item: any) => {
+            // For hourly rate items, use hours_used instead of days
+            if (item.rate_type === "hourly") {
+              return (
+                sum +
+                (item.quantity_outstanding || 0) *
+                  (item.daily_rate_actual || 0) *
+                  (item.hours_used || 0)
+              );
+            }
+
+            // For daily rate items, calculate based on days
             const itemDays = item.item_start_date
               ? Math.max(
                   1,
@@ -480,7 +491,7 @@ export function useRentalOrders(
                 )
               : daysSinceStart || 1;
             return (
-              sum + (item.quantity_outstanding || 0) * item.daily_rate_actual * itemDays
+              sum + (item.quantity_outstanding || 0) * (item.daily_rate_actual || 0) * itemDays
             );
           },
           0
@@ -659,21 +670,49 @@ export function useRentalOrder(id: string | undefined) {
         ? now > expectedReturnDate && data.status !== "completed"
         : false;
 
+      // Get all returns to calculate proper end dates for cost calculation
+      const allReturns = data.returns || [];
+
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const accruedRentalCost = (data.items || []).reduce(
         (sum: number, item: any) => {
-          const itemDays = item.item_start_date
-            ? Math.max(
-                1,
-                Math.ceil(
-                  (now.getTime() - new Date(item.item_start_date).getTime()) /
-                    (1000 * 60 * 60 * 24)
-                )
-              )
-            : daysSinceStart;
-          return (
-            sum + (item.quantity_outstanding || 0) * item.daily_rate_actual * itemDays
+          const itemStartDate = item.item_start_date
+            ? new Date(item.item_start_date)
+            : startDate;
+
+          // Get returns for this specific item
+          const itemReturns = allReturns.filter(
+            (r: any) => r.rental_order_item_id === item.id
           );
+
+          // Find the last return date for this item if fully returned
+          const itemLastReturnDate =
+            itemReturns.length > 0
+              ? new Date(
+                  Math.max(
+                    ...itemReturns.map((r: any) =>
+                      new Date(r.return_date).getTime()
+                    )
+                  )
+                )
+              : null;
+
+          // Use return date if item is fully returned, otherwise use now
+          const itemEndDate =
+            (item.quantity_outstanding || 0) === 0 && itemLastReturnDate
+              ? itemLastReturnDate
+              : now;
+
+          const itemDays = Math.max(
+            1,
+            Math.ceil(
+              (itemEndDate.getTime() - itemStartDate.getTime()) /
+                (1000 * 60 * 60 * 24)
+            )
+          );
+
+          // Use full quantity for cost (not quantity_outstanding)
+          return sum + (item.quantity || 0) * item.daily_rate_actual * itemDays;
         },
         0
       );
@@ -712,24 +751,45 @@ export function useCreateRentalOrder() {
         }
       );
 
-      if (numError) throw numError;
+      if (numError) {
+        console.error("RPC generate_rental_order_number error:", numError);
+        throw new Error(`Failed to generate order number: ${numError.message}`);
+      }
+
+      if (!orderNumber) {
+        throw new Error("Failed to generate order number: No value returned");
+      }
 
       const { items, ...orderData } = data;
 
-      // Calculate estimated total
-      const estimatedTotal = items.reduce((sum, item) => {
-        const days = data.expected_return_date
-          ? Math.max(
-              1,
-              Math.ceil(
-                (new Date(data.expected_return_date).getTime() -
-                  new Date(data.start_date).getTime()) /
-                  (1000 * 60 * 60 * 24)
+      // Calculate estimated total - considering hourly vs daily rate types
+      const itemsTotal = items.reduce((sum, item) => {
+        if (item.rate_type === "hourly") {
+          // Hourly: quantity × rate × hours
+          return sum + item.quantity * item.daily_rate_actual * (item.hours_used || 0);
+        } else {
+          // Daily: quantity × rate × days
+          const days = data.expected_return_date
+            ? Math.max(
+                1,
+                Math.ceil(
+                  (new Date(data.expected_return_date).getTime() -
+                    new Date(data.start_date).getTime()) /
+                    (1000 * 60 * 60 * 24)
+                ) + 1 // Add 1 because both start and end days are rental days
               )
-            )
-          : 30;
-        return sum + item.quantity * item.daily_rate_actual * days;
+            : 30;
+          return sum + item.quantity * item.daily_rate_actual * days;
+        }
       }, 0);
+
+      // Add transport costs
+      const transportTotal =
+        (data.transport_cost_outward || 0) +
+        (data.loading_cost_outward || 0) +
+        (data.unloading_cost_outward || 0);
+
+      const estimatedTotal = itemsTotal + transportTotal;
 
       // Create order
       const { data: order, error: orderError } = await supabase
@@ -737,13 +797,16 @@ export function useCreateRentalOrder() {
         .insert({
           ...orderData,
           rental_order_number: orderNumber,
-          status: "draft",
+          status: "confirmed",
           estimated_total: estimatedTotal,
         })
         .select()
         .single();
 
-      if (orderError) throw orderError;
+      if (orderError) {
+        console.error("Insert rental_orders error:", orderError);
+        throw new Error(`Failed to create order: ${orderError.message}`);
+      }
 
       // Create items
       if (items.length > 0) {
@@ -756,7 +819,10 @@ export function useCreateRentalOrder() {
           .from("rental_order_items")
           .insert(itemsToInsert);
 
-        if (itemsError) throw itemsError;
+        if (itemsError) {
+          console.error("Insert rental_order_items error:", itemsError);
+          throw new Error(`Failed to create order items: ${itemsError.message}`);
+        }
       }
 
       return order as RentalOrder;
@@ -845,6 +911,43 @@ export function useCancelRentalOrder() {
   });
 }
 
+export function useDeleteRentalOrder() {
+  const queryClient = useQueryClient();
+  const supabase = createClient();
+
+  return useMutation({
+    mutationFn: async (id: string) => {
+      await ensureFreshSession();
+
+      // Delete related records first (order matters due to foreign keys)
+      // Delete advances
+      await supabase.from("rental_advances").delete().eq("rental_order_id", id);
+
+      // Delete returns
+      await supabase.from("rental_returns").delete().eq("rental_order_id", id);
+
+      // Delete order items
+      await supabase
+        .from("rental_order_items")
+        .delete()
+        .eq("rental_order_id", id);
+
+      // Delete the order itself
+      const { error } = await supabase
+        .from("rental_orders")
+        .delete()
+        .eq("id", id);
+
+      if (error) throw error;
+      return id;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: rentalQueryKeys.orders.all });
+      queryClient.invalidateQueries({ queryKey: ["rentals", "summary"] });
+    },
+  });
+}
+
 // ============================================
 // RENTAL RETURNS
 // ============================================
@@ -908,7 +1011,9 @@ export function useRecordRentalReturn() {
 
         let newOrderStatus: RentalOrder["status"] = "active";
         if (allReturned) {
-          newOrderStatus = "completed";
+          // Keep as partially_returned until settlement is done
+          // Settlement will change status to "completed"
+          newOrderStatus = "partially_returned";
         } else if (partiallyReturned) {
           newOrderStatus = "partially_returned";
         }
@@ -1222,7 +1327,7 @@ export function useRentalSummary(siteId: string) {
           status,
           start_date,
           expected_return_date,
-          items:rental_order_items(quantity_outstanding, daily_rate_actual, item_start_date),
+          items:rental_order_items(quantity_outstanding, daily_rate_actual, item_start_date, rate_type, hours_used),
           advances:rental_advances(amount)
         `
         )
@@ -1264,6 +1369,17 @@ export function useRentalSummary(siteId: string) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         totalAccruedCost += (order.items || []).reduce(
           (sum: number, item: any) => {
+            // For hourly rate items, use hours_used instead of days
+            if (item.rate_type === "hourly") {
+              return (
+                sum +
+                (item.quantity_outstanding || 0) *
+                  (item.daily_rate_actual || 0) *
+                  (item.hours_used || 0)
+              );
+            }
+
+            // For daily rate items, calculate based on days
             const itemDays = item.item_start_date
               ? Math.max(
                   1,
@@ -1311,10 +1427,33 @@ export function useRentalCostCalculation(
       ? new Date(order.expected_return_date)
       : null;
 
+    // Get all returns to calculate proper end dates
+    const allReturns = order.returns || [];
+
+    // Check if all items are fully returned
+    const allItemsReturned = (order.items || []).every(
+      (item) => item.quantity_outstanding === 0
+    );
+
+    // Find the last return date if all items are returned
+    const lastReturnDate =
+      allReturns.length > 0
+        ? new Date(
+            Math.max(
+              ...allReturns.map((r) => new Date(r.return_date).getTime())
+            )
+          )
+        : null;
+
+    // Use last return date for days elapsed if all items returned, otherwise use now
+    const effectiveEndDate =
+      allItemsReturned && lastReturnDate ? lastReturnDate : now;
+
     const daysElapsed = Math.max(
       1,
       Math.ceil(
-        (now.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)
+        (effectiveEndDate.getTime() - startDate.getTime()) /
+          (1000 * 60 * 60 * 24)
       )
     );
     const expectedTotalDays = expectedReturnDate
@@ -1329,12 +1468,49 @@ export function useRentalCostCalculation(
         const itemStartDate = item.item_start_date
           ? new Date(item.item_start_date)
           : startDate;
+
+        // Get returns for this specific item
+        const itemReturns = allReturns.filter(
+          (r) => r.rental_order_item_id === item.id
+        );
+
+        // Find the last return date for this item if fully returned
+        const itemLastReturnDate =
+          itemReturns.length > 0
+            ? new Date(
+                Math.max(
+                  ...itemReturns.map((r) => new Date(r.return_date).getTime())
+                )
+              )
+            : null;
+
+        // Use return date if item is fully returned, otherwise use now
+        const itemEndDate =
+          item.quantity_outstanding === 0 && itemLastReturnDate
+            ? itemLastReturnDate
+            : now;
+
         const daysRented = Math.max(
           1,
           Math.ceil(
-            (now.getTime() - itemStartDate.getTime()) / (1000 * 60 * 60 * 24)
+            (itemEndDate.getTime() - itemStartDate.getTime()) /
+              (1000 * 60 * 60 * 24)
           )
         );
+
+        const rateType = item.rate_type || "daily";
+        const hoursUsed = item.hours_used || null;
+
+        // Calculate subtotal based on rate type
+        // Use full quantity for cost (not quantity_outstanding) since we charge for the rental period
+        let subtotal: number;
+        if (rateType === "hourly" && hoursUsed) {
+          // Hourly items: qty × rate × hours
+          subtotal = item.quantity * item.daily_rate_actual * hoursUsed;
+        } else {
+          // Daily items: qty × rate × days
+          subtotal = item.quantity * item.daily_rate_actual * daysRented;
+        }
 
         return {
           itemId: item.id,
@@ -1343,8 +1519,10 @@ export function useRentalCostCalculation(
           quantityReturned: item.quantity_returned,
           quantityOutstanding: item.quantity_outstanding,
           dailyRate: item.daily_rate_actual,
+          rateType,
           daysRented,
-          subtotal: item.quantity_outstanding * item.daily_rate_actual * daysRented,
+          hoursUsed,
+          subtotal,
         };
       }
     );

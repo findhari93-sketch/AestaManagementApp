@@ -605,93 +605,101 @@ export default function VendorDialog({
             </>
           )}
 
-          {/* Services & Delivery Options */}
-          <Grid size={12}>
-            <Divider sx={{ my: 1 }}>
-              <Typography variant="caption" color="text.secondary">
-                Services & Delivery
-              </Typography>
-            </Divider>
-          </Grid>
+          {/* Services & Delivery Options - Hide for rental vendors */}
+          {formData.vendor_type !== "rental_store" && (
+            <>
+              <Grid size={12}>
+                <Divider sx={{ my: 1 }}>
+                  <Typography variant="caption" color="text.secondary">
+                    Services & Delivery
+                  </Typography>
+                </Divider>
+              </Grid>
 
-          <Grid size={{ xs: 6, md: 4 }}>
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={formData.provides_transport || false}
-                  onChange={(e) =>
-                    handleChange("provides_transport", e.target.checked)
+              <Grid size={{ xs: 6, md: 4 }}>
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={formData.provides_transport || false}
+                      onChange={(e) =>
+                        handleChange("provides_transport", e.target.checked)
+                      }
+                    />
                   }
+                  label="Provides Transport"
                 />
-              }
-              label="Provides Transport"
-            />
-          </Grid>
-          <Grid size={{ xs: 6, md: 4 }}>
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={formData.provides_loading || false}
-                  onChange={(e) =>
-                    handleChange("provides_loading", e.target.checked)
+              </Grid>
+              <Grid size={{ xs: 6, md: 4 }}>
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={formData.provides_loading || false}
+                      onChange={(e) =>
+                        handleChange("provides_loading", e.target.checked)
+                      }
+                    />
                   }
+                  label="Provides Loading"
                 />
-              }
-              label="Provides Loading"
-            />
-          </Grid>
-          <Grid size={{ xs: 6, md: 4 }}>
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={formData.provides_unloading || false}
-                  onChange={(e) =>
-                    handleChange("provides_unloading", e.target.checked)
+              </Grid>
+              <Grid size={{ xs: 6, md: 4 }}>
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={formData.provides_unloading || false}
+                      onChange={(e) =>
+                        handleChange("provides_unloading", e.target.checked)
+                      }
+                    />
                   }
+                  label="Provides Unloading"
                 />
-              }
-              label="Provides Unloading"
-            />
-          </Grid>
-          <Grid size={{ xs: 6, md: 4 }}>
-            <TextField
-              fullWidth
-              label="Minimum Order Amount (₹)"
-              type="number"
-              value={formData.min_order_amount || ""}
-              onChange={(e) =>
-                handleChange("min_order_amount", parseFloat(e.target.value) || 0)
-              }
-              slotProps={{
-                input: {
-                  inputProps: { min: 0 },
-                  startAdornment: (
-                    <InputAdornment position="start">₹</InputAdornment>
-                  ),
-                },
-              }}
-            />
-          </Grid>
+              </Grid>
+              <Grid size={{ xs: 6, md: 4 }}>
+                <TextField
+                  fullWidth
+                  label="Minimum Order Amount (₹)"
+                  type="number"
+                  value={formData.min_order_amount || ""}
+                  onChange={(e) =>
+                    handleChange("min_order_amount", parseFloat(e.target.value) || 0)
+                  }
+                  slotProps={{
+                    input: {
+                      inputProps: { min: 0 },
+                      startAdornment: (
+                        <InputAdornment position="start">₹</InputAdornment>
+                      ),
+                    },
+                  }}
+                />
+              </Grid>
+            </>
+          )}
 
-          {/* Material Categories */}
-          <Grid size={12}>
-            <Divider sx={{ my: 1 }}>
-              <Typography variant="caption" color="text.secondary">
-                Material Categories Supplied
-              </Typography>
-            </Divider>
-          </Grid>
+          {/* Material Categories - Hide for rental vendors */}
+          {formData.vendor_type !== "rental_store" && (
+            <>
+              <Grid size={12}>
+                <Divider sx={{ my: 1 }}>
+                  <Typography variant="caption" color="text.secondary">
+                    Material Categories Supplied
+                  </Typography>
+                </Divider>
+              </Grid>
 
-          <Grid size={12}>
-            <CategoryAutocomplete
-              value={formData.category_ids || []}
-              onChange={(value) => handleChange("category_ids", value || [])}
-              multiple
-              parentOnly
-              label="Categories"
-              placeholder="Search and select categories..."
-            />
-          </Grid>
+              <Grid size={12}>
+                <CategoryAutocomplete
+                  value={formData.category_ids || []}
+                  onChange={(value) => handleChange("category_ids", value || [])}
+                  multiple
+                  parentOnly
+                  label="Categories"
+                  placeholder="Search and select categories..."
+                />
+              </Grid>
+            </>
+          )}
 
           {/* Tax & Payment Section - Accordion */}
           <Grid size={12}>

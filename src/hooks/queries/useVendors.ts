@@ -88,16 +88,17 @@ export function usePaginatedVendors(
   pagination: PaginationParams,
   categoryId?: string | null,
   searchTerm?: string,
-  vendorType?: VendorType
+  vendorType?: VendorType,
+  categoryNames?: string[] // Filter by category name patterns (case-insensitive partial match)
 ) {
   const supabase = createClient();
   const { pageIndex, pageSize } = pagination;
   const offset = pageIndex * pageSize;
 
   return useQuery({
-    queryKey: ["vendors", "paginated", { pageIndex, pageSize, categoryId, searchTerm, vendorType }],
+    queryKey: ["vendors", "paginated", { pageIndex, pageSize, categoryId, searchTerm, vendorType, categoryNames }],
     queryFn: async (): Promise<PaginatedResult<VendorWithCategories>> => {
-      // First, get total count
+      // First, get total count (without category filter for now since it's in-memory)
       let countQuery = supabase
         .from("vendors")
         .select("*", { count: "exact", head: true })
@@ -113,10 +114,14 @@ export function usePaginatedVendors(
         );
       }
 
-      const { count: totalCount, error: countError } = await countQuery;
+      // For category filtering, we need to fetch more and filter in memory
+      // This is a trade-off for simplicity
+      const needsCategoryFilter = categoryId || (categoryNames && categoryNames.length > 0);
+
+      const { count: rawTotalCount, error: countError } = await countQuery;
       if (countError) throw countError;
 
-      // Then, get paginated data
+      // Then, get paginated data (fetch more if we need to filter by category)
       let dataQuery = supabase
         .from("vendors")
         .select(
@@ -130,8 +135,12 @@ export function usePaginatedVendors(
         `
         )
         .eq("is_active", true)
-        .order("name")
-        .range(offset, offset + pageSize - 1);
+        .order("name");
+
+      // If we need category filtering, fetch all and paginate in memory
+      if (!needsCategoryFilter) {
+        dataQuery = dataQuery.range(offset, offset + pageSize - 1);
+      }
 
       if (vendorType) {
         dataQuery = dataQuery.eq("vendor_type", vendorType);
@@ -153,17 +162,36 @@ export function usePaginatedVendors(
           v.vendor_material_categories?.map((vc: any) => vc.category) || [],
       })) as VendorWithCategories[];
 
-      // Filter by category if specified (done in-memory for simplicity)
+      // Filter by category ID if specified
       if (categoryId) {
         vendors = vendors.filter((v) =>
           v.categories?.some((c) => c?.id === categoryId)
         );
       }
 
+      // Filter by category names if specified (partial match, case-insensitive)
+      if (categoryNames && categoryNames.length > 0) {
+        vendors = vendors.filter((v) =>
+          v.categories?.some((c) =>
+            categoryNames.some((name) =>
+              c?.name?.toLowerCase().includes(name.toLowerCase())
+            )
+          )
+        );
+      }
+
+      // Get actual total count after category filtering
+      const totalCount = needsCategoryFilter ? vendors.length : (rawTotalCount || 0);
+
+      // Paginate in memory if we filtered by category
+      if (needsCategoryFilter) {
+        vendors = vendors.slice(offset, offset + pageSize);
+      }
+
       return {
         data: vendors,
-        totalCount: totalCount || 0,
-        pageCount: Math.ceil((totalCount || 0) / pageSize),
+        totalCount,
+        pageCount: Math.ceil(totalCount / pageSize),
       };
     },
     placeholderData: (previousData) => previousData, // Keep previous data while loading

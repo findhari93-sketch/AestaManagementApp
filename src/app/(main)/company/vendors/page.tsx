@@ -14,6 +14,8 @@ import {
   Tooltip,
   Rating,
   Link,
+  Tabs,
+  Tab,
 } from "@mui/material";
 import {
   Add as AddIcon,
@@ -36,7 +38,27 @@ import {
 import { useMaterialCategories } from "@/hooks/queries/useMaterials";
 import { useVendorMaterialCounts } from "@/hooks/queries/useVendorInventory";
 import VendorDialog from "@/components/materials/VendorDialog";
-import type { VendorWithCategories } from "@/types/material.types";
+import type { VendorWithCategories, VendorType } from "@/types/material.types";
+
+// Vendor category tabs based on building material types
+type VendorTabId = "all" | "rental" | "civil" | "steel" | "electrical_plumbing" | "hardware" | "finishing";
+
+interface VendorTab {
+  id: VendorTabId;
+  label: string;
+  vendorType?: VendorType;
+  categoryNames?: string[];
+}
+
+const VENDOR_TABS: VendorTab[] = [
+  { id: "all", label: "All Vendors" },
+  { id: "rental", label: "Rental", vendorType: "rental_store" },
+  { id: "civil", label: "Civil", categoryNames: ["cement", "brick", "block", "sand", "aggregate", "binding"] },
+  { id: "steel", label: "Steel & Metals", categoryNames: ["steel", "metal", "iron", "tmt"] },
+  { id: "electrical_plumbing", label: "Electrical & Plumbing", categoryNames: ["electrical", "plumbing", "wiring", "pipe"] },
+  { id: "hardware", label: "Hardware", categoryNames: ["hardware"] },
+  { id: "finishing", label: "Finishing", categoryNames: ["paint", "tile", "sanitary", "flooring", "finishing"] },
+];
 
 export default function VendorsPage() {
   const router = useRouter();
@@ -44,6 +66,7 @@ export default function VendorsPage() {
   const [editingVendor, setEditingVendor] = useState<VendorWithCategories | null>(null);
   const [searchInput, setSearchInput] = useState("");
   const [pagination, setPagination] = useState<PaginationState>({ pageIndex: 0, pageSize: 50 });
+  const [selectedTab, setSelectedTab] = useState<VendorTabId>("all");
 
   const { userProfile } = useAuth();
   const isMobile = useIsMobile();
@@ -52,15 +75,26 @@ export default function VendorsPage() {
   // Debounce search input
   const deferredSearch = useDeferredValue(searchInput);
 
-  // Server-side paginated vendors with search
+  // Get current tab configuration
+  const currentTab = VENDOR_TABS.find((t) => t.id === selectedTab) || VENDOR_TABS[0];
+
+  // Server-side paginated vendors with search and tab filtering
   const { data: paginatedData, isLoading } = usePaginatedVendors(
     pagination,
     undefined, // categoryId
-    deferredSearch.length >= 2 ? deferredSearch : undefined
+    deferredSearch.length >= 2 ? deferredSearch : undefined,
+    currentTab.vendorType, // vendorType filter for rental tab
+    currentTab.categoryNames // categoryNames filter for category tabs
   );
 
   const vendors = paginatedData?.data || [];
   const totalCount = paginatedData?.totalCount || 0;
+
+  // Handle tab change - reset pagination
+  const handleTabChange = useCallback((_event: React.SyntheticEvent, newValue: VendorTabId) => {
+    setSelectedTab(newValue);
+    setPagination((prev) => ({ ...prev, pageIndex: 0 }));
+  }, []);
 
   const { data: categories = [] } = useMaterialCategories();
   const { data: materialCounts = {} } = useVendorMaterialCounts();
@@ -276,6 +310,21 @@ export default function VendorsPage() {
           ) : null
         }
       />
+
+      {/* Category Tabs */}
+      <Box sx={{ borderBottom: 1, borderColor: "divider", mb: 2 }}>
+        <Tabs
+          value={selectedTab}
+          onChange={handleTabChange}
+          variant={isMobile ? "scrollable" : "standard"}
+          scrollButtons={isMobile ? "auto" : false}
+          allowScrollButtonsMobile
+        >
+          {VENDOR_TABS.map((tab) => (
+            <Tab key={tab.id} value={tab.id} label={tab.label} />
+          ))}
+        </Tabs>
+      </Box>
 
       {/* Search */}
       <Box sx={{ mb: 2, display: "flex", alignItems: "center", gap: 2 }}>

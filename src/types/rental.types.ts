@@ -9,6 +9,10 @@
 
 export type RentalType = "equipment" | "scaffolding" | "shuttering" | "other";
 
+export type RentalSourceType = "store" | "contractor";
+
+export type RentalRateType = "hourly" | "daily";
+
 export type RentalOrderStatus =
   | "draft"
   | "confirmed"
@@ -79,6 +83,16 @@ export const TRANSPORT_HANDLER_LABELS: Record<TransportHandler, string> = {
   laborer: "Laborer",
 };
 
+export const RENTAL_SOURCE_TYPE_LABELS: Record<RentalSourceType, string> = {
+  store: "Store",
+  contractor: "Contractor",
+};
+
+export const RENTAL_RATE_TYPE_LABELS: Record<RentalRateType, string> = {
+  hourly: "Hourly",
+  daily: "Daily",
+};
+
 // ============================================
 // BASE TYPES
 // ============================================
@@ -104,6 +118,8 @@ export interface RentalItem {
   category_id: string | null;
   description: string | null;
   rental_type: RentalType;
+  source_type: RentalSourceType;
+  rate_type: RentalRateType;
   unit: string;
   specifications: Record<string, unknown> | null;
   default_daily_rate: number | null;
@@ -190,6 +206,8 @@ export interface RentalOrderItem {
   quantity: number;
   daily_rate_default: number;
   daily_rate_actual: number;
+  rate_type: RentalRateType;
+  hours_used: number | null;
   item_start_date: string | null;
   item_expected_return_date: string | null;
   quantity_returned: number;
@@ -249,6 +267,9 @@ export interface RentalSettlement {
   payer_source: string | null;
   payer_name: string | null;
   final_receipt_url: string | null;
+  vendor_bill_url: string | null;
+  upi_screenshot_url: string | null;
+  subcontract_id: string | null;
   engineer_transaction_id: string | null;
   settlement_group_id: string | null;
   notes: string | null;
@@ -335,6 +356,8 @@ export interface RentalItemFormData {
   category_id?: string;
   description?: string;
   rental_type: RentalType;
+  source_type: RentalSourceType;
+  rate_type: RentalRateType;
   unit: string;
   specifications?: Record<string, unknown>;
   default_daily_rate?: number;
@@ -376,6 +399,8 @@ export interface RentalOrderItemFormData {
   quantity: number;
   daily_rate_default: number;
   daily_rate_actual: number;
+  rate_type: RentalRateType;
+  hours_used?: number;
   item_start_date?: string;
   item_expected_return_date?: string;
   specifications?: string;
@@ -420,6 +445,9 @@ export interface RentalSettlementFormData {
   payer_source?: string;
   payer_name?: string;
   final_receipt_url?: string;
+  vendor_bill_url?: string;
+  upi_screenshot_url?: string;
+  subcontract_id?: string;
   notes?: string;
 }
 
@@ -463,7 +491,9 @@ export interface RentalItemCostBreakdown {
   quantityReturned: number;
   quantityOutstanding: number;
   dailyRate: number;
+  rateType: RentalRateType;
   daysRented: number;
+  hoursUsed: number | null;
   subtotal: number;
 }
 

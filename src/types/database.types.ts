@@ -5129,7 +5129,9 @@ export type Database = {
           is_active: boolean | null
           local_name: string | null
           name: string
+          rate_type: Database["public"]["Enums"]["rental_rate_type"] | null
           rental_type: Database["public"]["Enums"]["rental_type"]
+          source_type: Database["public"]["Enums"]["rental_source_type"] | null
           specifications: Json | null
           unit: string
           updated_at: string | null
@@ -5146,7 +5148,9 @@ export type Database = {
           is_active?: boolean | null
           local_name?: string | null
           name: string
+          rate_type?: Database["public"]["Enums"]["rental_rate_type"] | null
           rental_type: Database["public"]["Enums"]["rental_type"]
+          source_type?: Database["public"]["Enums"]["rental_source_type"] | null
           specifications?: Json | null
           unit?: string
           updated_at?: string | null
@@ -5163,7 +5167,9 @@ export type Database = {
           is_active?: boolean | null
           local_name?: string | null
           name?: string
+          rate_type?: Database["public"]["Enums"]["rental_rate_type"] | null
           rental_type?: Database["public"]["Enums"]["rental_type"]
+          source_type?: Database["public"]["Enums"]["rental_source_type"] | null
           specifications?: Json | null
           unit?: string
           updated_at?: string | null
@@ -5183,6 +5189,7 @@ export type Database = {
           created_at: string | null
           daily_rate_actual: number
           daily_rate_default: number
+          hours_used: number | null
           id: string
           item_expected_return_date: string | null
           item_start_date: string | null
@@ -5190,6 +5197,7 @@ export type Database = {
           quantity: number
           quantity_outstanding: number | null
           quantity_returned: number | null
+          rate_type: Database["public"]["Enums"]["rental_rate_type"] | null
           rental_item_id: string
           rental_order_id: string
           specifications: string | null
@@ -5200,6 +5208,7 @@ export type Database = {
           created_at?: string | null
           daily_rate_actual: number
           daily_rate_default: number
+          hours_used?: number | null
           id?: string
           item_expected_return_date?: string | null
           item_start_date?: string | null
@@ -5207,6 +5216,7 @@ export type Database = {
           quantity: number
           quantity_outstanding?: number | null
           quantity_returned?: number | null
+          rate_type?: Database["public"]["Enums"]["rental_rate_type"] | null
           rental_item_id: string
           rental_order_id: string
           specifications?: string | null
@@ -5217,6 +5227,7 @@ export type Database = {
           created_at?: string | null
           daily_rate_actual?: number
           daily_rate_default?: number
+          hours_used?: number | null
           id?: string
           item_expected_return_date?: string | null
           item_start_date?: string | null
@@ -5224,6 +5235,7 @@ export type Database = {
           quantity?: number
           quantity_outstanding?: number | null
           quantity_returned?: number | null
+          rate_type?: Database["public"]["Enums"]["rental_rate_type"] | null
           rental_item_id?: string
           rental_order_id?: string
           specifications?: string | null
@@ -11069,6 +11081,8 @@ export type Database = {
         | "completed"
         | "cancelled"
       rental_price_source: "rental" | "quotation" | "manual"
+      rental_rate_type: "hourly" | "daily"
+      rental_source_type: "store" | "contractor"
       rental_type: "equipment" | "scaffolding" | "shuttering" | "other"
       return_condition: "good" | "damaged" | "lost"
       salary_status: "draft" | "calculated" | "partial" | "paid"

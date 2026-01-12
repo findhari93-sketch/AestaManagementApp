@@ -30,13 +30,20 @@ import type {
   RentalItemWithDetails,
   RentalItemFormData,
   RentalType,
+  RentalSourceType,
+  RentalRateType,
 } from "@/types/rental.types";
-import { RENTAL_TYPE_LABELS } from "@/types/rental.types";
+import {
+  RENTAL_TYPE_LABELS,
+  RENTAL_SOURCE_TYPE_LABELS,
+  RENTAL_RATE_TYPE_LABELS,
+} from "@/types/rental.types";
 
 const UNITS = [
   { value: "piece", label: "Piece" },
   { value: "nos", label: "Numbers (nos)" },
   { value: "set", label: "Set" },
+  { value: "hour", label: "Hours" },
   { value: "sqft", label: "Square Feet (sqft)" },
   { value: "rmt", label: "Running Meter (rmt)" },
   { value: "bundle", label: "Bundle" },
@@ -68,6 +75,8 @@ export default function RentalItemDialog({
     category_id: "",
     description: "",
     rental_type: "scaffolding" as RentalType,
+    source_type: "store" as RentalSourceType,
+    rate_type: "daily" as RentalRateType,
     unit: "piece",
     specifications: {},
     default_daily_rate: undefined,
@@ -83,6 +92,8 @@ export default function RentalItemDialog({
         category_id: item.category_id || "",
         description: item.description || "",
         rental_type: item.rental_type,
+        source_type: item.source_type || "store",
+        rate_type: item.rate_type || "daily",
         unit: item.unit,
         specifications: item.specifications || {},
         default_daily_rate: item.default_daily_rate || undefined,
@@ -96,6 +107,8 @@ export default function RentalItemDialog({
         category_id: "",
         description: "",
         rental_type: "scaffolding",
+        source_type: "store",
+        rate_type: "daily",
         unit: "piece",
         specifications: {},
         default_daily_rate: undefined,
@@ -192,6 +205,40 @@ export default function RentalItemDialog({
 
           <Grid size={{ xs: 12, sm: 6 }}>
             <FormControl fullWidth>
+              <InputLabel>Source Type</InputLabel>
+              <Select
+                value={formData.source_type}
+                label="Source Type"
+                onChange={(e) => handleChange("source_type", e.target.value)}
+              >
+                {(Object.keys(RENTAL_SOURCE_TYPE_LABELS) as RentalSourceType[]).map((type) => (
+                  <MenuItem key={type} value={type}>
+                    {RENTAL_SOURCE_TYPE_LABELS[type]}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Grid>
+
+          <Grid size={{ xs: 12, sm: 6 }}>
+            <FormControl fullWidth>
+              <InputLabel>Rate Type</InputLabel>
+              <Select
+                value={formData.rate_type}
+                label="Rate Type"
+                onChange={(e) => handleChange("rate_type", e.target.value)}
+              >
+                {(Object.keys(RENTAL_RATE_TYPE_LABELS) as RentalRateType[]).map((type) => (
+                  <MenuItem key={type} value={type}>
+                    {RENTAL_RATE_TYPE_LABELS[type]}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Grid>
+
+          <Grid size={{ xs: 12, sm: 6 }}>
+            <FormControl fullWidth>
               <InputLabel>Rental Type</InputLabel>
               <Select
                 value={formData.rental_type}
@@ -246,7 +293,7 @@ export default function RentalItemDialog({
             <TextField
               fullWidth
               type="number"
-              label="Default Daily Rate"
+              label={formData.rate_type === "hourly" ? "Default Hourly Rate" : "Default Daily Rate"}
               value={formData.default_daily_rate || ""}
               onChange={(e) =>
                 handleChange(

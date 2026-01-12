@@ -602,7 +602,6 @@ export function useAddVendorInventory() {
           price_source: data.price_source || "manual",
           last_price_update: new Date().toISOString(),
           is_available: data.is_available ?? true,
-          is_active: true,
         })
         .select()
         .single();
@@ -679,7 +678,7 @@ export function useUpdateVendorInventory() {
 
 /**
  * Delete (soft delete) a vendor inventory item
- * Sets is_active to false instead of hard delete
+ * Sets is_available to false instead of hard delete
  */
 export function useDeleteVendorInventory() {
   const queryClient = useQueryClient();
@@ -701,7 +700,6 @@ export function useDeleteVendorInventory() {
       const { error } = await (supabase as any)
         .from("vendor_inventory")
         .update({
-          is_active: false,
           is_available: false,
           updated_at: new Date().toISOString(),
         })
@@ -749,7 +747,6 @@ export function useVendorMaterialCounts() {
       const { data, error } = await (supabase as any)
         .from("vendor_inventory")
         .select("vendor_id")
-        .eq("is_active", true)
         .eq("is_available", true);
 
       if (error) throw error;
@@ -820,7 +817,6 @@ export function useOrphanedVendors() {
       const { data: inventory, error: invError } = await (supabase as any)
         .from("vendor_inventory")
         .select("vendor_id")
-        .eq("is_active", true)
         .eq("is_available", true);
 
       if (invError) throw invError;
@@ -855,7 +851,6 @@ export function useMaterialsWithoutVendors() {
       const { data: inventory, error: invError } = await (supabase as any)
         .from("vendor_inventory")
         .select("material_id")
-        .eq("is_active", true)
         .eq("is_available", true)
         .not("material_id", "is", null);
 

@@ -45,6 +45,7 @@ import type {
   RentalOrderItemFormData,
   RentalItemWithDetails,
   TransportHandler,
+  RentalRateType,
 } from "@/types/rental.types";
 import { TRANSPORT_HANDLER_LABELS } from "@/types/rental.types";
 import type { Vendor } from "@/types/material.types";
@@ -59,6 +60,7 @@ interface RentalOrderDialogProps {
 interface OrderLineItem extends RentalOrderItemFormData {
   tempId: string;
   itemName: string;
+  itemRateType: RentalRateType;
 }
 
 export default function RentalOrderDialog({
@@ -95,6 +97,7 @@ export default function RentalOrderDialog({
   const [selectedItem, setSelectedItem] = useState<RentalItemWithDetails | null>(null);
   const [itemQuantity, setItemQuantity] = useState(1);
   const [itemRate, setItemRate] = useState(0);
+  const [itemHours, setItemHours] = useState<number>(8); // Default 8 hours for hourly items
 
   useEffect(() => {
     if (!open) {
@@ -112,6 +115,7 @@ export default function RentalOrderDialog({
       setSelectedItem(null);
       setItemQuantity(1);
       setItemRate(0);
+      setItemHours(8);
       setError("");
     }
   }, [open]);
@@ -163,13 +167,17 @@ export default function RentalOrderDialog({
       );
     } else {
       // Add new
+      const isHourly = selectedItem.rate_type === "hourly";
       const newItem: OrderLineItem = {
         tempId: `temp-${Date.now()}`,
         rental_item_id: selectedItem.id,
         itemName: selectedItem.name,
+        itemRateType: selectedItem.rate_type || "daily",
         quantity: itemQuantity,
         daily_rate_default: selectedItem.default_daily_rate || itemRate,
         daily_rate_actual: itemRate,
+        rate_type: selectedItem.rate_type || "daily",
+        hours_used: isHourly ? itemHours : undefined,
       };
       setLineItems((prev) => [...prev, newItem]);
     }
@@ -178,6 +186,7 @@ export default function RentalOrderDialog({
     setSelectedItem(null);
     setItemQuantity(1);
     setItemRate(0);
+    setItemHours(8);
     setError("");
   };
 
@@ -201,6 +210,14 @@ export default function RentalOrderDialog({
     );
   };
 
+  const handleUpdateItemHours = (tempId: string, newHours: number) => {
+    setLineItems((prev) =>
+      prev.map((li) =>
+        li.tempId === tempId ? { ...li, hours_used: newHours } : li
+      )
+    );
+  };
+
   // Calculate estimated total
   const estimatedDays = useMemo(() => {
     if (!expectedReturnDate || !startDate) return 30;
@@ -210,10 +227,15 @@ export default function RentalOrderDialog({
   }, [startDate, expectedReturnDate]);
 
   const estimatedTotal = useMemo(() => {
-    const itemsTotal = lineItems.reduce(
-      (sum, li) => sum + li.quantity * li.daily_rate_actual * estimatedDays,
-      0
-    );
+    const itemsTotal = lineItems.reduce((sum, li) => {
+      if (li.rate_type === "hourly") {
+        // Hourly items: qty × rate × hours
+        return sum + li.quantity * li.daily_rate_actual * (li.hours_used || 8);
+      } else {
+        // Daily items: qty × rate × days
+        return sum + li.quantity * li.daily_rate_actual * estimatedDays;
+      }
+    }, 0);
     const discount = (itemsTotal * discountPercentage) / 100;
     const transport = transportCostOutward + loadingCostOutward + unloadingCostOutward;
     return itemsTotal - discount + transport;
@@ -253,6 +275,8 @@ export default function RentalOrderDialog({
           quantity: li.quantity,
           daily_rate_default: li.daily_rate_default,
           daily_rate_actual: li.daily_rate_actual,
+          rate_type: li.rate_type,
+          hours_used: li.hours_used,
         })),
       };
 
@@ -386,11 +410,11 @@ export default function RentalOrderDialog({
             />
           </Grid>
 
-          <Grid size={{ xs: 4, md: 3 }}>
+          <Grid size={{ xs: 4, md: 2 }}>
             <TextField
               fullWidth
               type="number"
-              label="Rate/Day"
+              label={selectedItem?.rate_type === "hourly" ? "Rate/Hour" : "Rate/Day"}
               value={itemRate}
               onChange={(e) => setItemRate(parseFloat(e.target.value) || 0)}
               size="small"
@@ -402,13 +426,28 @@ export default function RentalOrderDialog({
             />
           </Grid>
 
-          <Grid size={{ xs: 4, md: 2 }}>
+          {selectedItem?.rate_type === "hourly" && (
+            <Grid size={{ xs: 4, md: 2 }}>
+              <TextField
+                fullWidth
+                type="number"
+                label="Hours"
+                value={itemHours}
+                onChange={(e) => setItemHours(parseFloat(e.target.value) || 8)}
+                size="small"
+                inputProps={{ min: 1 }}
+              />
+            </Grid>
+          )}
+
+          <Grid size={{ xs: 4, md: selectedItem?.rate_type === "hourly" ? 1 : 2 }}>
             <Button
               fullWidth
               variant="outlined"
               startIcon={<AddIcon />}
               onClick={handleAddItem}
               disabled={!selectedItem}
+              sx={{ minWidth: 0 }}
             >
               Add
             </Button>
@@ -423,70 +462,99 @@ export default function RentalOrderDialog({
                     <TableRow>
                       <TableCell>Item</TableCell>
                       <TableCell align="center">Qty</TableCell>
-                      <TableCell align="right">Rate/Day</TableCell>
-                      <TableCell align="right">
-                        Est. ({estimatedDays} days)
-                      </TableCell>
+                      <TableCell align="right">Rate</TableCell>
+                      <TableCell align="center">Duration</TableCell>
+                      <TableCell align="right">Est. Amount</TableCell>
                       <TableCell align="center" width={50}></TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {lineItems.map((li) => (
-                      <TableRow key={li.tempId}>
-                        <TableCell>{li.itemName}</TableCell>
-                        <TableCell align="center">
-                          <TextField
-                            type="number"
-                            value={li.quantity}
-                            onChange={(e) =>
-                              handleUpdateItemQuantity(
-                                li.tempId,
-                                parseInt(e.target.value) || 1
-                              )
-                            }
-                            size="small"
-                            sx={{ width: 70 }}
-                            inputProps={{ min: 1 }}
-                          />
-                        </TableCell>
-                        <TableCell align="right">
-                          <TextField
-                            type="number"
-                            value={li.daily_rate_actual}
-                            onChange={(e) =>
-                              handleUpdateItemRate(
-                                li.tempId,
-                                parseFloat(e.target.value) || 0
-                              )
-                            }
-                            size="small"
-                            sx={{ width: 90 }}
-                            InputProps={{
-                              startAdornment: (
-                                <InputAdornment position="start">₹</InputAdornment>
-                              ),
-                            }}
-                          />
-                        </TableCell>
-                        <TableCell align="right">
-                          ₹
-                          {(
-                            li.quantity *
-                            li.daily_rate_actual *
-                            estimatedDays
-                          ).toLocaleString("en-IN")}
-                        </TableCell>
-                        <TableCell align="center">
-                          <IconButton
-                            size="small"
-                            color="error"
-                            onClick={() => handleRemoveItem(li.tempId)}
-                          >
-                            <DeleteIcon fontSize="small" />
-                          </IconButton>
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                    {lineItems.map((li) => {
+                      const isHourly = li.rate_type === "hourly";
+                      const amount = isHourly
+                        ? li.quantity * li.daily_rate_actual * (li.hours_used || 8)
+                        : li.quantity * li.daily_rate_actual * estimatedDays;
+                      return (
+                        <TableRow key={li.tempId}>
+                          <TableCell>
+                            {li.itemName}
+                            {isHourly && (
+                              <Chip label="Hourly" size="small" sx={{ ml: 1 }} />
+                            )}
+                          </TableCell>
+                          <TableCell align="center">
+                            <TextField
+                              type="number"
+                              value={li.quantity}
+                              onChange={(e) =>
+                                handleUpdateItemQuantity(
+                                  li.tempId,
+                                  parseInt(e.target.value) || 1
+                                )
+                              }
+                              size="small"
+                              sx={{ width: 70 }}
+                              inputProps={{ min: 1 }}
+                            />
+                          </TableCell>
+                          <TableCell align="right">
+                            <TextField
+                              type="number"
+                              value={li.daily_rate_actual}
+                              onChange={(e) =>
+                                handleUpdateItemRate(
+                                  li.tempId,
+                                  parseFloat(e.target.value) || 0
+                                )
+                              }
+                              size="small"
+                              sx={{ width: 90 }}
+                              InputProps={{
+                                startAdornment: (
+                                  <InputAdornment position="start">₹</InputAdornment>
+                                ),
+                              }}
+                            />
+                            <Typography variant="caption" display="block" color="text.secondary">
+                              /{isHourly ? "hr" : "day"}
+                            </Typography>
+                          </TableCell>
+                          <TableCell align="center">
+                            {isHourly ? (
+                              <TextField
+                                type="number"
+                                value={li.hours_used || 8}
+                                onChange={(e) =>
+                                  handleUpdateItemHours(
+                                    li.tempId,
+                                    parseFloat(e.target.value) || 8
+                                  )
+                                }
+                                size="small"
+                                sx={{ width: 70 }}
+                                inputProps={{ min: 1 }}
+                              />
+                            ) : (
+                              <Typography variant="body2">
+                                {estimatedDays} days
+                              </Typography>
+                            )}
+                          </TableCell>
+                          <TableCell align="right">
+                            ₹{amount.toLocaleString("en-IN")}
+                          </TableCell>
+                          <TableCell align="center">
+                            <IconButton
+                              size="small"
+                              color="error"
+                              onClick={() => handleRemoveItem(li.tempId)}
+                            >
+                              <DeleteIcon fontSize="small" />
+                            </IconButton>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
                   </TableBody>
                 </Table>
               </Paper>
