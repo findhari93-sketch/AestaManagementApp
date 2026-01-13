@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   Dialog,
   DialogTitle,
@@ -55,7 +55,7 @@ export default function DateSettlementsEditDialog({
   onSuccess,
 }: DateSettlementsEditDialogProps) {
   const { selectedSite } = useSite();
-  const supabase = useMemo(() => createClient(), []);
+  const supabase = createClient();
 
   // Form state for bulk editing - Subcontract
   const [selectedSubcontractId, setSelectedSubcontractId] = useState<string | null>(null);
@@ -70,6 +70,10 @@ export default function DateSettlementsEditDialog({
   // UI state
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Submission guard to prevent double-clicks
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const submissionIdRef = useRef<string | null>(null);
 
   const formatCurrency = (amount: number) => `Rs.${amount.toLocaleString("en-IN")}`;
 
@@ -123,6 +127,12 @@ export default function DateSettlementsEditDialog({
 
   // Handle bulk save
   const handleSave = async () => {
+    // Guard against rapid double-clicks or multiple submissions
+    if (isSubmitting || submissionIdRef.current || processing) {
+      console.warn('[DateSettlementsEditDialog] Submission already in progress');
+      return;
+    }
+
     if (!selectedSite) {
       setError("No site selected");
       return;
@@ -144,6 +154,10 @@ export default function DateSettlementsEditDialog({
       return;
     }
 
+    // Mark as submitting to prevent double-clicks
+    const submissionId = `${Date.now()}-${Math.random()}`;
+    submissionIdRef.current = submissionId;
+    setIsSubmitting(true);
     setProcessing(true);
     setError(null);
 
@@ -310,6 +324,9 @@ export default function DateSettlementsEditDialog({
       console.error("Error updating settlements:", err);
       setError(err.message || "Failed to update settlements");
     } finally {
+      // Clean up submission guard
+      submissionIdRef.current = null;
+      setIsSubmitting(false);
       setProcessing(false);
     }
   };
@@ -622,7 +639,7 @@ export default function DateSettlementsEditDialog({
       </DialogContent>
 
       <DialogActions sx={{ px: 3, py: 2 }}>
-        <Button onClick={onClose} disabled={processing}>
+        <Button onClick={onClose} disabled={processing || isSubmitting}>
           Cancel
         </Button>
         <Button
@@ -630,12 +647,13 @@ export default function DateSettlementsEditDialog({
           onClick={handleSave}
           disabled={
             processing ||
+            isSubmitting ||
             (!(editingSubcontract && selectedSubcontractId) && !updatePayerSource) ||
             !!(editingSubcontract && selectedSubcontractId && recordsToUpdate.length === 0)
           }
-          startIcon={processing ? <CircularProgress size={16} /> : <SaveIcon />}
+          startIcon={(processing || isSubmitting) ? <CircularProgress size={16} /> : <SaveIcon />}
         >
-          {processing
+          {(processing || isSubmitting)
             ? "Saving..."
             : editingSubcontract && selectedSubcontractId && updatePayerSource
               ? `Update ${records.length} Record(s)`

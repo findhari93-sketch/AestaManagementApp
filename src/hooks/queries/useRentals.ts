@@ -1117,75 +1117,10 @@ export function useSettleRental() {
         })
         .eq("id", data.rental_order_id);
 
-      // Create expense entry for the rental settlement
-      const finalAmount = data.negotiated_final_amount ||
-        (data.total_rental_amount + data.total_transport_amount + data.total_damage_amount);
-
-      // Find or create "Rental Settlement" category under machinery module
-      let categoryId: string | null = null;
-
-      // First try to find existing category
-      const { data: existingCategory } = await supabase
-        .from("expense_categories")
-        .select("id")
-        .eq("name", "Rental Settlement")
-        .eq("module", "machinery")
-        .eq("is_active", true)
-        .single();
-
-      if (existingCategory) {
-        categoryId = existingCategory.id;
-      } else {
-        // Create the category if it doesn't exist
-        const { data: newCategory, error: catError } = await supabase
-          .from("expense_categories")
-          .insert({
-            name: "Rental Settlement",
-            module: "machinery",
-            description: "Equipment and machinery rental settlements",
-            is_active: true,
-            display_order: 100,
-          })
-          .select("id")
-          .single();
-
-        if (catError) {
-          console.error("Failed to create expense category:", catError);
-        } else {
-          categoryId = newCategory?.id || null;
-        }
-      }
-
-      // Create expense if we have a category
-      if (categoryId && finalAmount > 0) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const vendor = order.vendor as any;
-        const vendorName = vendor?.shop_name || vendor?.name || "Unknown Vendor";
-
-        const { error: expenseError } = await supabase
-          .from("expenses")
-          .insert({
-            site_id: order.site_id,
-            category_id: categoryId,
-            module: "machinery",
-            date: data.settlement_date,
-            amount: finalAmount,
-            vendor_name: vendorName,
-            vendor_contact: vendor?.phone || null,
-            description: `Rental settlement ${settRef} - ${vendorName}`,
-            payment_mode: data.payment_mode as any,
-            is_cleared: true, // Settlement means it's already paid
-            cleared_date: data.settlement_date,
-            reference_number: settRef,
-            receipt_url: data.final_receipt_url || data.upi_screenshot_url || null,
-            contract_id: data.subcontract_id || null,
-          });
-
-        if (expenseError) {
-          console.error("Failed to create expense for rental settlement:", expenseError);
-          // Don't throw - settlement itself succeeded, expense is secondary
-        }
-      }
+      // NOTE: We do NOT create a direct expense entry here.
+      // Rental settlements automatically appear in the v_all_expenses view
+      // via the rental_settlements UNION clause in the view definition.
+      // Creating a direct expense would cause duplicates.
 
       return settlement;
     },
@@ -1194,7 +1129,7 @@ export function useSettleRental() {
         queryKey: rentalQueryKeys.orders.byId(variables.rental_order_id),
       });
       queryClient.invalidateQueries({ queryKey: rentalQueryKeys.orders.all });
-      // Also invalidate expenses since we created one
+      // Invalidate expenses view since rental settlements automatically appear in v_all_expenses
       queryClient.invalidateQueries({ queryKey: ["expenses"] });
     },
   });

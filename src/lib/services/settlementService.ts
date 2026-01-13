@@ -41,6 +41,180 @@ export interface SettlementConfig {
   batchAllocations?: BatchAllocation[];
 }
 
+// =============================================================================
+// Retry Logic and Error Handling
+// =============================================================================
+
+/**
+ * Retry wrapper for settlement group creation with exponential backoff
+ * Handles transient errors and duplicate key issues
+ */
+async function createSettlementWithRetry(
+  supabase: SupabaseClient,
+  params: any,
+  maxRetries: number = 2
+): Promise<{ data: any; error: any }> {
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      const { data, error } = await supabase.rpc('create_settlement_group', params);
+
+      // Success - return immediately
+      if (!error) {
+        if (attempt > 0) {
+          console.log(`[Settlement] Succeeded on attempt ${attempt + 1}/${maxRetries}`);
+        }
+        return { data, error: null };
+      }
+
+      // Check if it's a duplicate key error that might resolve on retry
+      const isDuplicateKey = error.message?.includes('duplicate key') ||
+                             error.message?.includes('unique_violation');
+
+      // If duplicate key and not last attempt, wait and retry
+      if (isDuplicateKey && attempt < maxRetries - 1) {
+        const delay = Math.pow(2, attempt) * 100; // 100ms, 200ms, 400ms, etc.
+        console.warn(
+          `[Settlement] Duplicate key on attempt ${attempt + 1}/${maxRetries}, retrying in ${delay}ms...`
+        );
+        await new Promise(resolve => setTimeout(resolve, delay));
+        continue;
+      }
+
+      // Last attempt or non-retriable error - return error
+      return { data: null, error };
+
+    } catch (err: any) {
+      // Unexpected exception
+      if (attempt === maxRetries - 1) {
+        // Last attempt - throw the error
+        throw err;
+      }
+
+      // Not last attempt - log and retry
+      const delay = Math.pow(2, attempt) * 100;
+      console.warn(
+        `[Settlement] Exception on attempt ${attempt + 1}/${maxRetries}, retrying in ${delay}ms:`,
+        err.message
+      );
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+
+  // Should never reach here
+  return { data: null, error: new Error('Max retries exceeded') };
+}
+
+/**
+ * Generate idempotency key for a settlement
+ * Used to prevent duplicate submissions within a short time window
+ */
+function getSettlementIdempotencyKey(config: SettlementConfig): string {
+  // Sort record IDs for consistent key generation
+  const recordIds = [...config.records]
+    .map(r => r.sourceId)
+    .sort()
+    .join('_');
+  return `settlement_${config.siteId}_${recordIds}`;
+}
+
+/**
+ * Check if settlement was recently submitted (within last 5 seconds)
+ * Prevents accidental duplicate submissions from double-clicks
+ */
+function checkRecentSubmission(key: string): boolean {
+  try {
+    const recentKey = `recent_${key}`;
+    const recent = localStorage.getItem(recentKey);
+    if (recent) {
+      const timestamp = parseInt(recent, 10);
+      const now = Date.now();
+      const diff = now - timestamp;
+
+      // If submitted within last 5 seconds, it's a duplicate
+      if (diff < 5000) {
+        console.warn(`[Settlement] Duplicate submission detected (${diff}ms ago)`);
+        return true;
+      }
+    }
+    return false;
+  } catch (err) {
+    // localStorage might be unavailable - allow submission
+    console.warn('[Settlement] Could not check recent submission:', err);
+    return false;
+  }
+}
+
+/**
+ * Mark settlement as recently submitted
+ */
+function markAsRecentlySubmitted(key: string): void {
+  try {
+    const recentKey = `recent_${key}`;
+    localStorage.setItem(recentKey, Date.now().toString());
+
+    // Clean up after 10 seconds
+    setTimeout(() => {
+      try {
+        localStorage.removeItem(recentKey);
+      } catch (err) {
+        // Ignore cleanup errors
+      }
+    }, 10000);
+  } catch (err) {
+    // localStorage might be unavailable - continue anyway
+    console.warn('[Settlement] Could not mark as recently submitted:', err);
+  }
+}
+
+/**
+ * Convert settlement error to user-friendly message
+ */
+function getSettlementErrorMessage(err: any): string {
+  const message = err?.message || err?.toString() || 'Unknown error';
+
+  // Duplicate key error
+  if (message.includes('duplicate key') || message.includes('unique_violation')) {
+    return 'A settlement with this reference already exists. Please wait a moment and try again.';
+  }
+
+  // Settlement creation failed after retries
+  if (message.includes('Failed to create settlement after')) {
+    return 'Unable to generate unique settlement reference after multiple attempts. Please contact support with this error.';
+  }
+
+  // Wallet-related errors
+  if (message.includes('wallet') || message.includes('balance')) {
+    return `Wallet operation failed: ${message}`;
+  }
+
+  // Session/auth errors
+  if (message.includes('session') || message.includes('JWT') || message.includes('unauthorized')) {
+    return 'Your session has expired. Please refresh the page and try again.';
+  }
+
+  // Network errors
+  if (message.includes('fetch') || message.includes('network') || message.includes('timeout')) {
+    return 'Network error. Please check your connection and try again.';
+  }
+
+  // Generic error with the actual message
+  return `Failed to process settlement: ${message}`;
+}
+
+/**
+ * Log settlement error for debugging
+ */
+function logSettlementError(context: string, err: any, additionalInfo?: any): void {
+  console.error(`[Settlement Error - ${context}]`, {
+    timestamp: new Date().toISOString(),
+    error: err?.message || err,
+    stack: err?.stack,
+    ...additionalInfo
+  });
+}
+
+// =============================================================================
+
 /**
  * Process a settlement - the main entry point for all settlement operations.
  * This ensures consistency across all settlement paths (attendance page, salary page, etc.)
@@ -53,6 +227,15 @@ export async function processSettlement(
   config: SettlementConfig
 ): Promise<SettlementResult> {
   try {
+    // Check for recent duplicate submission (prevents accidental double-clicks)
+    const idempotencyKey = getSettlementIdempotencyKey(config);
+    if (checkRecentSubmission(idempotencyKey)) {
+      throw new Error('Settlement already submitted. Please wait a moment before trying again.');
+    }
+
+    // Mark as being processed
+    markAsRecentlySubmitted(idempotencyKey);
+
     const paymentDate = dayjs().format("YYYY-MM-DD");
     let engineerTransactionId: string | null = null;
     let settlementGroupId: string | undefined;
@@ -76,9 +259,9 @@ export async function processSettlement(
     // Get the record date (use first record's date)
     const recordDate = config.records.length > 0 ? config.records[0].date : paymentDate;
 
-    // 1. Create settlement_group FIRST using atomic function (guaranteed unique reference)
-    const { data: groupResult, error: groupError } = await supabase.rpc(
-      "create_settlement_group",
+    // 1. Create settlement_group FIRST using atomic function with retry logic
+    const { data: groupResult, error: groupError } = await createSettlementWithRetry(
+      supabase,
       {
         p_site_id: config.siteId,
         p_settlement_date: recordDate,
@@ -100,7 +283,11 @@ export async function processSettlement(
     );
 
     if (groupError) {
-      console.error("Error creating settlement_group:", groupError);
+      logSettlementError('processSettlement', groupError, {
+        siteId: config.siteId,
+        recordDate,
+        amount: config.totalAmount
+      });
       throw groupError;
     }
 
@@ -231,10 +418,14 @@ export async function processSettlement(
       engineerTransactionId: engineerTransactionId || undefined,
     };
   } catch (err: any) {
-    console.error("Settlement error:", err);
+    logSettlementError('processSettlement', err, {
+      siteId: config.siteId,
+      totalAmount: config.totalAmount,
+      recordCount: config.records.length
+    });
     return {
       success: false,
-      error: err.message || "Failed to process settlement",
+      error: getSettlementErrorMessage(err),
     };
   }
 }

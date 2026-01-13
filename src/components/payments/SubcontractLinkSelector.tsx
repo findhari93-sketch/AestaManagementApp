@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   Box,
   FormControl,
@@ -37,7 +37,7 @@ export default function SubcontractLinkSelector({
   showBalanceAfterPayment = true,
 }: SubcontractLinkSelectorProps) {
   const { selectedSite } = useSite();
-  const supabase = useMemo(() => createClient(), []);
+  const supabase = createClient();
 
   const [subcontracts, setSubcontracts] = useState<SubcontractOption[]>([]);
   const [loading, setLoading] = useState(false);

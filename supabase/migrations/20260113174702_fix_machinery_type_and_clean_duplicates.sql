@@ -1,12 +1,106 @@
--- Migration: Show individual daily salary settlements in v_all_expenses
--- Purpose: Change Daily Salary settlements from aggregated-by-date to individual records
--- This ensures the record count matches the actual number of settlements
+-- Migration: Fix Machinery Type Display and Clean Up Rental Expense Duplicates
+-- Purpose:
+-- 1. Fix v_all_expenses view to show category names instead of hardcoded "Machinery" type
+-- 2. Remove duplicate expense records created by old rental settlement code
+-- 3. Clean up "Rental Settlement" category (should only be "Rental")
+--
+-- Background:
+-- The view was hardcoding 'Machinery' as expense_type for all machinery module expenses.
+-- The old rental settlement code was creating duplicate expenses (both direct records and via view).
+-- This caused: Type showing "Machinery" instead of "Rental", duplicate entries, missing ref codes.
 
--- Drop and recreate view to handle column type changes
+-- ============================================================================
+-- PART 1: Delete duplicate expense records and categories FIRST
+-- ============================================================================
+
+DO $$
+DECLARE
+  v_rental_settlement_category_id uuid;
+  v_duplicate_count integer;
+  v_machinery_category_id uuid;
+  v_machinery_expense_count integer := 0;
+BEGIN
+  -- Find the "Rental Settlement" category ID
+  SELECT id INTO v_rental_settlement_category_id
+  FROM expense_categories
+  WHERE name = 'Rental Settlement'
+    AND module = 'machinery'
+  LIMIT 1;
+
+  IF v_rental_settlement_category_id IS NOT NULL THEN
+    -- Count how many duplicate expenses we're about to delete
+    SELECT COUNT(*) INTO v_duplicate_count
+    FROM expenses
+    WHERE module = 'machinery'
+      AND category_id = v_rental_settlement_category_id;
+
+    RAISE NOTICE 'Found % duplicate rental expense records to delete', v_duplicate_count;
+
+    -- Delete duplicate expense records
+    -- These are the old expenses created by the buggy code
+    DELETE FROM expenses
+    WHERE module = 'machinery'
+      AND category_id = v_rental_settlement_category_id;
+
+    RAISE NOTICE 'Deleted % duplicate rental expense records', v_duplicate_count;
+  ELSE
+    RAISE NOTICE 'No "Rental Settlement" category found, skipping duplicate expense deletion';
+  END IF;
+
+  -- Now delete the "Rental Settlement" category itself
+  DELETE FROM expense_categories
+  WHERE name = 'Rental Settlement'
+    AND module = 'machinery';
+
+  IF FOUND THEN
+    RAISE NOTICE 'Deleted "Rental Settlement" category';
+  ELSE
+    RAISE NOTICE 'No "Rental Settlement" category to delete';
+  END IF;
+
+  -- Check for "Machinery" as a category (shouldn't exist - it's a module, not a category)
+  SELECT id INTO v_machinery_category_id
+  FROM expense_categories
+  WHERE name = 'Machinery'
+  LIMIT 1;
+
+  IF v_machinery_category_id IS NOT NULL THEN
+    -- Count how many expenses use this category
+    SELECT COUNT(*) INTO v_machinery_expense_count
+    FROM expenses
+    WHERE category_id = v_machinery_category_id;
+
+    IF v_machinery_expense_count = 0 THEN
+      -- Safe to delete since no expenses use it
+      DELETE FROM expense_categories WHERE id = v_machinery_category_id;
+      RAISE NOTICE 'Deleted unused "Machinery" category (machinery is a module, not a category)';
+    ELSE
+      RAISE WARNING 'Found "Machinery" category with % associated expenses. Manual review needed.', v_machinery_expense_count;
+    END IF;
+  END IF;
+END $$;
+
+-- ============================================================================
+-- PART 2: Ensure "Rental" category exists and is active
+-- ============================================================================
+
+INSERT INTO expense_categories (module, name, description, display_order, is_active)
+VALUES ('machinery', 'Rental', 'Equipment and machinery rentals', 10, true)
+ON CONFLICT (module, name) DO UPDATE
+  SET is_active = true,
+      description = 'Equipment and machinery rentals',
+      display_order = 10,
+      updated_at = now();
+
+-- ============================================================================
+-- PART 3: Recreate v_all_expenses view with fixed CASE statement
+-- ============================================================================
+
 DROP VIEW IF EXISTS "public"."v_all_expenses";
 
 CREATE VIEW "public"."v_all_expenses" AS
 -- Regular expenses (non-labor)
+-- IMPORTANT: machinery module now shows category name as expense_type instead of hardcoded 'Machinery'
 SELECT "e"."id",
     "e"."site_id",
     "e"."date",
@@ -19,7 +113,7 @@ SELECT "e"."id",
     (
         CASE "e"."module"
             WHEN 'material'::"public"."expense_module" THEN 'Material'::character varying
-            WHEN 'machinery'::"public"."expense_module" THEN COALESCE("ec"."name", 'Machinery'::character varying)
+            WHEN 'machinery'::"public"."expense_module" THEN COALESCE("ec"."name", 'Machinery'::character varying)  -- FIXED: Use category name
             WHEN 'general'::"public"."expense_module" THEN 'General'::character varying
             ELSE COALESCE("ec"."name", 'Other'::character varying)
         END)::"text" AS "expense_type",
@@ -49,7 +143,7 @@ WHERE (("e"."is_deleted" = false) AND ("e"."module" <> 'labor'::"public"."expens
 
 UNION ALL
 
--- Daily Salary settlements (CHANGED: now individual records, not aggregated by date)
+-- Daily Salary settlements (individual records, not aggregated by date)
 SELECT "sg"."id",
     "sg"."site_id",
     "sg"."settlement_date" AS "date",
@@ -106,9 +200,16 @@ SELECT "sg"."id",
     "sg"."is_cancelled" AS "is_deleted"
 FROM ("public"."settlement_groups" "sg"
     LEFT JOIN "public"."subcontracts" "sc" ON (("sg"."subcontract_id" = "sc"."id")))
-WHERE (("sg"."is_cancelled" = false) AND (COALESCE("sg"."payment_type", 'salary'::"text") <> 'advance'::"text") AND (NOT (EXISTS ( SELECT 1
+WHERE (("sg"."is_cancelled" = false)
+    AND (COALESCE("sg"."payment_type", 'salary'::"text") NOT IN ('advance'::"text", 'excess'::"text"))
+    AND (NOT (EXISTS ( SELECT 1
            FROM "public"."labor_payments" "lp"
-          WHERE (("lp"."settlement_group_id" = "sg"."id") AND ("lp"."is_under_contract" = true))))))
+          WHERE (("lp"."settlement_group_id" = "sg"."id") AND ("lp"."is_under_contract" = true)))))
+    AND (
+        EXISTS (SELECT 1 FROM "public"."daily_attendance" "da" WHERE "da"."settlement_group_id" = "sg"."id")
+        OR EXISTS (SELECT 1 FROM "public"."market_laborer_attendance" "ma" WHERE "ma"."settlement_group_id" = "sg"."id")
+        OR EXISTS (SELECT 1 FROM "public"."labor_payments" "lp" WHERE "lp"."settlement_group_id" = "sg"."id")
+    ))
 
 UNION ALL
 
@@ -236,8 +337,68 @@ WHERE (("sg"."is_cancelled" = false) AND ("sg"."payment_type" = 'advance'::"text
 
 UNION ALL
 
+-- Excess/Overpayment settlements
+SELECT "sg"."id",
+    "sg"."site_id",
+    "sg"."settlement_date" AS "date",
+    COALESCE("sg"."actual_payment_date", ("sg"."created_at")::"date") AS "recorded_date",
+    "sg"."total_amount" AS "amount",
+        CASE
+            WHEN (("sg"."notes" IS NOT NULL) AND ("sg"."notes" <> ''::"text")) THEN ('Excess/Overpayment - '::"text" || "sg"."notes")
+            ELSE 'Excess/Overpayment'::"text"
+        END AS "description",
+    ( SELECT "expense_categories"."id"
+           FROM "public"."expense_categories"
+          WHERE (("expense_categories"."name")::"text" = 'Salary Settlement'::"text")
+         LIMIT 1) AS "category_id",
+    'Salary Settlement'::character varying AS "category_name",
+    'labor'::"text" AS "module",
+    'Contract Salary Excess'::"text" AS "expense_type",
+        CASE
+            WHEN ("sg"."payment_channel" = 'direct'::"text") THEN true
+            WHEN ("sg"."engineer_transaction_id" IS NOT NULL) THEN COALESCE(( SELECT "site_engineer_transactions"."is_settled"
+               FROM "public"."site_engineer_transactions"
+              WHERE ("site_engineer_transactions"."id" = "sg"."engineer_transaction_id")), false)
+            ELSE false
+        END AS "is_cleared",
+        CASE
+            WHEN ("sg"."payment_channel" = 'direct'::"text") THEN "sg"."settlement_date"
+            WHEN ("sg"."engineer_transaction_id" IS NOT NULL) THEN ( SELECT ("site_engineer_transactions"."confirmed_at")::"date" AS "confirmed_at"
+               FROM "public"."site_engineer_transactions"
+              WHERE (("site_engineer_transactions"."id" = "sg"."engineer_transaction_id") AND ("site_engineer_transactions"."is_settled" = true)))
+            ELSE NULL::"date"
+        END AS "cleared_date",
+    "sg"."subcontract_id" AS "contract_id",
+    "sc"."title" AS "subcontract_title",
+    NULL::"uuid" AS "site_payer_id",
+        CASE
+            WHEN ("sg"."payer_source" IS NULL) THEN 'Own Money'::"text"
+            WHEN ("sg"."payer_source" = 'own_money'::"text") THEN 'Own Money'::"text"
+            WHEN ("sg"."payer_source" = 'amma_money'::"text") THEN 'Amma Money'::"text"
+            WHEN ("sg"."payer_source" = 'client_money'::"text") THEN 'Client Money'::"text"
+            WHEN ("sg"."payer_source" = 'other_site_money'::"text") THEN COALESCE("sg"."payer_name", 'Other Site'::"text")
+            WHEN ("sg"."payer_source" = 'custom'::"text") THEN COALESCE("sg"."payer_name", 'Other'::"text")
+            ELSE COALESCE("sg"."payer_name", 'Own Money'::"text")
+        END AS "payer_name",
+    "sg"."payment_mode",
+    NULL::"text" AS "vendor_name",
+    "sg"."proof_url" AS "receipt_url",
+    "sg"."created_by" AS "paid_by",
+    "sg"."created_by_name" AS "entered_by",
+    "sg"."created_by" AS "entered_by_user_id",
+    "sg"."settlement_reference",
+    "sg"."id" AS "settlement_group_id",
+    'settlement'::"text" AS "source_type",
+    "sg"."id" AS "source_id",
+    "sg"."created_at",
+    "sg"."is_cancelled" AS "is_deleted"
+FROM ("public"."settlement_groups" "sg"
+    LEFT JOIN "public"."subcontracts" "sc" ON (("sg"."subcontract_id" = "sc"."id")))
+WHERE (("sg"."is_cancelled" = false) AND ("sg"."payment_type" = 'excess'::"text"))
+
+UNION ALL
+
 -- Tea Shop settlements
--- Use subcontract's site_id when linked to a subcontract, otherwise use tea_shop_account's site_id
 SELECT "ts"."id",
     COALESCE("sc"."site_id", "tsa"."site_id") AS "site_id",
     "ts"."payment_date" AS "date",
@@ -298,7 +459,6 @@ WHERE (COALESCE("ts"."is_cancelled", false) = false)
 UNION ALL
 
 -- Miscellaneous expenses
--- Use subcontract's site_id when linked to a subcontract
 SELECT
     "me"."id",
     COALESCE("sc"."site_id", "me"."site_id") AS "site_id",
@@ -435,7 +595,119 @@ SELECT
     COALESCE("sp"."is_deleted", false) AS "is_deleted"
 FROM ("public"."subcontract_payments" "sp"
     JOIN "public"."subcontracts" "sc" ON (("sp"."contract_id" = "sc"."id")))
-WHERE (COALESCE("sp"."is_deleted", false) = false);
+WHERE (COALESCE("sp"."is_deleted", false) = false)
 
--- Update view comment
-COMMENT ON VIEW "public"."v_all_expenses" IS 'Unified view combining regular expenses, individual daily salary settlements, contract salary settlements, advance payments, tea shop settlements, miscellaneous expenses, and subcontract direct payments. Each settlement is shown as an individual record.';
+UNION ALL
+
+-- Rental settlements
+-- Note: These come from rental_settlements table, NOT from expenses table
+SELECT
+    "rs"."id",
+    "ro"."site_id",
+    "rs"."settlement_date" AS "date",
+    ("rs"."created_at")::"date" AS "recorded_date",
+    COALESCE("rs"."negotiated_final_amount", "rs"."balance_amount" + "rs"."total_advance_paid") AS "amount",
+    CASE
+        WHEN (("rs"."notes" IS NOT NULL) AND ("rs"."notes" <> ''::"text")) THEN
+            ('Rental - '::"text" || COALESCE("v"."shop_name", "v"."name")) || ' - '::"text" || "rs"."notes"
+        ELSE
+            'Rental - '::"text" || COALESCE("v"."shop_name", "v"."name")
+    END AS "description",
+    ( SELECT "expense_categories"."id"
+           FROM "public"."expense_categories"
+          WHERE (("expense_categories"."name")::"text" = 'Rental'::"text" AND "expense_categories"."module" = 'machinery')
+         LIMIT 1) AS "category_id",
+    'Rental'::character varying AS "category_name",
+    'machinery'::"text" AS "module",
+    'Rental'::"text" AS "expense_type",
+    CASE
+        WHEN ("rs"."payment_channel" = 'direct'::"text") THEN true
+        WHEN ("rs"."engineer_transaction_id" IS NOT NULL) THEN COALESCE((
+            SELECT "site_engineer_transactions"."is_settled"
+            FROM "public"."site_engineer_transactions"
+            WHERE ("site_engineer_transactions"."id" = "rs"."engineer_transaction_id")), false)
+        ELSE true
+    END AS "is_cleared",
+    CASE
+        WHEN ("rs"."payment_channel" = 'direct'::"text") THEN "rs"."settlement_date"
+        WHEN ("rs"."engineer_transaction_id" IS NOT NULL) THEN (
+            SELECT ("site_engineer_transactions"."confirmed_at")::"date" AS "confirmed_at"
+            FROM "public"."site_engineer_transactions"
+            WHERE (("site_engineer_transactions"."id" = "rs"."engineer_transaction_id")
+                AND ("site_engineer_transactions"."is_settled" = true)))
+        ELSE "rs"."settlement_date"
+    END AS "cleared_date",
+    "rs"."subcontract_id" AS "contract_id",
+    "sc"."title" AS "subcontract_title",
+    NULL::"uuid" AS "site_payer_id",
+    CASE
+        WHEN ("rs"."payer_source" IS NULL) THEN 'Own Money'::"text"
+        WHEN ("rs"."payer_source" = 'own_money'::"text") THEN 'Own Money'::"text"
+        WHEN ("rs"."payer_source" = 'amma_money'::"text") THEN 'Amma Money'::"text"
+        WHEN ("rs"."payer_source" = 'client_money'::"text") THEN 'Client Money'::"text"
+        WHEN ("rs"."payer_source" = 'other_site_money'::"text") THEN COALESCE("rs"."payer_name", 'Other Site'::"text")
+        WHEN ("rs"."payer_source" = 'custom'::"text") THEN COALESCE("rs"."payer_name", 'Other'::"text")
+        ELSE COALESCE("rs"."payer_name", 'Own Money'::"text")
+    END AS "payer_name",
+    "rs"."payment_mode",
+    COALESCE("v"."shop_name", "v"."name") AS "vendor_name",
+    "rs"."final_receipt_url" AS "receipt_url",
+    "rs"."settled_by" AS "paid_by",
+    "rs"."settled_by_name" AS "entered_by",
+    "rs"."settled_by" AS "entered_by_user_id",
+    "rs"."settlement_reference",
+    "rs"."settlement_group_id",
+    'rental_settlement'::"text" AS "source_type",
+    "rs"."id" AS "source_id",
+    "rs"."created_at",
+    false AS "is_deleted"
+FROM "public"."rental_settlements" "rs"
+JOIN "public"."rental_orders" "ro" ON ("rs"."rental_order_id" = "ro"."id")
+JOIN "public"."vendors" "v" ON ("ro"."vendor_id" = "v"."id")
+LEFT JOIN "public"."subcontracts" "sc" ON ("rs"."subcontract_id" = "sc"."id");
+
+-- Grant permissions on the view
+GRANT SELECT ON "public"."v_all_expenses" TO authenticated;
+GRANT SELECT ON "public"."v_all_expenses" TO service_role;
+
+-- ============================================================================
+-- PART 4: Add helpful comment
+-- ============================================================================
+
+COMMENT ON VIEW "public"."v_all_expenses" IS 'Unified view combining all expense sources. For machinery module, expense_type shows the category name (e.g., "Rental", "Fuel") instead of hardcoded "Machinery".';
+
+COMMENT ON TABLE expense_categories IS 'Expense categories by module. Note: machinery is a MODULE (enum value), not a category. Valid machinery categories include: Rental, Fuel, Maintenance. There should be NO category named "Machinery".';
+
+-- ============================================================================
+-- PART 5: Verification (optional - uncomment to run manually)
+-- ============================================================================
+
+-- Verify no duplicates remain
+-- SELECT
+--   settlement_reference,
+--   COUNT(*) as appearance_count,
+--   array_agg(source_type) as sources
+-- FROM v_all_expenses
+-- WHERE module = 'machinery'
+--   AND settlement_reference IS NOT NULL
+-- GROUP BY settlement_reference
+-- HAVING COUNT(*) > 1;
+-- -- Should return no rows
+
+-- Verify only "Rental" category exists for machinery
+-- SELECT * FROM expense_categories WHERE module = 'machinery';
+-- -- Should show only: Rental, Fuel, Maintenance (no "Rental Settlement", no "Machinery")
+
+-- Verify all rental settlements appear with correct type
+-- SELECT
+--   settlement_reference,
+--   expense_type,
+--   category_name,
+--   module,
+--   amount,
+--   vendor_name
+-- FROM v_all_expenses
+-- WHERE module = 'machinery'
+--   AND settlement_reference LIKE 'RSET-%'
+-- ORDER BY date DESC;
+-- -- All should show expense_type='Rental', category_name='Rental'

@@ -84,7 +84,7 @@ SELECT "e"."id",
     (
         CASE "e"."module"
             WHEN 'material'::"public"."expense_module" THEN 'Material'::character varying
-            WHEN 'machinery'::"public"."expense_module" THEN 'Machinery'::character varying
+            WHEN 'machinery'::"public"."expense_module" THEN COALESCE("ec"."name", 'Machinery'::character varying)
             WHEN 'general'::"public"."expense_module" THEN 'General'::character varying
             ELSE COALESCE("ec"."name", 'Other'::character varying)
         END)::"text" AS "expense_type",

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Dialog,
   DialogTitle,
@@ -70,6 +70,10 @@ export default function SettlementFormDialog({
   const [transaction, setTransaction] =
     useState<TransactionWithLaborers | null>(null);
 
+  // Submission guard to prevent double-clicks
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const submissionIdRef = useRef<string | null>(null);
+
   // Form state
   const [settlementMode, setSettlementMode] = useState<SettlementMode>("upi");
   const [proofFile, setProofFile] = useState<UploadedFile | null>(null);
@@ -131,6 +135,12 @@ export default function SettlementFormDialog({
   }, [open, transactionId, supabase]);
 
   const handleSubmit = async () => {
+    // Guard against rapid double-clicks or multiple submissions
+    if (isSubmitting || submissionIdRef.current || submitting) {
+      console.warn('[SettlementFormDialog] Submission already in progress');
+      return;
+    }
+
     if (!transaction || !userProfile) return;
 
     // Validate
@@ -139,6 +149,10 @@ export default function SettlementFormDialog({
       return;
     }
 
+    // Mark as submitting to prevent double-clicks
+    const submissionId = `${Date.now()}-${Math.random()}`;
+    submissionIdRef.current = submissionId;
+    setIsSubmitting(true);
     setSubmitting(true);
     setError(null);
 
@@ -164,7 +178,9 @@ export default function SettlementFormDialog({
       console.error("[SettlementFormDialog] Submit error:", err);
       setError(err.message || "An unexpected error occurred. Please try again.");
     } finally {
-      // ALWAYS reset submitting state to prevent button from staying locked
+      // Clean up submission guard
+      submissionIdRef.current = null;
+      setIsSubmitting(false);
       setSubmitting(false);
     }
   };
@@ -447,7 +463,7 @@ export default function SettlementFormDialog({
       <Divider />
 
       <DialogActions sx={{ p: 2 }}>
-        <Button onClick={handleClose} disabled={submitting}>
+        <Button onClick={handleClose} disabled={submitting || isSubmitting}>
           Cancel
         </Button>
         <Button
@@ -456,12 +472,13 @@ export default function SettlementFormDialog({
           disabled={
             loading ||
             submitting ||
+            isSubmitting ||
             !transaction ||
             (settlementMode === "upi" && !proofFile)
           }
-          startIcon={submitting ? <CircularProgress size={16} /> : null}
+          startIcon={(submitting || isSubmitting) ? <CircularProgress size={16} /> : null}
         >
-          {submitting ? "Submitting..." : "Submit Settlement"}
+          {(submitting || isSubmitting) ? "Submitting..." : "Submit Settlement"}
         </Button>
       </DialogActions>
     </Dialog>

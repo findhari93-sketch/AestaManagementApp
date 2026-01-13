@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import {
   Dialog,
   DialogTitle,
@@ -147,6 +147,10 @@ export default function UnifiedSettlementDialog({
   const [loading, setLoading] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Submission guard to prevent double-clicks
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const submissionIdRef = useRef<string | null>(null);
 
   // Fetch site engineers when dialog opens
   useEffect(() => {
@@ -385,6 +389,12 @@ export default function UnifiedSettlementDialog({
 
   // Submit settlement
   const handleSubmit = async () => {
+    // Guard against rapid double-clicks or multiple submissions
+    if (isSubmitting || submissionIdRef.current || processing) {
+      console.warn('[UnifiedSettlementDialog] Submission already in progress');
+      return;
+    }
+
     if (!config || !selectedSite?.id || !userProfile) return;
 
     // Validation
@@ -421,6 +431,10 @@ export default function UnifiedSettlementDialog({
       return;
     }
 
+    // Mark as submitting to prevent double-clicks
+    const submissionId = `${Date.now()}-${Math.random()}`;
+    submissionIdRef.current = submissionId;
+    setIsSubmitting(true);
     setProcessing(true);
     setError(null);
 
@@ -550,6 +564,9 @@ export default function UnifiedSettlementDialog({
       console.error("Settlement error:", err);
       setError(err.message || "Failed to process settlement");
     } finally {
+      // Clean up submission guard
+      submissionIdRef.current = null;
+      setIsSubmitting(false);
       setProcessing(false);
     }
   };
@@ -1116,7 +1133,7 @@ export default function UnifiedSettlementDialog({
       <Divider />
 
       <DialogActions sx={{ p: 2 }}>
-        <Button onClick={onClose} disabled={processing}>
+        <Button onClick={onClose} disabled={processing || isSubmitting}>
           Cancel
         </Button>
         <Button
@@ -1125,13 +1142,14 @@ export default function UnifiedSettlementDialog({
           onClick={handleSubmit}
           disabled={
             processing ||
+            isSubmitting ||
             calculatedAmounts.selected === 0 ||
             (paymentChannel === "engineer_wallet" && !selectedEngineerId) ||
             ((paymentMode === "upi" || paymentMode === "net_banking") && !proofFile)
           }
-          startIcon={processing ? <CircularProgress size={20} /> : <PaymentIcon />}
+          startIcon={(processing || isSubmitting) ? <CircularProgress size={20} /> : <PaymentIcon />}
         >
-          {processing
+          {(processing || isSubmitting)
             ? "Processing..."
             : `Settle Rs.${calculatedAmounts.selected.toLocaleString("en-IN")}`}
         </Button>

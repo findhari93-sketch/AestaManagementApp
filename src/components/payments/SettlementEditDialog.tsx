@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   Dialog,
   DialogTitle,
@@ -51,7 +51,7 @@ export default function SettlementEditDialog({
   onSuccess,
 }: SettlementEditDialogProps) {
   const { selectedSite } = useSite();
-  const supabase = useMemo(() => createClient(), []);
+  const supabase = createClient();
 
   // Form state
   const [subcontractId, setSubcontractId] = useState<string | null>(null);

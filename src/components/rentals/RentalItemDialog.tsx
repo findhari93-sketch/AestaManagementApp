@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import {
   Dialog,
   DialogTitle,
@@ -68,7 +68,7 @@ export default function RentalItemDialog({
   const { data: categories = [] } = useRentalCategories();
   const createItem = useCreateRentalItem();
   const updateItem = useUpdateRentalItem();
-  const supabase = useMemo(() => createClient(), []);
+  const supabase = createClient();
 
   const [error, setError] = useState("");
   const [formData, setFormData] = useState<RentalItemFormData>({
