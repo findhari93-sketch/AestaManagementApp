@@ -11,13 +11,12 @@ import { createClient } from "@/lib/supabase/client";
  * doesn't trigger session refresh. This hook ensures the session is
  * validated and refreshed when navigating between pages.
  *
- * Redirects to login page if session is expired or times out.
+ * Only redirects to login if session is actually invalid, not on timeouts.
  */
 export function useSessionRefresh() {
   const pathname = usePathname();
   const lastRefreshRef = useRef<number>(0);
   const DEBOUNCE_MS = 2000; // Don't refresh more than once every 2 seconds
-  const SESSION_TIMEOUT = 5000; // 5 seconds
 
   useEffect(() => {
     const now = Date.now();
@@ -27,27 +26,15 @@ export function useSessionRefresh() {
       return;
     }
 
-    let didTimeout = false;
-
     const refreshSession = async () => {
       // Get singleton client inside effect to avoid dependency issues
       const supabase = createClient();
 
-      // Add timeout to prevent hanging and redirect on timeout
-      const timeoutId = setTimeout(() => {
-        didTimeout = true;
-        console.warn("Session refresh timed out - redirecting to login");
-        window.location.href = "/login?session_expired=true";
-      }, SESSION_TIMEOUT);
-
       try {
         const { data: { session }, error } = await supabase.auth.getSession();
-        clearTimeout(timeoutId);
-
-        if (didTimeout) return; // Already redirecting
 
         if (error || !session) {
-          // Session invalid - redirect to login
+          // Session actually invalid - redirect to login
           console.warn("Session invalid - redirecting to login");
           window.location.href = "/login?session_expired=true";
           return;
@@ -69,11 +56,9 @@ export function useSessionRefresh() {
 
         lastRefreshRef.current = Date.now();
       } catch (error) {
-        clearTimeout(timeoutId);
-        if (!didTimeout) {
-          console.error("Session refresh error:", error);
-          window.location.href = "/login?session_expired=true";
-        }
+        // Network errors or slow responses should not log the user out
+        // They may still have a valid session - just the check failed
+        console.warn("Session refresh check failed (network issue?):", error);
       }
     };
 
