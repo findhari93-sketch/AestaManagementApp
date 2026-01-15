@@ -2,7 +2,8 @@
 
 import { createContext, useContext, useEffect, useState, useCallback, useRef } from "react";
 import { User as SupabaseUser } from "@supabase/supabase-js";
-import { createClient, startSessionRefreshTimer, stopSessionRefreshTimer } from "@/lib/supabase/client";
+import { createClient } from "@/lib/supabase/client";
+import { initializeSessionManager, stopSessionManager } from "@/lib/auth/sessionManager";
 import { User } from "@/types/database.types";
 
 interface AuthContextType {
@@ -85,8 +86,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         if (session?.user) {
           await fetchUserProfile(session.user.id);
-          // Start session refresh timer to keep session alive during long form fills
-          startSessionRefreshTimer();
+          // Initialize session manager to keep session alive during long form fills
+          initializeSessionManager();
         }
       } catch (error) {
         console.error("[AuthContext] Error initializing auth:", error);
@@ -116,12 +117,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         } else {
           await fetchUserProfile(session.user.id);
         }
-        // Start session refresh timer when user signs in
-        startSessionRefreshTimer();
+        // Initialize session manager when user signs in
+        initializeSessionManager();
       } else {
         setUserProfile(null);
-        // Stop session refresh timer when user signs out
-        stopSessionRefreshTimer();
+        // Stop session manager when user signs out
+        stopSessionManager();
       }
 
       setLoading(false);
@@ -130,8 +131,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => {
       mounted = false;
       subscription.unsubscribe();
-      // Cleanup timer on unmount
-      stopSessionRefreshTimer();
+      // Cleanup session manager on unmount
+      stopSessionManager();
     };
   }, [supabase, fetchUserProfile]);
 

@@ -6,7 +6,9 @@ import React, {
   useMemo,
   useRef,
   useCallback,
+  Suspense,
 } from "react";
+import dynamic from "next/dynamic";
 import {
   Box,
   Button,
@@ -79,15 +81,39 @@ import {
   Groups as GroupsIcon,
 } from "@mui/icons-material";
 import AttendanceDrawer from "@/components/attendance/AttendanceDrawer";
-import HolidayConfirmDialog, { type SiteHoliday } from "@/components/attendance/HolidayConfirmDialog";
-import UnifiedSettlementDialog from "@/components/settlement/UnifiedSettlementDialog";
-import TeaShopEntryDialog from "@/components/tea-shop/TeaShopEntryDialog";
-import TeaShopEntryModeDialog from "@/components/tea-shop/TeaShopEntryModeDialog";
-import GroupTeaShopEntryDialog from "@/components/tea-shop/GroupTeaShopEntryDialog";
+import { type SiteHoliday } from "@/components/attendance/HolidayConfirmDialog";
+
+// OPTIMIZATION: Lazy load heavy dialog components (code splitting)
+// These dialogs are only shown when user triggers specific actions
+const HolidayConfirmDialog = dynamic(
+  () => import("@/components/attendance/HolidayConfirmDialog"),
+  { ssr: false }
+);
+const UnifiedSettlementDialog = dynamic(
+  () => import("@/components/settlement/UnifiedSettlementDialog"),
+  { ssr: false }
+);
+const TeaShopEntryDialog = dynamic(
+  () => import("@/components/tea-shop/TeaShopEntryDialog"),
+  { ssr: false }
+);
+const TeaShopEntryModeDialog = dynamic(
+  () => import("@/components/tea-shop/TeaShopEntryModeDialog"),
+  { ssr: false }
+);
+const GroupTeaShopEntryDialog = dynamic(
+  () => import("@/components/tea-shop/GroupTeaShopEntryDialog"),
+  { ssr: false }
+);
 import { useSiteGroup } from "@/hooks/queries/useSiteGroups";
 import { useTeaShopForGroup } from "@/hooks/queries/useCompanyTeaShops";
 import type { SiteGroupWithSites } from "@/types/material.types";
-import PaymentDialog from "@/components/payments/PaymentDialog";
+
+// More lazy-loaded dialogs
+const PaymentDialog = dynamic(
+  () => import("@/components/payments/PaymentDialog"),
+  { ssr: false }
+);
 import type { UnifiedSettlementConfig, SettlementRecord } from "@/types/settlement.types";
 import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
 import AuditAvatarGroup from "@/components/common/AuditAvatarGroup";

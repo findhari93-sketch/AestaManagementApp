@@ -20,7 +20,7 @@ import {
   Area,
   ComposedChart,
 } from 'recharts'
-import { format, parseISO } from 'date-fns'
+import dayjs from 'dayjs'
 
 interface PriceDataPoint {
   id: string
@@ -56,8 +56,8 @@ export default function PriceHistoryChart({
       .sort((a, b) => new Date(a.effective_date).getTime() - new Date(b.effective_date).getTime())
       .map((point) => ({
         ...point,
-        date: format(parseISO(point.effective_date), 'dd MMM'),
-        fullDate: format(parseISO(point.effective_date), 'dd MMM yyyy'),
+        date: dayjs(point.effective_date).format('DD MMM'),
+        fullDate: dayjs(point.effective_date).format('DD MMM YYYY'),
         price: point.price,
         changePercent: point.change_percentage,
       }))

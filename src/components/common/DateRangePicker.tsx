@@ -20,21 +20,33 @@ import {
 } from "@mui/icons-material";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { DateRange, Range, RangeKeyDict } from "react-date-range";
-import {
-  startOfDay,
-  endOfDay,
-  subDays,
-  startOfWeek,
-  endOfWeek,
-  startOfMonth,
-  endOfMonth,
-  subMonths,
-  format,
-  addDays,
-  differenceInDays,
-} from "date-fns";
+import dayjs from "dayjs";
 import "react-date-range/dist/styles.css";
 import "react-date-range/dist/theme/default.css";
+
+// OPTIMIZED: Replaced date-fns with dayjs to reduce bundle size
+// Helper functions that match date-fns API but use dayjs internally
+const startOfDay = (date: Date): Date => dayjs(date).startOf("day").toDate();
+const endOfDay = (date: Date): Date => dayjs(date).endOf("day").toDate();
+const subDays = (date: Date, days: number): Date => dayjs(date).subtract(days, "day").toDate();
+const addDays = (date: Date, days: number): Date => dayjs(date).add(days, "day").toDate();
+const startOfWeek = (date: Date): Date => dayjs(date).startOf("week").toDate();
+const endOfWeek = (date: Date): Date => dayjs(date).endOf("week").toDate();
+const startOfMonth = (date: Date): Date => dayjs(date).startOf("month").toDate();
+const endOfMonth = (date: Date): Date => dayjs(date).endOf("month").toDate();
+const subMonths = (date: Date, months: number): Date => dayjs(date).subtract(months, "month").toDate();
+const format = (date: Date, formatStr: string): string => {
+  // Convert date-fns format tokens to dayjs format tokens
+  const dayjsFormat = formatStr
+    .replace(/yyyy/g, "YYYY")
+    .replace(/yy/g, "YY")
+    .replace(/dd/g, "DD")
+    .replace(/d(?!a)/g, "D") // 'd' but not 'da' (day)
+    .replace(/MMM/g, "MMM")
+    .replace(/MM/g, "MM")
+    .replace(/M(?!M)/g, "M");
+  return dayjs(date).format(dayjsFormat);
+};
 
 interface DateRangePickerProps {
   startDate: Date | null;

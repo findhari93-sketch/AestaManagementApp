@@ -44,6 +44,8 @@ import {
 } from "@/lib/services/notificationService";
 import { SettlementMode } from "@/types/settlement.types";
 import dayjs from "dayjs";
+import { useOptimisticMutation } from "@/hooks/mutations/useOptimisticMutation";
+import { useQueryClient } from "@tanstack/react-query";
 
 interface SettlementFormDialogProps {
   open: boolean;
@@ -65,19 +67,62 @@ export default function SettlementFormDialog({
   const [supabase] = useState(() => createClient());
 
   const [loading, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [transaction, setTransaction] =
     useState<TransactionWithLaborers | null>(null);
-
-  // Submission guard to prevent double-clicks
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const submissionIdRef = useRef<string | null>(null);
 
   // Form state
   const [settlementMode, setSettlementMode] = useState<SettlementMode>("upi");
   const [proofFile, setProofFile] = useState<UploadedFile | null>(null);
   const [reason, setReason] = useState("");
+
+  // Settlement mutation with optimistic updates
+  const queryClient = useQueryClient();
+  const settlementMutation = useOptimisticMutation<
+    { error?: { message: string } },
+    Error,
+    {
+      transactionId: string;
+      settlementMode: SettlementMode;
+      userId: string;
+      userName: string;
+      proofUrl?: string;
+      reason?: string;
+      siteName?: string;
+    },
+    unknown
+  >({
+    mutationFn: async (params) => {
+      const result = await submitSettlement(
+        supabase,
+        params.transactionId,
+        params.settlementMode,
+        params.userId,
+        params.userName,
+        params.proofUrl,
+        params.reason,
+        params.siteName
+      );
+
+      // Transform error format to match mutation expectations
+      if (result.error) {
+        throw new Error(result.error.message);
+      }
+
+      return {} as any; // Success - return empty object
+    },
+    // Query keys that will be invalidated on success
+    queryKey: ["transactions", selectedSite?.id],
+    successMessage: "Settlement submitted successfully!",
+    errorMessage: "Failed to submit settlement",
+    onSuccess: () => {
+      onSuccess?.();
+      handleClose();
+    },
+    onError: (err) => {
+      setError(err.message || "Failed to submit settlement");
+    },
+  });
 
   // Fetch transaction details on open
   useEffect(() => {
@@ -135,8 +180,8 @@ export default function SettlementFormDialog({
   }, [open, transactionId, supabase]);
 
   const handleSubmit = async () => {
-    // Guard against rapid double-clicks or multiple submissions
-    if (isSubmitting || submissionIdRef.current || submitting) {
+    // Guard against rapid double-clicks (React Query also handles this)
+    if (settlementMutation.isPending) {
       console.warn('[SettlementFormDialog] Submission already in progress');
       return;
     }
@@ -149,40 +194,18 @@ export default function SettlementFormDialog({
       return;
     }
 
-    // Mark as submitting to prevent double-clicks
-    const submissionId = `${Date.now()}-${Math.random()}`;
-    submissionIdRef.current = submissionId;
-    setIsSubmitting(true);
-    setSubmitting(true);
     setError(null);
 
-    try {
-      const { error } = await submitSettlement(
-        supabase,
-        transactionId,
-        settlementMode,
-        userProfile.id,
-        userProfile.name || userProfile.email,
-        proofFile?.url,
-        reason || undefined,
-        selectedSite?.name
-      );
-
-      if (error) {
-        setError(error.message || "Failed to submit settlement");
-      } else {
-        onSuccess?.();
-        handleClose();
-      }
-    } catch (err: any) {
-      console.error("[SettlementFormDialog] Submit error:", err);
-      setError(err.message || "An unexpected error occurred. Please try again.");
-    } finally {
-      // Clean up submission guard
-      submissionIdRef.current = null;
-      setIsSubmitting(false);
-      setSubmitting(false);
-    }
+    // Submit via mutation - handles loading state, retries, errors automatically
+    settlementMutation.mutate({
+      transactionId,
+      settlementMode,
+      userId: userProfile.id,
+      userName: userProfile.name || userProfile.email,
+      proofUrl: proofFile?.url,
+      reason: reason || undefined,
+      siteName: selectedSite?.name,
+    });
   };
 
   const handleClose = () => {
@@ -463,7 +486,7 @@ export default function SettlementFormDialog({
       <Divider />
 
       <DialogActions sx={{ p: 2 }}>
-        <Button onClick={handleClose} disabled={submitting || isSubmitting}>
+        <Button onClick={handleClose} disabled={settlementMutation.isPending}>
           Cancel
         </Button>
         <Button
@@ -471,14 +494,13 @@ export default function SettlementFormDialog({
           onClick={handleSubmit}
           disabled={
             loading ||
-            submitting ||
-            isSubmitting ||
+            settlementMutation.isPending ||
             !transaction ||
             (settlementMode === "upi" && !proofFile)
           }
-          startIcon={(submitting || isSubmitting) ? <CircularProgress size={16} /> : null}
+          startIcon={settlementMutation.isPending ? <CircularProgress size={16} /> : null}
         >
-          {(submitting || isSubmitting) ? "Submitting..." : "Submit Settlement"}
+          {settlementMutation.isPending ? "Submitting..." : "Submit Settlement"}
         </Button>
       </DialogActions>
     </Dialog>

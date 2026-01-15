@@ -329,34 +329,42 @@ export async function recordWalletSpending(
 
     if (txError) throw txError;
 
-    // Create batch usage records and update remaining balances
-    for (const allocation of config.batchAllocations) {
-      // Create usage record
-      const { error: usageError } = await (supabase
-        .from("engineer_wallet_batch_usage") as any)
-        .insert({
-          transaction_id: txData.id,
-          batch_transaction_id: allocation.batchId,
-          amount_used: allocation.amount,
-        });
+    // Batch insert usage records and update balances in parallel
+    // 1. Prepare all usage records for batch insert
+    const usageRecords = config.batchAllocations.map((allocation) => ({
+      transaction_id: txData.id,
+      batch_transaction_id: allocation.batchId,
+      amount_used: allocation.amount,
+    }));
 
-      if (usageError) {
-        console.error("Error creating batch usage record:", usageError);
-      }
+    // 2. Prepare all balance updates
+    const balanceUpdates = config.batchAllocations
+      .map((allocation) => {
+        const batch = batches.find((b) => b.id === allocation.batchId);
+        if (!batch) return null;
+        return {
+          id: allocation.batchId,
+          remaining_balance: batch.remaining_balance - allocation.amount,
+        };
+      })
+      .filter(Boolean) as { id: string; remaining_balance: number }[];
 
-      // Update remaining balance on the batch
-      const batch = batches.find((b) => b.id === allocation.batchId);
-      if (batch) {
-        const newBalance = batch.remaining_balance - allocation.amount;
-        const { error: updateError } = await supabase
-          .from("site_engineer_transactions")
-          .update({ remaining_balance: newBalance })
-          .eq("id", allocation.batchId);
+    // 3. Execute both operations in parallel
+    const [usageResult, balanceResult] = await Promise.all([
+      // Batch insert usage records
+      (supabase.from("engineer_wallet_batch_usage") as any).insert(usageRecords),
+      // Batch update balances using upsert
+      supabase
+        .from("site_engineer_transactions")
+        .upsert(balanceUpdates, { onConflict: "id" }),
+    ]);
 
-        if (updateError) {
-          console.error("Error updating batch balance:", updateError);
-        }
-      }
+    if (usageResult.error) {
+      console.error("Error creating batch usage records:", usageResult.error);
+    }
+
+    if (balanceResult.error) {
+      console.error("Error updating batch balances:", balanceResult.error);
     }
 
     return {
@@ -468,34 +476,42 @@ export async function recordReturn(
 
     if (txError) throw txError;
 
-    // Create batch usage records and update remaining balances
-    for (const allocation of config.batchAllocations) {
-      // Create usage record
-      const { error: usageError } = await (supabase
-        .from("engineer_wallet_batch_usage") as any)
-        .insert({
-          transaction_id: txData.id,
-          batch_transaction_id: allocation.batchId,
-          amount_used: allocation.amount,
-        });
+    // Batch insert usage records and update balances in parallel
+    // 1. Prepare all usage records for batch insert
+    const usageRecords = config.batchAllocations.map((allocation) => ({
+      transaction_id: txData.id,
+      batch_transaction_id: allocation.batchId,
+      amount_used: allocation.amount,
+    }));
 
-      if (usageError) {
-        console.error("Error creating batch usage record:", usageError);
-      }
+    // 2. Prepare all balance updates
+    const balanceUpdates = config.batchAllocations
+      .map((allocation) => {
+        const batch = batches.find((b) => b.id === allocation.batchId);
+        if (!batch) return null;
+        return {
+          id: allocation.batchId,
+          remaining_balance: batch.remaining_balance - allocation.amount,
+        };
+      })
+      .filter(Boolean) as { id: string; remaining_balance: number }[];
 
-      // Update remaining balance on the batch
-      const batch = batches.find((b) => b.id === allocation.batchId);
-      if (batch) {
-        const newBalance = batch.remaining_balance - allocation.amount;
-        const { error: updateError } = await supabase
-          .from("site_engineer_transactions")
-          .update({ remaining_balance: newBalance })
-          .eq("id", allocation.batchId);
+    // 3. Execute both operations in parallel
+    const [usageResult, balanceResult] = await Promise.all([
+      // Batch insert usage records
+      (supabase.from("engineer_wallet_batch_usage") as any).insert(usageRecords),
+      // Batch update balances using upsert
+      supabase
+        .from("site_engineer_transactions")
+        .upsert(balanceUpdates, { onConflict: "id" }),
+    ]);
 
-        if (updateError) {
-          console.error("Error updating batch balance:", updateError);
-        }
-      }
+    if (usageResult.error) {
+      console.error("Error creating batch usage records:", usageResult.error);
+    }
+
+    if (balanceResult.error) {
+      console.error("Error updating batch balances:", balanceResult.error);
     }
 
     return {
@@ -565,43 +581,48 @@ export async function getPendingReimbursements(
 
 /**
  * Settle reimbursement(s) for an engineer's own money expenses
+ * OPTIMIZED: Uses batch insert and batch update instead of N+1 queries
  */
 export async function settleReimbursement(
   supabase: SupabaseClient,
   config: SettleReimbursementConfig
 ): Promise<WalletOperationResult> {
   try {
-    // Create reimbursement records for each expense
-    for (const expenseId of config.expenseTransactionIds) {
-      const { error: reimbError } = await (supabase
-        .from("engineer_reimbursements") as any)
-        .insert({
-          expense_transaction_id: expenseId,
-          engineer_id: config.engineerId,
-          amount: config.totalAmount / config.expenseTransactionIds.length, // Split equally
-          payer_source: config.payerSource,
-          payer_name: config.payerName || null,
-          payment_mode: config.paymentMode,
-          proof_url: config.proofUrl || null,
-          settled_date: config.settledDate || dayjs().format("YYYY-MM-DD"),
-          settled_by_user_id: config.userId,
-          settled_by_name: config.userName,
-          notes: config.notes || null,
-        });
+    const amountPerExpense = config.totalAmount / config.expenseTransactionIds.length;
+    const settledDate = config.settledDate || dayjs().format("YYYY-MM-DD");
 
-      if (reimbError) {
-        console.error("Error creating reimbursement record:", reimbError);
-      }
+    // OPTIMIZED: Batch create all reimbursement records in single insert
+    const reimbursementRecords = config.expenseTransactionIds.map((expenseId) => ({
+      expense_transaction_id: expenseId,
+      engineer_id: config.engineerId,
+      amount: amountPerExpense,
+      payer_source: config.payerSource,
+      payer_name: config.payerName || null,
+      payment_mode: config.paymentMode,
+      proof_url: config.proofUrl || null,
+      settled_date: settledDate,
+      settled_by_user_id: config.userId,
+      settled_by_name: config.userName,
+      notes: config.notes || null,
+    }));
 
-      // Mark the original transaction as settled
-      const { error: updateError } = await supabase
+    // OPTIMIZED: Execute batch insert and batch update in parallel
+    const [reimbResult, updateResult] = await Promise.all([
+      // Batch insert all reimbursement records
+      (supabase.from("engineer_reimbursements") as any).insert(reimbursementRecords),
+      // Batch update all transactions to is_settled=true
+      supabase
         .from("site_engineer_transactions")
         .update({ is_settled: true })
-        .eq("id", expenseId);
+        .in("id", config.expenseTransactionIds),
+    ]);
 
-      if (updateError) {
-        console.error("Error updating transaction settled status:", updateError);
-      }
+    if (reimbResult.error) {
+      console.error("Error creating reimbursement records:", reimbResult.error);
+    }
+
+    if (updateResult.error) {
+      console.error("Error updating transaction settled status:", updateResult.error);
     }
 
     return { success: true };

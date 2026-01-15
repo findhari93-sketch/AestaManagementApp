@@ -84,6 +84,7 @@ import ActiveSectionChip from "@/components/layout/ActiveSectionChip";
 import SettlementDialogManager from "@/components/settlement/SettlementDialogManager";
 import ThemeToggle from "@/components/common/ThemeToggle";
 import DateRangePicker from "@/components/common/DateRangePicker";
+import ManualRefreshButton from "@/components/common/ManualRefreshButton";
 import { useDateRange } from "@/contexts/DateRangeContext";
 
 const drawerWidth = 260;
@@ -1030,104 +1031,8 @@ export default function MainLayout({
             />
           </Box>
 
-          {/* Sync Status Indicator */}
-          <Tooltip
-            title={
-              <Box>
-                <Typography variant="caption" fontWeight={600}>
-                  {syncStatus.status === "syncing" && "Syncing data..."}
-                  {syncStatus.status === "success" &&
-                    "Data synced successfully"}
-                  {syncStatus.status === "error" &&
-                    "Sync error - click to retry"}
-                  {syncStatus.status === "idle" && "Click to refresh data"}
-                </Typography>
-                {syncStatus.lastSyncTimeFormatted && (
-                  <Typography
-                    variant="caption"
-                    display="block"
-                    sx={{ mt: 0.5, opacity: 0.8 }}
-                  >
-                    Last updated: {syncStatus.lastSyncTimeFormatted}
-                  </Typography>
-                )}
-              </Box>
-            }
-          >
-            <Box
-              sx={{
-                display: "flex",
-                alignItems: "center",
-                gap: 0.5,
-                px: { xs: 0.5, sm: 1.5 },
-                py: 0.5,
-                borderRadius: 2,
-                bgcolor: "action.hover",
-                cursor: "pointer",
-                transition: "all 0.2s",
-                "&:hover": {
-                  bgcolor: "action.selected",
-                },
-              }}
-              onClick={async () => {
-                if (syncStatus.isRefreshing) return;
-                const result = await syncStatus.refresh();
-                setSnackbar({
-                  open: true,
-                  message: result.message,
-                  severity: result.success ? "success" : "error",
-                });
-              }}
-            >
-              <IconButton
-                size="small"
-                disabled={syncStatus.isRefreshing}
-                sx={{
-                  p: 0.5,
-                  color:
-                    syncStatus.status === "syncing"
-                      ? "primary.main"
-                      : syncStatus.status === "success"
-                      ? "success.main"
-                      : syncStatus.status === "error"
-                      ? "error.main"
-                      : "text.secondary",
-                  animation: syncStatus.isRefreshing
-                    ? "spin 1s linear infinite"
-                    : "none",
-                  "@keyframes spin": {
-                    "0%": { transform: "rotate(0deg)" },
-                    "100%": { transform: "rotate(360deg)" },
-                  },
-                }}
-              >
-                {syncStatus.status === "syncing" && (
-                  <SyncIcon fontSize="small" />
-                )}
-                {syncStatus.status === "success" && (
-                  <CheckCircleIcon fontSize="small" />
-                )}
-                {syncStatus.status === "error" && (
-                  <ErrorIcon fontSize="small" />
-                )}
-                {syncStatus.status === "idle" && (
-                  <RefreshIcon fontSize="small" />
-                )}
-              </IconButton>
-              {!isMobile && syncStatus.timeSinceLastSync && (
-                <Typography
-                  variant="caption"
-                  sx={{
-                    fontSize: "0.7rem",
-                    color: "text.secondary",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {syncStatus.timeSinceLastSync}
-                </Typography>
-              )}
-            </Box>
-          </Tooltip>
+          {/* Manual Refresh Button */}
+          <ManualRefreshButton />
 
           {/* Notification Bell */}
           <Box sx={{ ml: { xs: 0.5, sm: 1 } }}>

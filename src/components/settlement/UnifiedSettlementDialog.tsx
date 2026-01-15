@@ -56,14 +56,6 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSite } from "@/contexts/SiteContext";
-import {
-  createSalaryExpense,
-  createPaymentSettlementNotification,
-} from "@/lib/services/notificationService";
-import {
-  generateWhatsAppUrl,
-  generateSettlementNotificationMessage,
-} from "@/lib/formatters";
 import FileUploader, { UploadedFile } from "@/components/common/FileUploader";
 import SubcontractLinkSelector from "@/components/payments/SubcontractLinkSelector";
 import PayerSourceSelector from "./PayerSourceSelector";
@@ -77,11 +69,13 @@ import type {
 } from "@/types/settlement.types";
 import type { PaymentMode, PaymentChannel } from "@/types/payment.types";
 import type { BatchAllocation } from "@/types/wallet.types";
-import { recordWalletSpending } from "@/lib/services/walletService";
 import {
   processSettlement,
-  processWeeklySettlement,
+  type SettlementConfig,
+  type SettlementResult,
 } from "@/lib/services/settlementService";
+import { useOptimisticMutation } from "@/hooks/mutations/useOptimisticMutation";
+import { useQueryClient } from "@tanstack/react-query";
 
 // Slide up transition for mobile fullscreen
 const SlideTransition = React.forwardRef(function Transition(
@@ -145,12 +139,32 @@ export default function UnifiedSettlementDialog({
   // Data state
   const [engineers, setEngineers] = useState<Engineer[]>([]);
   const [loading, setLoading] = useState(false);
-  const [processing, setProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Submission guard to prevent double-clicks
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const submissionIdRef = useRef<string | null>(null);
+  // Settlement mutation with optimistic updates
+  const queryClient = useQueryClient();
+  const settlementMutation = useOptimisticMutation<
+    SettlementResult,
+    Error,
+    SettlementConfig,
+    unknown
+  >({
+    mutationFn: async (config: SettlementConfig) => {
+      return await processSettlement(supabase, config);
+    },
+    // Query keys that will be invalidated on success
+    queryKey: ["settlements", selectedSite?.id],
+    successMessage: "Settlement processed successfully!",
+    errorMessage: "Failed to process settlement",
+    onSuccess: () => {
+      clearFormState();
+      onSuccess?.();
+      onClose();
+    },
+    onError: (error) => {
+      setError(error.message || "Failed to process settlement");
+    },
+  });
 
   // Fetch site engineers when dialog opens
   useEffect(() => {
@@ -389,8 +403,8 @@ export default function UnifiedSettlementDialog({
 
   // Submit settlement
   const handleSubmit = async () => {
-    // Guard against rapid double-clicks or multiple submissions
-    if (isSubmitting || submissionIdRef.current || processing) {
+    // Guard against rapid double-clicks (React Query also handles this)
+    if (settlementMutation.isPending) {
       console.warn('[UnifiedSettlementDialog] Submission already in progress');
       return;
     }
@@ -431,283 +445,36 @@ export default function UnifiedSettlementDialog({
       return;
     }
 
-    // Mark as submitting to prevent double-clicks
-    const submissionId = `${Date.now()}-${Math.random()}`;
-    submissionIdRef.current = submissionId;
-    setIsSubmitting(true);
-    setProcessing(true);
     setError(null);
 
-    try {
-      const paymentDate = dayjs().format("YYYY-MM-DD");
-      let engineerTransactionId: string | null = null;
-
-      // 1. If via engineer wallet, record spending transaction (deducts from wallet batches)
-      if (paymentChannel === "engineer_wallet") {
-        // Use walletService for proper batch tracking
-        // Map payment mode for wallet service (net_banking -> bank_transfer for compatibility)
-        const walletPaymentMode = paymentMode === "net_banking" ? "bank_transfer" : paymentMode;
-        const spendingResult = await recordWalletSpending(supabase, {
-          engineerId: selectedEngineerId,
-          amount: calculatedAmounts.selected,
-          siteId: selectedSite.id,
-          description: engineerReference || `Salary settlement`,
-          recipientType: "laborer",
-          paymentMode: walletPaymentMode as any,
-          moneySource: "wallet",
-          batchAllocations: batchAllocations,
-          subcontractId: subcontractId || undefined,
-          proofUrl: proofFile?.url || undefined,
-          notes: notes || undefined,
-          transactionDate: paymentDate,
-          userName: userProfile.name || "Unknown",
-          userId: userProfile.id,
-        });
-
-        if (!spendingResult.success) {
-          throw new Error(spendingResult.error || "Failed to record wallet spending");
-        }
-
-        engineerTransactionId = spendingResult.transactionId || null;
-
-        // Get engineer details for notification
-        const selectedEngineer = engineers.find((e) => e.id === selectedEngineerId);
-
-        // Send in-app notification to engineer
-        const dailyCount = config.context === "daily_single"
-          ? selectedRecords.size
-          : config.records.filter((r) => r.sourceType === "daily" && !r.isPaid).length;
-        const marketCount = config.context === "daily_single"
-          ? 0
-          : config.records.filter((r) => r.sourceType === "market" && !r.isPaid).length;
-
-        if (engineerTransactionId) {
-          await createPaymentSettlementNotification(
-            supabase,
-            engineerTransactionId,
-            selectedEngineerId,
-            calculatedAmounts.selected,
-            { dailyCount, marketCount, totalAmount: calculatedAmounts.selected },
-            selectedSite.name
-          );
-
-          // Send WhatsApp notification with deep link
-          if (selectedEngineer) {
-            // Fetch engineer's phone number
-            const { data: userData } = await supabase
-              .from("users")
-              .select("phone")
-              .eq("id", selectedEngineerId)
-              .single();
-
-            if (userData?.phone) {
-              const whatsappMessage = generateSettlementNotificationMessage({
-                engineerName: selectedEngineer.name,
-                amount: calculatedAmounts.selected,
-                dailyCount,
-                marketCount,
-                siteName: selectedSite.name || "Site",
-                transactionId: engineerTransactionId,
-              });
-              const whatsappUrl = generateWhatsAppUrl(userData.phone, whatsappMessage);
-              if (whatsappUrl) {
-                window.open(whatsappUrl, "_blank");
-              }
-            }
-          }
-        }
-      }
-
-      // 2. Process records based on context
-      if (config.context === "daily_single") {
-        await processDailyRecords(paymentDate, engineerTransactionId);
-      } else {
-        await processWeeklyRecords(paymentDate, engineerTransactionId);
-      }
-
-      // 3. Create salary expense for direct payments
-      if (paymentChannel === "direct") {
-        const recordDate = config.date || config.dateRange?.from || paymentDate;
-        const laborerCount = config.context === "daily_single"
-          ? selectedRecords.size
-          : config.records.filter((r) => !r.isPaid).length;
-
-        const expenseResult = await createSalaryExpense(supabase, {
-          siteId: selectedSite.id,
-          amount: calculatedAmounts.selected,
-          date: recordDate,
-          description: `Laborer salary (${laborerCount} laborers)${notes ? ` - ${notes}` : ""}`,
-          paymentMode,
-          paidBy: userProfile.name || "Unknown",
-          paidByUserId: userProfile.id,
-          proofUrl: proofFile?.url || null,
-          subcontractId,
-          isCleared: true,
-          paymentSource: "direct",
-        });
-
-        if (expenseResult.error) {
-          console.warn("Failed to create salary expense:", expenseResult.error.message);
-        }
-
-        // Link expense to attendance records
-        if (expenseResult.expenseId) {
-          await linkExpenseToRecords(expenseResult.expenseId);
-        }
-      }
-
-      // Clear saved form state on successful settlement
-      clearFormState();
-      onSuccess?.();
-      onClose();
-    } catch (err: any) {
-      console.error("Settlement error:", err);
-      setError(err.message || "Failed to process settlement");
-    } finally {
-      // Clean up submission guard
-      submissionIdRef.current = null;
-      setIsSubmitting(false);
-      setProcessing(false);
-    }
-  };
-
-  // Process daily records
-  const processDailyRecords = async (
-    paymentDate: string,
-    engineerTransactionId: string | null
-  ) => {
-    if (!config) return;
-
+    // Build settlement configuration
     const selectedIds = Array.from(selectedRecords);
-    const dailyIds = config.records
-      .filter((r) => selectedIds.includes(r.id) && r.sourceType === "daily")
-      .map((r) => r.sourceId);
-    const marketIds = config.records
-      .filter((r) => selectedIds.includes(r.id) && r.sourceType === "market")
-      .map((r) => r.sourceId);
+    const settlementRecords: SettlementRecord[] = config.records.filter((r) =>
+      config.context === "weekly" ? !r.isPaid : selectedIds.includes(r.id)
+    );
 
-    const updateData = {
-      is_paid: paymentChannel === "direct",
-      payment_date: paymentDate,
-      payment_mode: paymentMode,
-      paid_via: paymentChannel === "direct" ? "direct" : "engineer_wallet",
-      engineer_transaction_id: engineerTransactionId,
-      payment_proof_url: proofFile?.url || null,
-      payment_notes: notes || null,
-      payer_source: payerSource,
-      payer_name: payerSource === "custom" ? customPayerName : null,
-      subcontract_id: subcontractId,
+    const settlementConfig: SettlementConfig = {
+      siteId: selectedSite.id,
+      records: settlementRecords,
+      totalAmount: calculatedAmounts.selected,
+      paymentMode,
+      paymentChannel,
+      payerSource,
+      customPayerName: payerSource === "custom" ? customPayerName : undefined,
+      engineerId: paymentChannel === "engineer_wallet" ? selectedEngineerId : undefined,
+      engineerReference: paymentChannel === "engineer_wallet" ? engineerReference : undefined,
+      proofUrl: proofFile?.url,
+      notes: notes || undefined,
+      subcontractId: subcontractId || undefined,
+      userId: userProfile.id,
+      userName: userProfile.name || "Unknown",
+      batchAllocations: paymentChannel === "engineer_wallet" ? batchAllocations : undefined,
     };
 
-    if (dailyIds.length > 0) {
-      const { error } = await supabase
-        .from("daily_attendance")
-        .update(updateData)
-        .in("id", dailyIds);
-      if (error) throw error;
-    }
-
-    if (marketIds.length > 0) {
-      const { error } = await supabase
-        .from("market_laborer_attendance")
-        .update(updateData)
-        .in("id", marketIds);
-      if (error) throw error;
-    }
+    // Submit via mutation - handles loading state, retries, errors automatically
+    settlementMutation.mutate(settlementConfig);
   };
 
-  // Process weekly records
-  const processWeeklyRecords = async (
-    paymentDate: string,
-    engineerTransactionId: string | null
-  ) => {
-    if (!config || !config.dateRange) return;
-
-    const updateData = {
-      is_paid: paymentChannel === "direct",
-      payment_date: paymentDate,
-      payment_mode: paymentMode,
-      paid_via: paymentChannel === "direct" ? "direct" : "engineer_wallet",
-      engineer_transaction_id: engineerTransactionId,
-      payment_proof_url: proofFile?.url || null,
-      payment_notes: notes || null,
-      payer_source: payerSource,
-      payer_name: payerSource === "custom" ? customPayerName : null,
-      subcontract_id: subcontractId,
-    };
-
-    // Update daily laborers
-    if (settlementType === "daily" || settlementType === "all") {
-      const { error: dailyError } = await supabase
-        .from("daily_attendance")
-        .update(updateData)
-        .eq("site_id", selectedSite!.id)
-        .gte("date", config.dateRange.from)
-        .lte("date", config.dateRange.to)
-        .eq("is_paid", false)
-        .neq("laborer_type", "contract");
-
-      if (dailyError) throw dailyError;
-    }
-
-    // Update contract laborers
-    if (settlementType === "contract" || settlementType === "all") {
-      const { error: contractError } = await supabase
-        .from("daily_attendance")
-        .update(updateData)
-        .eq("site_id", selectedSite!.id)
-        .gte("date", config.dateRange.from)
-        .lte("date", config.dateRange.to)
-        .eq("is_paid", false)
-        .eq("laborer_type", "contract");
-
-      if (contractError) throw contractError;
-    }
-
-    // Update market laborers
-    if (settlementType === "market" || settlementType === "all") {
-      const { error: marketError } = await supabase
-        .from("market_laborer_attendance")
-        .update({
-          ...updateData,
-        })
-        .eq("site_id", selectedSite!.id)
-        .gte("date", config.dateRange.from)
-        .lte("date", config.dateRange.to)
-        .eq("is_paid", false);
-
-      if (marketError) throw marketError;
-    }
-  };
-
-  // Link expense to attendance records
-  const linkExpenseToRecords = async (expenseId: string) => {
-    if (!config) return;
-
-    if (config.context === "daily_single") {
-      const selectedIds = Array.from(selectedRecords);
-      const dailyIds = config.records
-        .filter((r) => selectedIds.includes(r.id) && r.sourceType === "daily")
-        .map((r) => r.sourceId);
-      const marketIds = config.records
-        .filter((r) => selectedIds.includes(r.id) && r.sourceType === "market")
-        .map((r) => r.sourceId);
-
-      if (dailyIds.length > 0) {
-        await supabase
-          .from("daily_attendance")
-          .update({ expense_id: expenseId })
-          .in("id", dailyIds);
-      }
-      if (marketIds.length > 0) {
-        await supabase
-          .from("market_laborer_attendance")
-          .update({ expense_id: expenseId })
-          .in("id", marketIds);
-      }
-    }
-    // For weekly, we don't link individual records
-  };
 
   if (!config) return null;
 
@@ -973,7 +740,7 @@ export default function UnifiedSettlementDialog({
           customName={customPayerName}
           onChange={setPayerSource}
           onCustomNameChange={setCustomPayerName}
-          disabled={processing}
+          disabled={settlementMutation.isPending}
         />
 
         {/* Payment Mode */}
@@ -1078,7 +845,7 @@ export default function UnifiedSettlementDialog({
                 requiredAmount={calculatedAmounts.selected}
                 selectedBatches={batchAllocations}
                 onSelectionChange={setBatchAllocations}
-                disabled={processing}
+                disabled={settlementMutation.isPending}
               />
             )}
           </Box>
@@ -1093,7 +860,7 @@ export default function UnifiedSettlementDialog({
             selectedSubcontractId={subcontractId}
             onSelect={setSubcontractId}
             paymentAmount={calculatedAmounts.selected}
-            disabled={processing}
+            disabled={settlementMutation.isPending}
           />
         </Box>
 
@@ -1133,7 +900,7 @@ export default function UnifiedSettlementDialog({
       <Divider />
 
       <DialogActions sx={{ p: 2 }}>
-        <Button onClick={onClose} disabled={processing || isSubmitting}>
+        <Button onClick={onClose} disabled={settlementMutation.isPending}>
           Cancel
         </Button>
         <Button
@@ -1141,15 +908,14 @@ export default function UnifiedSettlementDialog({
           color={isWeekly ? "primary" : "success"}
           onClick={handleSubmit}
           disabled={
-            processing ||
-            isSubmitting ||
+            settlementMutation.isPending ||
             calculatedAmounts.selected === 0 ||
             (paymentChannel === "engineer_wallet" && !selectedEngineerId) ||
             ((paymentMode === "upi" || paymentMode === "net_banking") && !proofFile)
           }
-          startIcon={(processing || isSubmitting) ? <CircularProgress size={20} /> : <PaymentIcon />}
+          startIcon={settlementMutation.isPending ? <CircularProgress size={20} /> : <PaymentIcon />}
         >
-          {(processing || isSubmitting)
+          {settlementMutation.isPending
             ? "Processing..."
             : `Settle Rs.${calculatedAmounts.selected.toLocaleString("en-IN")}`}
         </Button>

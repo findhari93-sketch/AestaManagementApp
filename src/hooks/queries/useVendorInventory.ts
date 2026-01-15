@@ -74,12 +74,29 @@ export function useMaterialVendors(materialId: string | undefined) {
     queryFn: async () => {
       if (!materialId) return [] as VendorInventoryWithDetails[];
 
-      const { data, error } = await (supabase as any)
+      const { data, error} = await (supabase as any)
         .from("vendor_inventory")
         .select(
           `
-          *,
-          vendor:vendors(*),
+          id,
+          vendor_id,
+          material_id,
+          custom_material_name,
+          brand_id,
+          current_price,
+          price_includes_gst,
+          gst_rate,
+          price_includes_transport,
+          transport_cost,
+          loading_cost,
+          unloading_cost,
+          is_available,
+          min_order_qty,
+          unit,
+          lead_time_days,
+          notes,
+          updated_at,
+          vendor:vendors(id, name, vendor_type, shop_name, phone, contact_person),
           material:materials(id, name, code, unit, category_id),
           brand:material_brands(id, brand_name)
         `

@@ -1,6 +1,52 @@
 import { SupabaseClient } from "@supabase/supabase-js";
 import { Database } from "@/types/database.types";
 
+// OPTIMIZATION: Cache for expense category lookup to avoid repeated queries
+let cachedSalaryCategoryId: string | null = null;
+let categoryCacheExpiry = 0;
+const CATEGORY_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+/**
+ * Get salary/labor expense category ID with caching
+ * Avoids repeated queries for the same category
+ */
+async function getSalaryExpenseCategoryId(
+  supabase: SupabaseClient<Database>
+): Promise<string | null> {
+  // Return cached value if still valid
+  if (cachedSalaryCategoryId && Date.now() < categoryCacheExpiry) {
+    return cachedSalaryCategoryId;
+  }
+
+  // Try "Salary Settlement" category first
+  const { data: categories } = await supabase
+    .from("expense_categories")
+    .select("id")
+    .eq("name", "Salary Settlement")
+    .limit(1);
+
+  let categoryId = categories?.[0]?.id;
+
+  // Fallback to "Labor" category
+  if (!categoryId) {
+    const { data: laborCategories } = await supabase
+      .from("expense_categories")
+      .select("id")
+      .ilike("name", "%labor%")
+      .limit(1);
+
+    categoryId = laborCategories?.[0]?.id;
+  }
+
+  // Cache the result
+  if (categoryId) {
+    cachedSalaryCategoryId = categoryId;
+    categoryCacheExpiry = Date.now() + CATEGORY_CACHE_TTL;
+  }
+
+  return categoryId || null;
+}
+
 export interface LaborerDetails {
   dailyCount: number;
   marketCount: number;
@@ -482,6 +528,7 @@ export async function confirmSettlement(
 
 /**
  * Create a daily expense entry for a confirmed settlement
+ * OPTIMIZED: Uses cached category lookup
  */
 async function createSettlementExpense(
   supabase: SupabaseClient<Database>,
@@ -499,25 +546,8 @@ async function createSettlementExpense(
   }
 ): Promise<void> {
   try {
-    // Find or create "Salary Settlement" category
-    const { data: categories } = await supabase
-      .from("expense_categories")
-      .select("id")
-      .eq("name", "Salary Settlement")
-      .limit(1);
-
-    let categoryId = categories?.[0]?.id;
-
-    // If no category exists, try to find "Labor" category
-    if (!categoryId) {
-      const { data: laborCategories } = await supabase
-        .from("expense_categories")
-        .select("id")
-        .ilike("name", "%labor%")
-        .limit(1);
-
-      categoryId = laborCategories?.[0]?.id;
-    }
+    // OPTIMIZED: Use cached category lookup
+    const categoryId = await getSalaryExpenseCategoryId(supabase);
 
     // If still no category, skip expense creation
     if (!categoryId) {
@@ -601,31 +631,15 @@ export interface SalaryExpenseParams {
  * 1. Direct payments by company
  * 2. Engineer settlements (via company money)
  * 3. Engineer's own money payments (pending reimbursement)
+ * OPTIMIZED: Uses cached category lookup
  */
 export async function createSalaryExpense(
   supabase: SupabaseClient<Database>,
   params: SalaryExpenseParams
 ): Promise<{ error: Error | null; expenseId: string | null }> {
   try {
-    // Find "Salary Settlement" or "Labor" category
-    const { data: categories } = await supabase
-      .from("expense_categories")
-      .select("id")
-      .eq("name", "Salary Settlement")
-      .limit(1);
-
-    let categoryId = categories?.[0]?.id;
-
-    // If no category exists, try to find "Labor" category
-    if (!categoryId) {
-      const { data: laborCategories } = await supabase
-        .from("expense_categories")
-        .select("id")
-        .ilike("name", "%labor%")
-        .limit(1);
-
-      categoryId = laborCategories?.[0]?.id;
-    }
+    // OPTIMIZED: Use cached category lookup
+    const categoryId = await getSalaryExpenseCategoryId(supabase);
 
     // If still no category, return error
     if (!categoryId) {
@@ -905,31 +919,62 @@ export async function migrateExpenseSubcontractLinks(
 
     if (dailyError) {
       errors.push(`Error fetching daily_attendance: ${dailyError.message}`);
-    } else if (dailyAttendance) {
-      for (const record of dailyAttendance) {
-        if (!record.expense_id || !record.subcontract_id) continue;
+    } else if (dailyAttendance && dailyAttendance.length > 0) {
+      // Batch fetch all expenses that might need updating
+      const expenseIds = dailyAttendance
+        .filter((r) => r.expense_id && r.subcontract_id)
+        .map((r) => r.expense_id)
+        .filter((id): id is string => id !== null);
 
-        // Check if expense already has contract_id
-        const { data: expense } = await supabase
+      if (expenseIds.length > 0) {
+        // Single query to get all expenses without contract_id
+        const { data: expenses } = await supabase
           .from("expenses")
           .select("id, contract_id")
-          .eq("id", record.expense_id)
-          .single();
+          .in("id", expenseIds)
+          .is("contract_id", null);
 
-        if (expense && !expense.contract_id) {
-          const { error: updateError } = await supabase
-            .from("expenses")
-            .update({ contract_id: record.subcontract_id })
-            .eq("id", record.expense_id);
+        if (expenses && expenses.length > 0) {
+          // Build map of expense_id -> subcontract_id from attendance records
+          const expenseToSubcontract = new Map<string, string>();
+          dailyAttendance.forEach((r) => {
+            if (r.expense_id && r.subcontract_id) {
+              expenseToSubcontract.set(r.expense_id, r.subcontract_id);
+            }
+          });
 
-          if (updateError) {
-            errors.push(`Error updating expense ${record.expense_id}: ${updateError.message}`);
-          } else {
-            updated++;
-            details.push({
-              source: "daily_attendance",
-              expenseId: record.expense_id,
-              subcontractId: record.subcontract_id,
+          // Prepare batch updates
+          const updates = expenses
+            .filter((e) => expenseToSubcontract.has(e.id))
+            .map((e) => ({
+              id: e.id,
+              contract_id: expenseToSubcontract.get(e.id)!,
+            }));
+
+          // Batch update in parallel using Promise.all
+          if (updates.length > 0) {
+            const updateResults = await Promise.allSettled(
+              updates.map((u) =>
+                supabase
+                  .from("expenses")
+                  .update({ contract_id: u.contract_id })
+                  .eq("id", u.id)
+              )
+            );
+
+            // Track successes and failures
+            updateResults.forEach((result, index) => {
+              if (result.status === "fulfilled" && !result.value.error) {
+                updated++;
+                details.push({
+                  source: "daily_attendance",
+                  expenseId: updates[index].id,
+                  subcontractId: updates[index].contract_id,
+                });
+              } else {
+                const error = result.status === "rejected" ? result.reason : result.value.error;
+                errors.push(`Error updating expense ${updates[index].id}: ${error?.message || "Unknown error"}`);
+              }
             });
           }
         }
@@ -951,30 +996,62 @@ export async function migrateExpenseSubcontractLinks(
 
     if (marketError) {
       errors.push(`Error fetching market_laborer_attendance: ${marketError.message}`);
-    } else if (marketAttendance) {
-      for (const record of marketAttendance) {
-        if (!record.expense_id || !record.subcontract_id) continue;
+    } else if (marketAttendance && marketAttendance.length > 0) {
+      // Batch fetch all expenses that might need updating
+      const expenseIds = marketAttendance
+        .filter((r: any) => r.expense_id && r.subcontract_id)
+        .map((r: any) => r.expense_id)
+        .filter((id: any): id is string => id !== null);
 
-        const { data: expense } = await supabase
+      if (expenseIds.length > 0) {
+        // Single query to get all expenses without contract_id
+        const { data: expenses } = await supabase
           .from("expenses")
           .select("id, contract_id")
-          .eq("id", record.expense_id)
-          .single();
+          .in("id", expenseIds)
+          .is("contract_id", null);
 
-        if (expense && !expense.contract_id) {
-          const { error: updateError } = await supabase
-            .from("expenses")
-            .update({ contract_id: record.subcontract_id })
-            .eq("id", record.expense_id);
+        if (expenses && expenses.length > 0) {
+          // Build map of expense_id -> subcontract_id from attendance records
+          const expenseToSubcontract = new Map<string, string>();
+          marketAttendance.forEach((r: any) => {
+            if (r.expense_id && r.subcontract_id) {
+              expenseToSubcontract.set(r.expense_id, r.subcontract_id);
+            }
+          });
 
-          if (updateError) {
-            errors.push(`Error updating expense ${record.expense_id}: ${updateError.message}`);
-          } else {
-            updated++;
-            details.push({
-              source: "market_laborer_attendance",
-              expenseId: record.expense_id,
-              subcontractId: record.subcontract_id,
+          // Prepare batch updates
+          const updates = expenses
+            .filter((e) => expenseToSubcontract.has(e.id))
+            .map((e) => ({
+              id: e.id,
+              contract_id: expenseToSubcontract.get(e.id)!,
+            }));
+
+          // Batch update in parallel using Promise.all
+          if (updates.length > 0) {
+            const updateResults = await Promise.allSettled(
+              updates.map((u) =>
+                supabase
+                  .from("expenses")
+                  .update({ contract_id: u.contract_id })
+                  .eq("id", u.id)
+              )
+            );
+
+            // Track successes and failures
+            updateResults.forEach((result, index) => {
+              if (result.status === "fulfilled" && !result.value.error) {
+                updated++;
+                details.push({
+                  source: "market_laborer_attendance",
+                  expenseId: updates[index].id,
+                  subcontractId: updates[index].contract_id,
+                });
+              } else {
+                const error = result.status === "rejected" ? result.reason : result.value.error;
+                errors.push(`Error updating expense ${updates[index].id}: ${error?.message || "Unknown error"}`);
+              }
             });
           }
         }
@@ -997,33 +1074,60 @@ export async function migrateExpenseSubcontractLinks(
 
     if (expenseError) {
       errors.push(`Error fetching expenses: ${expenseError.message}`);
-    } else if (expenses) {
-      for (const expense of expenses) {
-        if (!expense.engineer_transaction_id) continue;
+    } else if (expenses && expenses.length > 0) {
+      // OPTIMIZED: Batch fetch all transactions instead of N+1 queries
+      const transactionIds = expenses
+        .map((e) => e.engineer_transaction_id)
+        .filter((id): id is string => id !== null);
 
-        // Get the transaction's related_subcontract_id
-        const { data: transaction } = await (supabase
+      if (transactionIds.length > 0) {
+        // Single batch query for all transactions
+        const { data: transactions } = await (supabase
           .from("site_engineer_transactions") as any)
-          .select("related_subcontract_id")
-          .eq("id", expense.engineer_transaction_id)
-          .single();
+          .select("id, related_subcontract_id")
+          .in("id", transactionIds);
 
-        if (transaction?.related_subcontract_id) {
-          const { error: updateError } = await supabase
-            .from("expenses")
-            .update({ contract_id: transaction.related_subcontract_id })
-            .eq("id", expense.id);
-
-          if (updateError) {
-            errors.push(`Error updating expense ${expense.id}: ${updateError.message}`);
-          } else {
-            updated++;
-            details.push({
-              source: "engineer_transaction",
-              expenseId: expense.id,
-              subcontractId: transaction.related_subcontract_id,
-            });
+        // Build map of transaction_id -> subcontract_id
+        const transactionToSubcontract = new Map<string, string>();
+        (transactions || []).forEach((tx: any) => {
+          if (tx.related_subcontract_id) {
+            transactionToSubcontract.set(tx.id, tx.related_subcontract_id);
           }
+        });
+
+        // Prepare batch updates for expenses with matching subcontracts
+        const expenseUpdates = expenses
+          .filter((e) => e.engineer_transaction_id && transactionToSubcontract.has(e.engineer_transaction_id))
+          .map((e) => ({
+            id: e.id,
+            contract_id: transactionToSubcontract.get(e.engineer_transaction_id!)!,
+          }));
+
+        // Batch update using Promise.allSettled
+        if (expenseUpdates.length > 0) {
+          const updateResults = await Promise.allSettled(
+            expenseUpdates.map((u) =>
+              supabase
+                .from("expenses")
+                .update({ contract_id: u.contract_id })
+                .eq("id", u.id)
+            )
+          );
+
+          // Track successes and failures
+          updateResults.forEach((result, index) => {
+            if (result.status === "fulfilled" && !result.value.error) {
+              updated++;
+              details.push({
+                source: "engineer_transaction",
+                expenseId: expenseUpdates[index].id,
+                subcontractId: expenseUpdates[index].contract_id,
+              });
+            } else {
+              const error = result.status === "rejected" ? result.reason : result.value.error;
+              errors.push(`Error updating expense ${expenseUpdates[index].id}: ${error?.message || "Unknown error"}`);
+            }
+          });
         }
       }
     }

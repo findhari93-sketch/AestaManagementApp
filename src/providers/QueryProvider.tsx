@@ -5,10 +5,6 @@ import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client
 import { useState, useEffect, useRef } from "react";
 import { createIDBPersister } from "@/lib/cache/persistor";
 import { initBackgroundSync, stopBackgroundSync } from "@/lib/cache/sync";
-import {
-  startRealtimeListeners,
-  stopRealtimeListeners,
-} from "@/lib/supabase/realtime";
 import { useSite } from "@/contexts/SiteContext";
 import { useTab } from "@/providers/TabProvider";
 import { SessionExpiredError } from "@/lib/supabase/client";
@@ -189,17 +185,11 @@ function SyncInitializer({ queryClient }: { queryClient: QueryClient }) {
     // The sync module will handle leader/follower behavior internally
     initBackgroundSync(queryClient, currentSiteId);
 
-    // Stop old listeners and start new ones for current site
-    // The realtime module will handle leader/follower behavior internally
-    stopRealtimeListeners();
-    startRealtimeListeners(queryClient, currentSiteId);
-
     console.log(`[SyncInitializer] Initialized - isLeader: ${isLeader}, siteId: ${currentSiteId}`);
 
     // Cleanup on unmount
     return () => {
       stopBackgroundSync();
-      stopRealtimeListeners();
     };
   }, [queryClient, selectedSite?.id, isTabReady, isLeader]);
 

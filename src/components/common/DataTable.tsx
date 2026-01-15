@@ -27,6 +27,7 @@ export const tableDefaults = {
   // Row features
   enableRowSelection: false,
   enableRowNumbers: false,
+  enableRowVirtualization: true, // Virtual scrolling for large datasets (500+ rows)
 
   // Global filter/search
   enableGlobalFilter: true,

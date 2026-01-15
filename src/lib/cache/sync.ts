@@ -24,7 +24,7 @@ const DEFAULT_CONFIG: SyncConfig = {
   enabled: true,
   intervals: {
     reference: 10 * 60 * 1000, // 10 minutes
-    transactional: 2 * 60 * 1000, // 2 minutes (reduced frequency to prevent timeout cascades)
+    transactional: 45 * 1000, // 45 seconds (increased frequency for manual refresh + polling)
     dashboard: 5 * 60 * 1000, // 5 minutes
     cleanup: 30 * 60 * 1000, // 30 minutes
   },
