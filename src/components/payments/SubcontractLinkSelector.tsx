@@ -65,22 +65,24 @@ export default function SubcontractLinkSelector({
       setError(null);
 
       try {
-        // Fetch subcontracts with their payment totals
-        // Fetch teams first to avoid FK ambiguity issues with PostgREST
+        // Fetch teams (optional - used only for display)
         // Note: teams table is global, not site-specific
-        const { data: teamsData, error: teamsError } = await supabaseQueryWithTimeout(
-          supabase
-            .from("teams")
-            .select("id, name")
-        );
-
-        if (!isMountedRef.current) return;
-        if (teamsError) {
-          console.error("Error fetching teams:", teamsError);
+        // Use shorter timeout since this is non-critical
+        const teamsMap = new Map<string, string>();
+        try {
+          const { data: teamsData } = await supabaseQueryWithTimeout(
+            supabase.from("teams").select("id, name"),
+            10000 // 10 second timeout for non-critical teams lookup
+          );
+          if (teamsData) {
+            teamsData.forEach((t: any) => teamsMap.set(t.id, t.name));
+          }
+        } catch {
+          // Teams lookup is optional, continue without it
+          console.log("Teams lookup skipped - will show without team names");
         }
 
-        const teamsMap = new Map<string, string>();
-        (teamsData || []).forEach((t: any) => teamsMap.set(t.id, t.name));
+        if (!isMountedRef.current) return;
 
         const { data: subcontractsData, error: fetchError } = await supabaseQueryWithTimeout(
           supabase
