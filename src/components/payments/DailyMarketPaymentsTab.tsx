@@ -58,6 +58,7 @@ import SettlementDetailsDialog from "@/components/settlement/SettlementDetailsDi
 import DateViewDetailsDialog from "./DateViewDetailsDialog";
 import DateSettlementsEditDialog from "./DateSettlementsEditDialog";
 import SettlementRefDetailDialog, { type SettlementDetails } from "./SettlementRefDetailDialog";
+import { supabaseQueryWithTimeout } from "@/lib/utils/supabaseQuery";
 import DailySettlementEditDialog from "./DailySettlementEditDialog";
 import DeleteDailySettlementDialog from "./DeleteDailySettlementDialog";
 import SettlementFormDialog from "@/components/settlement/SettlementFormDialog";
@@ -151,10 +152,21 @@ export default function DailyMarketPaymentsTab({
   const [expandedDates, setExpandedDates] = useState<Set<string>>(new Set());
   const expandedDatesRef = useRef<Set<string>>(new Set());
 
+  // Track component mount state to prevent state updates after unmount
+  const isMountedRef = useRef(true);
+
   // Keep ref in sync with state
   useEffect(() => {
     expandedDatesRef.current = expandedDates;
   }, [expandedDates]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   const canEdit = hasEditPermission(userProfile?.role);
   const isAdmin = canPerformMassUpload(userProfile?.role); // admin or office
@@ -189,7 +201,7 @@ export default function DailyMarketPaymentsTab({
   const [engineerSettlementDialogOpen, setEngineerSettlementDialogOpen] = useState(false);
   const [engineerSettlementTransactionId, setEngineerSettlementTransactionId] = useState<string | null>(null);
 
-  // Fetch data
+  // Fetch data with timeout protection to prevent infinite loading
   const fetchData = useCallback(async () => {
     if (!selectedSite?.id) {
       setLoading(false);
@@ -201,121 +213,133 @@ export default function DailyMarketPaymentsTab({
 
     try {
       // Fetch daily attendance (non-contract laborers) with settlement status
-      const { data: dailyData, error: dailyError } = await supabase
-        .from("daily_attendance")
-        .select(
+      const { data: dailyData, error: dailyError } = await supabaseQueryWithTimeout(
+        supabase
+          .from("daily_attendance")
+          .select(
+            `
+            id,
+            date,
+            laborer_id,
+            daily_earnings,
+            is_paid,
+            payment_date,
+            payment_mode,
+            paid_via,
+            engineer_transaction_id,
+            payment_proof_url,
+            payment_notes,
+            subcontract_id,
+            expense_id,
+            settlement_group_id,
+            payer_source,
+            payer_name,
+            laborers!inner(name, laborer_type, labor_categories(name), labor_roles(name)),
+            subcontracts(title),
+            site_engineer_transactions!engineer_transaction_id(
+              settlement_status,
+              settlement_mode,
+              notes,
+              proof_url,
+              settlement_proof_url,
+              transaction_date,
+              settled_date,
+              confirmed_at,
+              money_source,
+              money_source_name,
+              user_id
+            ),
+            settlement_groups(id, settlement_reference, is_cancelled)
           `
-          id,
-          date,
-          laborer_id,
-          daily_earnings,
-          is_paid,
-          payment_date,
-          payment_mode,
-          paid_via,
-          engineer_transaction_id,
-          payment_proof_url,
-          payment_notes,
-          subcontract_id,
-          expense_id,
-          settlement_group_id,
-          payer_source,
-          payer_name,
-          laborers!inner(name, laborer_type, labor_categories(name), labor_roles(name)),
-          subcontracts(title),
-          site_engineer_transactions!engineer_transaction_id(
-            settlement_status,
-            settlement_mode,
-            notes,
-            proof_url,
-            settlement_proof_url,
-            transaction_date,
-            settled_date,
-            confirmed_at,
-            money_source,
-            money_source_name,
-            user_id
-          ),
-          settlement_groups(id, settlement_reference, is_cancelled)
-        `
-        )
-        .eq("site_id", selectedSite.id)
-        .neq("laborers.laborer_type", "contract")
-        .gte("date", dateFrom)
-        .lte("date", dateTo)
-        .order("date", { ascending: false });
+          )
+          .eq("site_id", selectedSite.id)
+          .neq("laborers.laborer_type", "contract")
+          .gte("date", dateFrom)
+          .lte("date", dateTo)
+          .order("date", { ascending: false })
+      );
 
+      if (!isMountedRef.current) return;
       if (dailyError) throw dailyError;
 
       // Fetch market attendance with settlement status
-      const { data: marketData, error: marketError } = await supabase
-        .from("market_laborer_attendance")
-        .select(
+      const { data: marketData, error: marketError } = await supabaseQueryWithTimeout(
+        supabase
+          .from("market_laborer_attendance")
+          .select(
+            `
+            id,
+            date,
+            count,
+            total_cost,
+            is_paid,
+            payment_date,
+            payment_mode,
+            paid_via,
+            engineer_transaction_id,
+            payment_proof_url,
+            payment_notes,
+            expense_id,
+            subcontract_id,
+            settlement_group_id,
+            payer_source,
+            payer_name,
+            labor_roles(name),
+            subcontracts(title),
+            site_engineer_transactions!engineer_transaction_id(
+              settlement_status,
+              settlement_mode,
+              notes,
+              proof_url,
+              settlement_proof_url,
+              transaction_date,
+              settled_date,
+              confirmed_at,
+              money_source,
+              money_source_name,
+              user_id
+            ),
+            settlement_groups(id, settlement_reference, is_cancelled),
+            expenses(contract_id, subcontracts(id, title))
           `
-          id,
-          date,
-          count,
-          total_cost,
-          is_paid,
-          payment_date,
-          payment_mode,
-          paid_via,
-          engineer_transaction_id,
-          payment_proof_url,
-          payment_notes,
-          expense_id,
-          subcontract_id,
-          settlement_group_id,
-          payer_source,
-          payer_name,
-          labor_roles(name),
-          subcontracts(title),
-          site_engineer_transactions!engineer_transaction_id(
-            settlement_status,
-            settlement_mode,
-            notes,
-            proof_url,
-            settlement_proof_url,
-            transaction_date,
-            settled_date,
-            confirmed_at,
-            money_source,
-            money_source_name,
-            user_id
-          ),
-          settlement_groups(id, settlement_reference, is_cancelled),
-          expenses(contract_id, subcontracts(id, title))
-        `
-        )
-        .eq("site_id", selectedSite.id)
-        .gte("date", dateFrom)
-        .lte("date", dateTo)
-        .order("date", { ascending: false });
+          )
+          .eq("site_id", selectedSite.id)
+          .gte("date", dateFrom)
+          .lte("date", dateTo)
+          .order("date", { ascending: false })
+      );
 
+      if (!isMountedRef.current) return;
       if (marketError) throw marketError;
 
       // Fetch contract attendance dates (to identify contract-only days)
-      const { data: contractAttendance, error: contractError } = await supabase
-        .from("daily_attendance")
-        .select("date, laborers!inner(laborer_type)")
-        .eq("site_id", selectedSite.id)
-        .eq("laborers.laborer_type", "contract")
-        .gte("date", dateFrom)
-        .lte("date", dateTo);
+      const { data: contractAttendance, error: contractError } = await supabaseQueryWithTimeout(
+        supabase
+          .from("daily_attendance")
+          .select("date, laborers!inner(laborer_type)")
+          .eq("site_id", selectedSite.id)
+          .eq("laborers.laborer_type", "contract")
+          .gte("date", dateFrom)
+          .lte("date", dateTo)
+      );
 
+      if (!isMountedRef.current) return;
       if (contractError) {
         console.error("Error fetching contract attendance:", contractError);
       }
 
       // Fetch holidays for the date range
-      const { data: holidayData, error: holidayError } = await supabase
-        .from("site_holidays")
-        .select("id, date, reason, is_paid_holiday")
-        .eq("site_id", selectedSite.id)
-        .gte("date", dateFrom)
-        .lte("date", dateTo)
-        .order("date", { ascending: false });
+      const { data: holidayData, error: holidayError } = await supabaseQueryWithTimeout(
+        supabase
+          .from("site_holidays")
+          .select("id, date, reason, is_paid_holiday")
+          .eq("site_id", selectedSite.id)
+          .gte("date", dateFrom)
+          .lte("date", dateTo)
+          .order("date", { ascending: false })
+      );
 
+      if (!isMountedRef.current) return;
       if (holidayError) {
         console.error("Error fetching holidays:", holidayError);
       }
@@ -448,6 +472,21 @@ export default function DailyMarketPaymentsTab({
         g.isExpanded = expandedDatesRef.current.has(g.date);
       });
 
+      // Fetch subcontracts for filter
+      const { data: subcontractsData, error: subcontractsError } = await supabaseQueryWithTimeout(
+        supabase
+          .from("subcontracts")
+          .select("id, title")
+          .eq("site_id", selectedSite.id)
+          .in("status", ["active", "on_hold"])
+      );
+
+      if (!isMountedRef.current) return;
+      if (subcontractsError) {
+        console.error("Error fetching subcontracts:", subcontractsError);
+      }
+
+      // Update all state together (only if still mounted)
       setDateGroups(groups);
 
       // Process contract-only dates (dates with contract labor but no daily/market)
@@ -463,19 +502,15 @@ export default function DailyMarketPaymentsTab({
       // Set holidays
       setHolidays(holidayData || []);
 
-      // Fetch subcontracts for filter
-      const { data: subcontractsData } = await supabase
-        .from("subcontracts")
-        .select("id, title")
-        .eq("site_id", selectedSite.id)
-        .in("status", ["active", "on_hold"]);
-
       setSubcontracts(subcontractsData || []);
     } catch (err: any) {
+      if (!isMountedRef.current) return;
       console.error("Error fetching payment data:", err);
       setError(err.message || "Failed to load payment data");
     } finally {
-      setLoading(false);
+      if (isMountedRef.current) {
+        setLoading(false);
+      }
     }
   // Note: expandedDates removed from deps to prevent refetch on expand/collapse
   }, [selectedSite?.id, dateFrom, dateTo, supabase]);

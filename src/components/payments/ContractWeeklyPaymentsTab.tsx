@@ -58,6 +58,7 @@ import {
   getPaymentStatusLabel,
 } from "@/types/payment.types";
 import { hasEditPermission } from "@/lib/permissions";
+import { supabaseQueryWithTimeout } from "@/lib/utils/supabaseQuery";
 
 interface ContractWeeklyPaymentsTabProps {
   weeksToShow?: number;
@@ -152,6 +153,17 @@ export default function ContractWeeklyPaymentsTab({
   const tableContainerRef = useRef<HTMLDivElement>(null);
   const [hasScrolledToHighlight, setHasScrolledToHighlight] = useState(false);
 
+  // Track component mount state to prevent state updates after unmount
+  const isMountedRef = useRef(true);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
   // Filters
   const [filterStatus, setFilterStatus] = useState<
     "all" | "pending" | "completed"
@@ -214,44 +226,54 @@ export default function ContractWeeklyPaymentsTab({
       const { fromDate, toDate } = dateRange;
 
       // Fetch teams first
-      const { data: teamsLookup } = await supabase
-        .from("teams")
-        .select("id, name")
-        .eq("site_id", selectedSite.id);
+      const { data: teamsLookup, error: teamsLookupError } = await supabaseQueryWithTimeout(
+        supabase
+          .from("teams")
+          .select("id, name")
+          .eq("site_id", selectedSite.id)
+      );
+
+      if (!isMountedRef.current) return;
+      if (teamsLookupError) {
+        console.error("Error fetching teams lookup:", teamsLookupError);
+      }
 
       const teamsMap = new Map<string, string>();
       (teamsLookup || []).forEach((t: any) => teamsMap.set(t.id, t.name));
 
       // Fetch ALL contract laborers' attendance (NO date filter)
       // This is needed for accurate waterfall calculation across ALL weeks
-      const { data: allAttendanceData, error: allAttendanceError } = await supabase
-        .from("daily_attendance")
-        .select(
-          `
-          id,
-          date,
-          laborer_id,
-          daily_earnings,
-          work_days,
-          is_paid,
-          payment_id,
-          subcontract_id,
-          laborers!inner(
+      const { data: allAttendanceData, error: allAttendanceError } = await supabaseQueryWithTimeout(
+        supabase
+          .from("daily_attendance")
+          .select(
+            `
             id,
-            name,
-            laborer_type,
-            team_id,
-            labor_roles(name)
-          ),
-          subcontracts(id, title)
-        `
-        )
-        .eq("site_id", selectedSite.id)
-        .eq("laborers.laborer_type", "contract")
-        .order("date", { ascending: true });
+            date,
+            laborer_id,
+            daily_earnings,
+            work_days,
+            is_paid,
+            payment_id,
+            subcontract_id,
+            laborers!inner(
+              id,
+              name,
+              laborer_type,
+              team_id,
+              labor_roles(name)
+            ),
+            subcontracts(id, title)
+          `
+          )
+          .eq("site_id", selectedSite.id)
+          .eq("laborers.laborer_type", "contract")
+          .order("date", { ascending: true })
+      );
 
+      if (!isMountedRef.current) return;
       if (allAttendanceError) {
-        throw new Error(allAttendanceError.message);
+        throw allAttendanceError;
       }
 
       // Filter attendance for display (within date range)
@@ -260,18 +282,32 @@ export default function ContractWeeklyPaymentsTab({
       });
 
       // Fetch labor payments
-      const { data: paymentsData } = await supabase
-        .from("labor_payments")
-        .select("*")
-        .eq("site_id", selectedSite.id)
-        .eq("is_under_contract", true);
+      const { data: paymentsData, error: paymentsError } = await supabaseQueryWithTimeout(
+        supabase
+          .from("labor_payments")
+          .select("*")
+          .eq("site_id", selectedSite.id)
+          .eq("is_under_contract", true)
+      );
+
+      if (!isMountedRef.current) return;
+      if (paymentsError) {
+        console.error("Error fetching payments:", paymentsError);
+      }
 
       // Fetch payment week allocations
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data: allocationsData } = await (supabase as any)
-        .from("payment_week_allocations")
-        .select("*")
-        .eq("site_id", selectedSite.id);
+      const { data: allocationsData, error: allocationsError } = await supabaseQueryWithTimeout<any[]>(
+        (supabase as any)
+          .from("payment_week_allocations")
+          .select("*")
+          .eq("site_id", selectedSite.id)
+      );
+
+      if (!isMountedRef.current) return;
+      if (allocationsError) {
+        console.error("Error fetching allocations:", allocationsError);
+      }
 
       // Group by laborer
       const laborerMap = new Map<
@@ -526,12 +562,19 @@ export default function ContractWeeklyPaymentsTab({
 
       // Step 1: Get settlement_group_ids that have contract labor_payments
       // This ensures we only include settlements with contract laborers (is_under_contract = true)
-      const { data: contractPaymentsForIds } = await supabase
-        .from("labor_payments")
-        .select("settlement_group_id")
-        .eq("site_id", selectedSite.id)
-        .eq("is_under_contract", true)
-        .not("settlement_group_id", "is", null);
+      const { data: contractPaymentsForIds, error: contractPaymentsError } = await supabaseQueryWithTimeout(
+        supabase
+          .from("labor_payments")
+          .select("settlement_group_id")
+          .eq("site_id", selectedSite.id)
+          .eq("is_under_contract", true)
+          .not("settlement_group_id", "is", null)
+      );
+
+      if (!isMountedRef.current) return;
+      if (contractPaymentsError) {
+        console.error("Error fetching contract payments:", contractPaymentsError);
+      }
 
       const contractSettlementIds =
         contractPaymentsForIds && contractPaymentsForIds.length > 0
@@ -564,7 +607,11 @@ export default function ContractWeeklyPaymentsTab({
         sgQuery = sgQuery.in("payment_type", ["advance", "other", "excess"]);
       }
 
-      const { data: sgData } = await sgQuery;
+      const { data: sgData, error: sgError } = await supabaseQueryWithTimeout<any[]>(sgQuery);
+      if (!isMountedRef.current) return;
+      if (sgError) {
+        console.error("Error fetching settlement groups:", sgError);
+      }
       settlementGroupsData = sgData || [];
 
       // ========================================================================
@@ -718,31 +765,48 @@ export default function ContractWeeklyPaymentsTab({
         }
       });
 
+      // Fetch filter options
+      const { data: subcontractsData, error: subcontractsError } = await supabaseQueryWithTimeout(
+        supabase
+          .from("subcontracts")
+          .select("id, title")
+          .eq("site_id", selectedSite.id)
+          .in("status", ["active", "on_hold"])
+      );
+
+      if (!isMountedRef.current) return;
+      if (subcontractsError) {
+        console.error("Error fetching subcontracts:", subcontractsError);
+      }
+
+      // Note: teams table is global, not site-specific
+      const { data: teamsData, error: teamsError } = await supabaseQueryWithTimeout(
+        supabase
+          .from("teams")
+          .select("id, name")
+          .eq("status", "active")
+      );
+
+      if (!isMountedRef.current) return;
+      if (teamsError) {
+        console.error("Error fetching teams:", teamsError);
+      }
+
+      // Update all state together (only if still mounted)
       setTotalAdvancesGiven(advanceTotal);
       setAdvanceRecordCount(advanceSettlementCount);
       setSalaryRecordCount(salarySettlementCount);
       setSalarySettlementsTotal(salaryTotal); // Track salary settlements separately from advances
-
-      // Fetch filter options
-      const { data: subcontractsData } = await supabase
-        .from("subcontracts")
-        .select("id, title")
-        .eq("site_id", selectedSite.id)
-        .in("status", ["active", "on_hold"]);
-
-      // Note: teams table is global, not site-specific
-      const { data: teamsData } = await supabase
-        .from("teams")
-        .select("id, name")
-        .eq("status", "active");
-
       setSubcontracts(subcontractsData || []);
       setTeams(teamsData || []);
     } catch (err: any) {
+      if (!isMountedRef.current) return;
       console.error("Error fetching data:", err);
       setError(`Failed to load data: ${err.message}`);
     } finally {
-      setLoading(false);
+      if (isMountedRef.current) {
+        setLoading(false);
+      }
     }
   }, [selectedSite?.id, dateRange, supabase]);
 
