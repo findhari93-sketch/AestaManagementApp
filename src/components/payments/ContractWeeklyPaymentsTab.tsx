@@ -225,12 +225,11 @@ export default function ContractWeeklyPaymentsTab({
     try {
       const { fromDate, toDate } = dateRange;
 
-      // Fetch teams first
+      // Fetch teams first (teams table is global, not site-specific)
       const { data: teamsLookup, error: teamsLookupError } = await supabaseQueryWithTimeout(
         supabase
           .from("teams")
           .select("id, name")
-          .eq("site_id", selectedSite.id)
       );
 
       if (!isMountedRef.current) return;
