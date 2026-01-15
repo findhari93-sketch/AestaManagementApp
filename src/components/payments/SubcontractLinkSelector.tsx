@@ -135,7 +135,8 @@ export default function SubcontractLinkSelector({
     };
 
     fetchSubcontracts();
-  }, [selectedSite?.id, supabase]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSite?.id]);
 
   const selectedSubcontract = subcontracts.find(
     (sc) => sc.id === selectedSubcontractId
