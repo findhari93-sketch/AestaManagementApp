@@ -20,6 +20,7 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { useSite } from "@/contexts/SiteContext";
 import type { SubcontractOption } from "@/types/payment.types";
+import { supabaseQueryWithTimeout } from "@/lib/utils/supabaseQuery";
 
 interface SubcontractLinkSelectorProps {
   selectedSubcontractId: string | null;
@@ -44,6 +45,17 @@ export default function SubcontractLinkSelector({
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Track component mount state to prevent state updates after unmount
+  const isMountedRef = useRef(true);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
   // Fetch active subcontracts for the site
   useEffect(() => {
     const fetchSubcontracts = async () => {
@@ -56,57 +68,73 @@ export default function SubcontractLinkSelector({
         // Fetch subcontracts with their payment totals
         // Fetch teams first to avoid FK ambiguity issues with PostgREST
         // Note: teams table is global, not site-specific
-        const { data: teamsData } = await supabase
-          .from("teams")
-          .select("id, name");
+        const { data: teamsData, error: teamsError } = await supabaseQueryWithTimeout(
+          supabase
+            .from("teams")
+            .select("id, name")
+        );
+
+        if (!isMountedRef.current) return;
+        if (teamsError) {
+          console.error("Error fetching teams:", teamsError);
+        }
 
         const teamsMap = new Map<string, string>();
         (teamsData || []).forEach((t: any) => teamsMap.set(t.id, t.name));
 
-        const { data: subcontractsData, error: fetchError } = await supabase
-          .from("subcontracts")
-          .select(
+        const { data: subcontractsData, error: fetchError } = await supabaseQueryWithTimeout(
+          supabase
+            .from("subcontracts")
+            .select(
+              `
+              id,
+              title,
+              total_value,
+              status,
+              team_id
             `
-            id,
-            title,
-            total_value,
-            status,
-            team_id
-          `
-          )
-          .eq("site_id", selectedSite.id)
-          .in("status", ["active", "on_hold"])
-          .order("title");
+            )
+            .eq("site_id", selectedSite.id)
+            .in("status", ["active", "on_hold"])
+            .order("title")
+        );
 
+        if (!isMountedRef.current) return;
         if (fetchError) throw fetchError;
 
         // For each subcontract, calculate total paid from all sources
         const subcontractsWithPayments: SubcontractOption[] = await Promise.all(
           (subcontractsData || []).map(async (sc: any) => {
             // Get sum of subcontract_payments
-            const { data: paymentsData } = await supabase
-              .from("subcontract_payments")
-              .select("amount")
-              .eq("contract_id", sc.id);
+            const { data: paymentsData } = await supabaseQueryWithTimeout(
+              supabase
+                .from("subcontract_payments")
+                .select("amount")
+                .eq("contract_id", sc.id)
+            );
 
             const totalPaid =
               paymentsData?.reduce((sum, p) => sum + (p.amount || 0), 0) || 0;
 
             // Also get labor_payments linked to this subcontract
-            const { data: laborPaymentsData } = await supabase
-              .from("labor_payments")
-              .select("amount")
-              .eq("subcontract_id", sc.id);
+            const { data: laborPaymentsData } = await supabaseQueryWithTimeout(
+              supabase
+                .from("labor_payments")
+                .select("amount")
+                .eq("subcontract_id", sc.id)
+            );
 
             const laborPaid =
               laborPaymentsData?.reduce((sum, p) => sum + (p.amount || 0), 0) ||
               0;
 
             // Also get expenses linked to this subcontract (via contract_id)
-            const { data: expensesData } = await supabase
-              .from("expenses")
-              .select("amount")
-              .eq("contract_id", sc.id);
+            const { data: expensesData } = await supabaseQueryWithTimeout(
+              supabase
+                .from("expenses")
+                .select("amount")
+                .eq("contract_id", sc.id)
+            );
 
             const expensesPaid =
               expensesData?.reduce((sum, e) => sum + (e.amount || 0), 0) || 0;
@@ -125,12 +153,16 @@ export default function SubcontractLinkSelector({
           })
         );
 
+        if (!isMountedRef.current) return;
         setSubcontracts(subcontractsWithPayments);
       } catch (err) {
+        if (!isMountedRef.current) return;
         console.error("Error fetching subcontracts:", err);
         setError("Failed to load subcontracts");
       } finally {
-        setLoading(false);
+        if (isMountedRef.current) {
+          setLoading(false);
+        }
       }
     };
 
