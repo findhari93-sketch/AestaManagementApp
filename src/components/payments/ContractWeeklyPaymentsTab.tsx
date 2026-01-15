@@ -598,15 +598,50 @@ export default function ContractWeeklyPaymentsTab({
         .eq("site_id", selectedSite.id)
         .eq("is_cancelled", false);
 
-      // Use OR to include both salary settlements and advance/other/excess payments
+      // Use separate queries for salary settlements and advance/other/excess payments
+      // to avoid query string length issues with .or() + .in()
+      let sgData: any[] = [];
+      let sgError: any = null;
+
       if (contractSettlementIds.length > 0) {
-        sgQuery = sgQuery.or(`id.in.(${contractSettlementIds.join(",")}),payment_type.in.(advance,other,excess)`);
+        // Query salary settlements by IDs
+        const { data: salaryData, error: salaryError } = await supabaseQueryWithTimeout<any[]>(
+          sgQuery.in("id", contractSettlementIds)
+        );
+
+        if (salaryError) {
+          sgError = salaryError;
+        } else {
+          sgData = salaryData || [];
+        }
+
+        // Query advance/other/excess settlements separately
+        const { data: otherData, error: otherError } = await supabaseQueryWithTimeout<any[]>(
+          (supabase as any)
+            .from("settlement_groups")
+            .select("id, settlement_reference, settlement_date, total_amount, week_allocations, payment_type")
+            .eq("site_id", selectedSite.id)
+            .eq("is_cancelled", false)
+            .in("payment_type", ["advance", "other", "excess"])
+        );
+
+        if (!otherError && otherData) {
+          // Merge results, avoiding duplicates
+          const existingIds = new Set(sgData.map((s: any) => s.id));
+          otherData.forEach((s: any) => {
+            if (!existingIds.has(s.id)) {
+              sgData.push(s);
+            }
+          });
+        }
       } else {
         // No salary settlements, just fetch advances/other/excess
-        sgQuery = sgQuery.in("payment_type", ["advance", "other", "excess"]);
+        const { data: otherData, error: otherError } = await supabaseQueryWithTimeout<any[]>(
+          sgQuery.in("payment_type", ["advance", "other", "excess"])
+        );
+        sgData = otherData || [];
+        sgError = otherError;
       }
-
-      const { data: sgData, error: sgError } = await supabaseQueryWithTimeout<any[]>(sgQuery);
       if (!isMountedRef.current) return;
       if (sgError) {
         console.error("Error fetching settlement groups:", sgError);

@@ -338,13 +338,71 @@ export default function ContractPaymentHistoryDialog({
 
       // If we have salary settlements, use OR to include them plus advances/other/excess
       // If no salary settlements, just fetch advances/other/excess
-      if (contractSettlementIds.length > 0) {
-        query = query.or(`id.in.(${contractSettlementIds.join(",")}),payment_type.in.(advance,other,excess)`);
-      } else {
-        query = query.in("payment_type", ["advance", "other", "excess"]);
-      }
+      // Note: Using filter with .in() for IDs to avoid query string length issues
+      let settlementData: any[] = [];
+      let error: any = null;
 
-      const { data: settlementData, error } = await query;
+      if (contractSettlementIds.length > 0) {
+        // Query salary settlements by IDs
+        const { data: salaryData, error: salaryError } = await query
+          .in("id", contractSettlementIds);
+
+        if (salaryError) {
+          error = salaryError;
+        } else {
+          settlementData = salaryData || [];
+        }
+
+        // Query advance/other/excess settlements separately
+        const { data: otherData, error: otherError } = await supabase
+          .from("settlement_groups")
+          .select(`
+            id,
+            settlement_reference,
+            settlement_date,
+            total_amount,
+            payment_mode,
+            payment_channel,
+            payment_type,
+            payer_source,
+            payer_name,
+            subcontract_id,
+            proof_url,
+            proof_urls,
+            notes,
+            created_by_name,
+            created_at,
+            laborer_count,
+            week_allocations,
+            subcontracts (
+              title
+            )
+          `)
+          .eq("site_id", selectedSite.id)
+          .eq("is_cancelled", false)
+          .in("payment_type", ["advance", "other", "excess"])
+          .order("settlement_date", { ascending: false });
+
+        if (!otherError && otherData) {
+          // Merge results, avoiding duplicates (some may have been included in both)
+          const existingIds = new Set(settlementData.map((s: any) => s.id));
+          otherData.forEach((s: any) => {
+            if (!existingIds.has(s.id)) {
+              settlementData.push(s);
+            }
+          });
+        }
+
+        // Sort combined results by settlement_date descending
+        settlementData.sort((a: any, b: any) =>
+          new Date(b.settlement_date).getTime() - new Date(a.settlement_date).getTime()
+        );
+      } else {
+        const { data: otherData, error: otherError } = await query
+          .in("payment_type", ["advance", "other", "excess"]);
+        settlementData = otherData || [];
+        error = otherError;
+      }
 
       if (error) {
         console.error("Error fetching settlements:", error);
@@ -486,11 +544,26 @@ export default function ContractPaymentHistoryDialog({
           const isAdvance = type === "advance";
           const isOther = type === "other";
           const isExcess = type === "excess";
+          // Excess payments are applied to salary in waterfall calculation, so show as Salary
+          // with tooltip explaining it was originally an overpayment
+          if (isExcess) {
+            return (
+              <Tooltip title="Originally recorded as overpayment (no salary due at time of payment). Now applied to salary.">
+                <Chip
+                  size="small"
+                  label="Salary"
+                  color="success"
+                  variant="outlined"
+                  sx={{ fontSize: "0.7rem" }}
+                />
+              </Tooltip>
+            );
+          }
           return (
             <Chip
               size="small"
-              label={isAdvance ? "Advance" : isOther ? "Other" : isExcess ? "Excess" : "Salary"}
-              color={isAdvance ? "warning" : isOther ? "info" : isExcess ? "secondary" : "success"}
+              label={isAdvance ? "Advance" : isOther ? "Other" : "Salary"}
+              color={isAdvance ? "warning" : isOther ? "info" : "success"}
               variant="outlined"
               sx={{ fontSize: "0.7rem" }}
             />
@@ -504,12 +577,23 @@ export default function ContractPaymentHistoryDialog({
         Cell: ({ row }) => {
           const count = row.original.laborerCount;
           const type = row.original.paymentType;
-          // For advance/other/excess payments, show "-" since no laborers are linked
-          if ((type === "advance" || type === "other" || type === "excess") && count === 0) {
+          // For advance/other payments, show "-" since no laborers are linked
+          // Note: excess payments are now shown as Salary, but may not have laborers if recorded before work
+          if ((type === "advance" || type === "other") && count === 0) {
             return (
               <Typography variant="body2" color="text.secondary">
                 -
               </Typography>
+            );
+          }
+          // For excess payments with no laborers, show "-" but it's still salary
+          if (type === "excess" && count === 0) {
+            return (
+              <Tooltip title="Applied to all contract laborers via waterfall">
+                <Typography variant="body2" color="text.secondary">
+                  -
+                </Typography>
+              </Tooltip>
             );
           }
           return (

@@ -164,10 +164,9 @@ export default function DeleteContractSettlementDialog({
   if (!settlement) return null;
 
   const isConfirmValid = confirmText === "DELETE";
+  // Excess payments are applied to salary in waterfall calculation, so show as Salary
   const paymentTypeLabel = settlement.paymentType === "advance"
     ? "Advance"
-    : settlement.paymentType === "excess"
-    ? "Excess/Overpayment"
     : settlement.paymentType === "other"
     ? "Other"
     : "Salary";
@@ -233,7 +232,7 @@ export default function DeleteContractSettlementDialog({
             <Chip
               label={paymentTypeLabel}
               size="small"
-              color={settlement.paymentType === "advance" ? "warning" : settlement.paymentType === "excess" ? "secondary" : "success"}
+              color={settlement.paymentType === "advance" ? "warning" : settlement.paymentType === "other" ? "info" : "success"}
               variant="outlined"
             />
           </Box>
