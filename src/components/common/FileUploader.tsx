@@ -372,12 +372,13 @@ export default function FileUploader({
       let globalTimeout: NodeJS.Timeout | null = null;
       let isAborted = false;
 
-      // Global timeout to prevent indefinite hanging (20 seconds)
+      // Global timeout to prevent indefinite hanging (60 seconds)
+      // Increased from 20s to handle slow networks and Supabase delays
       const timeoutPromise = new Promise<never>((_, reject) => {
         globalTimeout = setTimeout(() => {
           isAborted = true;
           reject(new Error("Upload timed out. Please try with a smaller file or check your connection."));
-        }, 20000);
+        }, 60000);
       });
 
       try {
