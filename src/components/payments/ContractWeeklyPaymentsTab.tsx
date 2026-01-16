@@ -240,8 +240,10 @@ export default function ContractWeeklyPaymentsTab({
       const teamsMap = new Map<string, string>();
       (teamsLookup || []).forEach((t: any) => teamsMap.set(t.id, t.name));
 
-      // Fetch ALL contract laborers' attendance (NO date filter)
-      // This is needed for accurate waterfall calculation across ALL weeks
+      // Fetch contract laborers' attendance from financial year start
+      // Limited to current FY (April onwards) for performance while maintaining waterfall accuracy
+      // Using 60s timeout as this is a heavy query that can be slow with concurrent tabs
+      const financialYearStart = "2025-04-01"; // FY 2025-26 start
       const { data: allAttendanceData, error: allAttendanceError } = await supabaseQueryWithTimeout(
         supabase
           .from("daily_attendance")
@@ -267,7 +269,9 @@ export default function ContractWeeklyPaymentsTab({
           )
           .eq("site_id", selectedSite.id)
           .eq("laborers.laborer_type", "contract")
-          .order("date", { ascending: true })
+          .gte("date", financialYearStart)
+          .order("date", { ascending: true }),
+        60000 // 60 second timeout for heavy query
       );
 
       if (!isMountedRef.current) return;
