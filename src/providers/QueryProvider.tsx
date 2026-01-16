@@ -137,10 +137,11 @@ function SyncInitializer({ queryClient }: { queryClient: QueryClient }) {
     const currentSiteId = selectedSite?.id;
     const previousSiteId = previousSiteIdRef.current;
 
-    // Clear old site's cached queries when switching sites
-    // This prevents stale data from appearing when navigating
-    if (currentSiteId && previousSiteId !== currentSiteId) {
-      console.log(`Site changed from ${previousSiteId || 'none'} to ${currentSiteId}, clearing site-specific cache`);
+    // Clear old site's cached queries when switching between sites
+    // Only clear when switching from one valid site to another (not on initial load)
+    // This prevents stale data from appearing when navigating between sites
+    if (currentSiteId && previousSiteId && previousSiteId !== currentSiteId) {
+      console.log(`Site changed from ${previousSiteId} to ${currentSiteId}, clearing site-specific cache`);
 
       // Cancel any in-flight queries first
       queryClient.cancelQueries();
