@@ -46,6 +46,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useDateRange } from "@/contexts/DateRangeContext";
 import PageHeader from "@/components/layout/PageHeader";
 import { hasEditPermission } from "@/lib/permissions";
+import { supabaseQueryWithTimeout } from "@/lib/utils/supabaseQuery";
 import type {
   Expense,
   ExpenseModule,
@@ -226,7 +227,9 @@ export default function ExpensesPage() {
       }
 
       if (activeTab !== "all") query = query.eq("module", activeTab);
-      const { data, error } = await query;
+
+      // Use timeout protection to prevent infinite loading
+      const { data, error } = await supabaseQueryWithTimeout<any[]>(query, 30000);
       if (error) throw error;
 
       setExpenses(
@@ -238,7 +241,8 @@ export default function ExpensesPage() {
       // Also refresh subcontracts summary since expenses affect paid totals
       fetchSubcontracts();
     } catch (error: any) {
-      alert("Failed to load expenses: " + error.message);
+      console.error("Error loading expenses:", error);
+      setExpenses([]);
     } finally {
       setLoading(false);
     }
