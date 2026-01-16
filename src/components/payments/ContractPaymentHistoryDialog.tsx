@@ -35,6 +35,7 @@ import {
   Delete as DeleteIcon,
 } from "@mui/icons-material";
 import { createClient } from "@/lib/supabase/client";
+import { supabaseQueryWithTimeout } from "@/lib/utils/supabaseQuery";
 import { useSite } from "@/contexts/SiteContext";
 import { useAuth } from "@/contexts/AuthContext";
 import DeleteContractSettlementDialog from "./DeleteContractSettlementDialog";
@@ -292,12 +293,14 @@ export default function ContractPaymentHistoryDialog({
     setLoading(true);
     try {
       // Step 1: Get settlement_group_ids that have contract labor_payments (salary payments)
-      const { data: contractPayments } = await supabase
-        .from("labor_payments")
-        .select("settlement_group_id")
-        .eq("site_id", selectedSite.id)
-        .eq("is_under_contract", true)
-        .not("settlement_group_id", "is", null);
+      const { data: contractPayments } = await supabaseQueryWithTimeout(
+        supabase
+          .from("labor_payments")
+          .select("settlement_group_id")
+          .eq("site_id", selectedSite.id)
+          .eq("is_under_contract", true)
+          .not("settlement_group_id", "is", null)
+      );
 
       // Get unique settlement_group_ids from labor_payments
       const contractSettlementIds = contractPayments
@@ -344,8 +347,9 @@ export default function ContractPaymentHistoryDialog({
 
       if (contractSettlementIds.length > 0) {
         // Query salary settlements by IDs
-        const { data: salaryData, error: salaryError } = await query
-          .in("id", contractSettlementIds);
+        const { data: salaryData, error: salaryError } = await supabaseQueryWithTimeout<any[]>(
+          query.in("id", contractSettlementIds)
+        );
 
         if (salaryError) {
           error = salaryError;
@@ -354,34 +358,36 @@ export default function ContractPaymentHistoryDialog({
         }
 
         // Query advance/other/excess settlements separately
-        const { data: otherData, error: otherError } = await supabase
-          .from("settlement_groups")
-          .select(`
-            id,
-            settlement_reference,
-            settlement_date,
-            total_amount,
-            payment_mode,
-            payment_channel,
-            payment_type,
-            payer_source,
-            payer_name,
-            subcontract_id,
-            proof_url,
-            proof_urls,
-            notes,
-            created_by_name,
-            created_at,
-            laborer_count,
-            week_allocations,
-            subcontracts (
-              title
-            )
-          `)
-          .eq("site_id", selectedSite.id)
-          .eq("is_cancelled", false)
-          .in("payment_type", ["advance", "other", "excess"])
-          .order("settlement_date", { ascending: false });
+        const { data: otherData, error: otherError } = await supabaseQueryWithTimeout<any[]>(
+          supabase
+            .from("settlement_groups")
+            .select(`
+              id,
+              settlement_reference,
+              settlement_date,
+              total_amount,
+              payment_mode,
+              payment_channel,
+              payment_type,
+              payer_source,
+              payer_name,
+              subcontract_id,
+              proof_url,
+              proof_urls,
+              notes,
+              created_by_name,
+              created_at,
+              laborer_count,
+              week_allocations,
+              subcontracts (
+                title
+              )
+            `)
+            .eq("site_id", selectedSite.id)
+            .eq("is_cancelled", false)
+            .in("payment_type", ["advance", "other", "excess"])
+            .order("settlement_date", { ascending: false })
+        );
 
         if (!otherError && otherData) {
           // Merge results, avoiding duplicates (some may have been included in both)
@@ -398,8 +404,9 @@ export default function ContractPaymentHistoryDialog({
           new Date(b.settlement_date).getTime() - new Date(a.settlement_date).getTime()
         );
       } else {
-        const { data: otherData, error: otherError } = await query
-          .in("payment_type", ["advance", "other", "excess"]);
+        const { data: otherData, error: otherError } = await supabaseQueryWithTimeout<any[]>(
+          query.in("payment_type", ["advance", "other", "excess"])
+        );
         settlementData = otherData || [];
         error = otherError;
       }

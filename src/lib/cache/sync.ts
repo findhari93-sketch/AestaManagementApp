@@ -420,13 +420,15 @@ export function getSyncOrchestrator(
 
 /**
  * Initialize background sync
- * Only the leader tab runs active sync; followers listen for broadcasts
+ * Leader tab runs active sync; all tabs listen for broadcasts
+ * Follower tabs can still fetch data on-demand via React Query
  */
 export function initBackgroundSync(
   queryClient: QueryClient,
   siteId?: string
 ): void {
   const coordinator = getTabCoordinator();
+  const isLeader = !coordinator || coordinator.isLeader;
 
   // Clean up any existing tab message subscription
   if (tabMessageUnsubscribe) {
@@ -434,14 +436,11 @@ export function initBackgroundSync(
     tabMessageUnsubscribe = null;
   }
 
-  // Check if this tab is the leader
-  if (coordinator && !coordinator.isLeader) {
-    // Follower tab: Listen for cache invalidation broadcasts from leader
-    console.log("[Sync] Not leader tab - listening for broadcasts only");
-
+  // All tabs subscribe to broadcasts for cache invalidation
+  if (coordinator) {
     tabMessageUnsubscribe = coordinator.subscribe((message: TabMessage) => {
       if (message.type === "CACHE_INVALIDATE" && message.queryKeys) {
-        // Invalidate the specified queries
+        // Invalidate the specified queries - triggers refetch if query is active
         message.queryKeys.forEach((queryKey) => {
           queryClient.invalidateQueries({
             queryKey: queryKey as unknown[],
@@ -449,20 +448,22 @@ export function initBackgroundSync(
           });
         });
       } else if (message.type === "SITE_CHANGED") {
-        // Site changed in leader tab - just log it, don't clear cache
-        // React Query will handle stale data via its normal refetch logic
-        // This allows follower tabs to continue working for multi-tab comparison
-        console.log("[Sync] Site changed in leader tab to:", message.siteId);
+        // Site changed in another tab - just log it
+        // Each tab manages its own site context independently
+        console.log("[Sync] Site changed in another tab to:", message.siteId);
       }
     });
-
-    return;
   }
 
-  // Leader tab: Run active background sync
-  console.log("[Sync] Leader tab - starting active sync");
-  const orchestrator = getSyncOrchestrator(queryClient);
-  orchestrator?.start(siteId);
+  // Only leader tab runs the background sync orchestrator
+  // This prevents duplicate polling from multiple tabs
+  if (isLeader) {
+    console.log("[Sync] Leader tab - starting active sync");
+    const orchestrator = getSyncOrchestrator(queryClient);
+    orchestrator?.start(siteId);
+  } else {
+    console.log("[Sync] Follower tab - ready for on-demand fetching");
+  }
 }
 
 /**

@@ -31,6 +31,7 @@ import {
 } from "@mui/icons-material";
 import dayjs from "dayjs";
 import { createClient } from "@/lib/supabase/client";
+import { supabaseQueryWithTimeout } from "@/lib/utils/supabaseQuery";
 import { useAuth } from "@/contexts/AuthContext";
 
 // Settlement record type (matches ContractPaymentHistoryDialog)
@@ -105,10 +106,12 @@ export default function DeleteContractSettlementDialog({
       }
 
       // 2. Get labor_payments for this settlement and clean up
-      const { data: payments, error: paymentsError } = await supabase
-        .from("labor_payments")
-        .select("id, laborer_id")
-        .eq("settlement_group_id", settlement.id);
+      const { data: payments, error: paymentsError } = await supabaseQueryWithTimeout(
+        supabase
+          .from("labor_payments")
+          .select("id, laborer_id")
+          .eq("settlement_group_id", settlement.id)
+      );
 
       if (paymentsError) {
         console.error("Error fetching labor_payments:", paymentsError);
