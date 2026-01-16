@@ -28,6 +28,7 @@ import {
   Tab,
   Drawer,
   Divider,
+  Tooltip,
 } from "@mui/material";
 import {
   Add,
@@ -381,9 +382,45 @@ export default function ExpensesPage() {
     const cleared = clearedExpenses.reduce((s, e) => s + e.amount, 0);
     const pendingExpenses = expenses.filter((e) => !e.is_cleared);
 
-    // Category breakdown by expense_type
+    // Calculate contract settlement breakdown for tooltip
+    // Includes: Contract Salary, Advance, and Contract Salary Excess (overpayments)
+    const contractSettlementBreakdown = {
+      salary: { amount: 0, count: 0 },
+      advance: { amount: 0, count: 0 },
+      excess: { amount: 0, count: 0 },
+      total: { amount: 0, count: 0 },
+    };
+
+    // Category breakdown by expense_type - consolidate contract types
     const categoryBreakdown = expenses.reduce((acc, e) => {
       const type = e.expense_type || 'Other';
+
+      // Consolidate Contract Salary, Advance, and Excess into contractSettlementBreakdown
+      if (type === "Contract Salary") {
+        contractSettlementBreakdown.salary.amount += e.amount;
+        contractSettlementBreakdown.salary.count += 1;
+        contractSettlementBreakdown.total.amount += e.amount;
+        contractSettlementBreakdown.total.count += 1;
+        return acc; // Don't add to regular breakdown
+      }
+
+      if (type === "Advance") {
+        contractSettlementBreakdown.advance.amount += e.amount;
+        contractSettlementBreakdown.advance.count += 1;
+        contractSettlementBreakdown.total.amount += e.amount;
+        contractSettlementBreakdown.total.count += 1;
+        return acc; // Don't add to regular breakdown
+      }
+
+      if (type === "Contract Salary Excess") {
+        contractSettlementBreakdown.excess.amount += e.amount;
+        contractSettlementBreakdown.excess.count += 1;
+        contractSettlementBreakdown.total.amount += e.amount;
+        contractSettlementBreakdown.total.count += 1;
+        return acc; // Don't add to regular breakdown
+      }
+
+      // Regular categories
       if (!acc[type]) {
         acc[type] = { amount: 0, count: 0 };
       }
@@ -399,6 +436,7 @@ export default function ExpensesPage() {
       totalCount: expenses.length,
       clearedCount: clearedExpenses.length,
       pendingCount: pendingExpenses.length,
+      contractSettlementBreakdown,
       categoryBreakdown,
     };
   }, [expenses]);
@@ -708,7 +746,7 @@ export default function ExpensesPage() {
             </Box>
 
             {/* Middle: Breakdown */}
-            {Object.keys(stats.categoryBreakdown).length > 0 && (
+            {(Object.keys(stats.categoryBreakdown).length > 0 || stats.contractSettlementBreakdown.total.count > 0) && (
               <Box sx={{ flex: 1 }}>
                 <Typography
                   variant="caption"
@@ -724,6 +762,66 @@ export default function ExpensesPage() {
                   Breakdown by Type
                 </Typography>
                 <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1.5 }}>
+                  {/* Contract Weekly Settlement - consolidated card with tooltip */}
+                  {stats.contractSettlementBreakdown.total.count > 0 && (
+                    <Tooltip
+                      title={
+                        <Box sx={{ p: 0.5 }}>
+                          <Typography variant="caption" sx={{ fontWeight: 600, display: "block", mb: 0.5 }}>
+                            Breakdown
+                          </Typography>
+                          <Box sx={{ display: "flex", flexDirection: "column", gap: 0.25 }}>
+                            <Typography variant="caption">
+                              Salary: ₹{stats.contractSettlementBreakdown.salary.amount.toLocaleString("en-IN")} ({stats.contractSettlementBreakdown.salary.count} rec)
+                            </Typography>
+                            <Typography variant="caption">
+                              Advance: ₹{stats.contractSettlementBreakdown.advance.amount.toLocaleString("en-IN")} ({stats.contractSettlementBreakdown.advance.count} rec)
+                            </Typography>
+                            {stats.contractSettlementBreakdown.excess.count > 0 && (
+                              <Typography variant="caption" sx={{ color: "info.light" }}>
+                                Excess: ₹{stats.contractSettlementBreakdown.excess.amount.toLocaleString("en-IN")} ({stats.contractSettlementBreakdown.excess.count} rec)
+                              </Typography>
+                            )}
+                          </Box>
+                        </Box>
+                      }
+                      arrow
+                      placement="top"
+                    >
+                      <Box
+                        sx={{
+                          px: 2,
+                          py: 1.25,
+                          bgcolor: "secondary.50",
+                          borderRadius: 1.5,
+                          minWidth: 110,
+                          flex: "1 1 auto",
+                          maxWidth: { xs: "100%", sm: 180 },
+                          cursor: "help",
+                          transition: "background-color 0.2s",
+                          "&:hover": {
+                            bgcolor: "secondary.100",
+                          },
+                        }}
+                      >
+                        <Typography
+                          variant="caption"
+                          color="text.secondary"
+                          noWrap
+                          sx={{ display: "block", mb: 0.25 }}
+                        >
+                          Contract Weekly Settlement
+                        </Typography>
+                        <Typography variant="subtitle1" fontWeight={600}>
+                          ₹{stats.contractSettlementBreakdown.total.amount.toLocaleString("en-IN")}
+                        </Typography>
+                        <Typography variant="caption" color="text.disabled">
+                          {stats.contractSettlementBreakdown.total.count} rec
+                        </Typography>
+                      </Box>
+                    </Tooltip>
+                  )}
+                  {/* Other expense types */}
                   {Object.entries(stats.categoryBreakdown)
                     .sort(([, a], [, b]) => b.amount - a.amount)
                     .map(([type, data]) => (
