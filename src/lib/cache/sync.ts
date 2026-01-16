@@ -448,11 +448,11 @@ export function initBackgroundSync(
             refetchType: "active",
           });
         });
-      } else if (message.type === "SITE_CHANGED" && message.siteId !== siteId) {
-        // Site changed in another tab - clear our cache
-        console.log("[Sync] Site changed in leader tab, clearing cache");
-        queryClient.cancelQueries();
-        queryClient.clear();
+      } else if (message.type === "SITE_CHANGED") {
+        // Site changed in leader tab - just log it, don't clear cache
+        // React Query will handle stale data via its normal refetch logic
+        // This allows follower tabs to continue working for multi-tab comparison
+        console.log("[Sync] Site changed in leader tab to:", message.siteId);
       }
     });
 
