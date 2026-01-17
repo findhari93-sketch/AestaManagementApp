@@ -198,7 +198,8 @@
       "Bash(npm:*)",
       "Bash(npm view:*)",
       "Bash(dir /b \"c:\\\\Users\\\\Haribabu\\\\Documents\\\\AppsCopilot\\\\AestaManagementApp\\\\src\\\\app\\\\\\(main\\)\\\\site\\\\payments\")",
-      "Bash(dir /s /b \"c:\\\\Users\\\\Haribabu\\\\Documents\\\\AppsCopilot\\\\AestaManagementApp\\\\src\\\\features\\\\attendance\")"
+      "Bash(dir /s /b \"c:\\\\Users\\\\Haribabu\\\\Documents\\\\AppsCopilot\\\\AestaManagementApp\\\\src\\\\features\\\\attendance\")",
+      "Bash(npm test:*)"
     ],
     "deny": [],
     "ask": []

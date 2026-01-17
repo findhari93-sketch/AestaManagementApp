@@ -16,6 +16,10 @@ import {
   Link,
   Tabs,
   Tab,
+  Avatar,
+  Dialog,
+  DialogTitle,
+  DialogContent,
 } from "@mui/material";
 import {
   Add as AddIcon,
@@ -38,6 +42,7 @@ import {
 import { useMaterialCategories } from "@/hooks/queries/useMaterials";
 import { useVendorMaterialCounts } from "@/hooks/queries/useVendorInventory";
 import VendorDialog from "@/components/materials/VendorDialog";
+import ConfirmDialog from "@/components/common/ConfirmDialog";
 import type { VendorWithCategories, VendorType } from "@/types/material.types";
 
 // Vendor category tabs based on building material types
@@ -67,6 +72,15 @@ export default function VendorsPage() {
   const [searchInput, setSearchInput] = useState("");
   const [pagination, setPagination] = useState<PaginationState>({ pageIndex: 0, pageSize: 50 });
   const [selectedTab, setSelectedTab] = useState<VendorTabId>("all");
+  const [deleteConfirm, setDeleteConfirm] = useState<{ open: boolean; vendor: VendorWithCategories | null }>({
+    open: false,
+    vendor: null,
+  });
+  const [photoPreview, setPhotoPreview] = useState<{ open: boolean; url: string; name: string }>({
+    open: false,
+    url: "",
+    name: "",
+  });
 
   const { userProfile } = useAuth();
   const isMobile = useIsMobile();
@@ -119,17 +133,23 @@ export default function VendorsPage() {
     setEditingVendor(null);
   }, []);
 
-  const handleDelete = useCallback(
-    async (id: string) => {
-      if (!confirm("Are you sure you want to delete this vendor?")) return;
-      try {
-        await deleteVendor.mutateAsync(id);
-      } catch (error) {
-        console.error("Failed to delete vendor:", error);
-      }
-    },
-    [deleteVendor]
-  );
+  const handleDeleteClick = useCallback((vendor: VendorWithCategories) => {
+    setDeleteConfirm({ open: true, vendor });
+  }, []);
+
+  const handleDeleteConfirm = useCallback(async () => {
+    if (!deleteConfirm.vendor) return;
+    try {
+      await deleteVendor.mutateAsync(deleteConfirm.vendor.id);
+      setDeleteConfirm({ open: false, vendor: null });
+    } catch (error) {
+      console.error("Failed to delete vendor:", error);
+    }
+  }, [deleteConfirm.vendor, deleteVendor]);
+
+  const handleDeleteCancel = useCallback(() => {
+    setDeleteConfirm({ open: false, vendor: null });
+  }, []);
 
   // Table columns
   const columns = useMemo<MRT_ColumnDef<VendorWithCategories>[]>(
@@ -137,23 +157,46 @@ export default function VendorsPage() {
       {
         accessorKey: "name",
         header: "Vendor Name",
-        size: 200,
+        size: 220,
         Cell: ({ row }) => (
-          <Box>
-            <Link
-              component="button"
-              variant="body2"
-              fontWeight={500}
-              onClick={() => router.push(`/company/vendors/${row.original.id}`)}
-              sx={{ textAlign: "left", cursor: "pointer" }}
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            <Avatar
+              {...(row.original.shop_photo_url ? { src: row.original.shop_photo_url } : {})}
+              sx={{
+                width: 36,
+                height: 36,
+                cursor: row.original.shop_photo_url ? "pointer" : "default",
+                bgcolor: row.original.shop_photo_url ? undefined : "primary.light",
+              }}
+              onClick={(e) => {
+                if (row.original.shop_photo_url) {
+                  e.stopPropagation();
+                  setPhotoPreview({
+                    open: true,
+                    url: row.original.shop_photo_url,
+                    name: row.original.shop_name || row.original.name,
+                  });
+                }
+              }}
             >
-              {row.original.name}
-            </Link>
-            {row.original.code && (
-              <Typography variant="caption" color="text.secondary" display="block">
-                {row.original.code}
-              </Typography>
-            )}
+              {row.original.name.charAt(0).toUpperCase()}
+            </Avatar>
+            <Box>
+              <Link
+                component="button"
+                variant="body2"
+                fontWeight={500}
+                onClick={() => router.push(`/company/vendors/${row.original.id}`)}
+                sx={{ textAlign: "left", cursor: "pointer" }}
+              >
+                {row.original.name}
+              </Link>
+              {row.original.code && (
+                <Typography variant="caption" color="text.secondary" display="block">
+                  {row.original.code}
+                </Typography>
+              )}
+            </Box>
           </Box>
         ),
       },
@@ -282,7 +325,7 @@ export default function VendorsPage() {
         <Tooltip title="Delete">
           <IconButton
             size="small"
-            onClick={() => handleDelete(row.original.id)}
+            onClick={() => handleDeleteClick(row.original)}
             disabled={!canEdit}
             color="error"
           >
@@ -291,7 +334,7 @@ export default function VendorsPage() {
         </Tooltip>
       </Box>
     ),
-    [handleOpenDialog, handleDelete, canEdit]
+    [handleOpenDialog, handleDeleteClick, canEdit]
   );
 
   return (
@@ -388,6 +431,39 @@ export default function VendorsPage() {
         vendor={editingVendor}
         categories={categories}
       />
+
+      {/* Delete Confirmation Dialog */}
+      <ConfirmDialog
+        open={deleteConfirm.open}
+        title="Delete Vendor"
+        message={`Are you sure you want to delete "${deleteConfirm.vendor?.name}"? This vendor will be removed from the active list.`}
+        confirmText="Delete"
+        confirmColor="error"
+        isLoading={deleteVendor.isPending}
+        onConfirm={handleDeleteConfirm}
+        onCancel={handleDeleteCancel}
+      />
+
+      {/* Photo Preview Dialog */}
+      <Dialog
+        open={photoPreview.open}
+        onClose={() => setPhotoPreview({ open: false, url: "", name: "" })}
+        maxWidth="md"
+      >
+        <DialogTitle>{photoPreview.name}</DialogTitle>
+        <DialogContent>
+          <Box
+            component="img"
+            src={photoPreview.url}
+            alt={photoPreview.name}
+            sx={{
+              width: "100%",
+              maxHeight: "70vh",
+              objectFit: "contain",
+            }}
+          />
+        </DialogContent>
+      </Dialog>
     </Box>
   );
 }

@@ -72,10 +72,13 @@ export default function VendorDialog({
   const updateVendor = useUpdateVendor();
   const supabase = createClient();
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const shopPhotoInputRef = React.useRef<HTMLInputElement>(null);
 
   const [error, setError] = useState("");
   const [customizeCode, setCustomizeCode] = useState(false);
   const [uploadingQr, setUploadingQr] = useState(false);
+  const [uploadingShopPhoto, setUploadingShopPhoto] = useState(false);
+  const [taxDetailsExpanded, setTaxDetailsExpanded] = useState(false);
   const [formData, setFormData] = useState<VendorFormData>({
     name: "",
     code: "",
@@ -117,6 +120,7 @@ export default function VendorDialog({
     credit_days: 0,
     upi_id: "",
     qr_code_url: "",
+    shop_photo_url: "",
   });
 
   // Reset form when vendor changes
@@ -163,6 +167,7 @@ export default function VendorDialog({
         credit_days: vendor.credit_days || 0,
         upi_id: vendor.upi_id || "",
         qr_code_url: vendor.qr_code_url || "",
+        shop_photo_url: vendor.shop_photo_url || "",
       });
       setCustomizeCode(!!vendor.code);
     } else {
@@ -207,12 +212,19 @@ export default function VendorDialog({
         credit_days: 0,
         upi_id: "",
         qr_code_url: "",
+        shop_photo_url: "",
       });
       setCustomizeCode(false);
     }
     setError("");
   }, [vendor, open]);
 
+  // Sync tax details accordion state when dialog opens
+  useEffect(() => {
+    if (open) {
+      setTaxDetailsExpanded(!!vendor);
+    }
+  }, [open, vendor]);
 
   const handleChange = (field: keyof VendorFormData, value: unknown) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
@@ -266,6 +278,55 @@ export default function VendorDialog({
 
   const handleRemoveQrCode = () => {
     handleChange("qr_code_url", "");
+  };
+
+  // Shop Photo upload handler
+  const handleShopPhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      setError("Please upload an image file");
+      return;
+    }
+
+    setUploadingShopPhoto(true);
+    setError("");
+
+    try {
+      // Compress image for shop photos (max 500KB, 1200px)
+      const compressedFile = await compressImage(file, 500, 1200, 1200, 0.8);
+
+      // Generate unique file name
+      const fileExt = "jpg";
+      const fileName = `vendors/${vendor?.id || "new"}/${Date.now()}_shop.${fileExt}`;
+
+      // Upload to Supabase Storage
+      const { error: uploadError } = await supabase.storage
+        .from("vendor-photos")
+        .upload(fileName, compressedFile, {
+          cacheControl: "3600",
+          upsert: true,
+        });
+
+      if (uploadError) throw uploadError;
+
+      // Get public URL
+      const { data: urlData } = supabase.storage.from("vendor-photos").getPublicUrl(fileName);
+      handleChange("shop_photo_url", urlData.publicUrl);
+    } catch (err: unknown) {
+      console.error("Error uploading shop photo:", err);
+      setError("Failed to upload shop photo");
+    } finally {
+      setUploadingShopPhoto(false);
+      if (shopPhotoInputRef.current) {
+        shopPhotoInputRef.current.value = "";
+      }
+    }
+  };
+
+  const handleRemoveShopPhoto = () => {
+    handleChange("shop_photo_url", "");
   };
 
   const handleSubmit = async () => {
@@ -602,6 +663,73 @@ export default function VendorDialog({
                   }}
                 />
               </Grid>
+
+              {/* Shop Photo Upload */}
+              <Grid size={12}>
+                <Box>
+                  <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: "block" }}>
+                    Shop/Store Photo
+                  </Typography>
+                  <input
+                    ref={shopPhotoInputRef}
+                    type="file"
+                    accept="image/*"
+                    onChange={handleShopPhotoUpload}
+                    style={{ display: "none" }}
+                    id="vendor-shop-photo-upload"
+                  />
+                  {formData.shop_photo_url ? (
+                    <Box sx={{ display: "flex", alignItems: "flex-start", gap: 2 }}>
+                      <Box
+                        component="img"
+                        src={formData.shop_photo_url}
+                        alt="Shop Photo"
+                        sx={{
+                          width: 150,
+                          height: 100,
+                          objectFit: "cover",
+                          borderRadius: 1,
+                          border: "1px solid",
+                          borderColor: "divider",
+                        }}
+                      />
+                      <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          onClick={() => shopPhotoInputRef.current?.click()}
+                          disabled={uploadingShopPhoto}
+                          startIcon={uploadingShopPhoto ? <CircularProgress size={16} /> : <UploadIcon />}
+                        >
+                          Replace
+                        </Button>
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          color="error"
+                          onClick={handleRemoveShopPhoto}
+                          startIcon={<DeleteIcon />}
+                        >
+                          Remove
+                        </Button>
+                      </Box>
+                    </Box>
+                  ) : (
+                    <Button
+                      variant="outlined"
+                      onClick={() => shopPhotoInputRef.current?.click()}
+                      disabled={uploadingShopPhoto}
+                      startIcon={uploadingShopPhoto ? <CircularProgress size={16} /> : <UploadIcon />}
+                      sx={{ height: 56 }}
+                    >
+                      {uploadingShopPhoto ? "Uploading..." : "Upload Shop Photo"}
+                    </Button>
+                  )}
+                  <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: "block" }}>
+                    Add a photo of the vendor&apos;s shop or store front
+                  </Typography>
+                </Box>
+              </Grid>
             </>
           )}
 
@@ -703,7 +831,10 @@ export default function VendorDialog({
 
           {/* Tax & Payment Section - Accordion */}
           <Grid size={12}>
-            <Accordion defaultExpanded={isEdit}>
+            <Accordion
+              expanded={taxDetailsExpanded}
+              onChange={(_, expanded) => setTaxDetailsExpanded(expanded)}
+            >
               <AccordionSummary expandIcon={<ExpandMoreIcon />}>
                 <Typography>Tax & Payment Details</Typography>
               </AccordionSummary>

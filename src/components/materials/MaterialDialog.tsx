@@ -51,6 +51,7 @@ import {
   useUpdateMaterialBrand,
   useParentMaterials,
   useCreateMaterialWithVariants,
+  useMaterial,
 } from "@/hooks/queries/useMaterials";
 import type {
   MaterialWithDetails,
@@ -61,6 +62,11 @@ import type {
   VariantFormData,
 } from "@/types/material.types";
 import VariantInlineTable from "./VariantInlineTable";
+import BrandVariantEditor from "./BrandVariantEditor";
+
+// Category patterns that should hide certain fields
+const CEMENT_CATEGORY_PATTERNS = ["cement", "ppc", "opc"];
+const TMT_CATEGORY_PATTERNS = ["tmt", "steel", "bar", "rod"];
 
 const UNITS: { value: MaterialUnit; label: string }[] = [
   { value: "kg", label: "Kilogram (kg)" },
@@ -104,6 +110,11 @@ export default function MaterialDialog({
   const updateBrand = useUpdateMaterialBrand();
   const deleteBrand = useDeleteMaterialBrand();
   const { data: parentMaterials = [] } = useParentMaterials();
+
+  // Fetch fresh material data to get updated brands after mutations
+  const { data: freshMaterial } = useMaterial(material?.id);
+  // Use fresh data for brands (falls back to prop if query not ready)
+  const materialForBrands = freshMaterial || material;
 
   const [error, setError] = useState("");
   const [newBrandName, setNewBrandName] = useState("");
@@ -227,6 +238,36 @@ export default function MaterialDialog({
     return parentMaterials;
   }, [parentMaterials, isEdit, material]);
 
+  // Get current category name for field visibility rules
+  const currentCategoryName = useMemo(() => {
+    if (!formData.category_id) return null;
+    const category = categories.find(c => c.id === formData.category_id);
+    if (!category) return null;
+    // If it's a sub-category, also check the parent
+    if (category.parent_id) {
+      const parent = categories.find(c => c.id === category.parent_id);
+      return `${parent?.name || ""} ${category.name}`.toLowerCase();
+    }
+    return category.name.toLowerCase();
+  }, [formData.category_id, categories]);
+
+  // Determine which fields to show based on category
+  const fieldVisibility = useMemo(() => {
+    const isCement = currentCategoryName
+      ? CEMENT_CATEGORY_PATTERNS.some(p => currentCategoryName.includes(p))
+      : false;
+    const isTMT = currentCategoryName
+      ? TMT_CATEGORY_PATTERNS.some(p => currentCategoryName.includes(p))
+      : false;
+
+    return {
+      showHsnCode: !isCement, // Hide HSN for cement
+      showMinOrderQty: !isCement, // Hide Min Order Qty for cement
+      showWeightLengthToggle: isTMT, // Only show weight/length toggle for TMT
+      defaultShowBrands: isCement, // Auto-expand brands for cement
+    };
+  }, [currentCategoryName]);
+
   // When parent material changes, inherit properties
   const handleParentChange = (parentId: string) => {
     handleChange("parent_id", parentId);
@@ -285,16 +326,20 @@ export default function MaterialDialog({
     }
   };
 
-  const handleAddBrand = async () => {
-    if (!material || !newBrandName.trim()) return;
+  const handleAddBrand = async (brandName?: string, variantName?: string | null) => {
+    const name = brandName || newBrandName;
+    if (!material || !name.trim()) return;
 
     try {
       await createBrand.mutateAsync({
         material_id: material.id,
-        brand_name: newBrandName.trim(),
+        brand_name: name.trim(),
+        variant_name: variantName || null,
         is_preferred: false,
       });
-      setNewBrandName("");
+      if (!brandName) {
+        setNewBrandName("");
+      }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to add brand";
       setError(message);
@@ -330,7 +375,7 @@ export default function MaterialDialog({
     createMaterial.isPending ||
     createMaterialWithVariants.isPending ||
     updateMaterial.isPending;
-  const activeBrands = material?.brands?.filter((b) => b.is_active) || [];
+  const activeBrands = materialForBrands?.brands?.filter((b) => b.is_active) || [];
 
   return (
     <Dialog
@@ -632,16 +677,18 @@ export default function MaterialDialog({
             </FormControl>
           </Grid>
 
-          <Grid size={{ xs: 6, md: 4 }}>
-            <TextField
-              fullWidth
-              label="HSN Code"
-              value={formData.hsn_code}
-              onChange={(e) => handleChange("hsn_code", e.target.value)}
-            />
-          </Grid>
+          {fieldVisibility.showHsnCode && (
+            <Grid size={{ xs: 6, md: 4 }}>
+              <TextField
+                fullWidth
+                label="HSN Code"
+                value={formData.hsn_code}
+                onChange={(e) => handleChange("hsn_code", e.target.value)}
+              />
+            </Grid>
+          )}
 
-          <Grid size={{ xs: 6, md: 4 }}>
+          <Grid size={{ xs: 6, md: fieldVisibility.showHsnCode ? 4 : 6 }}>
             <TextField
               fullWidth
               label="GST Rate (%)"
@@ -658,7 +705,7 @@ export default function MaterialDialog({
             />
           </Grid>
 
-          <Grid size={{ xs: 6, md: 6 }}>
+          <Grid size={{ xs: 6, md: fieldVisibility.showMinOrderQty ? 6 : 12 }}>
             <TextField
               fullWidth
               label={`Reorder Level (${formData.unit})`}
@@ -677,46 +724,50 @@ export default function MaterialDialog({
             />
           </Grid>
 
-          <Grid size={{ xs: 6, md: 6 }}>
-            <TextField
-              fullWidth
-              label={`Min Order Quantity (${formData.unit})`}
-              type="number"
-              value={formData.min_order_qty}
-              onChange={(e) =>
-                handleChange("min_order_qty", parseFloat(e.target.value) || 1)
-              }
-              helperText="Minimum quantity when placing orders"
-              slotProps={{
-                input: {
-                  inputProps: { min: 1, step: 1 },
-                  endAdornment: <InputAdornment position="end">{formData.unit}</InputAdornment>,
-                },
-              }}
-            />
-          </Grid>
-
-          {/* Weight & Length Section - Toggleable */}
-          <Grid size={12}>
-            <Box sx={{ display: "flex", alignItems: "center", gap: 1, my: 1 }}>
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={showWeightSection}
-                    onChange={(e) => setShowWeightSection(e.target.checked)}
-                    size="small"
-                  />
+          {fieldVisibility.showMinOrderQty && (
+            <Grid size={{ xs: 6, md: 6 }}>
+              <TextField
+                fullWidth
+                label={`Min Order Quantity (${formData.unit})`}
+                type="number"
+                value={formData.min_order_qty}
+                onChange={(e) =>
+                  handleChange("min_order_qty", parseFloat(e.target.value) || 1)
                 }
-                label={
-                  <Typography variant="body2" color="text.secondary">
-                    Enable Weight & Length Tracking
-                  </Typography>
-                }
+                helperText="Minimum quantity when placing orders"
+                slotProps={{
+                  input: {
+                    inputProps: { min: 1, step: 1 },
+                    endAdornment: <InputAdornment position="end">{formData.unit}</InputAdornment>,
+                  },
+                }}
               />
-            </Box>
-          </Grid>
+            </Grid>
+          )}
 
-          {showWeightSection && (
+          {/* Weight & Length Section - Only show toggle for TMT/Steel materials */}
+          {fieldVisibility.showWeightLengthToggle && (
+            <Grid size={12}>
+              <Box sx={{ display: "flex", alignItems: "center", gap: 1, my: 1 }}>
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={showWeightSection}
+                      onChange={(e) => setShowWeightSection(e.target.checked)}
+                      size="small"
+                    />
+                  }
+                  label={
+                    <Typography variant="body2" color="text.secondary">
+                      Enable Weight & Length Tracking
+                    </Typography>
+                  }
+                />
+              </Box>
+            </Grid>
+          )}
+
+          {fieldVisibility.showWeightLengthToggle && showWeightSection && (
             <>
               <Grid size={12}>
                 <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: "block" }}>
@@ -826,67 +877,27 @@ export default function MaterialDialog({
             </Grid>
           )}
 
-          {/* Brands Section - Only show for existing materials */}
-          {isEdit && (
+          {/* Brands & Variants Section - Only show for existing materials */}
+          {isEdit && material && (
             <Grid size={12}>
-              <Accordion defaultExpanded={activeBrands.length > 0}>
+              <Accordion defaultExpanded={activeBrands.length > 0 || fieldVisibility.defaultShowBrands}>
                 <AccordionSummary expandIcon={<ExpandMoreIcon />}>
                   <Typography>
-                    Brands ({activeBrands.length})
+                    Brands & Variants ({activeBrands.length})
                   </Typography>
                 </AccordionSummary>
                 <AccordionDetails>
-                  <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1, mb: 2 }}>
-                    {activeBrands.map((brand) => (
-                      <Chip
-                        key={brand.id}
-                        label={brand.brand_name}
-                        color={brand.is_preferred ? "primary" : "default"}
-                        variant={brand.is_preferred ? "filled" : "outlined"}
-                        onDelete={() => handleDeleteBrand(brand)}
-                        icon={
-                          <IconButton
-                            size="small"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleTogglePreferred(brand);
-                            }}
-                            sx={{ p: 0 }}
-                          >
-                            {brand.is_preferred ? (
-                              <StarIcon fontSize="small" color="warning" />
-                            ) : (
-                              <StarBorderIcon fontSize="small" />
-                            )}
-                          </IconButton>
-                        }
-                      />
-                    ))}
-                  </Box>
-
-                  <Box sx={{ display: "flex", gap: 1 }}>
-                    <TextField
-                      size="small"
-                      placeholder="Add brand name..."
-                      value={newBrandName}
-                      onChange={(e) => setNewBrandName(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          e.preventDefault();
-                          handleAddBrand();
-                        }
-                      }}
-                      sx={{ flex: 1 }}
-                    />
-                    <Button
-                      variant="outlined"
-                      startIcon={<AddIcon />}
-                      onClick={handleAddBrand}
-                      disabled={!newBrandName.trim() || createBrand.isPending}
-                    >
-                      Add
-                    </Button>
-                  </Box>
+                  <BrandVariantEditor
+                    materialId={material.id}
+                    brands={activeBrands}
+                    categoryName={currentCategoryName}
+                    onAddBrand={handleAddBrand}
+                    onUpdateBrand={async (brandId, data) => {
+                      await updateBrand.mutateAsync({ id: brandId, data });
+                    }}
+                    onDeleteBrand={handleDeleteBrand}
+                    disabled={createBrand.isPending || updateBrand.isPending || deleteBrand.isPending}
+                  />
                 </AccordionDetails>
               </Accordion>
             </Grid>

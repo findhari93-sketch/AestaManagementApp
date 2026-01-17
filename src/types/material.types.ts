@@ -132,6 +132,7 @@ export interface Vendor {
   credit_days: number | null;
   upi_id: string | null;
   qr_code_url: string | null;
+  shop_photo_url: string | null;
 }
 
 // ============================================
@@ -347,11 +348,25 @@ export interface MaterialBrand {
   id: string;
   material_id: string;
   brand_name: string;
+  variant_name: string | null; // Brand sub-variant (e.g., "DSP" for Dalmia DSP, "Grade" for Ramco Grade)
   is_preferred: boolean;
   quality_rating: number | null;
   notes: string | null;
   is_active: boolean;
   created_at: string;
+}
+
+// Helper type for grouped brand display with variants
+export interface BrandWithVariants {
+  brand_name: string;
+  is_preferred: boolean;
+  variants: Array<{
+    id: string;
+    variant_name: string | null;
+    quality_rating: number | null;
+    notes: string | null;
+    is_active: boolean;
+  }>;
 }
 
 export interface VendorMaterialCategory {
@@ -865,6 +880,7 @@ export interface VendorFormData {
   credit_days?: number;
   upi_id?: string;
   qr_code_url?: string;
+  shop_photo_url?: string;
 }
 
 export interface MaterialFormData {
@@ -917,6 +933,7 @@ export interface WeightCalculation {
 export interface MaterialBrandFormData {
   material_id: string;
   brand_name: string;
+  variant_name?: string | null; // Brand sub-variant (e.g., "DSP", "Regular", "Grade")
   is_preferred?: boolean;
   quality_rating?: number;
   notes?: string;

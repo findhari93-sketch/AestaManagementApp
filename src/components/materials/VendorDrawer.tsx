@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useCallback } from "react";
 import {
   Drawer,
   Box,
@@ -44,6 +44,7 @@ import { useDeleteVendorInventory } from "@/hooks/queries/useVendorInventory";
 import { useQuery } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase/client";
 import { formatCurrency, formatDate } from "@/lib/formatters";
+import AddVendorToMaterialDialog from "./AddVendorToMaterialDialog";
 import type { MaterialWithDetails, Vendor, VendorInventory } from "@/types/material.types";
 
 interface VendorWithPricing extends Vendor {
@@ -91,6 +92,7 @@ export default function VendorDrawer({
   const [expandedVendor, setExpandedVendor] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<SortOption>("best_price");
   const [removingVendorId, setRemovingVendorId] = useState<string | null>(null);
+  const [addVendorDialogOpen, setAddVendorDialogOpen] = useState(false);
   const supabase = createClient();
   const deleteVendorInventory = useDeleteVendorInventory();
 
@@ -337,15 +339,13 @@ export default function VendorDrawer({
           </Typography>
         </Box>
         <Box sx={{ display: "flex", gap: 1 }}>
-          {onAddVendor && (
-            <Button
-              size="small"
-              startIcon={<AddIcon />}
-              onClick={() => onAddVendor(material?.id || "")}
-            >
-              Add Vendor
-            </Button>
-          )}
+          <Button
+            size="small"
+            startIcon={<AddIcon />}
+            onClick={() => setAddVendorDialogOpen(true)}
+          >
+            Add Vendor
+          </Button>
           <IconButton onClick={onClose} size="small">
             <CloseIcon />
           </IconButton>
@@ -646,6 +646,15 @@ export default function VendorDrawer({
           </Stack>
         )}
       </Box>
+
+      {/* Add Vendor Dialog */}
+      <AddVendorToMaterialDialog
+        open={addVendorDialogOpen}
+        onClose={() => setAddVendorDialogOpen(false)}
+        material={material}
+        existingVendorIds={vendors.map((v) => v.id)}
+        onSuccess={() => refetch()}
+      />
     </Drawer>
   );
 }

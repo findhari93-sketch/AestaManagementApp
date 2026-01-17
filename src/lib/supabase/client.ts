@@ -50,6 +50,10 @@ export function createClient() {
   return client;
 }
 
+// Track last successful session check to avoid redundant checks
+let lastSessionCheckTime = 0;
+const SESSION_CHECK_DEBOUNCE = 5000; // 5 seconds - skip check if done within this window
+
 /**
  * Ensures a fresh session before performing mutations.
  * Call this before any write operation that might happen after
@@ -58,10 +62,21 @@ export function createClient() {
  * This prevents the "spinner keeps spinning" issue when sessions
  * expire while users are working on forms.
  *
- * Throws SessionExpiredError if session is invalid or times out.
+ * Throws SessionExpiredError only if session is actually invalid.
+ * Timeouts are logged but do NOT throw - the mutation proceeds and
+ * Supabase will return a proper 401/403 if the session is truly expired.
+ *
+ * Includes debouncing: if called multiple times within 5 seconds (e.g., batch
+ * upserts), only the first call actually checks the session.
  */
 export async function ensureFreshSession(): Promise<void> {
-  const SESSION_TIMEOUT = 10000; // 10 seconds
+  // Skip if we just checked the session recently (within 5 seconds)
+  const now = Date.now();
+  if (now - lastSessionCheckTime < SESSION_CHECK_DEBOUNCE) {
+    return; // Session was verified recently, skip check
+  }
+
+  const SESSION_TIMEOUT = 15000; // 15 seconds
 
   const sessionCheckPromise = async (): Promise<void> => {
     const supabase = createClient();
@@ -95,17 +110,25 @@ export async function ensureFreshSession(): Promise<void> {
         }
       }
     }
+
+    // Mark successful check
+    lastSessionCheckTime = Date.now();
   };
 
-  // Add timeout to prevent hanging indefinitely
-  const timeoutPromise = new Promise<never>((_, reject) => {
+  // Timeout with warning only - don't throw, let mutation proceed
+  // If session is truly expired, Supabase will return 401/403
+  const timeoutPromise = new Promise<void>((resolve) => {
     setTimeout(() => {
-      console.warn("ensureFreshSession timed out - session may be expired");
-      reject(new SessionExpiredError("Session check timed out. Please log in again."));
+      console.warn("ensureFreshSession check slow - proceeding anyway");
+      lastSessionCheckTime = Date.now(); // Still mark as checked to avoid repeated timeouts
+      resolve(); // Resolve instead of reject - let mutation proceed
     }, SESSION_TIMEOUT);
   });
 
-  return Promise.race([sessionCheckPromise(), timeoutPromise]);
+  // Race: first to complete wins
+  // If timeout wins, we proceed without error (mutation will fail at Supabase if session invalid)
+  // If session check wins, it either succeeds or throws real error
+  await Promise.race([sessionCheckPromise(), timeoutPromise]);
 }
 
 // Session refresh timer for keeping sessions alive during long form fills

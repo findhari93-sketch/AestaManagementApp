@@ -42,6 +42,7 @@ import { useMaterialCategories } from "@/hooks/queries/useMaterials";
 import { useMaterialCountForVendor } from "@/hooks/queries/useVendorInventory";
 import VendorDialog from "@/components/materials/VendorDialog";
 import VendorMaterialsTab from "@/components/materials/VendorMaterialsTab";
+import ConfirmDialog from "@/components/common/ConfirmDialog";
 import { RentalStoreInventoryTab } from "@/components/rentals";
 import { VENDOR_TYPE_LABELS } from "@/types/material.types";
 
@@ -76,6 +77,7 @@ export default function VendorDetailsPage() {
 
   const [tabValue, setTabValue] = useState(0);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
   const { data: vendor, isLoading, error } = useVendor(vendorId);
   const { data: categories = [] } = useMaterialCategories();
@@ -86,9 +88,8 @@ export default function VendorDetailsPage() {
     setTabValue(newValue);
   };
 
-  const handleDelete = async () => {
+  const handleDeleteConfirm = async () => {
     if (!vendor) return;
-    if (!confirm(`Are you sure you want to delete ${vendor.name}?`)) return;
 
     try {
       await deleteVendor.mutateAsync(vendor.id);
@@ -169,7 +170,7 @@ export default function VendorDetailsPage() {
                 </Button>
                 <IconButton
                   color="error"
-                  onClick={handleDelete}
+                  onClick={() => setDeleteDialogOpen(true)}
                   size="small"
                 >
                   <DeleteIcon />
@@ -183,7 +184,27 @@ export default function VendorDetailsPage() {
       {/* Vendor Header */}
       <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
         <Grid container spacing={2}>
-          <Grid size={{ xs: 12, md: 8 }}>
+          {/* Shop Photo */}
+          {vendor.shop_photo_url && (
+            <Grid size={{ xs: 12, md: 3 }}>
+              <Box
+                component="img"
+                src={vendor.shop_photo_url}
+                alt={`${vendor.shop_name || vendor.name} shop photo`}
+                sx={{
+                  width: "100%",
+                  maxWidth: 200,
+                  height: "auto",
+                  maxHeight: 150,
+                  objectFit: "cover",
+                  borderRadius: 1,
+                  border: "1px solid",
+                  borderColor: "divider",
+                }}
+              />
+            </Grid>
+          )}
+          <Grid size={{ xs: 12, md: vendor.shop_photo_url ? 5 : 8 }}>
             <Stack spacing={1}>
               <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
                 <Typography variant="h5" fontWeight={600}>
@@ -507,6 +528,18 @@ export default function VendorDetailsPage() {
         onClose={() => setEditDialogOpen(false)}
         vendor={vendor}
         categories={categories}
+      />
+
+      {/* Delete Confirmation Dialog */}
+      <ConfirmDialog
+        open={deleteDialogOpen}
+        title="Delete Vendor"
+        message={`Are you sure you want to delete "${vendor?.name}"? This vendor will be removed from the active list.`}
+        confirmText="Delete"
+        confirmColor="error"
+        isLoading={deleteVendor.isPending}
+        onConfirm={handleDeleteConfirm}
+        onCancel={() => setDeleteDialogOpen(false)}
       />
     </Box>
   );

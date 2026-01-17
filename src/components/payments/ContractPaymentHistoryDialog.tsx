@@ -33,13 +33,16 @@ import {
   Notes as NotesIcon,
   CalendarMonth as CalendarMonthIcon,
   Delete as DeleteIcon,
+  Edit as EditIcon,
 } from "@mui/icons-material";
 import { createClient } from "@/lib/supabase/client";
 import { supabaseQueryWithTimeout } from "@/lib/utils/supabaseQuery";
 import { useSite } from "@/contexts/SiteContext";
 import { useAuth } from "@/contexts/AuthContext";
 import DeleteContractSettlementDialog from "./DeleteContractSettlementDialog";
+import ContractSettlementEditDialog from "./ContractSettlementEditDialog";
 import dayjs from "dayjs";
+import type { DateWiseSettlement, PaymentMode, PaymentChannel } from "@/types/payment.types";
 import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
 import { getPayerSourceLabel, getPayerSourceColor } from "@/components/settlement/PayerSourceSelector";
 import type { PayerSource } from "@/types/settlement.types";
@@ -279,9 +282,39 @@ export default function ContractPaymentHistoryDialog({
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [settlementToDelete, setSettlementToDelete] = useState<SettlementRecord | null>(null);
 
+  // Edit dialog state
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [settlementToEdit, setSettlementToEdit] = useState<DateWiseSettlement | null>(null);
+
   const handleDeleteClick = useCallback((settlement: SettlementRecord) => {
     setSettlementToDelete(settlement);
     setDeleteDialogOpen(true);
+  }, []);
+
+  const handleEditClick = useCallback((settlement: SettlementRecord) => {
+    // Convert SettlementRecord to DateWiseSettlement format
+    // Note: weekAllocations is not used by the edit dialog, so we pass empty array
+    const editableSettlement: DateWiseSettlement = {
+      settlementGroupId: settlement.id,
+      settlementReference: settlement.settlementReference,
+      settlementDate: settlement.settlementDate,
+      totalAmount: settlement.totalAmount,
+      weekAllocations: [], // Not used by edit dialog
+      paymentMode: settlement.paymentMode as PaymentMode | null,
+      paymentChannel: (settlement.paymentChannel || "direct") as PaymentChannel,
+      payerSource: settlement.payerSource,
+      payerName: settlement.payerName,
+      proofUrls: settlement.proofUrls || [],
+      notes: settlement.notes,
+      subcontractId: settlement.subcontractId,
+      subcontractTitle: settlement.subcontractTitle,
+      createdBy: settlement.createdBy || "",
+      createdByName: settlement.createdBy,
+      createdAt: settlement.createdAt,
+      isCancelled: false,
+    };
+    setSettlementToEdit(editableSettlement);
+    setEditDialogOpen(true);
   }, []);
 
   // Fetch settlement groups for contract payments
@@ -737,31 +770,50 @@ export default function ContractPaymentHistoryDialog({
       {
         id: "actions",
         header: "Actions",
-        size: 70,
+        size: 100,
         enableColumnFilter: false,
         enableSorting: false,
         Cell: ({ row }) => (
-          <Tooltip title="Delete settlement">
-            <IconButton
-              size="small"
-              onClick={(e) => {
-                e.stopPropagation();
-                handleDeleteClick(row.original);
-              }}
-              sx={{
-                color: theme.palette.error.main,
-                "&:hover": {
-                  backgroundColor: alpha(theme.palette.error.main, 0.08),
-                },
-              }}
-            >
-              <DeleteIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
+          <Box sx={{ display: "flex", gap: 0.5 }}>
+            <Tooltip title="Edit settlement">
+              <IconButton
+                size="small"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleEditClick(row.original);
+                }}
+                sx={{
+                  color: theme.palette.primary.main,
+                  "&:hover": {
+                    backgroundColor: alpha(theme.palette.primary.main, 0.08),
+                  },
+                }}
+              >
+                <EditIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+            <Tooltip title="Delete settlement">
+              <IconButton
+                size="small"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleDeleteClick(row.original);
+                }}
+                sx={{
+                  color: theme.palette.error.main,
+                  "&:hover": {
+                    backgroundColor: alpha(theme.palette.error.main, 0.08),
+                  },
+                }}
+              >
+                <DeleteIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          </Box>
         ),
       },
     ],
-    [theme, handleDeleteClick]
+    [theme, handleDeleteClick, handleEditClick]
   );
 
   // Calculate summary stats
@@ -911,6 +963,21 @@ export default function ContractPaymentHistoryDialog({
         }}
         settlement={settlementToDelete}
         onSuccess={handleDeleteSuccess}
+      />
+
+      {/* Edit Settlement Dialog */}
+      <ContractSettlementEditDialog
+        open={editDialogOpen}
+        onClose={() => {
+          setEditDialogOpen(false);
+          setSettlementToEdit(null);
+        }}
+        settlement={settlementToEdit}
+        onSuccess={() => {
+          setEditDialogOpen(false);
+          setSettlementToEdit(null);
+          fetchSettlements();
+        }}
       />
     </Dialog>
   );

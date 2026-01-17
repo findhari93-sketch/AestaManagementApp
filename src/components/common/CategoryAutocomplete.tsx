@@ -47,15 +47,69 @@ const CategoryAutocomplete = memo(function CategoryAutocomplete({
     ? categories.filter((c) => !c.parent_id)
     : categories;
 
-  // Sort categories - parents first, then children indented
-  const sortedCategories = [...filteredCategories].sort((a, b) => {
-    // First by display_order if available
-    if (a.display_order !== b.display_order) {
-      return (a.display_order || 0) - (b.display_order || 0);
+  // Sort categories hierarchically - parents followed by their children
+  const sortedCategories = (() => {
+    if (parentOnly) {
+      // When parentOnly is true, simple sort
+      return [...filteredCategories].sort((a, b) => {
+        if (a.display_order !== b.display_order) {
+          return (a.display_order || 0) - (b.display_order || 0);
+        }
+        return a.name.localeCompare(b.name);
+      });
     }
-    // Then alphabetically
-    return a.name.localeCompare(b.name);
-  });
+
+    // Separate parents and children
+    const parents = filteredCategories.filter((c) => !c.parent_id);
+    const children = filteredCategories.filter((c) => c.parent_id);
+
+    // Sort parents
+    parents.sort((a, b) => {
+      if (a.display_order !== b.display_order) {
+        return (a.display_order || 0) - (b.display_order || 0);
+      }
+      return a.name.localeCompare(b.name);
+    });
+
+    // Group children by parent_id
+    const childrenByParent = new Map<string, MaterialCategory[]>();
+    for (const child of children) {
+      const list = childrenByParent.get(child.parent_id!) || [];
+      list.push(child);
+      childrenByParent.set(child.parent_id!, list);
+    }
+
+    // Sort children within each group
+    for (const list of childrenByParent.values()) {
+      list.sort((a, b) => {
+        if (a.display_order !== b.display_order) {
+          return (a.display_order || 0) - (b.display_order || 0);
+        }
+        return a.name.localeCompare(b.name);
+      });
+    }
+
+    // Build result: parent, its children, next parent, its children...
+    const result: MaterialCategory[] = [];
+    const parentIds = new Set(parents.map((p) => p.id));
+
+    for (const parent of parents) {
+      result.push(parent);
+      const parentChildren = childrenByParent.get(parent.id);
+      if (parentChildren) {
+        result.push(...parentChildren);
+      }
+    }
+
+    // Add orphaned children at the end
+    for (const child of children) {
+      if (!parentIds.has(child.parent_id!)) {
+        result.push(child);
+      }
+    }
+
+    return result;
+  })();
 
   // Get selected value(s)
   const getSelectedValue = () => {

@@ -127,10 +127,12 @@ class SessionManager {
 
   /**
    * Ensure session is fresh before mutation
-   * Throws error if session is invalid or expired
+   * Throws error only if session is actually invalid.
+   * Timeouts are logged but do NOT throw - the mutation proceeds and
+   * Supabase will return a proper 401/403 if the session is truly expired.
    */
   async ensureFreshSession(): Promise<void> {
-    const SESSION_TIMEOUT = 10000; // 10 seconds
+    const SESSION_TIMEOUT = 15000; // 15 seconds
 
     const sessionCheckPromise = async (): Promise<void> => {
       const supabase = createClient();
@@ -162,15 +164,18 @@ class SessionManager {
       }
     };
 
-    // Add timeout to prevent hanging
-    const timeoutPromise = new Promise<never>((_, reject) => {
+    // Timeout with warning only - don't throw, let mutation proceed
+    // If session is truly expired, Supabase will return 401/403
+    const timeoutPromise = new Promise<void>((resolve) => {
       setTimeout(() => {
-        console.warn("[SessionManager] ensureFreshSession timed out");
-        reject(new Error("Session check timed out. Please log in again."));
+        console.warn("[SessionManager] ensureFreshSession check slow - proceeding anyway");
+        resolve(); // Resolve instead of reject - let mutation proceed
       }, SESSION_TIMEOUT);
     });
 
-    return Promise.race([sessionCheckPromise(), timeoutPromise]);
+    // Race: first to complete wins
+    // If timeout wins, we proceed without error (mutation will fail at Supabase if session invalid)
+    await Promise.race([sessionCheckPromise(), timeoutPromise]);
   }
 
   // ==================== PRIVATE METHODS ====================

@@ -232,7 +232,7 @@ export function useMaterials(categoryId?: string | null) {
           `
           *,
           category:material_categories(id, name, code),
-          brands:material_brands(id, brand_name, is_preferred, quality_rating, is_active)
+          brands:material_brands(id, brand_name, variant_name, is_preferred, quality_rating, is_active)
         `
         )
         .eq("is_active", true)
@@ -322,7 +322,7 @@ export function useMaterialsGrouped(categoryId?: string | null) {
           `
           *,
           category:material_categories(id, name, code),
-          brands:material_brands(id, brand_name, is_preferred, quality_rating, is_active)
+          brands:material_brands(id, brand_name, variant_name, is_preferred, quality_rating, is_active)
         `
         )
         .eq("is_active", true);
@@ -543,7 +543,7 @@ export function usePaginatedMaterials(
           `
           *,
           category:material_categories(id, name, code),
-          brands:material_brands(id, brand_name, is_preferred, quality_rating, is_active)
+          brands:material_brands(id, brand_name, variant_name, is_preferred, quality_rating, is_active)
         `
         )
         .eq("is_active", true)
@@ -627,7 +627,7 @@ export function useMaterial(id: string | undefined) {
           `
           *,
           category:material_categories(id, name, code),
-          brands:material_brands(id, brand_name, is_preferred, quality_rating, notes, is_active)
+          brands:material_brands(id, brand_name, variant_name, is_preferred, quality_rating, notes, is_active)
         `
         )
         .eq("id", id)
@@ -1145,7 +1145,7 @@ export function useMaterialWithVariants(id: string | undefined) {
           `
           *,
           category:material_categories(id, name, code),
-          brands:material_brands(id, brand_name, is_preferred, quality_rating, notes, is_active)
+          brands:material_brands(id, brand_name, variant_name, is_preferred, quality_rating, notes, is_active)
         `
         )
         .eq("id", id)

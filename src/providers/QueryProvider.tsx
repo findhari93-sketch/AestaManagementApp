@@ -11,6 +11,7 @@ import { SessionExpiredError } from "@/lib/supabase/client";
 
 /**
  * Checks if an error is a session/auth related error that should redirect to login.
+ * Be precise - only catch actual auth failures, not network timeouts or generic errors.
  */
 function isSessionError(error: unknown): boolean {
   if (error instanceof SessionExpiredError) {
@@ -19,18 +20,20 @@ function isSessionError(error: unknown): boolean {
 
   if (error && typeof error === "object") {
     const err = error as Record<string, unknown>;
-    // Check for Supabase auth error codes
-    if (err.code === "PGRST301" || err.code === "401" || err.code === "403") {
+    // Check for Supabase auth error codes and HTTP status codes
+    if (err.code === "PGRST301" || err.status === 401 || err.status === 403) {
       return true;
     }
-    // Check for JWT-related error messages
+    // Be more specific about auth-related error messages
+    // Avoid matching generic "session" or "token" strings which may appear in other contexts
     const message = String(err.message || "").toLowerCase();
     if (
-      message.includes("jwt") ||
-      message.includes("session") ||
-      message.includes("token") ||
-      message.includes("unauthorized") ||
-      message.includes("not authenticated")
+      message.includes("jwt expired") ||
+      message.includes("invalid jwt") ||
+      message.includes("not authenticated") ||
+      message.includes("session expired") ||
+      message.includes("invalid refresh token") ||
+      message.includes("refresh token not found")
     ) {
       return true;
     }

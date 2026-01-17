@@ -29,6 +29,7 @@ import {
   Search as SearchIcon,
   Store as StoreIcon,
   Whatshot as FireIcon,
+  Visibility as ViewIcon,
 } from "@mui/icons-material";
 import DataTable, { type MRT_ColumnDef, type PaginationState } from "@/components/common/DataTable";
 import PageHeader from "@/components/layout/PageHeader";
@@ -466,7 +467,7 @@ export default function MaterialsPage() {
       {
         accessorKey: "brands",
         header: "Brands",
-        size: 140,
+        size: 160,
         enableSorting: false,
         Cell: ({ row }) => {
           const brands = row.original.brands?.filter((b) => b.is_active) || [];
@@ -475,21 +476,39 @@ export default function MaterialsPage() {
             return <Typography variant="caption" color="text.secondary">-</Typography>;
           }
 
+          // Format brand label with variant name if present
+          const formatBrandLabel = (brand: typeof brands[0]) => {
+            if (brand.variant_name) {
+              return `${brand.brand_name} ${brand.variant_name}`;
+            }
+            return brand.brand_name;
+          };
+
+          // Get unique brand names (for display count)
+          const uniqueBrandNames = new Set(brands.map(b => b.brand_name));
+          const brandCount = uniqueBrandNames.size;
+
           return (
-            <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
-              {brands.slice(0, 2).map((brand) => (
-                <Chip
-                  key={brand.id}
-                  label={brand.brand_name}
-                  size="small"
-                  color={brand.is_preferred ? "primary" : "default"}
-                  variant={brand.is_preferred ? "filled" : "outlined"}
-                />
-              ))}
-              {brands.length > 2 && (
-                <Chip label={`+${brands.length - 2}`} size="small" />
-              )}
-            </Box>
+            <Tooltip
+              title={brands.map(b => formatBrandLabel(b)).join(", ")}
+              placement="top"
+            >
+              <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
+                {brands.slice(0, 2).map((brand) => (
+                  <Chip
+                    key={brand.id}
+                    label={formatBrandLabel(brand)}
+                    size="small"
+                    color={brand.is_preferred ? "primary" : "default"}
+                    variant={brand.is_preferred ? "filled" : "outlined"}
+                    sx={{ maxWidth: 120, "& .MuiChip-label": { overflow: "hidden", textOverflow: "ellipsis" } }}
+                  />
+                ))}
+                {brands.length > 2 && (
+                  <Chip label={`+${brands.length - 2}`} size="small" />
+                )}
+              </Box>
+            </Tooltip>
           );
         },
       },
@@ -501,6 +520,14 @@ export default function MaterialsPage() {
   const renderRowActions = useCallback(
     ({ row }: { row: { original: MaterialWithDetails } }) => (
       <Box sx={{ display: "flex", gap: 0.5 }}>
+        <Tooltip title="View Details">
+          <IconButton
+            size="small"
+            onClick={() => router.push(`/company/materials/${row.original.id}`)}
+          >
+            <ViewIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
         <Tooltip title="Edit">
           <IconButton
             size="small"
@@ -522,7 +549,7 @@ export default function MaterialsPage() {
         </Tooltip>
       </Box>
     ),
-    [handleOpenDialog, handleDeleteClick, canEdit]
+    [handleOpenDialog, handleDeleteClick, canEdit, router]
   );
 
   return (

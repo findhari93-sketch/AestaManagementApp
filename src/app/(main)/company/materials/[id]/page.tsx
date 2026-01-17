@@ -36,6 +36,7 @@ import { useVendorCountForMaterial } from "@/hooks/queries/useVendorInventory";
 import MaterialDialog from "@/components/materials/MaterialDialog";
 import MaterialVendorsTab from "@/components/materials/MaterialVendorsTab";
 import MaterialVariantsTab from "@/components/materials/MaterialVariantsTab";
+import BrandsPricingTab from "@/components/materials/BrandsPricingTab";
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -259,6 +260,21 @@ export default function MaterialDetailsPage() {
       <Box sx={{ borderBottom: 1, borderColor: "divider" }}>
         <Tabs value={tabValue} onChange={handleTabChange}>
           <Tab label="Overview" />
+          {/* Brands & Pricing tab - show for materials with brands */}
+          {(material.brands?.length || 0) > 0 && (
+            <Tab
+              label={
+                <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                  Brands & Pricing
+                  <Chip
+                    label={material.brands?.filter(b => b.is_active).length || 0}
+                    size="small"
+                    color="primary"
+                  />
+                </Box>
+              }
+            />
+          )}
           {/* Variants tab - only show for parent materials (not variants) */}
           {!material.parent_id && (
             <Tab
@@ -279,9 +295,9 @@ export default function MaterialDetailsPage() {
           <Tab
             label={
               <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-                Vendors & Pricing
+                All Vendors
                 {vendorCount > 0 && (
-                  <Chip label={vendorCount} size="small" color="primary" />
+                  <Chip label={vendorCount} size="small" color="default" />
                 )}
               </Box>
             }
@@ -289,142 +305,169 @@ export default function MaterialDetailsPage() {
         </Tabs>
       </Box>
 
-      {/* Tab Panels */}
-      <TabPanel value={tabValue} index={0}>
-        <Grid container spacing={2}>
-          {/* Description */}
-          {material.description && (
-            <Grid size={12}>
-              <Paper variant="outlined" sx={{ p: 2 }}>
-                <Typography variant="subtitle2" gutterBottom>
-                  Description
-                </Typography>
-                <Divider sx={{ mb: 1 }} />
-                <Typography variant="body2">{material.description}</Typography>
-              </Paper>
-            </Grid>
-          )}
+      {/* Tab Panels - indices depend on which tabs are visible */}
+      {(() => {
+        const hasBrands = (material.brands?.length || 0) > 0;
+        const hasVariants = !material.parent_id;
 
-          {/* Specifications */}
-          <Grid size={{ xs: 12, md: 6 }}>
-            <Paper variant="outlined" sx={{ p: 2 }}>
-              <Typography variant="subtitle2" gutterBottom>
-                Material Details
-              </Typography>
-              <Divider sx={{ mb: 1 }} />
-              <Stack spacing={1}>
-                <Box sx={{ display: "flex", justifyContent: "space-between" }}>
-                  <Typography variant="body2" color="text.secondary">
-                    Category
-                  </Typography>
-                  <Typography variant="body2">
-                    {material.category?.name || "Uncategorized"}
-                  </Typography>
-                </Box>
-                <Box sx={{ display: "flex", justifyContent: "space-between" }}>
-                  <Typography variant="body2" color="text.secondary">
-                    Unit of Measure
-                  </Typography>
-                  <Typography variant="body2">{material.unit}</Typography>
-                </Box>
-                {material.hsn_code && (
-                  <Box sx={{ display: "flex", justifyContent: "space-between" }}>
-                    <Typography variant="body2" color="text.secondary">
-                      HSN Code
-                    </Typography>
-                    <Typography variant="body2">{material.hsn_code}</Typography>
-                  </Box>
-                )}
-                {material.gst_rate !== null && material.gst_rate !== undefined && (
-                  <Box sx={{ display: "flex", justifyContent: "space-between" }}>
-                    <Typography variant="body2" color="text.secondary">
-                      GST Rate
-                    </Typography>
-                    <Typography variant="body2">{material.gst_rate}%</Typography>
-                  </Box>
-                )}
-              </Stack>
-            </Paper>
-          </Grid>
+        // Calculate tab indices dynamically
+        let currentIndex = 0;
+        const overviewIndex = currentIndex++;
+        const brandsPricingIndex = hasBrands ? currentIndex++ : -1;
+        const variantsIndex = hasVariants ? currentIndex++ : -1;
+        const vendorsIndex = currentIndex;
 
-          {/* Inventory Settings */}
-          <Grid size={{ xs: 12, md: 6 }}>
-            <Paper variant="outlined" sx={{ p: 2 }}>
-              <Typography variant="subtitle2" gutterBottom>
-                Inventory Settings
-              </Typography>
-              <Divider sx={{ mb: 1 }} />
-              <Stack spacing={1}>
-                {material.reorder_level !== null && (
-                  <Box sx={{ display: "flex", justifyContent: "space-between" }}>
-                    <Typography variant="body2" color="text.secondary">
-                      Reorder Level
-                    </Typography>
-                    <Typography variant="body2">
-                      {material.reorder_level} {material.unit}
-                    </Typography>
-                  </Box>
+        return (
+          <>
+            {/* Overview Tab */}
+            <TabPanel value={tabValue} index={overviewIndex}>
+              <Grid container spacing={2}>
+                {/* Description */}
+                {material.description && (
+                  <Grid size={12}>
+                    <Paper variant="outlined" sx={{ p: 2 }}>
+                      <Typography variant="subtitle2" gutterBottom>
+                        Description
+                      </Typography>
+                      <Divider sx={{ mb: 1 }} />
+                      <Typography variant="body2">{material.description}</Typography>
+                    </Paper>
+                  </Grid>
                 )}
-                <Box sx={{ display: "flex", justifyContent: "space-between" }}>
-                  <Typography variant="body2" color="text.secondary">
-                    Vendors Available
-                  </Typography>
-                  <Chip label={vendorCount} size="small" color={vendorCount > 0 ? "success" : "warning"} />
-                </Box>
-              </Stack>
-            </Paper>
-          </Grid>
 
-          {/* Brands */}
-          {material.brands && material.brands.length > 0 && (
-            <Grid size={12}>
-              <Paper variant="outlined" sx={{ p: 2 }}>
-                <Typography variant="subtitle2" gutterBottom>
-                  Available Brands
-                </Typography>
-                <Divider sx={{ mb: 1 }} />
-                <Stack spacing={1}>
-                  {material.brands.filter(b => b.is_active).map((brand) => (
-                    <Box
-                      key={brand.id}
-                      sx={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "center",
-                        py: 0.5,
-                      }}
-                    >
-                      <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                        <Typography variant="body2">{brand.brand_name}</Typography>
-                        {brand.is_preferred && (
-                          <Chip label="Preferred" size="small" color="primary" />
-                        )}
-                      </Box>
-                      {brand.quality_rating && (
-                        <Typography variant="caption" color="text.secondary">
-                          Quality: {brand.quality_rating}/5
+                {/* Specifications */}
+                <Grid size={{ xs: 12, md: 6 }}>
+                  <Paper variant="outlined" sx={{ p: 2 }}>
+                    <Typography variant="subtitle2" gutterBottom>
+                      Material Details
+                    </Typography>
+                    <Divider sx={{ mb: 1 }} />
+                    <Stack spacing={1}>
+                      <Box sx={{ display: "flex", justifyContent: "space-between" }}>
+                        <Typography variant="body2" color="text.secondary">
+                          Category
                         </Typography>
+                        <Typography variant="body2">
+                          {material.category?.name || "Uncategorized"}
+                        </Typography>
+                      </Box>
+                      <Box sx={{ display: "flex", justifyContent: "space-between" }}>
+                        <Typography variant="body2" color="text.secondary">
+                          Unit of Measure
+                        </Typography>
+                        <Typography variant="body2">{material.unit}</Typography>
+                      </Box>
+                      {material.hsn_code && (
+                        <Box sx={{ display: "flex", justifyContent: "space-between" }}>
+                          <Typography variant="body2" color="text.secondary">
+                            HSN Code
+                          </Typography>
+                          <Typography variant="body2">{material.hsn_code}</Typography>
+                        </Box>
                       )}
-                    </Box>
-                  ))}
-                </Stack>
-              </Paper>
-            </Grid>
-          )}
-        </Grid>
-      </TabPanel>
+                      {material.gst_rate !== null && material.gst_rate !== undefined && (
+                        <Box sx={{ display: "flex", justifyContent: "space-between" }}>
+                          <Typography variant="body2" color="text.secondary">
+                            GST Rate
+                          </Typography>
+                          <Typography variant="body2">{material.gst_rate}%</Typography>
+                        </Box>
+                      )}
+                    </Stack>
+                  </Paper>
+                </Grid>
 
-      {/* Variants Tab - only for parent materials */}
-      {!material.parent_id && (
-        <TabPanel value={tabValue} index={1}>
-          <MaterialVariantsTab material={material} canEdit={canEdit} />
-        </TabPanel>
-      )}
+                {/* Inventory Settings */}
+                <Grid size={{ xs: 12, md: 6 }}>
+                  <Paper variant="outlined" sx={{ p: 2 }}>
+                    <Typography variant="subtitle2" gutterBottom>
+                      Inventory Settings
+                    </Typography>
+                    <Divider sx={{ mb: 1 }} />
+                    <Stack spacing={1}>
+                      {material.reorder_level !== null && (
+                        <Box sx={{ display: "flex", justifyContent: "space-between" }}>
+                          <Typography variant="body2" color="text.secondary">
+                            Reorder Level
+                          </Typography>
+                          <Typography variant="body2">
+                            {material.reorder_level} {material.unit}
+                          </Typography>
+                        </Box>
+                      )}
+                      <Box sx={{ display: "flex", justifyContent: "space-between" }}>
+                        <Typography variant="body2" color="text.secondary">
+                          Vendors Available
+                        </Typography>
+                        <Chip label={vendorCount} size="small" color={vendorCount > 0 ? "success" : "warning"} />
+                      </Box>
+                    </Stack>
+                  </Paper>
+                </Grid>
 
-      {/* Vendors Tab - index depends on whether variants tab is shown */}
-      <TabPanel value={tabValue} index={material.parent_id ? 1 : 2}>
-        <MaterialVendorsTab material={material} />
-      </TabPanel>
+                {/* Brands Summary */}
+                {material.brands && material.brands.length > 0 && (
+                  <Grid size={12}>
+                    <Paper variant="outlined" sx={{ p: 2 }}>
+                      <Typography variant="subtitle2" gutterBottom>
+                        Available Brands
+                      </Typography>
+                      <Divider sx={{ mb: 1 }} />
+                      <Stack spacing={1}>
+                        {material.brands.filter(b => b.is_active).map((brand) => (
+                          <Box
+                            key={brand.id}
+                            sx={{
+                              display: "flex",
+                              justifyContent: "space-between",
+                              alignItems: "center",
+                              py: 0.5,
+                            }}
+                          >
+                            <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                              <Typography variant="body2">
+                                {brand.brand_name}
+                                {brand.variant_name && ` - ${brand.variant_name}`}
+                              </Typography>
+                              {brand.is_preferred && (
+                                <Chip label="Preferred" size="small" color="primary" />
+                              )}
+                            </Box>
+                            {brand.quality_rating && (
+                              <Typography variant="caption" color="text.secondary">
+                                Quality: {brand.quality_rating}/5
+                              </Typography>
+                            )}
+                          </Box>
+                        ))}
+                      </Stack>
+                    </Paper>
+                  </Grid>
+                )}
+              </Grid>
+            </TabPanel>
+
+            {/* Brands & Pricing Tab */}
+            {hasBrands && (
+              <TabPanel value={tabValue} index={brandsPricingIndex}>
+                <BrandsPricingTab material={material} />
+              </TabPanel>
+            )}
+
+            {/* Variants Tab - only for parent materials */}
+            {hasVariants && (
+              <TabPanel value={tabValue} index={variantsIndex}>
+                <MaterialVariantsTab material={material} canEdit={canEdit} />
+              </TabPanel>
+            )}
+
+            {/* All Vendors Tab */}
+            <TabPanel value={tabValue} index={vendorsIndex}>
+              <MaterialVendorsTab material={material} />
+            </TabPanel>
+          </>
+        );
+      })()}
 
       {/* Edit Dialog */}
       <MaterialDialog
