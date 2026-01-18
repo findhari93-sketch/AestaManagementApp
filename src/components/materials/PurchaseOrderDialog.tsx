@@ -21,26 +21,40 @@ import {
   TableCell,
   Paper,
   Divider,
+  FormControlLabel,
+  Switch,
+  InputAdornment,
+  Collapse,
+  MenuItem,
 } from "@mui/material";
 import {
   Close as CloseIcon,
   Add as AddIcon,
   Delete as DeleteIcon,
+  Groups as GroupsIcon,
+  TrendingUp as TrendingUpIcon,
+  TrendingDown as TrendingDownIcon,
+  TrendingFlat as TrendingFlatIcon,
+  History as HistoryIcon,
 } from "@mui/icons-material";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useVendors } from "@/hooks/queries/useVendors";
 import { useMaterials } from "@/hooks/queries/useMaterials";
+import { useLatestPrice } from "@/hooks/queries/useVendorInventory";
+import { useSiteGroupMembership } from "@/hooks/queries/useSiteGroups";
 import {
   useCreatePurchaseOrder,
   useUpdatePurchaseOrder,
   useAddPOItem,
   useRemovePOItem,
 } from "@/hooks/queries/usePurchaseOrders";
+import { useAddHistoricalGroupStockPurchase } from "@/hooks/queries/useSiteGroups";
 import type {
   PurchaseOrderWithDetails,
   PurchaseOrderItemFormData,
   Vendor,
   MaterialWithDetails,
+  MaterialBrand,
 } from "@/types/material.types";
 import { formatCurrency } from "@/lib/formatters";
 import WeightCalculationDisplay from "./WeightCalculationDisplay";
@@ -60,6 +74,7 @@ interface PurchaseOrderDialogProps {
 interface POItemRow extends PurchaseOrderItemFormData {
   id?: string;
   materialName?: string;
+  brandName?: string;
   unit?: string;
   weight_per_unit?: number | null;
   weight_unit?: string | null;
@@ -85,20 +100,71 @@ export default function PurchaseOrderDialog({
   const updatePO = useUpdatePurchaseOrder();
   const addItem = useAddPOItem();
   const removeItem = useRemovePOItem();
+  const addHistoricalPurchase = useAddHistoricalGroupStockPurchase();
+
+  // Check if site belongs to a group
+  const { data: groupMembership } = useSiteGroupMembership(siteId);
+
+  // Get today's date in YYYY-MM-DD format for comparison
+  const today = new Date().toISOString().split("T")[0];
 
   const [error, setError] = useState("");
   const [selectedVendor, setSelectedVendor] = useState<Vendor | null>(null);
+  const [purchaseDate, setPurchaseDate] = useState(today);
   const [expectedDeliveryDate, setExpectedDeliveryDate] = useState("");
+
+  // Determine if this is historical mode (date is in the past)
+  const isHistoricalMode = Boolean(purchaseDate && purchaseDate < today);
   const [deliveryAddress, setDeliveryAddress] = useState("");
   const [paymentTerms, setPaymentTerms] = useState("");
   const [notes, setNotes] = useState("");
   const [items, setItems] = useState<POItemRow[]>([]);
 
+  // Group stock fields - initialize payingSiteId with siteId
+  const [isGroupStock, setIsGroupStock] = useState(false);
+  const [payingSiteId, setPayingSiteId] = useState<string>(siteId);
+  const [transportCost, setTransportCost] = useState("");
+
   // New item form
   const [selectedMaterial, setSelectedMaterial] = useState<MaterialWithDetails | null>(null);
+  const [selectedBrand, setSelectedBrand] = useState<MaterialBrand | null>(null);
   const [newItemQty, setNewItemQty] = useState("");
   const [newItemPrice, setNewItemPrice] = useState("");
   const [newItemTaxRate, setNewItemTaxRate] = useState("");
+
+  // Fetch latest price for the selected vendor + material + brand
+  const { data: latestPrice } = useLatestPrice(
+    selectedVendor?.id,
+    selectedMaterial?.id,
+    selectedBrand?.id
+  );
+
+  // Get available brands for selected material
+  const availableBrands = useMemo(() => {
+    if (!selectedMaterial?.brands) return [];
+    return selectedMaterial.brands.filter((b) => b.is_active);
+  }, [selectedMaterial]);
+
+  // Calculate price change info
+  const priceChangeInfo = useMemo(() => {
+    if (!latestPrice || !newItemPrice) return null;
+    const currentPrice = parseFloat(newItemPrice);
+    if (isNaN(currentPrice) || currentPrice <= 0) return null;
+
+    const lastPrice = latestPrice.total_landed_cost || latestPrice.price;
+    const changeAmount = currentPrice - lastPrice;
+    const changePercent = ((changeAmount) / lastPrice) * 100;
+
+    return {
+      lastPrice,
+      changeAmount,
+      changePercent,
+      recordedDate: latestPrice.recorded_date,
+      isIncrease: changePercent > 1,
+      isDecrease: changePercent < -1,
+      isFlat: changePercent >= -1 && changePercent <= 1,
+    };
+  }, [latestPrice, newItemPrice]);
 
   // Reset form when PO changes
   useEffect(() => {
@@ -143,21 +209,46 @@ export default function PurchaseOrderDialog({
         }
       }
 
+      setPurchaseDate(today);
       setExpectedDeliveryDate("");
       setDeliveryAddress("");
       setPaymentTerms("");
       setNotes("");
       setItems([]);
+      // Reset group stock fields
+      setIsGroupStock(false);
+      setTransportCost("");
     }
     setError("");
     // Only reset these if no prefilled material
     if (!prefilledMaterialId) {
       setSelectedMaterial(null);
+      setSelectedBrand(null);
       setNewItemTaxRate("");
     }
     setNewItemQty("");
     setNewItemPrice("");
   }, [purchaseOrder, vendors, materials, open, prefilledVendorId, prefilledMaterialId]);
+
+  // Reset brand when material changes
+  useEffect(() => {
+    setSelectedBrand(null);
+  }, [selectedMaterial]);
+
+  // Auto-fill price when latest price is found (only if price field is empty)
+  useEffect(() => {
+    if (latestPrice && !newItemPrice) {
+      const priceToUse = latestPrice.price;
+      setNewItemPrice(priceToUse.toString());
+    }
+  }, [latestPrice, newItemPrice]);
+
+  // Update payingSiteId when siteId changes (separate effect to avoid loops)
+  useEffect(() => {
+    if (!purchaseOrder && siteId) {
+      setPayingSiteId(siteId);
+    }
+  }, [siteId, purchaseOrder]);
 
   // Calculate totals
   const totals = useMemo(() => {
@@ -171,12 +262,15 @@ export default function PurchaseOrderDialog({
       taxAmount += itemTax;
     });
 
+    const transport = parseFloat(transportCost) || 0;
+
     return {
       subtotal,
       taxAmount,
-      total: subtotal + taxAmount,
+      transport,
+      total: subtotal + taxAmount + transport,
     };
-  }, [items]);
+  }, [items, transportCost]);
 
   const handleAddItem = () => {
     if (!selectedMaterial) {
@@ -194,10 +288,16 @@ export default function PurchaseOrderDialog({
 
     const newItem: POItemRow = {
       material_id: selectedMaterial.id,
+      brand_id: selectedBrand?.id,
       quantity: parseFloat(newItemQty),
       unit_price: parseFloat(newItemPrice),
       tax_rate: newItemTaxRate ? parseFloat(newItemTaxRate) : selectedMaterial.gst_rate || undefined,
       materialName: selectedMaterial.name,
+      brandName: selectedBrand
+        ? selectedBrand.variant_name
+          ? `${selectedBrand.brand_name} ${selectedBrand.variant_name}`
+          : selectedBrand.brand_name
+        : undefined,
       unit: selectedMaterial.unit,
       weight_per_unit: selectedMaterial.weight_per_unit,
       weight_unit: selectedMaterial.weight_unit,
@@ -205,6 +305,7 @@ export default function PurchaseOrderDialog({
 
     setItems([...items, newItem]);
     setSelectedMaterial(null);
+    setSelectedBrand(null);
     setNewItemQty("");
     setNewItemPrice("");
     setNewItemTaxRate("");
@@ -231,6 +332,35 @@ export default function PurchaseOrderDialog({
     }
 
     try {
+      // Historical Mode: Direct entry to group stock (skip PO workflow)
+      if (isHistoricalMode && !isEdit && groupMembership?.isInGroup) {
+        // For historical purchases, directly add to group stock
+        for (const item of items) {
+          // Calculate per-item transport cost (distributed by value)
+          const itemValue = item.quantity * item.unit_price;
+          const totalValue = totals.subtotal;
+          const itemTransportCost =
+            totalValue > 0
+              ? (parseFloat(transportCost) || 0) * (itemValue / totalValue)
+              : 0;
+
+          await addHistoricalPurchase.mutateAsync({
+            groupId: groupMembership.groupId!,
+            materialId: item.material_id,
+            brandId: item.brand_id,
+            quantity: item.quantity,
+            unitCost: item.unit_price,
+            transportCost: itemTransportCost,
+            paymentSiteId: payingSiteId || siteId,
+            purchaseDate,
+            vendorName: selectedVendor.name,
+            notes: notes || undefined,
+          });
+        }
+        onClose();
+        return;
+      }
+
       if (isEdit) {
         await updatePO.mutateAsync({
           id: purchaseOrder.id,
@@ -258,13 +388,30 @@ export default function PurchaseOrderDialog({
           });
         }
       } else {
+        // Build notes with group stock info if applicable
+        let finalNotes = notes || "";
+        if (isGroupStock && groupMembership?.isInGroup) {
+          const payingSite = groupMembership.allSites?.find((s) => s.id === payingSiteId);
+          const groupNote = `[GROUP STOCK] Paying Site: ${payingSite?.name || "Unknown"}`;
+          finalNotes = finalNotes ? `${groupNote}\n${finalNotes}` : groupNote;
+        }
+
         await createPO.mutateAsync({
           site_id: siteId,
           vendor_id: selectedVendor.id,
           expected_delivery_date: expectedDeliveryDate || undefined,
           delivery_address: deliveryAddress || undefined,
           payment_terms: paymentTerms || undefined,
-          notes: notes || undefined,
+          transport_cost: transportCost ? parseFloat(transportCost) : undefined,
+          notes: finalNotes || undefined,
+          // Pass group stock info via internal_notes for processing on delivery
+          internal_notes: isGroupStock
+            ? JSON.stringify({
+                is_group_stock: true,
+                group_id: groupMembership?.groupId,
+                payment_source_site_id: payingSiteId,
+              })
+            : undefined,
           items: items.map((item) => ({
             material_id: item.material_id,
             brand_id: item.brand_id,
@@ -282,7 +429,7 @@ export default function PurchaseOrderDialog({
   };
 
   const isSubmitting =
-    createPO.isPending || updatePO.isPending || addItem.isPending;
+    createPO.isPending || updatePO.isPending || addItem.isPending || addHistoricalPurchase.isPending;
 
   return (
     <Dialog
@@ -299,7 +446,7 @@ export default function PurchaseOrderDialog({
           alignItems: "center",
         }}
       >
-        <Typography variant="h6">
+        <Typography component="span" variant="h6">
           {isEdit ? `Edit PO ${purchaseOrder.po_number}` : "Create Purchase Order"}
         </Typography>
         <IconButton onClick={onClose} size="small">
@@ -314,9 +461,27 @@ export default function PurchaseOrderDialog({
           </Alert>
         )}
 
+        {/* Historical Mode Indicator */}
+        {isHistoricalMode && !isEdit && (
+          <Alert
+            severity="info"
+            icon={<HistoryIcon />}
+            sx={{ mb: 2, bgcolor: "warning.50", borderColor: "warning.main" }}
+            variant="outlined"
+          >
+            <Typography variant="subtitle2" fontWeight={600}>
+              Historical Purchase Mode
+            </Typography>
+            <Typography variant="body2">
+              This is a past date ({purchaseDate}). The purchase will be recorded directly to
+              {groupMembership?.isInGroup ? " group stock" : " inventory"} without creating a purchase order.
+            </Typography>
+          </Alert>
+        )}
+
         <Grid container spacing={2}>
           {/* Vendor Selection */}
-          <Grid size={{ xs: 12, md: 6 }}>
+          <Grid size={{ xs: 12, md: 4 }}>
             <Autocomplete
               options={vendors}
               getOptionLabel={(option) => option.name}
@@ -340,7 +505,24 @@ export default function PurchaseOrderDialog({
             />
           </Grid>
 
-          <Grid size={{ xs: 12, md: 3 }}>
+          {/* Purchase Date - determines if historical mode */}
+          {!isEdit && (
+            <Grid size={{ xs: 12, md: 2.5 }}>
+              <TextField
+                fullWidth
+                type="date"
+                label="Purchase Date"
+                value={purchaseDate}
+                onChange={(e) => setPurchaseDate(e.target.value)}
+                slotProps={{ inputLabel: { shrink: true } }}
+                helperText={isHistoricalMode ? "Historical entry" : ""}
+                color={isHistoricalMode ? "warning" : undefined}
+                focused={isHistoricalMode}
+              />
+            </Grid>
+          )}
+
+          <Grid size={{ xs: 12, md: isEdit ? 3 : 2.5 }}>
             <TextField
               fullWidth
               type="date"
@@ -348,6 +530,7 @@ export default function PurchaseOrderDialog({
               value={expectedDeliveryDate}
               onChange={(e) => setExpectedDeliveryDate(e.target.value)}
               slotProps={{ inputLabel: { shrink: true } }}
+              disabled={isHistoricalMode}
             />
           </Grid>
 
@@ -372,6 +555,122 @@ export default function PurchaseOrderDialog({
             />
           </Grid>
 
+          {/* Group Stock Toggle - Only show if site is in a group */}
+          {groupMembership?.isInGroup && !isEdit && (
+            <Grid size={12}>
+              <Paper
+                variant="outlined"
+                sx={{
+                  p: 2,
+                  bgcolor: (isGroupStock || isHistoricalMode) ? "primary.50" : "transparent",
+                  borderColor: (isGroupStock || isHistoricalMode) ? "primary.main" : "divider",
+                }}
+              >
+                <Box sx={{ display: "flex", alignItems: "flex-start", gap: 2 }}>
+                  <GroupsIcon
+                    color={(isGroupStock || isHistoricalMode) ? "primary" : "action"}
+                    sx={{ mt: 0.5 }}
+                  />
+                  <Box sx={{ flex: 1 }}>
+                    {!isHistoricalMode ? (
+                      <FormControlLabel
+                        control={
+                          <Switch
+                            checked={isGroupStock}
+                            onChange={(e) => {
+                              setIsGroupStock(e.target.checked);
+                              if (e.target.checked && !payingSiteId) {
+                                setPayingSiteId(siteId);
+                              }
+                            }}
+                          />
+                        }
+                        label={
+                          <Typography fontWeight={500}>
+                            Purchase for Group Shared Stock
+                          </Typography>
+                        }
+                      />
+                    ) : (
+                      <Typography fontWeight={500} sx={{ mb: 0.5 }}>
+                        Group Shared Stock (Historical)
+                      </Typography>
+                    )}
+                    <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                      Materials will be shared across all sites in{" "}
+                      <strong>{groupMembership.groupName}</strong>
+                    </Typography>
+
+                    {/* Always show paying site for historical mode, or when group stock is enabled */}
+                    <Collapse in={isGroupStock || isHistoricalMode}>
+                      <Grid container spacing={2} sx={{ mt: 1 }}>
+                        <Grid size={{ xs: 12, sm: 6 }}>
+                          <TextField
+                            select
+                            fullWidth
+                            size="small"
+                            label="Paying Site"
+                            value={payingSiteId}
+                            onChange={(e) => setPayingSiteId(e.target.value)}
+                            helperText="Which site's money was used"
+                            required={isHistoricalMode}
+                          >
+                            {groupMembership.allSites?.map((site) => (
+                              <MenuItem key={site.id} value={site.id}>
+                                {site.name}
+                                {site.id === siteId && " (Current)"}
+                              </MenuItem>
+                            ))}
+                          </TextField>
+                        </Grid>
+                        <Grid size={{ xs: 12, sm: 6 }}>
+                          <TextField
+                            fullWidth
+                            size="small"
+                            type="number"
+                            label="Transport Cost"
+                            value={transportCost}
+                            onChange={(e) => setTransportCost(e.target.value)}
+                            slotProps={{
+                              input: {
+                                startAdornment: (
+                                  <InputAdornment position="start">₹</InputAdornment>
+                                ),
+                                inputProps: { min: 0, step: 0.01 },
+                              },
+                            }}
+                            helperText="Include for accurate per-unit cost"
+                          />
+                        </Grid>
+                      </Grid>
+                    </Collapse>
+                  </Box>
+                </Box>
+              </Paper>
+            </Grid>
+          )}
+
+          {/* Transport Cost for non-group purchases (not shown in historical mode for grouped sites) */}
+          {(!groupMembership?.isInGroup || (!isGroupStock && !isHistoricalMode)) && !isEdit && (
+            <Grid size={{ xs: 12, md: 6 }}>
+              <TextField
+                fullWidth
+                type="number"
+                label="Transport Cost (Optional)"
+                value={transportCost}
+                onChange={(e) => setTransportCost(e.target.value)}
+                slotProps={{
+                  input: {
+                    startAdornment: (
+                      <InputAdornment position="start">₹</InputAdornment>
+                    ),
+                    inputProps: { min: 0, step: 0.01 },
+                  },
+                }}
+              />
+            </Grid>
+          )}
+
           {/* Add Item Section */}
           <Grid size={12}>
             <Divider sx={{ my: 1 }}>
@@ -379,7 +678,7 @@ export default function PurchaseOrderDialog({
             </Divider>
           </Grid>
 
-          <Grid size={{ xs: 12, md: 4 }}>
+          <Grid size={{ xs: 12, md: 3 }}>
             <Autocomplete
               options={materials}
               getOptionLabel={(option) =>
@@ -391,6 +690,8 @@ export default function PurchaseOrderDialog({
                 if (value?.gst_rate) {
                   setNewItemTaxRate(value.gst_rate.toString());
                 }
+                // Reset price when material changes
+                setNewItemPrice("");
               }}
               renderInput={(params) => (
                 <TextField {...params} label="Material" size="small" />
@@ -401,6 +702,9 @@ export default function PurchaseOrderDialog({
                     <Typography variant="body2">{option.name}</Typography>
                     <Typography variant="caption" color="text.secondary">
                       {option.code} • {option.unit}
+                      {option.brands && option.brands.length > 0 && (
+                        <> • {option.brands.filter(b => b.is_active).length} brands</>
+                      )}
                     </Typography>
                   </Box>
                 </li>
@@ -408,7 +712,52 @@ export default function PurchaseOrderDialog({
             />
           </Grid>
 
-          <Grid size={{ xs: 4, md: 2 }}>
+          {/* Brand Selection */}
+          <Grid size={{ xs: 12, md: 2 }}>
+            <Autocomplete
+              options={availableBrands}
+              getOptionLabel={(brand) =>
+                brand.variant_name
+                  ? `${brand.brand_name} ${brand.variant_name}`
+                  : brand.brand_name
+              }
+              value={selectedBrand}
+              onChange={(_, value) => {
+                setSelectedBrand(value);
+                // Reset price to trigger re-fetch
+                setNewItemPrice("");
+              }}
+              disabled={!selectedMaterial || availableBrands.length === 0}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  label="Brand"
+                  size="small"
+                  placeholder={
+                    !selectedMaterial
+                      ? "Select material"
+                      : availableBrands.length === 0
+                      ? "No brands"
+                      : "Optional"
+                  }
+                />
+              )}
+              renderOption={(props, brand) => (
+                <li {...props} key={brand.id}>
+                  <Typography variant="body2">
+                    {brand.brand_name}
+                    {brand.variant_name && (
+                      <Typography component="span" color="text.secondary">
+                        {" "}- {brand.variant_name}
+                      </Typography>
+                    )}
+                  </Typography>
+                </li>
+              )}
+            />
+          </Grid>
+
+          <Grid size={{ xs: 4, md: 1.5 }}>
             <TextField
               fullWidth
               size="small"
@@ -429,6 +778,36 @@ export default function PurchaseOrderDialog({
               value={newItemPrice}
               onChange={(e) => setNewItemPrice(e.target.value)}
               slotProps={{ input: { inputProps: { min: 0, step: 0.01 } } }}
+              helperText={
+                priceChangeInfo ? (
+                  <Box
+                    component="span"
+                    sx={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 0.5,
+                      color: priceChangeInfo.isIncrease
+                        ? "error.main"
+                        : priceChangeInfo.isDecrease
+                        ? "success.main"
+                        : "text.secondary",
+                    }}
+                  >
+                    {priceChangeInfo.isIncrease && <TrendingUpIcon sx={{ fontSize: 14 }} />}
+                    {priceChangeInfo.isDecrease && <TrendingDownIcon sx={{ fontSize: 14 }} />}
+                    {priceChangeInfo.isFlat && <TrendingFlatIcon sx={{ fontSize: 14 }} />}
+                    <span>
+                      Last: {formatCurrency(priceChangeInfo.lastPrice)}
+                      {!priceChangeInfo.isFlat && (
+                        <> ({priceChangeInfo.changePercent > 0 ? "+" : ""}
+                        {priceChangeInfo.changePercent.toFixed(1)}%)</>
+                      )}
+                    </span>
+                  </Box>
+                ) : latestPrice ? (
+                  <span>Last: {formatCurrency(latestPrice.price)}</span>
+                ) : undefined
+              }
             />
           </Grid>
 
@@ -495,7 +874,12 @@ export default function PurchaseOrderDialog({
                             <Typography variant="body2">
                               {item.materialName}
                             </Typography>
-                            <Typography variant="caption" color="text.secondary">
+                            {item.brandName && (
+                              <Typography variant="caption" color="primary.main" sx={{ fontWeight: 500 }}>
+                                {item.brandName}
+                              </Typography>
+                            )}
+                            <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
                               {item.unit}
                             </Typography>
                           </TableCell>
@@ -573,6 +957,20 @@ export default function PurchaseOrderDialog({
                       {formatCurrency(totals.taxAmount)}
                     </Typography>
                   </Box>
+                  {totals.transport > 0 && (
+                    <Box
+                      sx={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        mb: 0.5,
+                      }}
+                    >
+                      <Typography variant="body2">Transport:</Typography>
+                      <Typography variant="body2">
+                        {formatCurrency(totals.transport)}
+                      </Typography>
+                    </Box>
+                  )}
                   <Divider sx={{ my: 1 }} />
                   <Box
                     sx={{
@@ -615,11 +1013,15 @@ export default function PurchaseOrderDialog({
           variant="contained"
           onClick={handleSubmit}
           disabled={isSubmitting || !selectedVendor || items.length === 0}
+          color={isHistoricalMode && !isEdit ? "warning" : "primary"}
+          startIcon={isHistoricalMode && !isEdit ? <HistoryIcon /> : undefined}
         >
           {isSubmitting
             ? "Saving..."
             : isEdit
             ? "Update"
+            : isHistoricalMode
+            ? "Record Purchase"
             : "Create Draft PO"}
         </Button>
       </DialogActions>

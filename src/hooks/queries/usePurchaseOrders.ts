@@ -198,11 +198,43 @@ export function useCreatePurchaseOrder() {
 
       if (itemsError) throw itemsError;
 
+      // Auto-record prices to price_history for each item
+      const priceRecords = itemsWithTotals.map((item) => ({
+        vendor_id: data.vendor_id,
+        material_id: item.material_id,
+        brand_id: item.brand_id || null,
+        price: item.unit_price,
+        price_includes_gst: false,
+        gst_rate: item.tax_rate || null,
+        transport_cost: null,
+        loading_cost: null,
+        unloading_cost: null,
+        total_landed_cost: item.unit_price,
+        recorded_date: new Date().toISOString().split("T")[0],
+        source: "purchase",
+        source_reference: poNumber,
+        quantity: item.quantity,
+        unit: null,
+        recorded_by: null,
+        notes: `Auto-recorded from PO ${poNumber}`,
+      }));
+
+      // Insert price history records (don't fail PO creation if this fails)
+      try {
+        await supabase.from("price_history").insert(priceRecords);
+      } catch (priceError) {
+        console.warn("Failed to record price history:", priceError);
+      }
+
       return po as PurchaseOrder;
     },
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({
         queryKey: queryKeys.purchaseOrders.bySite(variables.site_id),
+      });
+      // Also invalidate price history queries
+      queryClient.invalidateQueries({
+        queryKey: ["price-history"],
       });
     },
   });

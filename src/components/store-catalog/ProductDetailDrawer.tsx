@@ -52,9 +52,11 @@ export default function ProductDetailDrawer({
   const router = useRouter();
 
   const materialId = product?.material_id || undefined;
+  const brandId = product?.brand_id || undefined;
 
+  // Pass brandId to compare prices only within the same brand
   const { data: competingVendors = [], isLoading: vendorsLoading } =
-    useMaterialPriceComparison(materialId);
+    useMaterialPriceComparison(materialId, brandId);
 
   const { data: priceHistory = [], isLoading: historyLoading } =
     usePriceHistory(vendorId, materialId);

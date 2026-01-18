@@ -22,6 +22,7 @@ import {
   Edit as EditIcon,
   Delete as DeleteIcon,
   Category as CategoryIcon,
+  ShowChart as ChartIcon,
 } from "@mui/icons-material";
 import PageHeader from "@/components/layout/PageHeader";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -37,6 +38,7 @@ import MaterialDialog from "@/components/materials/MaterialDialog";
 import MaterialVendorsTab from "@/components/materials/MaterialVendorsTab";
 import MaterialVariantsTab from "@/components/materials/MaterialVariantsTab";
 import BrandsPricingTab from "@/components/materials/BrandsPricingTab";
+import MaterialPriceIntelligenceTab from "@/components/materials/MaterialPriceIntelligenceTab";
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -275,6 +277,15 @@ export default function MaterialDetailsPage() {
               }
             />
           )}
+          {/* Price Intelligence tab */}
+          <Tab
+            label={
+              <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                <ChartIcon fontSize="small" />
+                Price Intelligence
+              </Box>
+            }
+          />
           {/* Variants tab - only show for parent materials (not variants) */}
           {!material.parent_id && (
             <Tab
@@ -314,6 +325,7 @@ export default function MaterialDetailsPage() {
         let currentIndex = 0;
         const overviewIndex = currentIndex++;
         const brandsPricingIndex = hasBrands ? currentIndex++ : -1;
+        const priceIntelligenceIndex = currentIndex++; // Always visible
         const variantsIndex = hasVariants ? currentIndex++ : -1;
         const vendorsIndex = currentIndex;
 
@@ -453,6 +465,11 @@ export default function MaterialDetailsPage() {
                 <BrandsPricingTab material={material} />
               </TabPanel>
             )}
+
+            {/* Price Intelligence Tab */}
+            <TabPanel value={tabValue} index={priceIntelligenceIndex}>
+              <MaterialPriceIntelligenceTab material={material} />
+            </TabPanel>
 
             {/* Variants Tab - only for parent materials */}
             {hasVariants && (

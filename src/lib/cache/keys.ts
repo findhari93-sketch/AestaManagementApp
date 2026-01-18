@@ -210,6 +210,31 @@ export const queryKeys = {
     usageBySite: (groupId: string) => ['group-stock', 'group', groupId, 'usage-by-site'] as const,
   },
 
+  // ==================== INTER-SITE SETTLEMENTS ====================
+
+  interSiteSettlements: {
+    all: ['inter-site-settlements'] as const,
+    bySite: (siteId: string) => ['inter-site-settlements', 'site', siteId] as const,
+    byGroup: (groupId: string) => ['inter-site-settlements', 'group', groupId] as const,
+    byId: (id: string) => ['inter-site-settlements', id] as const,
+    balances: (groupId: string) => ['inter-site-settlements', 'balances', groupId] as const,
+    summary: (siteId: string) => ['inter-site-settlements', 'summary', siteId] as const,
+    pending: (siteId: string) => ['inter-site-settlements', 'pending', siteId] as const,
+  },
+
+  // ==================== MATERIAL PURCHASE EXPENSES ====================
+
+  materialPurchases: {
+    all: ['material-purchases'] as const,
+    bySite: (siteId: string) => ['material-purchases', 'site', siteId] as const,
+    byGroup: (groupId: string) => ['material-purchases', 'group', groupId] as const,
+    byId: (id: string) => ['material-purchases', id] as const,
+    byRefCode: (refCode: string) => ['material-purchases', 'ref', refCode] as const,
+    batches: (groupId: string) => ['material-purchases', 'batches', groupId] as const,
+    ownSite: (siteId: string) => ['material-purchases', 'own-site', siteId] as const,
+    groupStock: (groupId: string) => ['material-purchases', 'group-stock', groupId] as const,
+  },
+
   // ==================== VENDOR INVENTORY & PRICE HISTORY ====================
 
   vendorInventory: {

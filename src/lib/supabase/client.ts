@@ -76,7 +76,7 @@ export async function ensureFreshSession(): Promise<void> {
     return; // Session was verified recently, skip check
   }
 
-  const SESSION_TIMEOUT = 15000; // 15 seconds
+  const SESSION_TIMEOUT = 3000; // 3 seconds - reduced for better UX
 
   const sessionCheckPromise = async (): Promise<void> => {
     const supabase = createClient();

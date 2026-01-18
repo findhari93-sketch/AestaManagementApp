@@ -15,9 +15,12 @@ export interface MaterialOrderStats {
 
 /**
  * Best price info for a material from vendor inventory
+ * Key is composite of material_id + brand_id to compare within same brand only
  */
 export interface MaterialBestPrice {
   material_id: string;
+  brand_id: string | null;
+  brand_name: string | null;
   vendor_id: string;
   vendor_name: string;
   unit_price: number;
@@ -86,6 +89,7 @@ export function useMaterialOrderStats() {
 
 /**
  * Fetch best prices for all materials from vendor inventory
+ * Groups by material_id + brand_id to ensure comparison within same brand only
  */
 export function useMaterialBestPrices() {
   const supabase = createClient();
@@ -93,15 +97,17 @@ export function useMaterialBestPrices() {
   return useQuery({
     queryKey: ["materials", "best-prices"],
     queryFn: async () => {
-      // Get vendor inventory with vendor names
+      // Get vendor inventory with vendor names and brand info
       const { data, error } = await supabase
         .from("vendor_inventory")
         .select(`
           material_id,
+          brand_id,
           vendor_id,
           current_price,
           price_includes_gst,
-          vendors(name)
+          vendors(name),
+          material_brands(brand_name)
         `)
         .eq("is_available", true)
         .not("material_id", "is", null)
@@ -112,17 +118,23 @@ export function useMaterialBestPrices() {
         return new Map<string, MaterialBestPrice>();
       }
 
-      // Get best (lowest) price per material
+      // Get best (lowest) price per material + brand combination
       const priceMap = new Map<string, MaterialBestPrice>();
 
       for (const item of data || []) {
         if (!item.material_id) continue;
 
-        // Only store if this is the first (lowest price) for this material
-        if (!priceMap.has(item.material_id)) {
+        // Create composite key using material_id and brand_id
+        const key = `${item.material_id}_${item.brand_id || 'no-brand'}`;
+
+        // Only store if this is the first (lowest price) for this material+brand
+        if (!priceMap.has(key)) {
           const vendorData = item.vendors as { name: string } | null;
-          priceMap.set(item.material_id, {
+          const brandData = item.material_brands as { brand_name: string } | null;
+          priceMap.set(key, {
             material_id: item.material_id,
+            brand_id: item.brand_id || null,
+            brand_name: brandData?.brand_name || null,
             vendor_id: item.vendor_id,
             vendor_name: vendorData?.name || "Unknown",
             unit_price: item.current_price || 0,

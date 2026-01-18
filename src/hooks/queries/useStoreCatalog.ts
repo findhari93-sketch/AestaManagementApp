@@ -64,14 +64,14 @@ export function useStoreCatalog(vendorId: string | undefined) {
       if (materialIds.length > 0) {
         const { data: allPrices, error: priceError } = await (supabase as any)
           .from("vendor_inventory")
-          .select("material_id, current_price, vendor:vendors(id, name)")
+          .select("material_id, brand_id, current_price, vendor:vendors(id, name)")
           .in("material_id", materialIds)
           .eq("is_available", true)
           .neq("vendor_id", vendorId)
           .order("current_price");
 
         if (!priceError && allPrices) {
-          // Build lowest price map for each material
+          // Build lowest price map for each material+brand combination
           lowestPriceMap = buildLowestPriceMap(allPrices);
         }
       }
@@ -105,8 +105,13 @@ export function useStoreCatalog(vendorId: string | undefined) {
           (item.loading_cost || 0) +
           (item.unloading_cost || 0);
 
-        const lowestCompeting = item.material_id
-          ? lowestPriceMap[item.material_id]
+        // Use composite key of material_id + brand_id for price comparison
+        // This ensures we only compare prices for the same brand
+        const priceComparisonKey = item.material_id
+          ? `${item.material_id}_${item.brand_id || 'no-brand'}`
+          : null;
+        const lowestCompeting = priceComparisonKey
+          ? lowestPriceMap[priceComparisonKey]
           : null;
 
         const isBestPrice =
@@ -130,11 +135,13 @@ export function useStoreCatalog(vendorId: string | undefined) {
 }
 
 /**
- * Build a map of material_id -> lowest competing price
+ * Build a map of (material_id + brand_id) -> lowest competing price
+ * Uses composite key to ensure price comparison is only within same brand
  */
 function buildLowestPriceMap(
   prices: Array<{
     material_id: string;
+    brand_id: string | null;
     current_price: number;
     vendor: { id: string; name: string };
   }>
@@ -143,8 +150,10 @@ function buildLowestPriceMap(
 
   // Prices are already sorted by current_price, so first occurrence is lowest
   prices.forEach((item) => {
-    if (!map[item.material_id] && item.current_price && item.vendor) {
-      map[item.material_id] = {
+    // Create composite key using material_id and brand_id
+    const key = `${item.material_id}_${item.brand_id || 'no-brand'}`;
+    if (!map[key] && item.current_price && item.vendor) {
+      map[key] = {
         price: item.current_price,
         vendorName: item.vendor.name,
         vendorId: item.vendor.id,
@@ -319,18 +328,22 @@ export function filterStoreCatalog(
 /**
  * Get all vendors selling a specific material with their prices
  * For price comparison in product detail drawer
+ * Optionally filter by brandId to compare only same brand offerings
  */
-export function useMaterialPriceComparison(materialId: string | undefined) {
+export function useMaterialPriceComparison(
+  materialId: string | undefined,
+  brandId?: string | null
+) {
   const supabase = createClient();
 
   return useQuery({
     queryKey: materialId
-      ? queryKeys.storeCatalog.priceComparison(materialId)
+      ? [...queryKeys.storeCatalog.priceComparison(materialId), brandId || 'all-brands']
       : ["store-catalog", "price-comparison"],
     queryFn: async () => {
       if (!materialId) return [];
 
-      const { data, error } = await (supabase as any)
+      let query = (supabase as any)
         .from("vendor_inventory")
         .select(
           `
@@ -340,8 +353,14 @@ export function useMaterialPriceComparison(materialId: string | undefined) {
         `
         )
         .eq("material_id", materialId)
-        .eq("is_available", true)
-        .order("current_price");
+        .eq("is_available", true);
+
+      // Filter by brand if specified - only compare same brand
+      if (brandId) {
+        query = query.eq("brand_id", brandId);
+      }
+
+      const { data, error } = await query.order("current_price");
 
       if (error) throw error;
 

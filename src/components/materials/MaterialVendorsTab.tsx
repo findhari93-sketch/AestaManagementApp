@@ -11,7 +11,6 @@ import {
   Alert,
   CircularProgress,
   Stack,
-  Paper,
 } from "@mui/material";
 import {
   Add as AddIcon,
@@ -63,15 +62,34 @@ export default function MaterialVendorsTab({ material }: MaterialVendorsTabProps
   const { data: vendors = [], isLoading, error } = useMaterialVendors(material.id);
   const deleteInventory = useDeleteVendorInventory();
 
-  // Find best price vendor
-  const bestPriceVendor = useMemo(() => {
-    if (vendors.length === 0) return null;
-    return vendors.reduce((best, current) => {
-      const bestCost = best.total_landed_cost || Infinity;
-      const currentCost = current.total_landed_cost || Infinity;
-      return currentCost < bestCost ? current : best;
-    }, vendors[0]);
+  // Create a map of best prices by brand (brand_id represents brand + variant combination)
+  // Best price comparison should only compare vendors with the same brand
+  const bestPriceByBrand = useMemo(() => {
+    const brandMap = new Map<string, VendorInventoryWithDetails>();
+
+    vendors.forEach(vendor => {
+      const brandKey = vendor.brand_id || 'no-brand';
+      const existing = brandMap.get(brandKey);
+
+      const vendorCost = vendor.total_landed_cost || Infinity;
+      const existingCost = existing?.total_landed_cost || Infinity;
+
+      if (!existing || vendorCost < existingCost) {
+        brandMap.set(brandKey, vendor);
+      }
+    });
+
+    return brandMap;
   }, [vendors]);
+
+  // Check if a vendor has the best price for its brand
+  const isBestPriceForBrand = useCallback((vendor: VendorInventoryWithDetails) => {
+    const brandKey = vendor.brand_id || 'no-brand';
+    const bestForBrand = bestPriceByBrand.get(brandKey);
+    // Only show "Best" if there are multiple vendors for this brand
+    const vendorsForBrand = vendors.filter(v => (v.brand_id || 'no-brand') === brandKey);
+    return vendorsForBrand.length > 1 && bestForBrand?.id === vendor.id;
+  }, [bestPriceByBrand, vendors]);
 
   const handleAdd = useCallback(() => {
     setSelectedItem(null);
@@ -119,11 +137,11 @@ export default function MaterialVendorsTab({ material }: MaterialVendorsTabProps
         header: "Vendor",
         size: 200,
         Cell: ({ row }) => {
-          const isBestPrice = bestPriceVendor?.id === row.original.id;
+          const isBestPrice = isBestPriceForBrand(row.original);
           return (
             <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
               {isBestPrice && (
-                <Tooltip title="Best Price">
+                <Tooltip title="Best Price for this Brand">
                   <TrophyIcon color="warning" fontSize="small" />
                 </Tooltip>
               )}
@@ -179,7 +197,7 @@ export default function MaterialVendorsTab({ material }: MaterialVendorsTabProps
         header: "Total Cost",
         size: 110,
         Cell: ({ row }) => {
-          const isBestPrice = bestPriceVendor?.id === row.original.id;
+          const isBestPrice = isBestPriceForBrand(row.original);
           return (
             <Typography
               variant="body2"
@@ -256,7 +274,7 @@ export default function MaterialVendorsTab({ material }: MaterialVendorsTabProps
           ),
       },
     ],
-    [bestPriceVendor]
+    [isBestPriceForBrand]
   );
 
   if (error) {
@@ -293,32 +311,6 @@ export default function MaterialVendorsTab({ material }: MaterialVendorsTabProps
           Add Vendor
         </Button>
       </Box>
-
-      {/* Best Price Summary */}
-      {bestPriceVendor && vendors.length > 1 && (
-        <Paper
-          variant="outlined"
-          sx={{
-            p: 2,
-            mb: 2,
-            bgcolor: "success.50",
-            borderColor: "success.200",
-          }}
-        >
-          <Stack direction="row" alignItems="center" spacing={1}>
-            <TrophyIcon color="warning" />
-            <Box>
-              <Typography variant="subtitle2">
-                Best Price: {formatCurrency(bestPriceVendor.total_landed_cost)} / {material.unit}
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                from {bestPriceVendor.vendor?.name}
-                {bestPriceVendor.brand?.brand_name && ` (${bestPriceVendor.brand.brand_name})`}
-              </Typography>
-            </Box>
-          </Stack>
-        </Paper>
-      )}
 
       {/* Vendors Table */}
       {isLoading ? (

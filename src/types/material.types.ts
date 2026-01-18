@@ -191,6 +191,107 @@ export interface GroupStockTransaction {
 }
 
 // ============================================
+// INTER-SITE SETTLEMENT
+// ============================================
+
+export type InterSiteSettlementStatus =
+  | "draft"
+  | "pending"
+  | "approved"
+  | "settled"
+  | "cancelled";
+
+export type SettlementPaymentMode = "cash" | "bank_transfer" | "upi" | "adjustment";
+
+export interface InterSiteSettlement {
+  id: string;
+  settlement_code: string;
+  site_group_id: string;
+  from_site_id: string; // Creditor site (paid for materials)
+  to_site_id: string; // Debtor site (used the materials)
+  year: number;
+  week_number: number;
+  period_start: string;
+  period_end: string;
+  total_amount: number;
+  paid_amount: number;
+  pending_amount: number;
+  status: InterSiteSettlementStatus;
+  notes: string | null;
+  created_by: string | null;
+  approved_by: string | null;
+  approved_at: string | null;
+  settled_by: string | null;
+  settled_at: string | null;
+  cancelled_by: string | null;
+  cancelled_at: string | null;
+  cancellation_reason: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface InterSiteSettlementItem {
+  id: string;
+  settlement_id: string;
+  material_id: string;
+  brand_id: string | null;
+  batch_code: string | null;
+  quantity_used: number;
+  unit: string;
+  unit_cost: number;
+  total_cost: number;
+  transaction_id: string | null;
+  usage_date: string;
+  notes: string | null;
+  created_at: string;
+}
+
+export interface InterSiteSettlementPayment {
+  id: string;
+  settlement_id: string;
+  payment_date: string;
+  amount: number;
+  payment_mode: SettlementPaymentMode;
+  reference_number: string | null;
+  notes: string | null;
+  recorded_by: string | null;
+  created_at: string;
+}
+
+// Pending balance between sites (calculated from transactions)
+export interface InterSiteBalance {
+  site_group_id: string;
+  group_name: string;
+  creditor_site_id: string;
+  creditor_site_name: string;
+  debtor_site_id: string;
+  debtor_site_name: string;
+  year: number;
+  week_number: number;
+  week_start: string;
+  week_end: string;
+  transaction_count: number;
+  material_count: number;
+  total_quantity: number;
+  total_amount_owed: number;
+  settlement_id?: string;
+  settlement_status?: InterSiteSettlementStatus;
+  is_settled: boolean;
+}
+
+// Site settlement summary (aggregated view)
+export interface SiteSettlementSummary {
+  site_id: string;
+  site_name: string;
+  group_id: string;
+  group_name: string;
+  total_owed_to_you: number; // Sum of what other sites owe this site
+  total_you_owe: number; // Sum of what this site owes others
+  net_balance: number; // total_owed_to_you - total_you_owe
+  pending_settlements_count: number;
+}
+
+// ============================================
 // VENDOR INVENTORY & PRICE HISTORY
 // ============================================
 
@@ -238,6 +339,52 @@ export interface PriceHistory {
   recorded_by: string | null;
   notes: string | null;
   created_at: string;
+}
+
+// ============================================
+// PRICE ALERTS
+// ============================================
+
+export type PriceAlertType = "price_drop" | "price_increase" | "threshold_below" | "threshold_above";
+
+export interface PriceAlert {
+  id: string;
+  material_id: string;
+  brand_id: string | null;
+  alert_type: PriceAlertType;
+  threshold_value: number | null; // For threshold_below/threshold_above
+  threshold_percent: number | null; // For price_drop/price_increase
+  is_active: boolean;
+  last_triggered_at: string | null;
+  trigger_count: number;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PriceAlertWithDetails extends PriceAlert {
+  material?: Material;
+  brand?: MaterialBrand | null;
+  created_by_user?: { name: string } | null;
+}
+
+export interface PriceAlertTriggered {
+  id: string;
+  alert_id: string;
+  triggered_at: string;
+  old_price: number;
+  new_price: number;
+  change_percent: number;
+  vendor_id: string | null;
+  source_reference: string | null;
+  acknowledged: boolean;
+  acknowledged_by: string | null;
+  acknowledged_at: string | null;
+}
+
+export interface PriceAlertTriggeredWithDetails extends PriceAlertTriggered {
+  alert?: PriceAlert;
+  vendor?: Vendor;
 }
 
 // ============================================
@@ -772,8 +919,21 @@ export interface GroupStockTransactionWithDetails extends GroupStockTransaction 
   material?: Material;
   brand?: MaterialBrand | null;
   site_group?: SiteGroup;
-  usage_site?: { name: string } | null;
-  payment_source_site?: { name: string } | null;
+  usage_site?: { id: string; name: string } | null;
+  payment_source_site?: { id: string; name: string } | null;
+}
+
+export interface InterSiteSettlementWithDetails extends InterSiteSettlement {
+  from_site?: { id: string; name: string };
+  to_site?: { id: string; name: string };
+  site_group?: SiteGroup;
+  items?: InterSiteSettlementItemWithDetails[];
+  payments?: InterSiteSettlementPayment[];
+}
+
+export interface InterSiteSettlementItemWithDetails extends InterSiteSettlementItem {
+  material?: Material;
+  brand?: MaterialBrand | null;
 }
 
 export interface VendorInventoryWithDetails extends VendorInventory {
@@ -983,7 +1143,9 @@ export interface PurchaseOrderFormData {
   delivery_address?: string;
   delivery_location_id?: string;
   payment_terms?: string;
+  transport_cost?: number;
   notes?: string;
+  internal_notes?: string; // For storing group stock info as JSON
   items: PurchaseOrderItemFormData[];
 }
 
@@ -1122,6 +1284,66 @@ export interface DeliveryVerificationFormData {
   verification_notes?: string;
   discrepancies?: DeliveryDiscrepancy[];
   verification_status: DeliveryVerificationStatus;
+}
+
+// Form data for historical group stock purchase entry
+export interface HistoricalPurchaseFormData {
+  group_id: string;
+  payment_source_site_id: string;
+  purchase_date: string;
+  vendor_id?: string;
+  vendor_name?: string;
+  transport_cost?: number;
+  notes?: string;
+  items: Array<{
+    material_id: string;
+    brand_id?: string;
+    quantity: number;
+    unit_price: number;
+  }>;
+}
+
+// Form data for weekly usage report entry
+export interface WeeklyUsageReportFormData {
+  group_id: string;
+  week_start: string;
+  week_end: string;
+  entries: Array<{
+    material_id: string;
+    brand_id?: string;
+    quantity: number;
+    usage_site_id: string;
+    work_description?: string;
+    usage_date?: string;
+  }>;
+}
+
+// Form data for generating a settlement
+export interface GenerateSettlementFormData {
+  site_group_id: string;
+  from_site_id: string; // Creditor
+  to_site_id: string; // Debtor
+  year: number;
+  week_number: number;
+}
+
+// Form data for recording settlement payment
+export interface SettlementPaymentFormData {
+  settlement_id: string;
+  amount: number;
+  payment_date: string;
+  payment_mode: SettlementPaymentMode;
+  reference_number?: string;
+  notes?: string;
+}
+
+// Form data for creating/updating price alerts
+export interface PriceAlertFormData {
+  material_id: string;
+  brand_id?: string;
+  alert_type: PriceAlertType;
+  threshold_value?: number;
+  threshold_percent?: number;
 }
 
 // ============================================
@@ -1304,4 +1526,261 @@ export const PRICE_SOURCE_LABELS: Record<PriceSource, string> = {
   quotation: "Quotation",
   manual: "Manual Entry",
   bill: "Bill",
+};
+
+export const SETTLEMENT_STATUS_LABELS: Record<InterSiteSettlementStatus, string> = {
+  draft: "Draft",
+  pending: "Pending",
+  approved: "Approved",
+  settled: "Settled",
+  cancelled: "Cancelled",
+};
+
+export const SETTLEMENT_STATUS_COLORS: Record<InterSiteSettlementStatus, "default" | "warning" | "info" | "success" | "error"> = {
+  draft: "default",
+  pending: "warning",
+  approved: "info",
+  settled: "success",
+  cancelled: "error",
+};
+
+export const SETTLEMENT_PAYMENT_MODE_LABELS: Record<SettlementPaymentMode, string> = {
+  cash: "Cash",
+  bank_transfer: "Bank Transfer",
+  upi: "UPI",
+  adjustment: "Adjustment",
+};
+
+export const PRICE_ALERT_TYPE_LABELS: Record<PriceAlertType, string> = {
+  price_drop: "Price Drop",
+  price_increase: "Price Increase",
+  threshold_below: "Below Threshold",
+  threshold_above: "Above Threshold",
+};
+
+export const PRICE_ALERT_TYPE_DESCRIPTIONS: Record<PriceAlertType, string> = {
+  price_drop: "Alert when price drops by a percentage",
+  price_increase: "Alert when price increases by a percentage",
+  threshold_below: "Alert when price falls below a fixed value",
+  threshold_above: "Alert when price exceeds a fixed value",
+};
+
+export const PRICE_ALERT_TYPE_COLORS: Record<PriceAlertType, "success" | "error" | "info" | "warning"> = {
+  price_drop: "success",
+  price_increase: "error",
+  threshold_below: "info",
+  threshold_above: "warning",
+};
+
+// ============================================
+// MATERIAL PURCHASE EXPENSE TRACKING (PHASE 7)
+// ============================================
+
+export type MaterialPurchaseType = "own_site" | "group_stock";
+
+export type MaterialBatchStatus = "in_stock" | "partial_used" | "completed" | "converted" | "recorded";
+
+export type MaterialPaymentMode = "cash" | "upi" | "bank_transfer" | "cheque" | "credit";
+
+export interface MaterialPurchaseExpense {
+  id: string;
+  site_id: string;
+  ref_code: string;
+  purchase_type: MaterialPurchaseType;
+
+  // Purchase details
+  vendor_id: string | null;
+  vendor_name: string | null;
+  purchase_date: string;
+
+  // Financial
+  total_amount: number;
+  transport_cost: number;
+
+  // Payment
+  payment_mode: MaterialPaymentMode | null;
+  payment_reference: string | null;
+  payment_screenshot_url: string | null;
+  is_paid: boolean;
+  paid_date: string | null;
+
+  // Documents
+  bill_url: string | null;
+
+  // Status
+  status: MaterialBatchStatus;
+
+  // For group stock: tracks if converted to own site
+  converted_from_group: boolean;
+  original_batch_code: string | null;
+
+  // Links
+  group_stock_transaction_id: string | null;
+  local_purchase_id: string | null;
+  site_group_id: string | null;
+
+  // Metadata
+  notes: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MaterialPurchaseExpenseItem {
+  id: string;
+  purchase_expense_id: string;
+  material_id: string;
+  brand_id: string | null;
+  quantity: number;
+  unit_price: number;
+  total_price: number; // computed: quantity * unit_price
+  notes: string | null;
+  created_at: string;
+}
+
+export interface BatchAllocation {
+  site_id: string;
+  site_name: string;
+  quantity_used: number;
+  amount: number;
+  usage_percent: number;
+}
+
+export interface GroupStockBatch {
+  batch_code: string;
+  ref_code: string;
+  purchase_date: string;
+  vendor_id: string | null;
+  vendor_name: string | null;
+  payment_source_site_id: string | null;
+  payment_source_site_name: string | null;
+  total_amount: number;
+  original_quantity: number;
+  remaining_quantity: number;
+  status: MaterialBatchStatus;
+  bill_url: string | null;
+  payment_mode: MaterialPaymentMode | null;
+  payment_reference: string | null;
+  payment_screenshot_url: string | null;
+  notes: string | null;
+  items: Array<{
+    material_id: string;
+    material_name: string;
+    material_code: string | null;
+    brand_id: string | null;
+    brand_name: string | null;
+    quantity: number;
+    unit: string;
+    unit_price: number;
+  }>;
+  allocations: BatchAllocation[];
+  // Actual usage recorded from sites
+  site_usage?: Array<{
+    site_id: string;
+    site_name: string;
+    quantity_used: number;
+    amount: number;
+  }>;
+}
+
+// Extended types with relationships
+export interface MaterialPurchaseExpenseWithDetails extends MaterialPurchaseExpense {
+  site?: { id: string; name: string };
+  vendor?: Vendor | null;
+  site_group?: SiteGroup | null;
+  items?: MaterialPurchaseExpenseItemWithDetails[];
+  created_by_user?: { name: string } | null;
+}
+
+export interface MaterialPurchaseExpenseItemWithDetails extends MaterialPurchaseExpenseItem {
+  material?: Material;
+  brand?: MaterialBrand | null;
+}
+
+// Form data for creating/updating material purchase expenses
+export interface MaterialPurchaseExpenseFormData {
+  site_id: string;
+  purchase_type: MaterialPurchaseType;
+  site_group_id?: string; // Required for group_stock type
+
+  // Purchase details
+  vendor_id?: string;
+  vendor_name?: string;
+  purchase_date: string;
+
+  // Financial
+  transport_cost?: number;
+
+  // Payment
+  payment_mode?: MaterialPaymentMode;
+  payment_reference?: string;
+  payment_screenshot_url?: string;
+  is_paid?: boolean;
+  paid_date?: string;
+
+  // Documents
+  bill_url?: string;
+
+  // For group_stock type
+  payment_source_site_id?: string; // Site that paid for the materials
+
+  // Metadata
+  notes?: string;
+
+  // Items
+  items: MaterialPurchaseExpenseItemFormData[];
+}
+
+export interface MaterialPurchaseExpenseItemFormData {
+  material_id: string;
+  brand_id?: string;
+  quantity: number;
+  unit_price: number;
+  notes?: string;
+}
+
+// Form data for completing a group stock batch
+export interface CompleteBatchFormData {
+  batch_code: string;
+  allocations: Array<{
+    site_id: string;
+    amount: number;
+    usage_percent: number;
+  }>;
+}
+
+// Form data for converting group to own site
+export interface ConvertToOwnSiteFormData {
+  batch_code: string;
+  target_site_id: string;
+}
+
+// Labels
+export const MATERIAL_PURCHASE_TYPE_LABELS: Record<MaterialPurchaseType, string> = {
+  own_site: "Own Site Purchase",
+  group_stock: "Group Stock Purchase",
+};
+
+export const MATERIAL_BATCH_STATUS_LABELS: Record<MaterialBatchStatus, string> = {
+  recorded: "Recorded",
+  in_stock: "In Stock",
+  partial_used: "Partially Used",
+  completed: "Completed",
+  converted: "Converted",
+};
+
+export const MATERIAL_BATCH_STATUS_COLORS: Record<MaterialBatchStatus, "default" | "info" | "warning" | "success" | "error"> = {
+  recorded: "default",
+  in_stock: "info",
+  partial_used: "warning",
+  completed: "success",
+  converted: "default",
+};
+
+export const MATERIAL_PAYMENT_MODE_LABELS: Record<MaterialPaymentMode, string> = {
+  cash: "Cash",
+  upi: "UPI",
+  bank_transfer: "Bank Transfer",
+  cheque: "Cheque",
+  credit: "Credit",
 };
