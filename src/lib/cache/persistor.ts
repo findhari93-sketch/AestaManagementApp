@@ -15,9 +15,8 @@ import { getTabCoordinator } from "@/lib/tab/coordinator";
 
 const CACHE_VERSION = 1;
 const CACHE_KEY = `aesta-query-cache-v${CACHE_VERSION}`;
-const SKIP_RESTORE_KEY = "aesta-skip-cache-restore"; // Session flag to skip slow cache
 const MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 days max retention
-const RESTORE_TIMEOUT = 5000; // 5 seconds - fail fast, fresh data is fine
+const RESTORE_TIMEOUT = 5000; // 5 seconds - proceed without cache if slow
 const MAX_RESTORE_RETRIES = 1; // Single retry only
 
 /**
@@ -65,15 +64,6 @@ export function createIDBPersister(): Persister {
     },
 
     restoreClient: async () => {
-      // Check if we should skip restoration (previous timeout in this session)
-      if (typeof window !== "undefined") {
-        const skipRestore = sessionStorage.getItem(SKIP_RESTORE_KEY);
-        if (skipRestore) {
-          console.log("Skipping cache restoration (previous timeout in this session)");
-          return undefined;
-        }
-      }
-
       // Retry logic for restore with exponential backoff
       const attemptRestore = async (attempt: number): Promise<PersistedClient | undefined> => {
         try {
@@ -144,20 +134,11 @@ export function createIDBPersister(): Persister {
       const restorePromise = attemptRestore(0);
 
       // Race between restore and timeout
+      // Non-destructive timeout: just proceed without cache, don't clear it
+      // The cache may finish restoring in background and be available for future persistence
       const timeoutPromise = new Promise<undefined>((resolve) => {
-        setTimeout(async () => {
-          console.warn("Cache restoration timed out - starting fresh");
-          try {
-            // Set flag to skip restoration for rest of this session
-            if (typeof window !== "undefined") {
-              sessionStorage.setItem(SKIP_RESTORE_KEY, "true");
-            }
-            // Clear the potentially corrupted/slow cache
-            await clear();
-            console.log("Cache cleared, will skip restoration for this session");
-          } catch (clearError) {
-            console.error("Failed to clear cache after timeout:", clearError);
-          }
+        setTimeout(() => {
+          console.warn("Cache restoration slow - proceeding without cache");
           resolve(undefined);
         }, RESTORE_TIMEOUT);
       });
@@ -197,9 +178,8 @@ export async function forceResetAllCache(): Promise<boolean> {
     // Clear IndexedDB via idb-keyval
     await clear();
 
-    // Clear session flags to allow fresh cache attempt
+    // Clear all session storage
     if (typeof window !== "undefined") {
-      sessionStorage.removeItem(SKIP_RESTORE_KEY);
       sessionStorage.clear();
     }
 

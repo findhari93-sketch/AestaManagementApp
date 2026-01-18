@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect } from "react";
-import { Box, Button, Typography, Paper } from "@mui/material";
-import { Error as ErrorIcon } from "@mui/icons-material";
+import { useEffect, useState } from "react";
+import { Box, Button, Typography, Paper, Stack } from "@mui/material";
+import { Error as ErrorIcon, Refresh, DeleteSweep } from "@mui/icons-material";
+import { forceResetAllCache } from "@/lib/cache/persistor";
 
 export default function Error({
   error,
@@ -11,9 +12,22 @@ export default function Error({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  const [isClearing, setIsClearing] = useState(false);
+
   useEffect(() => {
     console.error("Attendance page error:", error);
   }, [error]);
+
+  const handleClearCacheAndRetry = async () => {
+    setIsClearing(true);
+    try {
+      await forceResetAllCache();
+      window.location.reload();
+    } catch (e) {
+      console.error("Failed to clear cache:", e);
+      setIsClearing(false);
+    }
+  };
 
   return (
     <Box
@@ -38,9 +52,19 @@ export default function Error({
         <Typography color="text.secondary" sx={{ mb: 3 }}>
           {error.message || "Failed to load attendance data"}
         </Typography>
-        <Button variant="contained" onClick={reset}>
-          Try again
-        </Button>
+        <Stack direction="row" spacing={2} justifyContent="center">
+          <Button variant="contained" onClick={reset} startIcon={<Refresh />}>
+            Try again
+          </Button>
+          <Button
+            variant="outlined"
+            onClick={handleClearCacheAndRetry}
+            startIcon={<DeleteSweep />}
+            disabled={isClearing}
+          >
+            {isClearing ? "Clearing..." : "Clear Cache"}
+          </Button>
+        </Stack>
       </Paper>
     </Box>
   );

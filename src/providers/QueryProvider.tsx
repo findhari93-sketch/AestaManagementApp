@@ -77,9 +77,15 @@ export default function QueryProvider({
             },
             retryDelay: (attemptIndex) =>
               Math.min(1000 * 2 ** attemptIndex, 30000), // Exponential backoff
-            refetchOnWindowFocus: false, // Disabled - prevents refetch cascade on tab focus
+            // Smart window focus refetch: only refetch if data is older than default staleTime
+            // This prevents refetch cascade on tab focus while still refreshing stale data
+            refetchOnWindowFocus: (query) => {
+              const age = Date.now() - (query.state.dataUpdatedAt || 0);
+              const defaultStaleTime = 5 * 60 * 1000; // 5 minutes
+              return age > defaultStaleTime;
+            },
             refetchOnReconnect: true, // Refetch when network reconnects
-            refetchOnMount: true, // Only refetch if data is stale (not "always")
+            refetchOnMount: true, // Refetch if data is stale
             networkMode: "online", // Online mode to prevent showing stale data from wrong site
           },
           mutations: {
@@ -107,7 +113,19 @@ export default function QueryProvider({
         maxAge: 24 * 60 * 60 * 1000, // 24 hours max age for persisted data
         buster: "v1", // Change this to invalidate all persisted cache
       }}
-      // Removed onSuccess invalidation - it was causing refetch cascade after cache restore
+      onSuccess={() => {
+        // After cache restoration, invalidate queries that are past the default staleTime
+        // This ensures stale data gets refreshed while still showing cached data immediately
+        const defaultStaleTime = 5 * 60 * 1000; // 5 minutes
+        queryClient.invalidateQueries({
+          predicate: (query) => {
+            const age = Date.now() - (query.state.dataUpdatedAt || 0);
+            // Only invalidate if data exists and is stale
+            return query.state.data !== undefined && age > defaultStaleTime;
+          },
+          refetchType: "active", // Only refetch queries currently being observed
+        });
+      }}
     >
       <SyncInitializer queryClient={queryClient} />
       {children}

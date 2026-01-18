@@ -66,6 +66,9 @@ export class BackgroundSyncOrchestrator {
     // Sync dashboard data
     this.scheduleDashboardSync();
 
+    // Sync company-level data (not site-specific)
+    this.scheduleCompanySync();
+
     // Schedule cache cleanup
     this.scheduleCleanup();
 
@@ -204,6 +207,14 @@ export class BackgroundSyncOrchestrator {
     this.intervals.set("dashboard", interval);
   }
 
+  private scheduleCompanySync(): void {
+    const interval = setInterval(() => {
+      this.syncCompanyData();
+    }, this.config.intervals.reference); // Same interval as reference data
+
+    this.intervals.set("company", interval);
+  }
+
   private scheduleCleanup(): void {
     const interval = setInterval(() => {
       this.performCleanup();
@@ -335,6 +346,39 @@ export class BackgroundSyncOrchestrator {
       this.updateLastSyncTime("dashboard");
     } catch (error) {
       console.error("Dashboard data sync error:", error);
+    }
+  }
+
+  /**
+   * Sync company-level data (not site-specific)
+   * These queries work regardless of selected site (e.g., Material Catalog, Vendor Directory)
+   */
+  private async syncCompanyData(): Promise<void> {
+    if (!this.config.enabled) return;
+
+    try {
+      const queriesToSync: (readonly unknown[])[] = [
+        queryKeys.materials.list(),
+        queryKeys.materials.all,
+        queryKeys.vendors.list(),
+        queryKeys.laborCategories.list(),
+        queryKeys.laborRoles.list(),
+        queryKeys.siteGroups.list(),
+        queryKeys.companyTeaShops.list(),
+      ];
+
+      await Promise.allSettled(
+        queriesToSync.map((queryKey) =>
+          this.queryClient.invalidateQueries({
+            queryKey,
+            refetchType: "active", // Only refetch if currently being observed
+          })
+        )
+      );
+
+      this.updateLastSyncTime("company");
+    } catch (error) {
+      console.error("Company data sync error:", error);
     }
   }
 
