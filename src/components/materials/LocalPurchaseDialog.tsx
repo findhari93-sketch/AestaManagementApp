@@ -33,6 +33,7 @@ import {
   PhotoCamera as CameraIcon,
 } from "@mui/icons-material";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { useFormDraft } from "@/hooks/useFormDraft";
 import { useVendors } from "@/hooks/queries/useVendors";
 import { useMaterials } from "@/hooks/queries/useMaterials";
 import { useCreateLocalPurchase } from "@/hooks/queries/useLocalPurchases";
@@ -64,6 +65,17 @@ interface PurchaseItem {
   total_price: number;
 }
 
+interface LocalPurchaseDraftData {
+  receiptUrl: string | null;
+  selectedVendorId: string | null;
+  isNewVendor: boolean;
+  newVendorName: string;
+  newVendorPhone: string;
+  paymentMode: LocalPurchasePaymentMode;
+  description: string;
+  items: PurchaseItem[];
+}
+
 const emptyItem = (): PurchaseItem => ({
   id: crypto.randomUUID(),
   material_id: null,
@@ -73,6 +85,17 @@ const emptyItem = (): PurchaseItem => ({
   unit: "nos",
   unit_price: 0,
   total_price: 0,
+});
+
+const getInitialDraftData = (): LocalPurchaseDraftData => ({
+  receiptUrl: null,
+  selectedVendorId: null,
+  isNewVendor: false,
+  newVendorName: "",
+  newVendorPhone: "",
+  paymentMode: "cash",
+  description: "",
+  items: [emptyItem()],
 });
 
 export default function LocalPurchaseDialog({
@@ -89,52 +112,63 @@ export default function LocalPurchaseDialog({
   const supabase = createClient();
 
   const [error, setError] = useState("");
-  const [receiptFile, setReceiptFile] = useState<UploadedFile | null>(null);
-  const [selectedVendor, setSelectedVendor] =
-    useState<VendorWithCategories | null>(null);
-  const [isNewVendor, setIsNewVendor] = useState(false);
-  const [newVendorName, setNewVendorName] = useState("");
-  const [newVendorPhone, setNewVendorPhone] = useState("");
-  const [paymentMode, setPaymentMode] =
-    useState<LocalPurchasePaymentMode>("cash");
-  const [description, setDescription] = useState("");
-  const [items, setItems] = useState<PurchaseItem[]>([emptyItem()]);
 
-  // Reset form when dialog opens
+  // Use form draft hook for persistence
+  const initialDraftData = useMemo(() => getInitialDraftData(), []);
+  const {
+    formData: draftData,
+    updateField,
+    isDirty,
+    hasRestoredDraft,
+    clearDraft,
+    discardDraft,
+  } = useFormDraft<LocalPurchaseDraftData>({
+    key: "local_purchase_dialog",
+    initialData: initialDraftData,
+    isOpen: open,
+  });
+
+  // Derived state from draft data
+  const selectedVendor = useMemo(
+    () => vendors.find((v) => v.id === draftData.selectedVendorId) || null,
+    [vendors, draftData.selectedVendorId]
+  );
+  const receiptFile: UploadedFile | null = draftData.receiptUrl
+    ? { url: draftData.receiptUrl, name: "Receipt", size: 0 }
+    : null;
+
+  // Reset error when dialog opens
   useEffect(() => {
     if (open) {
       setError("");
-      setReceiptFile(null);
-      setSelectedVendor(null);
-      setIsNewVendor(false);
-      setNewVendorName("");
-      setNewVendorPhone("");
-      setPaymentMode("cash");
-      setDescription("");
-      setItems([emptyItem()]);
     }
   }, [open]);
 
   // Calculate total
   const totalAmount = useMemo(() => {
-    return items.reduce((sum, item) => sum + item.total_price, 0);
-  }, [items]);
+    return draftData.items.reduce((sum, item) => sum + item.total_price, 0);
+  }, [draftData.items]);
 
   const handleAddItem = useCallback(() => {
-    setItems((prev) => [...prev, emptyItem()]);
-  }, []);
+    updateField("items", [...draftData.items, emptyItem()]);
+  }, [draftData.items, updateField]);
 
-  const handleRemoveItem = useCallback((id: string) => {
-    setItems((prev) => {
-      if (prev.length <= 1) return prev;
-      return prev.filter((item) => item.id !== id);
-    });
-  }, []);
+  const handleRemoveItem = useCallback(
+    (id: string) => {
+      if (draftData.items.length <= 1) return;
+      updateField(
+        "items",
+        draftData.items.filter((item) => item.id !== id)
+      );
+    },
+    [draftData.items, updateField]
+  );
 
   const handleItemChange = useCallback(
     (id: string, field: keyof PurchaseItem, value: unknown) => {
-      setItems((prev) =>
-        prev.map((item) => {
+      updateField(
+        "items",
+        draftData.items.map((item) => {
           if (item.id !== id) return item;
 
           const updated = { ...item, [field]: value };
@@ -148,13 +182,14 @@ export default function LocalPurchaseDialog({
         })
       );
     },
-    []
+    [draftData.items, updateField]
   );
 
   const handleMaterialSelect = useCallback(
     (id: string, material: MaterialWithDetails | null) => {
-      setItems((prev) =>
-        prev.map((item) => {
+      updateField(
+        "items",
+        draftData.items.map((item) => {
           if (item.id !== id) return item;
           return {
             ...item,
@@ -165,7 +200,7 @@ export default function LocalPurchaseDialog({
         })
       );
     },
-    []
+    [draftData.items, updateField]
   );
 
   const handleSubmit = async () => {
@@ -175,17 +210,17 @@ export default function LocalPurchaseDialog({
       return;
     }
 
-    if (!selectedVendor && !isNewVendor) {
+    if (!selectedVendor && !draftData.isNewVendor) {
       setError("Please select or add a vendor");
       return;
     }
 
-    if (isNewVendor && !newVendorName.trim()) {
+    if (draftData.isNewVendor && !draftData.newVendorName.trim()) {
       setError("Please enter vendor name");
       return;
     }
 
-    const validItems = items.filter(
+    const validItems = draftData.items.filter(
       (item) =>
         (item.material_id || item.custom_material_name) &&
         item.quantity > 0 &&
@@ -202,13 +237,17 @@ export default function LocalPurchaseDialog({
         site_id: siteId,
         engineerId: engineerId,
         vendor_id: selectedVendor?.id,
-        vendor_name: isNewVendor ? newVendorName : selectedVendor?.name || "",
-        vendor_phone: isNewVendor ? newVendorPhone : selectedVendor?.phone || "",
-        is_new_vendor: isNewVendor,
+        vendor_name: draftData.isNewVendor
+          ? draftData.newVendorName
+          : selectedVendor?.name || "",
+        vendor_phone: draftData.isNewVendor
+          ? draftData.newVendorPhone
+          : selectedVendor?.phone || "",
+        is_new_vendor: draftData.isNewVendor,
         purchase_date: new Date().toISOString().split("T")[0],
-        receipt_url: receiptFile?.url || undefined,
-        payment_mode: paymentMode,
-        description: description || undefined,
+        receipt_url: draftData.receiptUrl || undefined,
+        payment_mode: draftData.paymentMode,
+        description: draftData.description || undefined,
         items: validItems.map((item) => ({
           material_id: item.material_id || undefined,
           custom_material_name: item.custom_material_name || undefined,
@@ -220,6 +259,7 @@ export default function LocalPurchaseDialog({
       };
 
       await createLocalPurchase.mutateAsync(formData);
+      clearDraft(); // Clear draft on successful save
       onClose();
     } catch (err) {
       const message =
@@ -252,6 +292,19 @@ export default function LocalPurchaseDialog({
       </DialogTitle>
 
       <DialogContent dividers>
+        {hasRestoredDraft && (
+          <Alert
+            severity="info"
+            sx={{ mb: 2 }}
+            action={
+              <Button size="small" color="inherit" onClick={discardDraft}>
+                Discard
+              </Button>
+            }
+          >
+            Restored from previous session
+          </Alert>
+        )}
         {error && (
           <Alert severity="error" sx={{ mb: 2 }}>
             {error}
@@ -271,8 +324,8 @@ export default function LocalPurchaseDialog({
               fileNamePrefix="receipt"
               accept="image"
               maxSizeMB={5}
-              onUpload={(file) => setReceiptFile(file)}
-              onRemove={() => setReceiptFile(null)}
+              onUpload={(file) => updateField("receiptUrl", file.url)}
+              onRemove={() => updateField("receiptUrl", null)}
               value={receiptFile}
             />
           </Box>
@@ -285,16 +338,16 @@ export default function LocalPurchaseDialog({
               Vendor/Shop
             </Typography>
             <ToggleButtonGroup
-              value={isNewVendor ? "new" : "existing"}
+              value={draftData.isNewVendor ? "new" : "existing"}
               exclusive
               onChange={(_, value) => {
                 if (value === "new") {
-                  setIsNewVendor(true);
-                  setSelectedVendor(null);
+                  updateField("isNewVendor", true);
+                  updateField("selectedVendorId", null);
                 } else if (value === "existing") {
-                  setIsNewVendor(false);
-                  setNewVendorName("");
-                  setNewVendorPhone("");
+                  updateField("isNewVendor", false);
+                  updateField("newVendorName", "");
+                  updateField("newVendorPhone", "");
                 }
               }}
               size="small"
@@ -304,14 +357,14 @@ export default function LocalPurchaseDialog({
               <ToggleButton value="new">New Vendor</ToggleButton>
             </ToggleButtonGroup>
 
-            {isNewVendor ? (
+            {draftData.isNewVendor ? (
               <Grid container spacing={2}>
                 <Grid size={{ xs: 12, sm: 6 }}>
                   <TextField
                     fullWidth
                     label="Vendor/Shop Name"
-                    value={newVendorName}
-                    onChange={(e) => setNewVendorName(e.target.value)}
+                    value={draftData.newVendorName}
+                    onChange={(e) => updateField("newVendorName", e.target.value)}
                     required
                     placeholder="e.g., Sri Lakshmi Hardware"
                   />
@@ -320,8 +373,8 @@ export default function LocalPurchaseDialog({
                   <TextField
                     fullWidth
                     label="Phone (Optional)"
-                    value={newVendorPhone}
-                    onChange={(e) => setNewVendorPhone(e.target.value)}
+                    value={draftData.newVendorPhone}
+                    onChange={(e) => updateField("newVendorPhone", e.target.value)}
                     placeholder="+91 99999 99999"
                   />
                 </Grid>
@@ -333,7 +386,7 @@ export default function LocalPurchaseDialog({
                   option.shop_name || option.name || ""
                 }
                 value={selectedVendor}
-                onChange={(_, value) => setSelectedVendor(value)}
+                onChange={(_, value) => updateField("selectedVendorId", value?.id || null)}
                 renderInput={(params) => (
                   <TextField
                     {...params}
@@ -367,10 +420,10 @@ export default function LocalPurchaseDialog({
               Payment Mode
             </Typography>
             <ToggleButtonGroup
-              value={paymentMode}
+              value={draftData.paymentMode}
               exclusive
               onChange={(_, value) => {
-                if (value) setPaymentMode(value);
+                if (value) updateField("paymentMode", value);
               }}
               size="small"
             >
@@ -378,7 +431,7 @@ export default function LocalPurchaseDialog({
               <ToggleButton value="upi">UPI</ToggleButton>
               <ToggleButton value="engineer_own">My Own Money</ToggleButton>
             </ToggleButtonGroup>
-            {paymentMode === "engineer_own" && (
+            {draftData.paymentMode === "engineer_own" && (
               <Alert severity="info" sx={{ mt: 1 }}>
                 This will be added to your pending reimbursement
               </Alert>
@@ -408,7 +461,7 @@ export default function LocalPurchaseDialog({
             </Box>
 
             <Stack spacing={2}>
-              {items.map((item, index) => (
+              {draftData.items.map((item, index) => (
                 <Card key={item.id} variant="outlined">
                   <CardContent sx={{ py: 1.5, "&:last-child": { pb: 1.5 } }}>
                     <Grid container spacing={2} alignItems="center">
@@ -515,7 +568,7 @@ export default function LocalPurchaseDialog({
                         <IconButton
                           size="small"
                           onClick={() => handleRemoveItem(item.id)}
-                          disabled={items.length <= 1}
+                          disabled={draftData.items.length <= 1}
                         >
                           <DeleteIcon fontSize="small" />
                         </IconButton>
@@ -549,8 +602,8 @@ export default function LocalPurchaseDialog({
             label="Description/Notes (Optional)"
             multiline
             rows={2}
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
+            value={draftData.description}
+            onChange={(e) => updateField("description", e.target.value)}
             placeholder="Any additional notes about this purchase..."
           />
         </Stack>

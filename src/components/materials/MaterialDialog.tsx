@@ -43,6 +43,7 @@ import CategoryAutocomplete from "@/components/common/CategoryAutocomplete";
 import FileUploader from "@/components/common/FileUploader";
 import { createClient } from "@/lib/supabase/client";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { useFormDraft } from "@/hooks/useFormDraft";
 import {
   useCreateMaterial,
   useUpdateMaterial,
@@ -128,87 +129,69 @@ export default function MaterialDialog({
   const [showDescription, setShowDescription] = useState(false);
   const [showImageUpload, setShowImageUpload] = useState(false);
   const supabase = createClient();
-  const [formData, setFormData] = useState<MaterialFormData>({
-    name: "",
-    code: "",
-    local_name: "",
-    category_id: "",
-    parent_id: "",
-    description: "",
-    unit: "piece",
-    hsn_code: "",
-    gst_rate: 18,
-    reorder_level: 10,
-    min_order_qty: 1,
-    weight_per_unit: null,
-    weight_unit: "kg",
-    length_per_piece: null,
-    length_unit: "ft",
-    image_url: "",
+
+  // Memoize initial form data based on material prop
+  const initialFormData = useMemo<MaterialFormData>(
+    () => ({
+      name: material?.name || "",
+      code: material?.code || "",
+      local_name: material?.local_name || "",
+      category_id: material?.category_id || "",
+      parent_id: material?.parent_id || "",
+      description: material?.description || "",
+      unit: material?.unit || "piece",
+      hsn_code: material?.hsn_code || "",
+      gst_rate: material?.gst_rate || 18,
+      reorder_level: material?.reorder_level || 10,
+      min_order_qty: material?.min_order_qty || 1,
+      weight_per_unit: material?.weight_per_unit ?? null,
+      weight_unit: material?.weight_unit || "kg",
+      length_per_piece: material?.length_per_piece ?? null,
+      length_unit: material?.length_unit || "ft",
+      image_url: material?.image_url || "",
+    }),
+    [material]
+  );
+
+  // Use form draft hook for persistence
+  const {
+    formData,
+    updateField,
+    isDirty,
+    hasRestoredDraft,
+    clearDraft,
+    discardDraft,
+  } = useFormDraft<MaterialFormData>({
+    key: "material_dialog",
+    initialData: initialFormData,
+    isOpen: open,
+    entityId: material?.id || null,
   });
 
-  // Reset form when material changes
+  // Sync UI state when dialog opens (doesn't affect form data)
   useEffect(() => {
-    if (material) {
-      setFormData({
-        name: material.name,
-        code: material.code || "",
-        local_name: material.local_name || "",
-        category_id: material.category_id || "",
-        parent_id: material.parent_id || "",
-        description: material.description || "",
-        unit: material.unit,
-        hsn_code: material.hsn_code || "",
-        gst_rate: material.gst_rate || 18,
-        reorder_level: material.reorder_level || 10,
-        min_order_qty: material.min_order_qty || 1,
-        weight_per_unit: material.weight_per_unit,
-        weight_unit: material.weight_unit || "kg",
-        length_per_piece: material.length_per_piece,
-        length_unit: material.length_unit || "ft",
-        image_url: material.image_url || "",
-      });
-      setIsVariant(!!material.parent_id);
+    if (open) {
+      if (material) {
+        setIsVariant(!!material.parent_id);
+        setShowVariantSection(false);
+        setShowWeightSection(!!material.weight_per_unit || !!material.length_per_piece);
+        setCustomizeCode(!!material.code);
+        setShowLocalName(!!material.local_name);
+        setShowDescription(!!material.description);
+        setShowImageUpload(!!material.image_url);
+      } else {
+        setIsVariant(false);
+        setShowVariantSection(false);
+        setShowWeightSection(false);
+        setCustomizeCode(false);
+        setShowLocalName(false);
+        setShowDescription(false);
+        setShowImageUpload(false);
+      }
       setVariants([]);
-      setShowVariantSection(false);
-      // Show weight section if material has weight/length data
-      setShowWeightSection(!!material.weight_per_unit || !!material.length_per_piece);
-      // Set UX toggles based on existing data
-      setCustomizeCode(!!material.code);
-      setShowLocalName(!!material.local_name);
-      setShowDescription(!!material.description);
-      setShowImageUpload(!!material.image_url);
-    } else {
-      setFormData({
-        name: "",
-        code: "",
-        local_name: "",
-        category_id: "",
-        parent_id: "",
-        description: "",
-        unit: "piece",
-        hsn_code: "",
-        gst_rate: 18,
-        reorder_level: 10,
-        min_order_qty: 1,
-        weight_per_unit: null,
-        weight_unit: "kg",
-        length_per_piece: null,
-        length_unit: "ft",
-        image_url: "",
-      });
-      setIsVariant(false);
-      setVariants([]);
-      setShowVariantSection(false);
-      setShowWeightSection(false);
-      // Reset UX toggles
-      setCustomizeCode(false);
-      setShowLocalName(false);
-      setShowDescription(false);
-      setShowImageUpload(false);
+      setError("");
+      setNewBrandName("");
     }
-    setError("");
-    setNewBrandName("");
   }, [material, open]);
 
   // Get parent categories only
@@ -284,7 +267,7 @@ export default function MaterialDialog({
   };
 
   const handleChange = (field: keyof MaterialFormData, value: unknown) => {
-    setFormData((prev) => ({ ...prev, [field]: value }));
+    updateField(field, value as MaterialFormData[typeof field]);
     setError("");
   };
 
@@ -319,6 +302,7 @@ export default function MaterialDialog({
       } else {
         await createMaterial.mutateAsync(dataToSubmit);
       }
+      clearDraft(); // Clear draft on successful save
       onClose();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to save material";
@@ -401,6 +385,19 @@ export default function MaterialDialog({
       </DialogTitle>
 
       <DialogContent dividers>
+        {hasRestoredDraft && (
+          <Alert
+            severity="info"
+            sx={{ mb: 2 }}
+            action={
+              <Button size="small" color="inherit" onClick={discardDraft}>
+                Discard
+              </Button>
+            }
+          >
+            Restored from previous session
+          </Alert>
+        )}
         {error && (
           <Alert severity="error" sx={{ mb: 2 }}>
             {error}

@@ -733,6 +733,7 @@ export function useSiteMaterialExpenses(siteId: string | undefined) {
           .select(`
             *,
             vendor:vendors(id, name),
+            purchase_order:purchase_orders(id, po_number),
             items:material_purchase_expense_items(
               *,
               material:materials(id, name, code, unit),

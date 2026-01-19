@@ -1698,6 +1698,7 @@ export interface MaterialPurchaseExpenseWithDetails extends MaterialPurchaseExpe
   site?: { id: string; name: string };
   vendor?: Vendor | null;
   site_group?: SiteGroup | null;
+  purchase_order?: { id: string; po_number: string } | null;
   items?: MaterialPurchaseExpenseItemWithDetails[];
   created_by_user?: { name: string } | null;
 }

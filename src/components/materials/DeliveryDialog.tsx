@@ -69,8 +69,11 @@ export default function DeliveryDialog({
   const [notes, setNotes] = useState("");
   const [items, setItems] = useState<DeliveryItemRow[]>([]);
 
-  // Reset form when PO changes
+  // Reset form when PO changes (only when dialog is open)
   useEffect(() => {
+    // Skip if dialog is closed to prevent unnecessary state updates
+    if (!open) return;
+
     if (purchaseOrder?.items) {
       const deliveryItems: DeliveryItemRow[] = purchaseOrder.items
         .filter((item) => {

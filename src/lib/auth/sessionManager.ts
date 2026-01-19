@@ -17,10 +17,13 @@ import { createClient } from "@/lib/supabase/client";
 const REFRESH_INTERVAL = 45 * 60 * 1000; // 45 minutes
 const IDLE_THRESHOLD = 15 * 60 * 1000; // 15 minutes
 const ACTIVITY_DEBOUNCE = 2000; // 2 seconds
+const SESSION_CHECK_DEBOUNCE = 5000; // 5 seconds - skip session check if done recently
+const SESSION_CHECK_TIMEOUT = 8000; // 8 seconds - balanced timeout (was 15s)
 
 type SessionManagerState = {
   isInitialized: boolean;
   lastActivity: number;
+  lastSessionCheckTime: number;
   refreshTimer: ReturnType<typeof setInterval> | null;
   activityTimer: ReturnType<typeof setTimeout> | null;
 };
@@ -29,6 +32,7 @@ class SessionManager {
   private state: SessionManagerState = {
     isInitialized: false,
     lastActivity: Date.now(),
+    lastSessionCheckTime: 0,
     refreshTimer: null,
     activityTimer: null,
   };
@@ -130,9 +134,16 @@ class SessionManager {
    * Throws error only if session is actually invalid.
    * Timeouts are logged but do NOT throw - the mutation proceeds and
    * Supabase will return a proper 401/403 if the session is truly expired.
+   *
+   * Includes debouncing: if called multiple times within 5 seconds (e.g., batch
+   * upserts), only the first call actually checks the session.
    */
   async ensureFreshSession(): Promise<void> {
-    const SESSION_TIMEOUT = 15000; // 15 seconds
+    // Skip if we just checked the session recently (within 5 seconds)
+    const now = Date.now();
+    if (now - this.state.lastSessionCheckTime < SESSION_CHECK_DEBOUNCE) {
+      return; // Session was verified recently, skip check
+    }
 
     const sessionCheckPromise = async (): Promise<void> => {
       const supabase = createClient();
@@ -162,6 +173,9 @@ class SessionManager {
           console.log("[SessionManager] Session refreshed before mutation");
         }
       }
+
+      // Mark successful check
+      this.state.lastSessionCheckTime = Date.now();
     };
 
     // Timeout with warning only - don't throw, let mutation proceed
@@ -169,8 +183,9 @@ class SessionManager {
     const timeoutPromise = new Promise<void>((resolve) => {
       setTimeout(() => {
         console.warn("[SessionManager] ensureFreshSession check slow - proceeding anyway");
+        this.state.lastSessionCheckTime = Date.now(); // Still mark as checked to avoid repeated timeouts
         resolve(); // Resolve instead of reject - let mutation proceed
-      }, SESSION_TIMEOUT);
+      }, SESSION_CHECK_TIMEOUT);
     });
 
     // Race: first to complete wins

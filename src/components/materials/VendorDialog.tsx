@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {
   Dialog,
   DialogTitle,
@@ -41,6 +41,7 @@ import CategoryAutocomplete from "@/components/common/CategoryAutocomplete";
 import { compressImage } from "@/components/attendance/work-updates/imageUtils";
 import { createClient } from "@/lib/supabase/client";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { useFormDraft } from "@/hooks/useFormDraft";
 import {
   useCreateVendor,
   useUpdateVendor,
@@ -79,144 +80,76 @@ export default function VendorDialog({
   const [uploadingQr, setUploadingQr] = useState(false);
   const [uploadingShopPhoto, setUploadingShopPhoto] = useState(false);
   const [taxDetailsExpanded, setTaxDetailsExpanded] = useState(false);
-  const [formData, setFormData] = useState<VendorFormData>({
-    name: "",
-    code: "",
-    contact_person: "",
-    phone: "",
-    alternate_phone: "",
-    whatsapp_number: "",
-    email: "",
-    address: "",
-    city: "",
-    state: "Tamil Nadu",
-    pincode: "",
-    gst_number: "",
-    pan_number: "",
-    bank_name: "",
-    bank_account_number: "",
-    bank_ifsc: "",
-    payment_terms_days: 30,
-    credit_limit: 0,
-    notes: "",
-    rating: 0,
-    category_ids: [],
-    // New vendor enhancement fields
-    vendor_type: "dealer" as VendorType,
-    shop_name: "",
-    has_physical_store: false,
-    store_address: "",
-    store_city: "",
-    store_pincode: "",
-    provides_transport: false,
-    provides_loading: false,
-    provides_unloading: false,
-    min_order_amount: 0,
-    delivery_radius_km: 0,
-    specializations: [],
-    accepts_upi: true,
-    accepts_cash: true,
-    accepts_credit: false,
-    credit_days: 0,
-    upi_id: "",
-    qr_code_url: "",
-    shop_photo_url: "",
+
+  // Memoize initial form data based on vendor prop
+  const initialFormData = useMemo<VendorFormData>(
+    () => ({
+      name: vendor?.name || "",
+      code: vendor?.code || "",
+      contact_person: vendor?.contact_person || "",
+      phone: vendor?.phone || "",
+      alternate_phone: vendor?.alternate_phone || "",
+      whatsapp_number: vendor?.whatsapp_number || "",
+      email: vendor?.email || "",
+      address: vendor?.address || "",
+      city: vendor?.city || "",
+      state: vendor?.state || "Tamil Nadu",
+      pincode: vendor?.pincode || "",
+      gst_number: vendor?.gst_number || "",
+      pan_number: vendor?.pan_number || "",
+      bank_name: vendor?.bank_name || "",
+      bank_account_number: vendor?.bank_account_number || "",
+      bank_ifsc: vendor?.bank_ifsc || "",
+      payment_terms_days: vendor?.payment_terms_days || 30,
+      credit_limit: vendor?.credit_limit || 0,
+      notes: vendor?.notes || "",
+      rating: vendor?.rating || 0,
+      category_ids:
+        vendor?.categories?.map((c) => c?.id).filter(Boolean) as string[] || [],
+      vendor_type: vendor?.vendor_type || "dealer",
+      shop_name: vendor?.shop_name || "",
+      has_physical_store: vendor?.has_physical_store || false,
+      store_address: vendor?.store_address || "",
+      store_city: vendor?.store_city || "",
+      store_pincode: vendor?.store_pincode || "",
+      provides_transport: vendor?.provides_transport || false,
+      provides_loading: vendor?.provides_loading || false,
+      provides_unloading: vendor?.provides_unloading || false,
+      min_order_amount: vendor?.min_order_amount || 0,
+      delivery_radius_km: vendor?.delivery_radius_km || 0,
+      specializations: vendor?.specializations || [],
+      accepts_upi: vendor?.accepts_upi ?? true,
+      accepts_cash: vendor?.accepts_cash ?? true,
+      accepts_credit: vendor?.accepts_credit || false,
+      credit_days: vendor?.credit_days || 0,
+      upi_id: vendor?.upi_id || "",
+      qr_code_url: vendor?.qr_code_url || "",
+      shop_photo_url: vendor?.shop_photo_url || "",
+    }),
+    [vendor]
+  );
+
+  // Use form draft hook for persistence
+  const {
+    formData,
+    updateField,
+    isDirty,
+    hasRestoredDraft,
+    clearDraft,
+    discardDraft,
+  } = useFormDraft<VendorFormData>({
+    key: "vendor_dialog",
+    initialData: initialFormData,
+    isOpen: open,
+    entityId: vendor?.id || null,
   });
 
-  // Reset form when vendor changes
+  // Sync customizeCode state with vendor code
   useEffect(() => {
-    if (vendor) {
-      setFormData({
-        name: vendor.name,
-        code: vendor.code || "",
-        contact_person: vendor.contact_person || "",
-        phone: vendor.phone || "",
-        alternate_phone: vendor.alternate_phone || "",
-        whatsapp_number: vendor.whatsapp_number || "",
-        email: vendor.email || "",
-        address: vendor.address || "",
-        city: vendor.city || "",
-        state: vendor.state || "Tamil Nadu",
-        pincode: vendor.pincode || "",
-        gst_number: vendor.gst_number || "",
-        pan_number: vendor.pan_number || "",
-        bank_name: vendor.bank_name || "",
-        bank_account_number: vendor.bank_account_number || "",
-        bank_ifsc: vendor.bank_ifsc || "",
-        payment_terms_days: vendor.payment_terms_days || 30,
-        credit_limit: vendor.credit_limit || 0,
-        notes: vendor.notes || "",
-        rating: vendor.rating || 0,
-        category_ids: vendor.categories?.map((c) => c?.id).filter(Boolean) as string[] || [],
-        // New vendor enhancement fields
-        vendor_type: vendor.vendor_type || "dealer",
-        shop_name: vendor.shop_name || "",
-        has_physical_store: vendor.has_physical_store || false,
-        store_address: vendor.store_address || "",
-        store_city: vendor.store_city || "",
-        store_pincode: vendor.store_pincode || "",
-        provides_transport: vendor.provides_transport || false,
-        provides_loading: vendor.provides_loading || false,
-        provides_unloading: vendor.provides_unloading || false,
-        min_order_amount: vendor.min_order_amount || 0,
-        delivery_radius_km: vendor.delivery_radius_km || 0,
-        specializations: vendor.specializations || [],
-        accepts_upi: vendor.accepts_upi ?? true,
-        accepts_cash: vendor.accepts_cash ?? true,
-        accepts_credit: vendor.accepts_credit || false,
-        credit_days: vendor.credit_days || 0,
-        upi_id: vendor.upi_id || "",
-        qr_code_url: vendor.qr_code_url || "",
-        shop_photo_url: vendor.shop_photo_url || "",
-      });
-      setCustomizeCode(!!vendor.code);
-    } else {
-      setFormData({
-        name: "",
-        code: "",
-        contact_person: "",
-        phone: "",
-        alternate_phone: "",
-        whatsapp_number: "",
-        email: "",
-        address: "",
-        city: "",
-        state: "Tamil Nadu",
-        pincode: "",
-        gst_number: "",
-        pan_number: "",
-        bank_name: "",
-        bank_account_number: "",
-        bank_ifsc: "",
-        payment_terms_days: 30,
-        credit_limit: 0,
-        notes: "",
-        rating: 0,
-        category_ids: [],
-        // New vendor enhancement fields
-        vendor_type: "dealer",
-        shop_name: "",
-        has_physical_store: false,
-        store_address: "",
-        store_city: "",
-        store_pincode: "",
-        provides_transport: false,
-        provides_loading: false,
-        provides_unloading: false,
-        min_order_amount: 0,
-        delivery_radius_km: 0,
-        specializations: [],
-        accepts_upi: true,
-        accepts_cash: true,
-        accepts_credit: false,
-        credit_days: 0,
-        upi_id: "",
-        qr_code_url: "",
-        shop_photo_url: "",
-      });
-      setCustomizeCode(false);
+    if (open) {
+      setCustomizeCode(!!vendor?.code);
+      setError("");
     }
-    setError("");
   }, [vendor, open]);
 
   // Sync tax details accordion state when dialog opens
@@ -227,7 +160,7 @@ export default function VendorDialog({
   }, [open, vendor]);
 
   const handleChange = (field: keyof VendorFormData, value: unknown) => {
-    setFormData((prev) => ({ ...prev, [field]: value }));
+    updateField(field, value as VendorFormData[typeof field]);
     setError("");
   };
 
@@ -344,6 +277,7 @@ export default function VendorDialog({
       } else {
         await createVendor.mutateAsync(formData);
       }
+      clearDraft(); // Clear draft on successful save
       onClose();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to save vendor";
@@ -377,6 +311,19 @@ export default function VendorDialog({
       </DialogTitle>
 
       <DialogContent dividers>
+        {hasRestoredDraft && (
+          <Alert
+            severity="info"
+            sx={{ mb: 2 }}
+            action={
+              <Button size="small" color="inherit" onClick={discardDraft}>
+                Discard
+              </Button>
+            }
+          >
+            Restored from previous session
+          </Alert>
+        )}
         {error && (
           <Alert severity="error" sx={{ mb: 2 }}>
             {error}

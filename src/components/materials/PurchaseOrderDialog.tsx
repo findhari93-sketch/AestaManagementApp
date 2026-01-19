@@ -175,8 +175,11 @@ export default function PurchaseOrderDialog({
     };
   }, [latestPrice, newItemPrice]);
 
-  // Reset form when PO changes
+  // Reset form when PO changes (only when dialog is open)
   useEffect(() => {
+    // Skip if dialog is closed to prevent unnecessary state updates
+    if (!open) return;
+
     if (purchaseOrder) {
       const vendor = vendors.find((v) => v.id === purchaseOrder.vendor_id);
       setSelectedVendor(vendor || null);

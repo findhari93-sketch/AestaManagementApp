@@ -507,6 +507,25 @@ export default function PurchaseOrdersPage() {
               </IconButton>
             </Tooltip>
           )}
+
+          {po.status === "delivered" && canEdit && (
+            <>
+              <Tooltip title="Edit">
+                <IconButton size="small" onClick={() => handleOpenDialog(po)}>
+                  <EditIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+              <Tooltip title="Delete">
+                <IconButton
+                  size="small"
+                  color="error"
+                  onClick={() => handleDelete(po)}
+                >
+                  <DeleteIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            </>
+          )}
         </Box>
       );
     },

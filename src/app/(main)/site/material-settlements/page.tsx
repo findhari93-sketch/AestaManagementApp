@@ -20,8 +20,6 @@ import {
   Skeleton,
   Alert,
   Grid,
-  Tabs,
-  Tab,
   ToggleButton,
   ToggleButtonGroup,
 } from "@mui/material";
@@ -30,7 +28,6 @@ import {
   CheckCircle as SettledIcon,
   Pending as PendingIcon,
   Visibility as ViewIcon,
-  Edit as EditIcon,
   Delete as DeleteIcon,
   Inventory as InventoryIcon,
   Add as AddIcon,
@@ -47,25 +44,9 @@ import ConfirmDialog from "@/components/common/ConfirmDialog";
 import MaterialSettlementDialog from "@/components/materials/MaterialSettlementDialog";
 import { useRouter } from "next/navigation";
 
-interface TabPanelProps {
-  children?: React.ReactNode;
-  index: number;
-  value: number;
-}
-
-function TabPanel(props: TabPanelProps) {
-  const { children, value, index, ...other } = props;
-  return (
-    <div role="tabpanel" hidden={value !== index} {...other}>
-      {value === index && <Box sx={{ pt: 2 }}>{children}</Box>}
-    </div>
-  );
-}
-
 export default function MaterialSettlementsPage() {
   const { selectedSite } = useSite();
   const router = useRouter();
-  const [tabValue, setTabValue] = useState(0);
   const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "settled">("all");
 
   // Delete confirmation state
@@ -279,6 +260,7 @@ export default function MaterialSettlementsPage() {
             <TableHead>
               <TableRow>
                 <TableCell>Ref Code</TableCell>
+                <TableCell>PO Number</TableCell>
                 <TableCell>Date</TableCell>
                 <TableCell>Materials</TableCell>
                 <TableCell>Vendor</TableCell>
@@ -298,6 +280,7 @@ export default function MaterialSettlementsPage() {
                     <TableCell><Skeleton /></TableCell>
                     <TableCell><Skeleton /></TableCell>
                     <TableCell><Skeleton /></TableCell>
+                    <TableCell><Skeleton /></TableCell>
                   </TableRow>
                 ))
               ) : filteredPurchases.length > 0 ? (
@@ -307,6 +290,17 @@ export default function MaterialSettlementsPage() {
                       <Typography variant="body2" fontWeight={500} sx={{ fontFamily: "monospace" }}>
                         {purchase.ref_code}
                       </Typography>
+                    </TableCell>
+                    <TableCell>
+                      {purchase.purchase_order?.po_number ? (
+                        <Typography variant="body2" fontWeight={500} sx={{ fontFamily: "monospace" }}>
+                          {purchase.purchase_order.po_number}
+                        </Typography>
+                      ) : (
+                        <Typography variant="body2" color="text.secondary">
+                          -
+                        </Typography>
+                      )}
                     </TableCell>
                     <TableCell>
                       <Typography variant="body2">
@@ -393,7 +387,7 @@ export default function MaterialSettlementsPage() {
                 ))
               ) : (
                 <TableRow>
-                  <TableCell colSpan={7} align="center" sx={{ py: 4 }}>
+                  <TableCell colSpan={8} align="center" sx={{ py: 4 }}>
                     <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 1 }}>
                       <InventoryIcon sx={{ fontSize: 48, color: "text.disabled" }} />
                       <Typography color="text.secondary">
