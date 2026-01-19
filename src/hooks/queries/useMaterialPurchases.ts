@@ -12,7 +12,9 @@ import type {
   GroupStockBatch,
   CompleteBatchFormData,
   ConvertToOwnSiteFormData,
+  MaterialPaymentMode,
 } from "@/types/material.types";
+import type { PayerSource } from "@/types/settlement.types";
 
 // ============================================
 // HELPER FUNCTIONS
@@ -420,6 +422,7 @@ export function useCreateMaterialPurchase() {
           bill_url: data.bill_url,
           status: data.purchase_type === "own_site" ? "completed" : "recorded",
           site_group_id: data.site_group_id,
+          purchase_order_id: data.purchase_order_id || null,
           notes: data.notes,
           created_by: user?.id,
         })
@@ -571,6 +574,75 @@ export function useDeleteMaterialPurchase() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.materialPurchases.all });
+    },
+  });
+}
+
+// ============================================
+// SETTLEMENT
+// ============================================
+
+/**
+ * Generate a settlement reference code
+ */
+function generateSettlementRef(): string {
+  const shortId = Math.random().toString(36).substring(2, 10).toUpperCase();
+  return `PSET-${shortId}`;
+}
+
+/**
+ * Form data for settling a material purchase
+ */
+export interface SettleMaterialPurchaseData {
+  id: string;
+  settlement_date: string;
+  payment_mode: MaterialPaymentMode;
+  payer_source: PayerSource;
+  payer_name?: string;
+  payment_reference?: string;
+  bill_url?: string;
+  payment_screenshot_url?: string;
+  notes?: string;
+}
+
+/**
+ * Settle a material purchase expense
+ * Generates a settlement reference and marks the purchase as settled
+ */
+export function useSettleMaterialPurchase() {
+  const supabase = createClient();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (data: SettleMaterialPurchaseData) => {
+      await ensureFreshSession();
+
+      const settlementRef = generateSettlementRef();
+
+      const { error } = await (supabase as any)
+        .from("material_purchase_expenses")
+        .update({
+          settlement_reference: settlementRef,
+          settlement_date: data.settlement_date,
+          settlement_payer_source: data.payer_source,
+          settlement_payer_name: data.payer_name || null,
+          payment_mode: data.payment_mode,
+          payment_reference: data.payment_reference || null,
+          bill_url: data.bill_url || null,
+          payment_screenshot_url: data.payment_screenshot_url || null,
+          is_paid: true,
+          paid_date: data.settlement_date,
+          notes: data.notes || null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", data.id);
+
+      if (error) throw error;
+      return { id: data.id, settlement_reference: settlementRef };
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.materialPurchases.all });
+      queryClient.invalidateQueries({ queryKey: queryKeys.expenses.all });
     },
   });
 }

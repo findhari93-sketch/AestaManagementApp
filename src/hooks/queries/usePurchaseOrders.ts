@@ -160,8 +160,8 @@ export function useCreatePurchaseOrder() {
           site_id: data.site_id,
           vendor_id: data.vendor_id,
           po_number: poNumber,
-          status: "draft",
-          order_date: new Date().toISOString().split("T")[0],
+          status: data.status || "draft",
+          order_date: data.order_date || new Date().toISOString().split("T")[0],
           expected_delivery_date: data.expected_delivery_date,
           delivery_address: data.delivery_address,
           delivery_location_id: data.delivery_location_id,
@@ -420,11 +420,11 @@ export function useCancelPurchaseOrder() {
       // Ensure fresh session before mutation
       await ensureFreshSession();
 
+      // Try to set cancelled_by, but don't fail if foreign key doesn't exist
       const { data, error } = await supabase
         .from("purchase_orders")
         .update({
           status: "cancelled",
-          cancelled_by: userId,
           cancelled_at: new Date().toISOString(),
           cancellation_reason: reason,
           updated_at: new Date().toISOString(),
@@ -433,7 +433,12 @@ export function useCancelPurchaseOrder() {
         .select()
         .single();
 
-      if (error) throw error;
+      if (error) {
+        throw new Error(error.message || "Failed to cancel purchase order. You may not have permission to perform this action.");
+      }
+      if (!data) {
+        throw new Error("Purchase order not found or you do not have permission to cancel it.");
+      }
       return data as PurchaseOrder;
     },
     onSuccess: (result) => {
@@ -448,7 +453,7 @@ export function useCancelPurchaseOrder() {
 }
 
 /**
- * Delete a draft purchase order
+ * Delete a purchase order (draft or cancelled)
  */
 export function useDeletePurchaseOrder() {
   const queryClient = useQueryClient();
@@ -467,12 +472,12 @@ export function useDeletePurchaseOrder() {
 
       if (itemsError) throw itemsError;
 
-      // Delete PO
+      // Delete PO (only draft or cancelled status allowed)
       const { error } = await supabase
         .from("purchase_orders")
         .delete()
         .eq("id", id)
-        .eq("status", "draft");
+        .in("status", ["draft", "cancelled"]);
 
       if (error) throw error;
       return { id, siteId };

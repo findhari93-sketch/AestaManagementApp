@@ -1147,6 +1147,9 @@ export interface PurchaseOrderFormData {
   notes?: string;
   internal_notes?: string; // For storing group stock info as JSON
   items: PurchaseOrderItemFormData[];
+  // For historical purchases - allow overriding defaults
+  order_date?: string; // Override default (today's date)
+  status?: string; // Override default ("draft")
 }
 
 export interface PurchaseOrderItemFormData {
@@ -1610,11 +1613,18 @@ export interface MaterialPurchaseExpense {
   // Status
   status: MaterialBatchStatus;
 
+  // Settlement fields (for Material Settlement flow)
+  settlement_reference: string | null;
+  settlement_date: string | null;
+  settlement_payer_source: string | null;
+  settlement_payer_name: string | null;
+
   // For group stock: tracks if converted to own site
   converted_from_group: boolean;
   original_batch_code: string | null;
 
   // Links
+  purchase_order_id: string | null;
   group_stock_transaction_id: string | null;
   local_purchase_id: string | null;
   site_group_id: string | null;
@@ -1723,6 +1733,9 @@ export interface MaterialPurchaseExpenseFormData {
 
   // For group_stock type
   payment_source_site_id?: string; // Site that paid for the materials
+
+  // Link to purchase order (for cascade delete)
+  purchase_order_id?: string;
 
   // Metadata
   notes?: string;

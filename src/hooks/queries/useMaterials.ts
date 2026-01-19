@@ -1128,6 +1128,41 @@ export function useAddVariantToMaterial() {
 }
 
 /**
+ * Fetch variants for a parent material
+ * Returns array of variant materials with their details
+ */
+export function useMaterialVariants(parentId: string | undefined) {
+  const supabase = createClient();
+
+  return useQuery({
+    queryKey: ["materials", "variants", parentId],
+    queryFn: async () => {
+      if (!parentId) return [];
+
+      const { data, error } = await supabase
+        .from("materials")
+        .select(
+          `
+          id, name, code, unit,
+          weight_per_unit, weight_unit,
+          length_per_piece, length_unit,
+          rods_per_bundle,
+          gst_rate,
+          brands:material_brands(id, brand_name, variant_name, is_preferred, is_active)
+        `
+        )
+        .eq("parent_id", parentId)
+        .eq("is_active", true)
+        .order("name");
+
+      if (error) throw error;
+      return data as unknown as MaterialWithDetails[];
+    },
+    enabled: !!parentId,
+  });
+}
+
+/**
  * Fetch material with all its variants
  */
 export function useMaterialWithVariants(id: string | undefined) {

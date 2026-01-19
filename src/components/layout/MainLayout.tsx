@@ -217,6 +217,11 @@ const siteNavCategories: NavCategory[] = [
         path: "/site/inter-site-settlement",
       },
       {
+        text: "Material Settlements",
+        icon: <PaymentIcon />,
+        path: "/site/material-settlements",
+      },
+      {
         text: "Rentals",
         icon: <RentalIcon />,
         path: "/site/rentals",

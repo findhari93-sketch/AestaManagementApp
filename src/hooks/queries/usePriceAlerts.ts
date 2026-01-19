@@ -41,16 +41,22 @@ const PRICE_ALERT_KEYS = {
 
 /**
  * Check if error is due to missing table (table doesn't exist yet)
+ * or other recoverable database errors
  */
 function isTableNotFoundError(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
-  const err = error as { code?: string; message?: string };
+  const err = error as { code?: string; message?: string; status?: number; statusCode?: number };
   // PostgreSQL error code 42P01 = undefined_table
   // Also check for message patterns indicating missing relation
+  // Handle 400 Bad Request which can occur when table doesn't exist
   return (
     err.code === "42P01" ||
+    err.code === "PGRST200" || // PostgREST error for missing table
+    err.status === 400 ||
+    err.statusCode === 400 ||
     (err.message?.includes("relation") ?? false) ||
-    (err.message?.includes("does not exist") ?? false)
+    (err.message?.includes("does not exist") ?? false) ||
+    (err.message?.includes("price_alerts") ?? false)
   );
 }
 

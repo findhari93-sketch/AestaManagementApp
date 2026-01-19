@@ -29,6 +29,7 @@ import {
   CheckCircle as CheckCircleIcon,
   Cancel as CancelIcon,
 } from "@mui/icons-material";
+import VendorAutocomplete from "@/components/common/VendorAutocomplete";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useMaterials } from "@/hooks/queries/useMaterials";
 import { useMaterialBrands } from "@/hooks/queries/useMaterials";
@@ -84,6 +85,9 @@ export default function VendorInventoryDialog({
   // Load brands for selected material
   const [selectedMaterialId, setSelectedMaterialId] = useState<string | null>(null);
   const { data: brands = [] } = useMaterialBrands(selectedMaterialId || undefined);
+
+  // Track selected vendor (when vendor is not pre-selected)
+  const [selectedVendorId, setSelectedVendorId] = useState<string | null>(null);
 
   const [error, setError] = useState("");
   const [formData, setFormData] = useState<Partial<VendorInventoryFormData>>({
@@ -145,6 +149,7 @@ export default function VendorInventoryDialog({
         notes: "",
       });
       setSelectedMaterialId(material?.id || null);
+      setSelectedVendorId(null);
     }
     setError("");
   }, [existingItem, vendor, material, open]);
@@ -275,6 +280,23 @@ export default function VendorInventoryDialog({
             )}
 
             <Grid container spacing={2}>
+              {/* Vendor Selection - only show if not pre-selected */}
+              {!vendor && (
+                <Grid size={12}>
+                  <VendorAutocomplete
+                    value={selectedVendorId}
+                    onChange={(value) => {
+                      setSelectedVendorId(value as string | null);
+                      handleChange("vendor_id", value || "");
+                    }}
+                    label="Select Vendor"
+                    placeholder="Search vendors..."
+                    size="medium"
+                    disabled={isEdit}
+                  />
+                </Grid>
+              )}
+
               {/* Material Selection - only show if not pre-selected */}
               {!material && (
                 <Grid size={12}>
@@ -615,9 +637,14 @@ export default function VendorInventoryDialog({
         <Button
           variant="contained"
           onClick={handleSubmit}
-          disabled={isSubmitting || isLoading || (!formData.material_id && !material?.id)}
+          disabled={
+            isSubmitting ||
+            isLoading ||
+            (!formData.material_id && !material?.id) ||
+            (!formData.vendor_id && !vendor?.id)
+          }
         >
-          {isSubmitting ? "Saving..." : isEdit ? "Update" : "Add Material"}
+          {isSubmitting ? "Saving..." : isEdit ? "Update" : vendor ? "Add Material" : "Add Vendor"}
         </Button>
       </DialogActions>
     </Dialog>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useCallback, useEffect } from "react";
+import { useMemo, useState, useCallback, useEffect, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import {
   Box,
@@ -20,6 +20,11 @@ import {
   Stack,
   Drawer,
   Alert,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  CircularProgress,
 } from "@mui/material";
 import {
   Add as AddIcon,
@@ -100,6 +105,24 @@ export default function PurchaseOrdersPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [prefilledData, setPrefilledData] = useState<PrefilledPOData | null>(null);
 
+  // Confirmation dialog states
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deletingPO, setDeletingPO] = useState<PurchaseOrderWithDetails | null>(null);
+
+  const [submitDialogOpen, setSubmitDialogOpen] = useState(false);
+  const [submittingPO, setSubmittingPO] = useState<PurchaseOrderWithDetails | null>(null);
+
+  const [approveDialogOpen, setApproveDialogOpen] = useState(false);
+  const [approvingPO, setApprovingPO] = useState<PurchaseOrderWithDetails | null>(null);
+
+  const [markOrderedDialogOpen, setMarkOrderedDialogOpen] = useState(false);
+  const [markingOrderedPO, setMarkingOrderedPO] = useState<PurchaseOrderWithDetails | null>(null);
+
+  const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
+  const [cancellingPO, setCancellingPO] = useState<PurchaseOrderWithDetails | null>(null);
+  const [cancelReason, setCancelReason] = useState("");
+  const [cancelError, setCancelError] = useState("");
+
   const searchParams = useSearchParams();
   const router = useRouter();
   const { userProfile, user } = useAuth();
@@ -108,22 +131,31 @@ export default function PurchaseOrdersPage() {
   const canEdit = hasEditPermission(userProfile?.role);
   const isAdmin = hasAdminPermission(userProfile?.role);
 
+  // Track if we've already processed URL params
+  const hasProcessedParams = useRef(false);
+
+  // Extract specific param values to use as stable dependencies
+  const isNewParam = searchParams.get("new");
+  const vendorIdParam = searchParams.get("vendorId");
+  const materialIdParam = searchParams.get("materialId");
+  const materialNameParam = searchParams.get("materialName");
+  const unitParam = searchParams.get("unit");
+  const sourceParam = searchParams.get("source");
+
   // Handle URL params for prefilled data (from material-search)
   useEffect(() => {
-    const isNew = searchParams.get("new") === "true";
-    const vendorId = searchParams.get("vendorId");
-    const materialId = searchParams.get("materialId");
-    const materialName = searchParams.get("materialName");
-    const unit = searchParams.get("unit");
-    const source = searchParams.get("source");
+    if (hasProcessedParams.current) return;
 
-    if (isNew && (vendorId || materialId)) {
+    const isNew = isNewParam === "true";
+    if (isNew && (vendorIdParam || materialIdParam)) {
+      hasProcessedParams.current = true;
+
       setPrefilledData({
-        vendorId: vendorId || undefined,
-        materialId: materialId || undefined,
-        materialName: materialName || undefined,
-        unit: unit || undefined,
-        source: source || undefined,
+        vendorId: vendorIdParam || undefined,
+        materialId: materialIdParam || undefined,
+        materialName: materialNameParam || undefined,
+        unit: unitParam || undefined,
+        source: sourceParam || undefined,
       });
 
       // Auto-open the dialog
@@ -132,7 +164,7 @@ export default function PurchaseOrdersPage() {
       // Clean up URL params after reading
       router.replace("/site/purchase-orders", { scroll: false });
     }
-  }, [searchParams, router]);
+  }, [isNewParam, vendorIdParam, materialIdParam, materialNameParam, unitParam, sourceParam, router]);
 
   const { data: allPOs = [], isLoading } = usePurchaseOrders(selectedSite?.id);
   const { data: summary } = usePOSummary(selectedSite?.id);
@@ -209,72 +241,90 @@ export default function PurchaseOrdersPage() {
     setSelectedPO(null);
   }, []);
 
-  const handleDelete = useCallback(
-    async (po: PurchaseOrderWithDetails) => {
-      if (po.status !== "draft") {
-        alert("Only draft POs can be deleted");
-        return;
-      }
-      if (!confirm("Are you sure you want to delete this purchase order?")) return;
-      try {
-        await deletePO.mutateAsync({ id: po.id, siteId: po.site_id });
-      } catch (error) {
-        console.error("Failed to delete PO:", error);
-      }
-    },
-    [deletePO]
-  );
+  const handleDelete = useCallback((po: PurchaseOrderWithDetails) => {
+    setDeletingPO(po);
+    setDeleteDialogOpen(true);
+  }, []);
 
-  const handleSubmitForApproval = useCallback(
-    async (po: PurchaseOrderWithDetails) => {
-      if (!confirm("Submit this PO for approval?")) return;
-      try {
-        await submitForApproval.mutateAsync(po.id);
-      } catch (error) {
-        console.error("Failed to submit PO:", error);
-      }
-    },
-    [submitForApproval]
-  );
+  const handleConfirmDelete = useCallback(async () => {
+    if (!deletingPO) return;
+    try {
+      await deletePO.mutateAsync({ id: deletingPO.id, siteId: deletingPO.site_id });
+      setDeleteDialogOpen(false);
+      setDeletingPO(null);
+    } catch (error) {
+      console.error("Failed to delete PO:", error);
+    }
+  }, [deletePO, deletingPO]);
 
-  const handleApprove = useCallback(
-    async (po: PurchaseOrderWithDetails) => {
-      if (!user?.id) return;
-      if (!confirm("Approve this purchase order?")) return;
-      try {
-        await approvePO.mutateAsync({ id: po.id, userId: user.id });
-      } catch (error) {
-        console.error("Failed to approve PO:", error);
-      }
-    },
-    [approvePO, user?.id]
-  );
+  const handleSubmitForApproval = useCallback((po: PurchaseOrderWithDetails) => {
+    setSubmittingPO(po);
+    setSubmitDialogOpen(true);
+  }, []);
 
-  const handleMarkOrdered = useCallback(
-    async (po: PurchaseOrderWithDetails) => {
-      if (!confirm("Mark this PO as ordered (sent to vendor)?")) return;
-      try {
-        await markAsOrdered.mutateAsync(po.id);
-      } catch (error) {
-        console.error("Failed to update PO:", error);
-      }
-    },
-    [markAsOrdered]
-  );
+  const handleConfirmSubmit = useCallback(async () => {
+    if (!submittingPO) return;
+    try {
+      await submitForApproval.mutateAsync(submittingPO.id);
+      setSubmitDialogOpen(false);
+      setSubmittingPO(null);
+    } catch (error) {
+      console.error("Failed to submit PO:", error);
+    }
+  }, [submitForApproval, submittingPO]);
 
-  const handleCancel = useCallback(
-    async (po: PurchaseOrderWithDetails) => {
-      if (!user?.id) return;
-      const reason = prompt("Enter cancellation reason:");
-      if (reason === null) return;
-      try {
-        await cancelPO.mutateAsync({ id: po.id, userId: user.id, reason });
-      } catch (error) {
-        console.error("Failed to cancel PO:", error);
-      }
-    },
-    [cancelPO, user?.id]
-  );
+  const handleApprove = useCallback((po: PurchaseOrderWithDetails) => {
+    setApprovingPO(po);
+    setApproveDialogOpen(true);
+  }, []);
+
+  const handleConfirmApprove = useCallback(async () => {
+    if (!approvingPO || !user?.id) return;
+    try {
+      await approvePO.mutateAsync({ id: approvingPO.id, userId: user.id });
+      setApproveDialogOpen(false);
+      setApprovingPO(null);
+    } catch (error) {
+      console.error("Failed to approve PO:", error);
+    }
+  }, [approvePO, approvingPO, user?.id]);
+
+  const handleMarkOrdered = useCallback((po: PurchaseOrderWithDetails) => {
+    setMarkingOrderedPO(po);
+    setMarkOrderedDialogOpen(true);
+  }, []);
+
+  const handleConfirmMarkOrdered = useCallback(async () => {
+    if (!markingOrderedPO) return;
+    try {
+      await markAsOrdered.mutateAsync(markingOrderedPO.id);
+      setMarkOrderedDialogOpen(false);
+      setMarkingOrderedPO(null);
+    } catch (error) {
+      console.error("Failed to update PO:", error);
+    }
+  }, [markAsOrdered, markingOrderedPO]);
+
+  const handleCancel = useCallback((po: PurchaseOrderWithDetails) => {
+    setCancellingPO(po);
+    setCancelReason("");
+    setCancelError("");
+    setCancelDialogOpen(true);
+  }, []);
+
+  const handleConfirmCancel = useCallback(async () => {
+    if (!cancellingPO || !user?.id) return;
+    setCancelError("");
+    try {
+      await cancelPO.mutateAsync({ id: cancellingPO.id, userId: user.id, reason: cancelReason });
+      setCancelDialogOpen(false);
+      setCancellingPO(null);
+      setCancelReason("");
+    } catch (error: any) {
+      console.error("Failed to cancel PO:", error);
+      setCancelError(error?.message || "Failed to cancel purchase order. Please try again.");
+    }
+  }, [cancelPO, cancellingPO, cancelReason, user?.id]);
 
   // Table columns
   const columns = useMemo<MRT_ColumnDef<PurchaseOrderWithDetails>[]>(
@@ -387,6 +437,11 @@ export default function PurchaseOrdersPage() {
 
           {po.status === "pending_approval" && isAdmin && (
             <>
+              <Tooltip title="Edit">
+                <IconButton size="small" onClick={() => handleOpenDialog(po)}>
+                  <EditIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
               <Tooltip title="Approve">
                 <IconButton
                   size="small"
@@ -403,6 +458,15 @@ export default function PurchaseOrdersPage() {
                   onClick={() => handleCancel(po)}
                 >
                   <CancelIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+              <Tooltip title="Delete">
+                <IconButton
+                  size="small"
+                  color="error"
+                  onClick={() => handleDelete(po)}
+                >
+                  <DeleteIcon fontSize="small" />
                 </IconButton>
               </Tooltip>
             </>
@@ -428,6 +492,18 @@ export default function PurchaseOrdersPage() {
                 onClick={() => handleOpenDeliveryDialog(po)}
               >
                 <DeliveryIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          )}
+
+          {po.status === "cancelled" && canEdit && (
+            <Tooltip title="Delete">
+              <IconButton
+                size="small"
+                color="error"
+                onClick={() => handleDelete(po)}
+              >
+                <DeleteIcon fontSize="small" />
               </IconButton>
             </Tooltip>
           )}
@@ -626,6 +702,210 @@ export default function PurchaseOrdersPage() {
         canEdit={canEdit}
         isAdmin={isAdmin}
       />
+
+      {/* Cancellation Reason Dialog */}
+      <Dialog
+        open={cancelDialogOpen}
+        onClose={() => {
+          setCancelDialogOpen(false);
+          setCancellingPO(null);
+          setCancelReason("");
+          setCancelError("");
+        }}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Cancel Purchase Order</DialogTitle>
+        <DialogContent>
+          {cancelError && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {cancelError}
+            </Alert>
+          )}
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Are you sure you want to cancel PO <strong>{cancellingPO?.po_number}</strong>?
+          </Typography>
+          <TextField
+            autoFocus
+            fullWidth
+            label="Cancellation Reason"
+            placeholder="Enter reason for cancellation"
+            value={cancelReason}
+            onChange={(e) => setCancelReason(e.target.value)}
+            multiline
+            rows={3}
+          />
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button
+            onClick={() => {
+              setCancelDialogOpen(false);
+              setCancellingPO(null);
+              setCancelReason("");
+              setCancelError("");
+            }}
+          >
+            Close
+          </Button>
+          <Button
+            variant="contained"
+            color="error"
+            onClick={handleConfirmCancel}
+            disabled={cancelPO.isPending}
+            startIcon={cancelPO.isPending ? <CircularProgress size={16} color="inherit" /> : null}
+          >
+            {cancelPO.isPending ? "Cancelling..." : "Confirm Cancel"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog
+        open={deleteDialogOpen}
+        onClose={() => {
+          setDeleteDialogOpen(false);
+          setDeletingPO(null);
+        }}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>Delete Purchase Order</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary">
+            Are you sure you want to delete PO <strong>{deletingPO?.po_number}</strong>? This action cannot be undone.
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button
+            onClick={() => {
+              setDeleteDialogOpen(false);
+              setDeletingPO(null);
+            }}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            color="error"
+            onClick={handleConfirmDelete}
+            disabled={deletePO.isPending}
+            startIcon={deletePO.isPending ? <CircularProgress size={16} color="inherit" /> : null}
+          >
+            {deletePO.isPending ? "Deleting..." : "Delete"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Submit for Approval Confirmation Dialog */}
+      <Dialog
+        open={submitDialogOpen}
+        onClose={() => {
+          setSubmitDialogOpen(false);
+          setSubmittingPO(null);
+        }}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>Submit for Approval</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary">
+            Are you sure you want to submit PO <strong>{submittingPO?.po_number}</strong> for approval?
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button
+            onClick={() => {
+              setSubmitDialogOpen(false);
+              setSubmittingPO(null);
+            }}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            color="primary"
+            onClick={handleConfirmSubmit}
+            disabled={submitForApproval.isPending}
+            startIcon={submitForApproval.isPending ? <CircularProgress size={16} color="inherit" /> : null}
+          >
+            {submitForApproval.isPending ? "Submitting..." : "Submit"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Approve Confirmation Dialog */}
+      <Dialog
+        open={approveDialogOpen}
+        onClose={() => {
+          setApproveDialogOpen(false);
+          setApprovingPO(null);
+        }}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>Approve Purchase Order</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary">
+            Are you sure you want to approve PO <strong>{approvingPO?.po_number}</strong>?
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button
+            onClick={() => {
+              setApproveDialogOpen(false);
+              setApprovingPO(null);
+            }}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            color="success"
+            onClick={handleConfirmApprove}
+            disabled={approvePO.isPending}
+            startIcon={approvePO.isPending ? <CircularProgress size={16} color="inherit" /> : null}
+          >
+            {approvePO.isPending ? "Approving..." : "Approve"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Mark as Ordered Confirmation Dialog */}
+      <Dialog
+        open={markOrderedDialogOpen}
+        onClose={() => {
+          setMarkOrderedDialogOpen(false);
+          setMarkingOrderedPO(null);
+        }}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>Mark as Ordered</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary">
+            Are you sure you want to mark PO <strong>{markingOrderedPO?.po_number}</strong> as ordered? This indicates the order has been placed with the vendor.
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button
+            onClick={() => {
+              setMarkOrderedDialogOpen(false);
+              setMarkingOrderedPO(null);
+            }}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            color="primary"
+            onClick={handleConfirmMarkOrdered}
+            disabled={markAsOrdered.isPending}
+            startIcon={markAsOrdered.isPending ? <CircularProgress size={16} color="inherit" /> : null}
+          >
+            {markAsOrdered.isPending ? "Updating..." : "Mark as Ordered"}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }

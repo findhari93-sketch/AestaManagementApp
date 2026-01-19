@@ -122,6 +122,136 @@ export function useMaterialVendors(materialId: string | undefined) {
 }
 
 /**
+ * Fetch vendor inventory for multiple material variants (batch query)
+ * Used when displaying vendors for a parent material with variants
+ */
+export function useVendorsByVariants(variantIds: string[]) {
+  const supabase = createClient();
+
+  return useQuery({
+    queryKey: ["vendor-inventory", "variants", variantIds],
+    queryFn: async () => {
+      if (!variantIds || variantIds.length === 0) return [];
+
+      const { data, error } = await (supabase as any)
+        .from("vendor_inventory")
+        .select(
+          `
+          id,
+          vendor_id,
+          material_id,
+          current_price,
+          price_includes_gst,
+          gst_rate,
+          price_includes_transport,
+          is_available,
+          min_order_qty,
+          unit,
+          lead_time_days,
+          vendor:vendors(id, name, vendor_type, shop_name, phone, whatsapp_number, city, accepts_credit, provides_transport),
+          material:materials(id, name, code, unit)
+        `
+        )
+        .in("material_id", variantIds)
+        .eq("is_available", true);
+
+      if (error) throw error;
+      return (data || []) as Array<{
+        id: string;
+        vendor_id: string;
+        material_id: string;
+        current_price: number | null;
+        price_includes_gst: boolean;
+        gst_rate: number;
+        price_includes_transport: boolean;
+        is_available: boolean;
+        min_order_qty: number | null;
+        unit: string | null;
+        lead_time_days: number | null;
+        vendor: {
+          id: string;
+          name: string;
+          vendor_type: string;
+          shop_name: string | null;
+          phone: string | null;
+          whatsapp_number: string | null;
+          city: string | null;
+          accepts_credit: boolean;
+          provides_transport: boolean;
+        } | null;
+        material: {
+          id: string;
+          name: string;
+          code: string | null;
+          unit: string;
+        } | null;
+      }>;
+    },
+    enabled: variantIds.length > 0,
+  });
+}
+
+/**
+ * Fetch brand prices for a material
+ * Returns a map of brandId -> { bestPrice, vendorName, vendorCount, includesGst }
+ */
+export function useMaterialBrandPrices(materialId: string | undefined) {
+  const supabase = createClient();
+
+  return useQuery({
+    queryKey: ["vendor-inventory", "brand-prices", materialId],
+    queryFn: async () => {
+      if (!materialId) return new Map<string, { bestPrice: number; vendorName: string; vendorCount: number; includesGst: boolean }>();
+
+      const { data, error } = await (supabase as any)
+        .from("vendor_inventory")
+        .select(
+          `
+          brand_id,
+          current_price,
+          price_includes_gst,
+          vendor:vendors(id, name)
+        `
+        )
+        .eq("material_id", materialId)
+        .eq("is_available", true)
+        .not("brand_id", "is", null);
+
+      if (error) throw error;
+
+      // Group by brand and find best price
+      const brandPriceMap = new Map<string, { bestPrice: number; vendorName: string; vendorCount: number; includesGst: boolean }>();
+
+      for (const inv of data || []) {
+        if (!inv.brand_id) continue;
+
+        const existing = brandPriceMap.get(inv.brand_id);
+        const currentPrice = inv.current_price || 0;
+
+        if (!existing) {
+          brandPriceMap.set(inv.brand_id, {
+            bestPrice: currentPrice,
+            vendorName: inv.vendor?.name || "Unknown",
+            vendorCount: 1,
+            includesGst: inv.price_includes_gst || false,
+          });
+        } else {
+          existing.vendorCount++;
+          if (currentPrice > 0 && (existing.bestPrice === 0 || currentPrice < existing.bestPrice)) {
+            existing.bestPrice = currentPrice;
+            existing.vendorName = inv.vendor?.name || "Unknown";
+            existing.includesGst = inv.price_includes_gst || false;
+          }
+        }
+      }
+
+      return brandPriceMap;
+    },
+    enabled: !!materialId,
+  });
+}
+
+/**
  * Search vendor inventory across all vendors
  */
 export function useVendorInventorySearch(searchTerm: string) {

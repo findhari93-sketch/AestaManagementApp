@@ -76,6 +76,10 @@ export default function MiscellaneousExpensesPage() {
     reason: string;
   }>({ open: false, expense: null, reason: "" });
 
+  // Category filter state
+  const [categoryFilter, setCategoryFilter] = useState<string>("all");
+  const [categories, setCategories] = useState<{ id: string; name: string }[]>([]);
+
   const canEdit = hasEditPermission(userProfile?.role);
 
   const fetchExpenses = useCallback(async () => {
@@ -115,10 +119,26 @@ export default function MiscellaneousExpensesPage() {
     }
   }, [selectedSite?.id, dateFrom, dateTo, isAllTime]);
 
+  // Fetch expense categories
+  const fetchCategories = useCallback(async () => {
+    try {
+      const { data } = await (supabase as any)
+        .from("expense_categories")
+        .select("id, name")
+        .eq("module", "miscellaneous")
+        .eq("is_active", true)
+        .order("display_order");
+      setCategories(data || []);
+    } catch (err) {
+      console.error("Error fetching categories:", err);
+    }
+  }, []);
+
   useEffect(() => {
     fetchExpenses();
     fetchStats();
-  }, [fetchExpenses, fetchStats]);
+    fetchCategories();
+  }, [fetchExpenses, fetchStats, fetchCategories]);
 
   const handleEdit = (expense: MiscExpenseWithDetails) => {
     setEditingExpense(expense);
@@ -168,6 +188,15 @@ export default function MiscellaneousExpensesPage() {
     fetchExpenses();
     fetchStats();
   };
+
+  // Filter expenses by selected category
+  const filteredExpenses = useMemo(() => {
+    if (categoryFilter === "all") return expenses;
+    if (categoryFilter === "uncategorized") {
+      return expenses.filter((e) => !e.category_id);
+    }
+    return expenses.filter((e) => e.category_id === categoryFilter);
+  }, [expenses, categoryFilter]);
 
   const columns = useMemo<MRT_ColumnDef<MiscExpenseWithDetails>[]>(
     () => [
@@ -419,10 +448,43 @@ export default function MiscellaneousExpensesPage() {
         </Grid>
       </Grid>
 
+      {/* Category Filter */}
+      {categories.length > 0 && (
+        <Box sx={{ mb: 2, display: "flex", gap: 1, flexWrap: "wrap", alignItems: "center" }}>
+          <Typography variant="body2" color="text.secondary" sx={{ mr: 1 }}>
+            Filter by:
+          </Typography>
+          <Chip
+            label="All"
+            onClick={() => setCategoryFilter("all")}
+            color={categoryFilter === "all" ? "primary" : "default"}
+            variant={categoryFilter === "all" ? "filled" : "outlined"}
+            size="small"
+          />
+          {categories.map((cat) => (
+            <Chip
+              key={cat.id}
+              label={cat.name}
+              onClick={() => setCategoryFilter(cat.id)}
+              color={categoryFilter === cat.id ? "primary" : "default"}
+              variant={categoryFilter === cat.id ? "filled" : "outlined"}
+              size="small"
+            />
+          ))}
+          <Chip
+            label="Uncategorized"
+            onClick={() => setCategoryFilter("uncategorized")}
+            color={categoryFilter === "uncategorized" ? "warning" : "default"}
+            variant={categoryFilter === "uncategorized" ? "filled" : "outlined"}
+            size="small"
+          />
+        </Box>
+      )}
+
       {/* Data Table */}
       <DataTable
         columns={columns}
-        data={expenses}
+        data={filteredExpenses}
         isLoading={loading}
         initialState={{
           sorting: [{ id: "date", desc: true }],

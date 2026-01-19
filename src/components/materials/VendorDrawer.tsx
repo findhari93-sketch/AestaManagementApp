@@ -40,12 +40,22 @@ import {
   History as HistoryIcon,
   Delete as DeleteIcon,
 } from "@mui/icons-material";
-import { useDeleteVendorInventory } from "@/hooks/queries/useVendorInventory";
+import { useDeleteVendorInventory, useVendorsByVariants } from "@/hooks/queries/useVendorInventory";
+import { useMaterialVariants } from "@/hooks/queries/useMaterials";
 import { useQuery } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase/client";
 import { formatCurrency, formatDate } from "@/lib/formatters";
 import AddVendorToMaterialDialog from "./AddVendorToMaterialDialog";
+import VendorVariantPrices from "./VendorVariantPrices";
 import type { MaterialWithDetails, Vendor, VendorInventory } from "@/types/material.types";
+
+interface VariantPrice {
+  variantId: string;
+  variantName: string;
+  price: number | null;
+  priceIncludesGst: boolean;
+  unit?: string;
+}
 
 interface VendorWithPricing extends Vendor {
   current_price: number | null;
@@ -70,6 +80,9 @@ interface VendorWithPricing extends Vendor {
     has_invoice: boolean;
     is_verified: boolean;
   }>;
+  // Variant prices when material has variants
+  variantPrices?: VariantPrice[];
+  lowestVariantPrice?: number | null;
 }
 
 interface VendorDrawerProps {
@@ -78,6 +91,10 @@ interface VendorDrawerProps {
   material: MaterialWithDetails | null;
   onCreatePO?: (vendorId: string, materialId: string) => void;
   onAddVendor?: (materialId: string) => void;
+  /** Filter vendors by specific brand_id (for materials with brands) */
+  filteredBrandId?: string;
+  /** Label to display for the filtered brand (e.g., "Ultratech Premium") */
+  filterBrandLabel?: string;
 }
 
 type SortOption = "best_price" | "most_orders" | "credit_first" | "nearest";
@@ -88,6 +105,8 @@ export default function VendorDrawer({
   material,
   onCreatePO,
   onAddVendor,
+  filteredBrandId,
+  filterBrandLabel,
 }: VendorDrawerProps) {
   const [expandedVendor, setExpandedVendor] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<SortOption>("best_price");
@@ -96,14 +115,83 @@ export default function VendorDrawer({
   const supabase = createClient();
   const deleteVendorInventory = useDeleteVendorInventory();
 
+  // Check if material has variants
+  const hasVariants = (material?.variant_count || 0) > 0;
+
+  // Fetch variants if material has variants
+  const { data: variants = [] } = useMaterialVariants(hasVariants ? material?.id : undefined);
+  const variantIds = useMemo(() => variants.map(v => v.id), [variants]);
+
+  // Fetch vendor inventory for all variants
+  const { data: variantInventory = [], isLoading: isLoadingVariants } = useVendorsByVariants(variantIds);
+
+  // Group variant inventory by vendor
+  const variantVendorsMap = useMemo(() => {
+    if (!hasVariants || variantInventory.length === 0) return new Map<string, VendorWithPricing>();
+
+    const vendorMap = new Map<string, VendorWithPricing>();
+
+    for (const inv of variantInventory) {
+      if (!inv.vendor) continue;
+
+      const existingVendor = vendorMap.get(inv.vendor.id);
+      const variantInfo = inv.material;
+
+      const variantPrice: VariantPrice = {
+        variantId: inv.material_id,
+        variantName: variantInfo?.name || "Unknown",
+        price: inv.current_price,
+        priceIncludesGst: inv.price_includes_gst,
+        unit: inv.unit || variantInfo?.unit,
+      };
+
+      if (existingVendor) {
+        existingVendor.variantPrices = existingVendor.variantPrices || [];
+        existingVendor.variantPrices.push(variantPrice);
+        // Update lowest variant price
+        if (inv.current_price && (!existingVendor.lowestVariantPrice || inv.current_price < existingVendor.lowestVariantPrice)) {
+          existingVendor.lowestVariantPrice = inv.current_price;
+        }
+      } else {
+        // Cast to unknown first since we're only using a subset of Vendor fields
+        // that are available from the variant inventory query
+        vendorMap.set(inv.vendor.id, {
+          id: inv.vendor.id,
+          name: inv.vendor.name,
+          vendor_type: inv.vendor.vendor_type,
+          shop_name: inv.vendor.shop_name,
+          phone: inv.vendor.phone,
+          whatsapp_number: inv.vendor.whatsapp_number,
+          city: inv.vendor.city,
+          accepts_credit: inv.vendor.accepts_credit,
+          provides_transport: inv.vendor.provides_transport,
+          current_price: null, // Not applicable for parent with variants
+          price_includes_gst: false,
+          min_order_qty: inv.min_order_qty,
+          last_price_update: null,
+          order_count: 0,
+          total_purchased_qty: 0,
+          total_purchased_value: 0,
+          last_order_date: null,
+          price_history: [],
+          recent_orders: [],
+          variantPrices: [variantPrice],
+          lowestVariantPrice: inv.current_price,
+        } as unknown as VendorWithPricing);
+      }
+    }
+
+    return vendorMap;
+  }, [hasVariants, variantInventory]);
+
   // Fetch vendors for this material with pricing and order history
   const { data: vendors = [], isLoading, refetch } = useQuery({
-    queryKey: ["material-vendors", material?.id],
+    queryKey: ["material-vendors", material?.id, filteredBrandId],
     queryFn: async () => {
       if (!material?.id) return [];
 
-      // Get vendor inventory for this material
-      const { data: inventory, error: invError } = await supabase
+      // Build query for vendor inventory
+      let query = supabase
         .from("vendor_inventory")
         .select(`
           vendor_id,
@@ -111,10 +199,18 @@ export default function VendorDrawer({
           price_includes_gst,
           min_order_qty,
           last_price_update,
+          brand_id,
           vendors(*)
         `)
         .eq("material_id", material.id)
         .eq("is_available", true);
+
+      // Filter by brand if specified
+      if (filteredBrandId) {
+        query = query.eq("brand_id", filteredBrandId);
+      }
+
+      const { data: inventory, error: invError } = await query;
 
       if (invError) {
         console.error("Error fetching vendor inventory:", invError);
@@ -226,37 +322,47 @@ export default function VendorDrawer({
     enabled: !!material?.id && open,
   });
 
+  // Get the vendor list based on whether material has variants
+  const vendorList = useMemo(() => {
+    if (hasVariants) {
+      return Array.from(variantVendorsMap.values());
+    }
+    return vendors;
+  }, [hasVariants, variantVendorsMap, vendors]);
+
   // Sort vendors based on selected option
   const sortedVendors = useMemo(() => {
-    const sorted = [...vendors];
+    const sorted = [...vendorList];
+
+    // Helper to get price for sorting (use lowestVariantPrice for variant materials)
+    const getPrice = (v: VendorWithPricing) => v.lowestVariantPrice ?? v.current_price ?? 999999;
 
     switch (sortBy) {
       case "best_price":
-        return sorted.sort((a, b) => (a.current_price || 999999) - (b.current_price || 999999));
+        return sorted.sort((a, b) => getPrice(a) - getPrice(b));
       case "most_orders":
         return sorted.sort((a, b) => b.order_count - a.order_count);
       case "credit_first":
         return sorted.sort((a, b) => {
           if (a.accepts_credit && !b.accepts_credit) return -1;
           if (!a.accepts_credit && b.accepts_credit) return 1;
-          return (a.current_price || 999999) - (b.current_price || 999999);
+          return getPrice(a) - getPrice(b);
         });
       case "nearest":
         // Would need geolocation - for now just sort by price
-        return sorted.sort((a, b) => (a.current_price || 999999) - (b.current_price || 999999));
+        return sorted.sort((a, b) => getPrice(a) - getPrice(b));
       default:
         return sorted;
     }
-  }, [vendors, sortBy]);
+  }, [vendorList, sortBy]);
 
   // Find best price vendor
   const bestPriceVendorId = useMemo(() => {
-    if (vendors.length === 0) return null;
-    const sorted = [...vendors].sort(
-      (a, b) => (a.current_price || 999999) - (b.current_price || 999999)
-    );
+    if (vendorList.length === 0) return null;
+    const getPrice = (v: VendorWithPricing) => v.lowestVariantPrice ?? v.current_price ?? 999999;
+    const sorted = [...vendorList].sort((a, b) => getPrice(a) - getPrice(b));
     return sorted[0]?.id;
-  }, [vendors]);
+  }, [vendorList]);
 
   // Get price trend indicator
   const getPriceTrend = (vendor: VendorWithPricing) => {
@@ -333,9 +439,15 @@ export default function VendorDrawer({
         <Box>
           <Typography variant="h6" fontWeight={600}>
             Vendors for: {material?.name}
+            {filterBrandLabel && (
+              <Typography component="span" variant="body2" color="primary.main" sx={{ ml: 1 }}>
+                ({filterBrandLabel})
+              </Typography>
+            )}
           </Typography>
           <Typography variant="caption" color="text.secondary">
-            {vendors.length} vendor{vendors.length !== 1 ? "s" : ""} available
+            {hasVariants && `${variants.length} variant${variants.length !== 1 ? "s" : ""}, `}
+            {vendorList.length} vendor{vendorList.length !== 1 ? "s" : ""} available
           </Typography>
         </Box>
         <Box sx={{ display: "flex", gap: 1 }}>
@@ -370,13 +482,13 @@ export default function VendorDrawer({
 
       {/* Vendor List */}
       <Box sx={{ flex: 1, overflow: "auto", p: 2 }}>
-        {isLoading ? (
+        {(isLoading || (hasVariants && isLoadingVariants)) ? (
           <Stack spacing={2}>
             {[1, 2, 3].map((i) => (
               <Skeleton key={i} variant="rounded" height={120} />
             ))}
           </Stack>
-        ) : vendors.length === 0 ? (
+        ) : vendorList.length === 0 ? (
           <Alert severity="info" sx={{ mt: 2 }}>
             No vendors found for this material. Add a vendor to get started.
           </Alert>
@@ -449,54 +561,64 @@ export default function VendorDrawer({
                     {/* Price & Stats Summary */}
                     <Box
                       sx={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
                         bgcolor: "grey.50",
                         p: 1,
                         borderRadius: 1,
                         mb: 1,
                       }}
                     >
-                      <Box>
-                        <Typography variant="caption" color="text.secondary">
-                          Current Price
-                        </Typography>
-                        <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-                          <Typography variant="h6" fontWeight={600} color="primary">
-                            {vendor.current_price
-                              ? formatCurrency(vendor.current_price)
-                              : "N/A"}
-                          </Typography>
-                          {priceTrend === "up" && (
-                            <TrendUpIcon fontSize="small" color="error" />
-                          )}
-                          {priceTrend === "down" && (
-                            <TrendDownIcon fontSize="small" color="success" />
-                          )}
-                          {priceTrend === "flat" && (
-                            <TrendFlatIcon fontSize="small" color="action" />
-                          )}
+                      {/* Show variant prices if material has variants */}
+                      {hasVariants && vendor.variantPrices && vendor.variantPrices.length > 0 ? (
+                        <VendorVariantPrices variantPrices={vendor.variantPrices} />
+                      ) : (
+                        <Box
+                          sx={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                          }}
+                        >
+                          <Box>
+                            <Typography variant="caption" color="text.secondary">
+                              Current Price
+                            </Typography>
+                            <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                              <Typography variant="h6" fontWeight={600} color="primary">
+                                {vendor.current_price
+                                  ? formatCurrency(vendor.current_price)
+                                  : "N/A"}
+                              </Typography>
+                              {priceTrend === "up" && (
+                                <TrendUpIcon fontSize="small" color="error" />
+                              )}
+                              {priceTrend === "down" && (
+                                <TrendDownIcon fontSize="small" color="success" />
+                              )}
+                              {priceTrend === "flat" && (
+                                <TrendFlatIcon fontSize="small" color="action" />
+                              )}
+                            </Box>
+                            {vendor.price_includes_gst && (
+                              <Typography variant="caption" color="text.secondary">
+                                (incl. GST)
+                              </Typography>
+                            )}
+                          </Box>
+                          <Box sx={{ textAlign: "right" }}>
+                            <Typography variant="caption" color="text.secondary">
+                              Total Purchased
+                            </Typography>
+                            <Typography variant="body2" fontWeight={500}>
+                              {vendor.order_count} orders
+                            </Typography>
+                            {vendor.total_purchased_value > 0 && (
+                              <Typography variant="caption" color="text.secondary">
+                                {formatCurrency(vendor.total_purchased_value)}
+                              </Typography>
+                            )}
+                          </Box>
                         </Box>
-                        {vendor.price_includes_gst && (
-                          <Typography variant="caption" color="text.secondary">
-                            (incl. GST)
-                          </Typography>
-                        )}
-                      </Box>
-                      <Box sx={{ textAlign: "right" }}>
-                        <Typography variant="caption" color="text.secondary">
-                          Total Purchased
-                        </Typography>
-                        <Typography variant="body2" fontWeight={500}>
-                          {vendor.order_count} orders
-                        </Typography>
-                        {vendor.total_purchased_value > 0 && (
-                          <Typography variant="caption" color="text.secondary">
-                            {formatCurrency(vendor.total_purchased_value)}
-                          </Typography>
-                        )}
-                      </Box>
+                      )}
                     </Box>
 
                     {/* Last Order */}

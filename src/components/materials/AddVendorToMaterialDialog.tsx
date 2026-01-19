@@ -36,6 +36,7 @@ import {
 } from "@mui/icons-material";
 import VendorAutocomplete from "@/components/common/VendorAutocomplete";
 import BrandChecklistSection from "@/components/materials/BrandChecklistSection";
+import VariantChecklistSection from "@/components/materials/VariantChecklistSection";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useCreateVendor, useVendors } from "@/hooks/queries/useVendors";
 import { useUpsertVendorInventory } from "@/hooks/queries/useVendorInventory";
@@ -54,6 +55,8 @@ interface AddVendorToMaterialDialogProps {
   material: MaterialWithDetails | null;
   existingVendorIds?: string[];
   onSuccess?: () => void;
+  /** Pre-select a specific brand when opening the dialog */
+  preSelectedBrandId?: string;
 }
 
 interface TabPanelProps {
@@ -81,6 +84,7 @@ export default function AddVendorToMaterialDialog({
   material,
   existingVendorIds = [],
   onSuccess,
+  preSelectedBrandId,
 }: AddVendorToMaterialDialogProps) {
   const isMobile = useIsMobile();
   const [tabValue, setTabValue] = useState(0);
@@ -118,8 +122,14 @@ export default function AddVendorToMaterialDialog({
     notes: "",
   });
 
-  // Check if material has brands - if so, use brand checklist instead of single price
-  const hasBrands = (material?.brands?.filter(b => b.is_active)?.length || 0) > 0;
+  // Check if material has variants or brands
+  // Variants take priority: if material has variants, use variant checklist
+  const hasVariants = (material?.variant_count || 0) > 0;
+  const hasBrands = !hasVariants && (material?.brands?.filter(b => b.is_active)?.length || 0) > 0;
+
+  // Variant selection state - which variants this vendor supplies
+  const [selectedVariants, setSelectedVariants] = useState<Set<string>>(new Set());
+  const [variantPrices, setVariantPrices] = useState<Record<string, number>>({});
 
   // Brand selection state - which brands this vendor carries
   const [selectedBrands, setSelectedBrands] = useState<Set<string>>(new Set());
@@ -144,7 +154,14 @@ export default function AddVendorToMaterialDialog({
       setError("");
       setSelectedVendorId(null);
       setSelectedVendor(null);
-      setSelectedBrands(new Set());
+      setSelectedVariants(new Set());
+      setVariantPrices({});
+      // Pre-select brand if provided
+      if (preSelectedBrandId) {
+        setSelectedBrands(new Set([preSelectedBrandId]));
+      } else {
+        setSelectedBrands(new Set());
+      }
       setBrandPrices({});
       setVendorFormData({
         name: "",
@@ -171,7 +188,7 @@ export default function AddVendorToMaterialDialog({
         notes: "",
       });
     }
-  }, [open, material]);
+  }, [open, material, preSelectedBrandId]);
 
   const handleVendorChange = (field: keyof VendorFormData, value: unknown) => {
     setVendorFormData((prev) => ({ ...prev, [field]: value }));
@@ -207,6 +224,30 @@ export default function AddVendorToMaterialDialog({
     setError("");
   };
 
+  // Variant selection handlers
+  const handleVariantToggle = (variantId: string, checked: boolean) => {
+    setSelectedVariants((prev) => {
+      const next = new Set(prev);
+      if (checked) {
+        next.add(variantId);
+      } else {
+        next.delete(variantId);
+        // Also remove price for this variant
+        setVariantPrices((prices) => {
+          const { [variantId]: _, ...rest } = prices;
+          return rest;
+        });
+      }
+      return next;
+    });
+    setError("");
+  };
+
+  const handleVariantPriceChange = (variantId: string, price: number) => {
+    setVariantPrices((prev) => ({ ...prev, [variantId]: price }));
+    setError("");
+  };
+
   // Calculate total landed cost
   const totalLandedCost = useMemo(() => {
     const price = pricingData.current_price || 0;
@@ -222,14 +263,20 @@ export default function AddVendorToMaterialDialog({
       return;
     }
 
+    // For materials with variants, require at least one variant selected
+    if (hasVariants && selectedVariants.size === 0) {
+      setError("Please select at least one variant this vendor supplies");
+      return;
+    }
+
     // For materials with brands, require at least one brand selected
     if (hasBrands && selectedBrands.size === 0) {
       setError("Please select at least one brand this vendor carries");
       return;
     }
 
-    // Validate pricing only if material has no brands
-    if (!hasBrands && (!pricingData.current_price || pricingData.current_price <= 0)) {
+    // Validate pricing only if material has no variants and no brands
+    if (!hasVariants && !hasBrands && (!pricingData.current_price || pricingData.current_price <= 0)) {
       setError("Price must be greater than 0");
       return;
     }
@@ -259,7 +306,32 @@ export default function AddVendorToMaterialDialog({
         vendorId = newVendor.id;
       }
 
-      if (hasBrands) {
+      if (hasVariants) {
+        // Create vendor_inventory for EACH selected variant - run in parallel for speed
+        // Note: We create inventory for the VARIANT material, not the parent
+        const upsertPromises = Array.from(selectedVariants).map((variantId) => {
+          const inventoryData: VendorInventoryFormData = {
+            vendor_id: vendorId,
+            material_id: variantId, // Use variant ID, not parent ID
+            current_price: variantPrices[variantId] || 0,
+            price_includes_gst: pricingData.price_includes_gst,
+            gst_rate: pricingData.gst_rate || material.gst_rate || 18,
+            price_includes_transport: pricingData.price_includes_transport,
+            transport_cost: pricingData.transport_cost,
+            loading_cost: pricingData.loading_cost,
+            unloading_cost: pricingData.unloading_cost,
+            is_available: true,
+            min_order_qty: pricingData.min_order_qty,
+            unit: pricingData.unit || material.unit,
+            lead_time_days: pricingData.lead_time_days,
+            notes: pricingData.notes,
+          };
+
+          return upsertInventory.mutateAsync(inventoryData);
+        });
+
+        await Promise.all(upsertPromises);
+      } else if (hasBrands) {
         // Create vendor_inventory for EACH selected brand - run in parallel for speed
         const upsertPromises = Array.from(selectedBrands).map((brandId) => {
           const inventoryData: VendorInventoryFormData = {
@@ -318,12 +390,16 @@ export default function AddVendorToMaterialDialog({
 
   // Check if form is valid for submit
   const canSubmit = useMemo(() => {
+    // For materials with variants, require at least one variant selected
+    if (hasVariants && selectedVariants.size === 0) {
+      return false;
+    }
     // For materials with brands, require at least one brand selected
     if (hasBrands && selectedBrands.size === 0) {
       return false;
     }
-    // For materials without brands, require a price
-    if (!hasBrands && (!pricingData.current_price || pricingData.current_price <= 0)) {
+    // For materials without variants or brands, require a price
+    if (!hasVariants && !hasBrands && (!pricingData.current_price || pricingData.current_price <= 0)) {
       return false;
     }
     if (tabValue === 0) {
@@ -331,7 +407,7 @@ export default function AddVendorToMaterialDialog({
     } else {
       return !!vendorFormData.name?.trim();
     }
-  }, [tabValue, selectedVendorId, vendorFormData.name, pricingData.current_price, hasBrands, selectedBrands.size]);
+  }, [tabValue, selectedVendorId, vendorFormData.name, pricingData.current_price, hasVariants, selectedVariants.size, hasBrands, selectedBrands.size]);
 
   return (
     <Dialog
@@ -424,11 +500,25 @@ export default function AddVendorToMaterialDialog({
               </Grid>
             )}
 
-            {/* Show brand selection or pricing section when vendor is selected */}
+            {/* Show variant/brand selection or pricing section when vendor is selected */}
             {selectedVendor && (
               <>
-                {/* For materials with brands, show brand checklist */}
-                {hasBrands && material ? (
+                {/* For materials with variants, show variant checklist */}
+                {hasVariants && material ? (
+                  <Grid size={12}>
+                    <Box sx={{ mt: 1 }}>
+                      <VariantChecklistSection
+                        parentMaterial={material}
+                        selectedVariants={selectedVariants}
+                        variantPrices={variantPrices}
+                        onVariantToggle={handleVariantToggle}
+                        onPriceChange={handleVariantPriceChange}
+                        disabled={isSubmitting}
+                      />
+                    </Box>
+                  </Grid>
+                ) : hasBrands && material ? (
+                  /* For materials with brands, show brand checklist */
                   <Grid size={12}>
                     <Box sx={{ mt: 1 }}>
                       <BrandChecklistSection
@@ -442,7 +532,7 @@ export default function AddVendorToMaterialDialog({
                     </Box>
                   </Grid>
                 ) : (
-                  /* Show pricing form for materials without brands */
+                  /* Show pricing form for materials without variants or brands */
                   <PricingFormSection
                     pricingData={pricingData}
                     onPricingChange={handlePricingChange}
@@ -577,8 +667,21 @@ export default function AddVendorToMaterialDialog({
               </Grid>
             )}
 
-            {/* Brand selection or pricing for new vendor */}
-            {hasBrands && material ? (
+            {/* Variant/Brand selection or pricing for new vendor */}
+            {hasVariants && material ? (
+              <Grid size={12}>
+                <Box sx={{ mt: 1 }}>
+                  <VariantChecklistSection
+                    parentMaterial={material}
+                    selectedVariants={selectedVariants}
+                    variantPrices={variantPrices}
+                    onVariantToggle={handleVariantToggle}
+                    onPriceChange={handleVariantPriceChange}
+                    disabled={isSubmitting}
+                  />
+                </Box>
+              </Grid>
+            ) : hasBrands && material ? (
               <Grid size={12}>
                 <Box sx={{ mt: 1 }}>
                   <BrandChecklistSection

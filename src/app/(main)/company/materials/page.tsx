@@ -51,6 +51,8 @@ import {
 } from "@/hooks/queries/useMaterialOrderStats";
 import MaterialDialog from "@/components/materials/MaterialDialog";
 import VendorDrawer from "@/components/materials/VendorDrawer";
+import VariantSubTable from "@/components/materials/VariantSubTable";
+import BrandSubTable from "@/components/materials/BrandSubTable";
 import ConfirmDialog from "@/components/common/ConfirmDialog";
 import type {
   MaterialWithDetails,
@@ -223,15 +225,25 @@ export default function MaterialsPage() {
     });
   }, [materials, sortBy, orderStats, vendorCounts, bestPrices]);
 
-  // Add variant count display text to materials (variant_count already from server)
+  // Add variant/brand count display text to materials (variant_count already from server)
   const materialsWithVariantText = useMemo(() => {
-    return sortedMaterials.map((material) => ({
-      ...material,
-      _variantText: material.variant_count && material.variant_count > 0
-        ? `${material.variant_count} variant${material.variant_count !== 1 ? "s" : ""}`
-        : null,
-      _variantCount: material.variant_count || 0,
-    }));
+    return sortedMaterials.map((material) => {
+      const variantCount = material.variant_count || 0;
+      const brandCount = material.brands?.filter(b => b.is_active)?.length || 0;
+
+      // Determine if row can expand (has variants OR brands)
+      const canExpand = variantCount > 0 || brandCount > 0;
+
+      return {
+        ...material,
+        _variantText: variantCount > 0
+          ? `${variantCount} variant${variantCount !== 1 ? "s" : ""}`
+          : null,
+        _variantCount: variantCount,
+        _brandCount: brandCount,
+        _canExpand: canExpand,
+      };
+    });
   }, [sortedMaterials]);
 
   const handleOpenDialog = useCallback((material?: MaterialWithDetails) => {
@@ -296,7 +308,7 @@ export default function MaterialsPage() {
   }, [router]);
 
   // Table columns
-  const columns = useMemo<MRT_ColumnDef<MaterialWithDetails & { _variantText?: string | null; _variantCount?: number }>[]>(
+  const columns = useMemo<MRT_ColumnDef<MaterialWithDetails & { _variantText?: string | null; _variantCount?: number; _brandCount?: number; _canExpand?: boolean }>[]>(
     () => [
       {
         accessorKey: "name",
@@ -659,6 +671,27 @@ export default function MaterialsPage() {
         rowCount={totalCount}
         pagination={pagination}
         onPaginationChange={handlePaginationChange}
+        // Expandable rows for materials with variants OR brands
+        enableExpanding={true}
+        positionExpandColumn="first"
+        getRowCanExpand={(row) => row.original._canExpand === true}
+        renderDetailPanel={({ row }) => {
+          if (!row.original._canExpand) return null;
+          // Show variant sub-table if has variants, otherwise show brand sub-table
+          if ((row.original._variantCount ?? 0) > 0) {
+            return <VariantSubTable parentMaterial={row.original} />;
+          }
+          if ((row.original._brandCount ?? 0) > 0) {
+            return <BrandSubTable material={row.original} onOpenVendorDrawer={handleOpenVendorDrawer} />;
+          }
+          return null;
+        }}
+        muiExpandButtonProps={({ row }) => ({
+          sx: {
+            // Show expand button only for rows that can expand
+            visibility: row.original._canExpand ? "visible" : "hidden",
+          },
+        })}
       />
 
       {/* Mobile FAB */}

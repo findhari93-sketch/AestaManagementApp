@@ -63,10 +63,7 @@ import {
   getSiteSubcontractTotals,
   type SubcontractTotals,
 } from "@/lib/services/subcontractService";
-import { useSiteMaterialExpenses } from "@/hooks/queries/useMaterialPurchases";
-import {
-  Inventory as InventoryIcon,
-} from "@mui/icons-material";
+// Material expenses hook removed - will be handled by Material Settlements page after settlement
 
 interface SitePayer {
   id: string;
@@ -110,10 +107,7 @@ export default function ExpensesPage() {
   const [subcontractsLoading, setSubcontractsLoading] = useState(false);
   const [subcontractDrawerOpen, setSubcontractDrawerOpen] = useState(false);
 
-  // Material Purchases state - from useSiteMaterialExpenses hook
-  const { data: materialExpensesData, isLoading: materialExpensesLoading } = useSiteMaterialExpenses(selectedSite?.id);
-  const materialExpenses = materialExpensesData?.expenses || [];
-  const materialExpensesTotal = materialExpensesData?.total || 0;
+  // Material Purchases state removed - now handled by Material Settlements page
 
   // Redirect dialog state for salary expenses that can't be deleted directly
   const [redirectDialog, setRedirectDialog] = useState<{
@@ -944,98 +938,8 @@ export default function ExpensesPage() {
         </CardContent>
       </Card>
 
-      {/* Material Purchases Summary Card */}
-      {(materialExpenses.length > 0 || materialExpensesLoading) && (
-        <Card sx={{ mb: 3 }}>
-          <CardContent sx={{ p: { xs: 2, md: 2.5 } }}>
-            <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 2 }}>
-              <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                <InventoryIcon sx={{ fontSize: 20, color: "primary.main" }} />
-                <Typography variant="subtitle1" fontWeight={600}>
-                  Material Purchases
-                </Typography>
-                <Chip
-                  label={`${materialExpenses.length} records`}
-                  size="small"
-                  variant="outlined"
-                  sx={{ ml: 1 }}
-                />
-              </Box>
-              <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
-                <Typography variant="h6" fontWeight={700} color="primary.main">
-                  ₹{materialExpensesTotal.toLocaleString("en-IN")}
-                </Typography>
-                <Button
-                  size="small"
-                  variant="outlined"
-                  onClick={() => router.push("/site/inter-site-settlement")}
-                  endIcon={<ChevronRight />}
-                >
-                  View All
-                </Button>
-              </Box>
-            </Box>
-
-            {materialExpensesLoading ? (
-              <Typography variant="body2" color="text.secondary">Loading material purchases...</Typography>
-            ) : materialExpenses.length > 0 ? (
-              <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
-                {materialExpenses.slice(0, 5).map((expense) => (
-                  <Box
-                    key={expense.id}
-                    sx={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      py: 1,
-                      px: 1.5,
-                      bgcolor: "action.hover",
-                      borderRadius: 1,
-                    }}
-                  >
-                    <Box sx={{ display: "flex", alignItems: "center", gap: 2, flex: 1 }}>
-                      <Typography variant="caption" color="text.secondary" sx={{ minWidth: 90 }}>
-                        {expense.ref_code}
-                      </Typography>
-                      <Typography variant="body2" sx={{ flex: 1 }}>
-                        {expense.items && expense.items.length > 0
-                          ? expense.items.map(i => i.material?.name || "Unknown").join(", ")
-                          : "Material purchase"}
-                      </Typography>
-                      {expense.original_batch_code && (
-                        <Chip
-                          label="Allocated"
-                          size="small"
-                          color="info"
-                          variant="outlined"
-                          sx={{ fontSize: "0.7rem" }}
-                        />
-                      )}
-                    </Box>
-                    <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
-                      <Typography variant="caption" color="text.secondary">
-                        {expense.vendor?.name || expense.vendor_name || "-"}
-                      </Typography>
-                      <Typography variant="body2" fontWeight={600}>
-                        ₹{Number(expense.total_amount).toLocaleString("en-IN")}
-                      </Typography>
-                    </Box>
-                  </Box>
-                ))}
-                {materialExpenses.length > 5 && (
-                  <Typography variant="caption" color="text.secondary" sx={{ textAlign: "center", pt: 1 }}>
-                    + {materialExpenses.length - 5} more purchases
-                  </Typography>
-                )}
-              </Box>
-            ) : (
-              <Typography variant="body2" color="text.secondary">
-                No material purchases recorded for this site.
-              </Typography>
-            )}
-          </CardContent>
-        </Card>
-      )}
+      {/* Material Purchases section removed - material expenses show in All Site Expenses only AFTER settlement */}
+      {/* See /site/material-settlements for pending material purchases */}
 
       <Card sx={{ mb: 3 }}>
         <CardContent>

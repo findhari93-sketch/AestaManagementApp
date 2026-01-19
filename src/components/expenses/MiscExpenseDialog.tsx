@@ -137,12 +137,12 @@ export default function MiscExpenseDialog({
 
   const fetchCategories = async () => {
     try {
-      const { data } = await supabase
+      const { data } = await (supabase as any)
         .from("expense_categories")
-        .select("id, name, module")
+        .select("id, name, module, description")
         .eq("is_active", true)
-        .in("module", ["general", "material", "machinery"])
-        .order("module")
+        .eq("module", "miscellaneous")
+        .order("display_order")
         .order("name");
 
       setCategories(data || []);
@@ -374,14 +374,7 @@ export default function MiscExpenseDialog({
             </MenuItem>
             {categories.map((cat) => (
               <MenuItem key={cat.id} value={cat.id}>
-                <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                  <Chip
-                    label={cat.module}
-                    size="small"
-                    sx={{ height: 18, fontSize: "0.65rem", textTransform: "capitalize" }}
-                  />
-                  {cat.name}
-                </Box>
+                {cat.name}
               </MenuItem>
             ))}
           </Select>

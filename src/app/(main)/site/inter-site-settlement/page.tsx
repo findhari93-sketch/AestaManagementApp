@@ -44,13 +44,17 @@ import {
   ShoppingCart as PurchaseIcon,
   LocalShipping as UsageIcon,
   Inventory as BatchesIcon,
+  Edit as EditIcon,
+  Delete as DeleteIcon,
 } from '@mui/icons-material'
 import PageHeader from '@/components/layout/PageHeader'
 import Breadcrumbs from '@/components/layout/Breadcrumbs'
 import RelatedPages from '@/components/layout/RelatedPages'
 import { useSite } from '@/contexts/SiteContext'
+import { useAuth } from '@/contexts/AuthContext'
 import { formatCurrency, formatDate } from '@/lib/formatters'
-import { useSiteGroupMembership } from '@/hooks/queries/useSiteGroups'
+import { hasEditPermission } from '@/lib/permissions'
+import { useSiteGroupMembership, useUpdateGroupStockTransaction, useDeleteGroupStockTransaction } from '@/hooks/queries/useSiteGroups'
 import {
   useInterSiteSettlements,
   useSiteSettlementSummary,
@@ -65,7 +69,11 @@ import WeeklyUsageReportDialog from '@/components/materials/WeeklyUsageReportDia
 import GroupStockBatchCard from '@/components/materials/GroupStockBatchCard'
 import EditMaterialPurchaseDialog from '@/components/materials/EditMaterialPurchaseDialog'
 import ConvertToOwnSiteDialog from '@/components/materials/ConvertToOwnSiteDialog'
+import GroupStockTransactionDrawer from '@/components/materials/GroupStockTransactionDrawer'
+import EditGroupStockTransactionDialog from '@/components/materials/EditGroupStockTransactionDialog'
+import ConfirmDialog from '@/components/common/ConfirmDialog'
 import type { InterSiteSettlementWithDetails, InterSiteBalance, GroupStockBatch, MaterialPurchaseExpenseWithDetails } from '@/types/material.types'
+import type { GroupStockTransaction } from '@/hooks/queries/useInterSiteSettlements'
 import { SETTLEMENT_STATUS_COLORS, SETTLEMENT_STATUS_LABELS } from '@/types/material.types'
 
 interface TabPanelProps {
@@ -101,6 +109,14 @@ export default function InterSiteSettlementPage() {
   // Filter for batches tab
   const [batchStatusFilter, setBatchStatusFilter] = useState<'all' | 'in_stock' | 'partial_used' | 'completed'>('all')
 
+  // Transaction action states
+  const [viewTransaction, setViewTransaction] = useState<GroupStockTransaction | null>(null)
+  const [editTransaction, setEditTransaction] = useState<GroupStockTransaction | null>(null)
+  const [deleteTransaction, setDeleteTransaction] = useState<GroupStockTransaction | null>(null)
+  const [viewDrawerOpen, setViewDrawerOpen] = useState(false)
+  const [editDialogOpen, setEditDialogOpen] = useState(false)
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
+
   // Hooks
   const { data: groupMembership, isLoading: membershipLoading } = useSiteGroupMembership(
     selectedSite?.id
@@ -125,6 +141,11 @@ export default function InterSiteSettlementPage() {
 
   const generateSettlement = useGenerateSettlement()
   const approveSettlement = useApproveSettlement()
+  const deleteTransactionMutation = useDeleteGroupStockTransaction()
+
+  // Auth and permissions
+  const { userProfile } = useAuth()
+  const canEdit = hasEditPermission(userProfile?.role)
 
   const isLoading = membershipLoading || summaryLoading || balancesLoading || settlementsLoading || transactionsLoading || batchesLoading
 
@@ -175,6 +196,36 @@ export default function InterSiteSettlementPage() {
   const handleCompleteBatch = (batch: GroupStockBatch) => {
     // TODO: Open batch completion dialog
     console.log('Complete batch:', batch.ref_code)
+  }
+
+  // Transaction action handlers
+  const handleViewTransaction = (tx: GroupStockTransaction) => {
+    setViewTransaction(tx)
+    setViewDrawerOpen(true)
+  }
+
+  const handleEditTransaction = (tx: GroupStockTransaction) => {
+    setEditTransaction(tx)
+    setEditDialogOpen(true)
+  }
+
+  const handleDeleteTransaction = (tx: GroupStockTransaction) => {
+    setDeleteTransaction(tx)
+    setDeleteConfirmOpen(true)
+  }
+
+  const handleConfirmDelete = async () => {
+    if (!deleteTransaction || !groupMembership?.groupId) return
+    try {
+      await deleteTransactionMutation.mutateAsync({
+        transactionId: deleteTransaction.id,
+        groupId: groupMembership.groupId,
+      })
+      setDeleteConfirmOpen(false)
+      setDeleteTransaction(null)
+    } catch (error) {
+      console.error('Failed to delete transaction:', error)
+    }
   }
 
   // Calculate per-site summaries from transactions
@@ -545,12 +596,14 @@ export default function InterSiteSettlementPage() {
                   <TableCell align="right">Total</TableCell>
                   <TableCell>Paid By / Used By</TableCell>
                   <TableCell>Notes</TableCell>
+                  <TableCell>Actions</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
                 {isLoading ? (
                   [...Array(5)].map((_, i) => (
                     <TableRow key={i}>
+                      <TableCell><Skeleton /></TableCell>
                       <TableCell><Skeleton /></TableCell>
                       <TableCell><Skeleton /></TableCell>
                       <TableCell><Skeleton /></TableCell>
@@ -623,11 +676,34 @@ export default function InterSiteSettlementPage() {
                           {tx.notes || '-'}
                         </Typography>
                       </TableCell>
+                      <TableCell>
+                        <Box sx={{ display: 'flex', gap: 0.5 }}>
+                          <Tooltip title="View Details">
+                            <IconButton size="small" onClick={() => handleViewTransaction(tx)}>
+                              <ViewIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                          {canEdit && (
+                            <>
+                              <Tooltip title="Edit">
+                                <IconButton size="small" onClick={() => handleEditTransaction(tx)}>
+                                  <EditIcon fontSize="small" />
+                                </IconButton>
+                              </Tooltip>
+                              <Tooltip title="Delete">
+                                <IconButton size="small" color="error" onClick={() => handleDeleteTransaction(tx)}>
+                                  <DeleteIcon fontSize="small" />
+                                </IconButton>
+                              </Tooltip>
+                            </>
+                          )}
+                        </Box>
+                      </TableCell>
                     </TableRow>
                   ))
                 ) : (
                   <TableRow>
-                    <TableCell colSpan={8} align="center" sx={{ py: 4 }}>
+                    <TableCell colSpan={9} align="center" sx={{ py: 4 }}>
                       <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
                         <TransactionsIcon sx={{ fontSize: 48, color: 'text.disabled' }} />
                         <Typography color="text.secondary">
@@ -1050,6 +1126,40 @@ export default function InterSiteSettlementPage() {
           />
         </>
       )}
+
+      {/* Transaction Action Dialogs */}
+      <GroupStockTransactionDrawer
+        open={viewDrawerOpen}
+        onClose={() => {
+          setViewDrawerOpen(false)
+          setViewTransaction(null)
+        }}
+        transaction={viewTransaction}
+      />
+
+      <EditGroupStockTransactionDialog
+        open={editDialogOpen}
+        onClose={() => {
+          setEditDialogOpen(false)
+          setEditTransaction(null)
+        }}
+        transaction={editTransaction}
+        groupId={groupMembership?.groupId}
+      />
+
+      <ConfirmDialog
+        open={deleteConfirmOpen}
+        title="Delete Transaction"
+        message="Are you sure you want to delete this transaction? This will also update the inventory balance."
+        confirmText="Delete"
+        confirmColor="error"
+        isLoading={deleteTransactionMutation.isPending}
+        onConfirm={handleConfirmDelete}
+        onCancel={() => {
+          setDeleteConfirmOpen(false)
+          setDeleteTransaction(null)
+        }}
+      />
 
       {/* Mobile FAB */}
       <Box
