@@ -632,3 +632,65 @@ export function useConvertGroupToOwnSite() {
     },
   });
 }
+
+// ============================================
+// SITE MATERIAL EXPENSES (for Expenses Page)
+// ============================================
+
+/**
+ * Fetch material expenses for a site (for display in Site Expenses page)
+ * Includes:
+ * - Own site purchases (purchase_type = 'own_site')
+ * - Allocated group stock purchases (original_batch_code IS NOT NULL)
+ */
+export function useSiteMaterialExpenses(siteId: string | undefined) {
+  const supabase = createClient();
+
+  return useQuery({
+    queryKey: siteId
+      ? [...queryKeys.materialPurchases.bySite(siteId), "expenses"]
+      : ["material-expenses"],
+    queryFn: async () => {
+      if (!siteId) return { expenses: [], total: 0 };
+
+      try {
+        // Fetch material purchase expenses for this site
+        // Include both own_site purchases AND allocated group purchases
+        const { data, error } = await (supabase as any)
+          .from("material_purchase_expenses")
+          .select(`
+            *,
+            vendor:vendors(id, name),
+            items:material_purchase_expense_items(
+              *,
+              material:materials(id, name, code, unit),
+              brand:material_brands(id, brand_name)
+            )
+          `)
+          .eq("site_id", siteId)
+          .or("purchase_type.eq.own_site,original_batch_code.not.is.null")
+          .order("purchase_date", { ascending: false });
+
+        if (error) {
+          if (isQueryError(error)) {
+            console.warn("Site material expenses query failed:", error.message);
+            return { expenses: [], total: 0 };
+          }
+          throw error;
+        }
+
+        const expenses = (data || []) as MaterialPurchaseExpenseWithDetails[];
+        const total = expenses.reduce((sum, exp) => sum + Number(exp.total_amount || 0), 0);
+
+        return { expenses, total };
+      } catch (err) {
+        if (isQueryError(err)) {
+          console.warn("Site material expenses query failed:", err);
+          return { expenses: [], total: 0 };
+        }
+        throw err;
+      }
+    },
+    enabled: !!siteId,
+  });
+}

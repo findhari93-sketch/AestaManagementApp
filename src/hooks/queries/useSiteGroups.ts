@@ -941,3 +941,179 @@ export function useAddHistoricalGroupStockPurchase() {
     },
   });
 }
+
+/**
+ * Update a group stock transaction
+ */
+export function useUpdateGroupStockTransaction() {
+  const queryClient = useQueryClient();
+  const supabase = createClient();
+
+  return useMutation({
+    mutationFn: async (data: {
+      transactionId: string;
+      groupId: string;
+      transactionDate?: string;
+      quantity?: number;
+      unitCost?: number;
+      notes?: string;
+    }) => {
+      await ensureFreshSession();
+
+      // Get the current transaction to calculate differences
+      const { data: currentTx, error: fetchError } = await (supabase as any)
+        .from("group_stock_transactions")
+        .select("*")
+        .eq("id", data.transactionId)
+        .single();
+
+      if (fetchError) throw fetchError;
+
+      // Prepare update payload
+      const updateData: Record<string, unknown> = {
+        updated_at: new Date().toISOString(),
+      };
+
+      if (data.transactionDate !== undefined) {
+        updateData.transaction_date = data.transactionDate;
+      }
+      if (data.notes !== undefined) {
+        updateData.notes = data.notes;
+      }
+
+      // Handle quantity and unit cost changes - need to update total_cost
+      const newQuantity = data.quantity ?? Math.abs(currentTx.quantity);
+      const newUnitCost = data.unitCost ?? currentTx.unit_cost;
+      const newTotalCost = newQuantity * newUnitCost;
+
+      // For usage transactions, quantities are negative
+      const isUsage = currentTx.transaction_type === "usage";
+      if (data.quantity !== undefined) {
+        updateData.quantity = isUsage ? -newQuantity : newQuantity;
+      }
+      if (data.unitCost !== undefined) {
+        updateData.unit_cost = newUnitCost;
+      }
+      if (data.quantity !== undefined || data.unitCost !== undefined) {
+        updateData.total_cost = isUsage ? -newTotalCost : newTotalCost;
+      }
+
+      // Update the transaction
+      const { data: updated, error: updateError } = await (supabase as any)
+        .from("group_stock_transactions")
+        .update(updateData)
+        .eq("id", data.transactionId)
+        .select()
+        .single();
+
+      if (updateError) throw updateError;
+
+      // Update inventory if quantity changed
+      if (data.quantity !== undefined && currentTx.inventory_id) {
+        const qtyDiff = newQuantity - Math.abs(currentTx.quantity);
+        const inventoryQtyChange = isUsage ? -qtyDiff : qtyDiff;
+
+        if (inventoryQtyChange !== 0) {
+          const { data: inventory } = await (supabase as any)
+            .from("group_stock_inventory")
+            .select("*")
+            .eq("id", currentTx.inventory_id)
+            .single();
+
+          if (inventory) {
+            await (supabase as any)
+              .from("group_stock_inventory")
+              .update({
+                current_qty: inventory.current_qty + inventoryQtyChange,
+                updated_at: new Date().toISOString(),
+              })
+              .eq("id", currentTx.inventory_id);
+          }
+        }
+      }
+
+      return updated;
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.groupStock.byGroup(variables.groupId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.groupStock.transactions(variables.groupId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.interSiteSettlements.balances(variables.groupId),
+      });
+    },
+  });
+}
+
+/**
+ * Delete a group stock transaction
+ */
+export function useDeleteGroupStockTransaction() {
+  const queryClient = useQueryClient();
+  const supabase = createClient();
+
+  return useMutation({
+    mutationFn: async (data: {
+      transactionId: string;
+      groupId: string;
+    }) => {
+      await ensureFreshSession();
+
+      // Get the transaction to reverse inventory changes
+      const { data: tx, error: fetchError } = await (supabase as any)
+        .from("group_stock_transactions")
+        .select("*")
+        .eq("id", data.transactionId)
+        .single();
+
+      if (fetchError) throw fetchError;
+
+      // Reverse inventory changes if inventory_id exists
+      if (tx.inventory_id) {
+        const { data: inventory } = await (supabase as any)
+          .from("group_stock_inventory")
+          .select("*")
+          .eq("id", tx.inventory_id)
+          .single();
+
+        if (inventory) {
+          // For purchase: reduce qty (tx.quantity is positive)
+          // For usage: add back qty (tx.quantity is negative, so subtracting adds)
+          const newQty = inventory.current_qty - tx.quantity;
+
+          await (supabase as any)
+            .from("group_stock_inventory")
+            .update({
+              current_qty: Math.max(0, newQty),
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", tx.inventory_id);
+        }
+      }
+
+      // Delete the transaction
+      const { error: deleteError } = await (supabase as any)
+        .from("group_stock_transactions")
+        .delete()
+        .eq("id", data.transactionId);
+
+      if (deleteError) throw deleteError;
+
+      return { success: true };
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.groupStock.byGroup(variables.groupId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.groupStock.transactions(variables.groupId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.interSiteSettlements.balances(variables.groupId),
+      });
+    },
+  });
+}
