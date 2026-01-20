@@ -167,6 +167,8 @@ export function useCreatePurchaseOrder() {
           delivery_location_id: data.delivery_location_id,
           payment_terms: data.payment_terms,
           notes: data.notes,
+          internal_notes: data.internal_notes,
+          transport_cost: data.transport_cost || null,
           subtotal,
           tax_amount: taxAmount,
           total_amount: totalAmount,
@@ -266,6 +268,7 @@ export function useUpdatePurchaseOrder() {
           delivery_address: data.delivery_address,
           delivery_location_id: data.delivery_location_id,
           payment_terms: data.payment_terms,
+          transport_cost: data.transport_cost ?? undefined,
           notes: data.notes,
           updated_at: new Date().toISOString(),
         })
@@ -453,7 +456,7 @@ export function useCancelPurchaseOrder() {
 }
 
 /**
- * Delete a purchase order (draft or cancelled)
+ * Delete a purchase order (draft, cancelled, or delivered)
  */
 export function useDeletePurchaseOrder() {
   const queryClient = useQueryClient();
@@ -464,7 +467,62 @@ export function useDeletePurchaseOrder() {
       // Ensure fresh session before mutation
       await ensureFreshSession();
 
-      // Delete items first
+      // First, get all deliveries for this PO
+      const { data: deliveries } = await supabase
+        .from("deliveries")
+        .select("id")
+        .eq("po_id", id);
+
+      // Delete delivery items for all deliveries
+      if (deliveries && deliveries.length > 0) {
+        const deliveryIds = deliveries.map((d) => d.id);
+        const { error: deliveryItemsError } = await supabase
+          .from("delivery_items")
+          .delete()
+          .in("delivery_id", deliveryIds);
+
+        if (deliveryItemsError) throw deliveryItemsError;
+
+        // Delete deliveries
+        const { error: deliveriesError } = await supabase
+          .from("deliveries")
+          .delete()
+          .eq("po_id", id);
+
+        if (deliveriesError) throw deliveriesError;
+      }
+
+      // Delete material purchase expense items linked to this PO
+      const { data: materialExpenses } = await (supabase as any)
+        .from("material_purchase_expenses")
+        .select("id")
+        .eq("purchase_order_id", id);
+
+      if (materialExpenses && materialExpenses.length > 0) {
+        const expenseIds = materialExpenses.map((e: { id: string }) => e.id);
+
+        // Delete material purchase expense items
+        const { error: expenseItemsError } = await (supabase as any)
+          .from("material_purchase_expense_items")
+          .delete()
+          .in("purchase_expense_id", expenseIds);
+
+        if (expenseItemsError) {
+          console.warn("Failed to delete material expense items:", expenseItemsError);
+        }
+
+        // Delete material purchase expenses
+        const { error: expensesError } = await (supabase as any)
+          .from("material_purchase_expenses")
+          .delete()
+          .eq("purchase_order_id", id);
+
+        if (expensesError) {
+          console.warn("Failed to delete material expenses:", expensesError);
+        }
+      }
+
+      // Delete PO items
       const { error: itemsError } = await supabase
         .from("purchase_order_items")
         .delete()
@@ -472,12 +530,12 @@ export function useDeletePurchaseOrder() {
 
       if (itemsError) throw itemsError;
 
-      // Delete PO (only draft or cancelled status allowed)
+      // Delete PO (only draft, cancelled, or delivered status allowed)
       const { error } = await supabase
         .from("purchase_orders")
         .delete()
         .eq("id", id)
-        .in("status", ["draft", "cancelled"]);
+        .in("status", ["draft", "cancelled", "delivered"]);
 
       if (error) throw error;
       return { id, siteId };
@@ -485,6 +543,14 @@ export function useDeletePurchaseOrder() {
     onSuccess: (result) => {
       queryClient.invalidateQueries({
         queryKey: queryKeys.purchaseOrders.bySite(result.siteId),
+      });
+      // Also invalidate deliveries cache
+      queryClient.invalidateQueries({
+        queryKey: ["deliveries", result.siteId],
+      });
+      // Invalidate material purchases cache
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.materialPurchases.bySite(result.siteId),
       });
     },
   });
@@ -875,6 +941,86 @@ export function useRecordDelivery() {
                 updated_at: new Date().toISOString(),
               })
               .eq("id", data.po_id);
+
+            // When PO becomes "delivered", auto-create Material Settlement record
+            if (newStatus === "delivered") {
+              try {
+                // Get full PO details with vendor and items
+                const { data: po } = await supabase
+                  .from("purchase_orders")
+                  .select(`
+                    *,
+                    vendor:vendors(id, name),
+                    items:purchase_order_items(
+                      id, material_id, brand_id, quantity, unit_price, tax_rate
+                    )
+                  `)
+                  .eq("id", data.po_id)
+                  .single();
+
+                if (po) {
+                  // Generate reference code for material purchase
+                  const { data: refCode } = await (supabase as any).rpc(
+                    "generate_material_purchase_reference"
+                  );
+
+                  // Calculate total from ORDERED quantity (user choice)
+                  const itemsTotal = (po.items || []).reduce(
+                    (sum: number, item: any) => sum + (item.quantity * item.unit_price),
+                    0
+                  );
+                  const totalAmount = itemsTotal + (po.transport_cost || 0);
+
+                  // Get current user
+                  const { data: { user } } = await supabase.auth.getUser();
+
+                  // Create material_purchase_expense linked to PO
+                  const { data: expense, error: expenseError } = await (supabase as any)
+                    .from("material_purchase_expenses")
+                    .insert({
+                      site_id: po.site_id,
+                      ref_code: refCode || `MAT-${Date.now()}`,
+                      purchase_type: "own_site",
+                      purchase_order_id: po.id,
+                      vendor_id: po.vendor_id,
+                      vendor_name: po.vendor?.name || null,
+                      purchase_date: new Date().toISOString().split("T")[0],
+                      total_amount: totalAmount,
+                      transport_cost: po.transport_cost || 0,
+                      status: "recorded", // Pending settlement
+                      is_paid: false,
+                      created_by: user?.id,
+                      notes: `Auto-created from PO ${po.po_number}`,
+                    })
+                    .select()
+                    .single();
+
+                  if (expenseError) {
+                    console.warn("Failed to create material expense:", expenseError);
+                  } else if (expense && po.items?.length > 0) {
+                    // Create expense items from PO items (ordered quantity)
+                    const expenseItems = po.items.map((item: any) => ({
+                      purchase_expense_id: expense.id,
+                      material_id: item.material_id,
+                      brand_id: item.brand_id || null,
+                      quantity: item.quantity, // Ordered quantity
+                      unit_price: item.unit_price,
+                    }));
+
+                    const { error: itemsInsertError } = await (supabase as any)
+                      .from("material_purchase_expense_items")
+                      .insert(expenseItems);
+
+                    if (itemsInsertError) {
+                      console.warn("Failed to create material expense items:", itemsInsertError);
+                    }
+                  }
+                }
+              } catch (autoCreateError) {
+                // Don't fail the delivery if material expense creation fails
+                console.warn("Failed to auto-create material expense:", autoCreateError);
+              }
+            }
           }
         }
       }
@@ -887,6 +1033,10 @@ export function useRecordDelivery() {
       });
       queryClient.invalidateQueries({
         queryKey: queryKeys.materialStock.bySite(variables.site_id),
+      });
+      // Invalidate material purchases cache (for auto-created settlement)
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.materialPurchases.bySite(variables.site_id),
       });
       if (variables.po_id) {
         queryClient.invalidateQueries({

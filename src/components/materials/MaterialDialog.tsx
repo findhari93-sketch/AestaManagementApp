@@ -26,6 +26,7 @@ import {
   Switch,
   Autocomplete,
   InputAdornment,
+  Tooltip,
 } from "@mui/material";
 import {
   Close as CloseIcon,
@@ -53,6 +54,8 @@ import {
   useParentMaterials,
   useCreateMaterialWithVariants,
   useMaterial,
+  useMaterialVariants,
+  useCreateMaterialCategory,
 } from "@/hooks/queries/useMaterials";
 import type {
   MaterialWithDetails,
@@ -64,6 +67,7 @@ import type {
 } from "@/types/material.types";
 import VariantInlineTable from "./VariantInlineTable";
 import BrandVariantEditor from "./BrandVariantEditor";
+import CategoryDialog, { type CategoryFormData } from "@/components/categories/CategoryDialog";
 
 // Category patterns that should hide certain fields
 const CEMENT_CATEGORY_PATTERNS = ["cement", "ppc", "opc"];
@@ -111,11 +115,17 @@ export default function MaterialDialog({
   const updateBrand = useUpdateMaterialBrand();
   const deleteBrand = useDeleteMaterialBrand();
   const { data: parentMaterials = [] } = useParentMaterials();
+  const createCategory = useCreateMaterialCategory();
 
   // Fetch fresh material data to get updated brands after mutations
   const { data: freshMaterial } = useMaterial(material?.id);
   // Use fresh data for brands (falls back to prop if query not ready)
   const materialForBrands = freshMaterial || material;
+
+  // Fetch variants when editing a parent material
+  const { data: materialVariants = [] } = useMaterialVariants(
+    material?.variant_count && material.variant_count > 0 ? material.id : undefined
+  );
 
   const [error, setError] = useState("");
   const [newBrandName, setNewBrandName] = useState("");
@@ -128,6 +138,7 @@ export default function MaterialDialog({
   const [showLocalName, setShowLocalName] = useState(false);
   const [showDescription, setShowDescription] = useState(false);
   const [showImageUpload, setShowImageUpload] = useState(false);
+  const [categoryDialogOpen, setCategoryDialogOpen] = useState(false);
   const supabase = createClient();
 
   // Memoize initial form data based on material prop
@@ -310,6 +321,15 @@ export default function MaterialDialog({
     }
   };
 
+  const handleCreateCategory = async (data: CategoryFormData) => {
+    const newCategory = await createCategory.mutateAsync({
+      ...data,
+      is_active: true,
+    });
+    handleChange("category_id", newCategory.id);
+    setCategoryDialogOpen(false);
+  };
+
   const handleAddBrand = async (brandName?: string, variantName?: string | null) => {
     const name = brandName || newBrandName;
     if (!material || !name.trim()) return;
@@ -447,14 +467,29 @@ export default function MaterialDialog({
           )}
 
           <Grid size={{ xs: 12, md: 4 }}>
-            <CategoryAutocomplete
-              value={formData.category_id || null}
-              onChange={(value) => handleChange("category_id", value || "")}
-              parentOnly={false}
-              disabled={isVariant && !!formData.parent_id}
-              label="Category"
-              placeholder="Search categories..."
-            />
+            <Box sx={{ display: "flex", gap: 0.5, alignItems: "flex-start" }}>
+              <Box sx={{ flex: 1 }}>
+                <CategoryAutocomplete
+                  value={formData.category_id || null}
+                  onChange={(value) => handleChange("category_id", value || "")}
+                  parentOnly={false}
+                  disabled={isVariant && !!formData.parent_id}
+                  label="Category"
+                  placeholder="Search categories..."
+                />
+              </Box>
+              <Tooltip title="Add new category">
+                <IconButton
+                  onClick={() => setCategoryDialogOpen(true)}
+                  disabled={isVariant && !!formData.parent_id}
+                  sx={{ mt: 1 }}
+                  size="small"
+                  color="primary"
+                >
+                  <AddIcon />
+                </IconButton>
+              </Tooltip>
+            </Box>
           </Grid>
 
           {/* Optional Fields - Local Name and Description as toggle buttons */}
@@ -868,19 +903,77 @@ export default function MaterialDialog({
                     parentUnit={formData.unit}
                     variants={variants}
                     onVariantsChange={setVariants}
+                    categoryId={formData.category_id}
+                    categories={categories}
                   />
                 </AccordionDetails>
               </Accordion>
             </Grid>
           )}
 
-          {/* Brands & Variants Section - Only show for existing materials */}
+          {/* Material Variants Section - Only show for parent materials with variants */}
+          {isEdit && material && material.variant_count && material.variant_count > 0 && (
+            <Grid size={12}>
+              <Accordion defaultExpanded>
+                <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                  <Typography>
+                    Material Variants ({material.variant_count})
+                  </Typography>
+                </AccordionSummary>
+                <AccordionDetails>
+                  <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+                    {materialVariants.map((variant) => (
+                      <Box
+                        key={variant.id}
+                        sx={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 1,
+                          p: 1,
+                          bgcolor: "grey.50",
+                          borderRadius: 1,
+                        }}
+                      >
+                        <Typography variant="body2" fontWeight={500}>
+                          {variant.name}
+                        </Typography>
+                        {variant.code && (
+                          <Typography variant="caption" color="text.secondary">
+                            ({variant.code})
+                          </Typography>
+                        )}
+                        {variant.weight_per_unit && (
+                          <Chip
+                            label={`${variant.weight_per_unit} ${variant.weight_unit || "kg"}/pc`}
+                            size="small"
+                            variant="outlined"
+                          />
+                        )}
+                        {variant.length_per_piece && (
+                          <Chip
+                            label={`${variant.length_per_piece} ${variant.length_unit || "ft"}`}
+                            size="small"
+                            variant="outlined"
+                          />
+                        )}
+                      </Box>
+                    ))}
+                    <Typography variant="caption" color="text.secondary" sx={{ mt: 1 }}>
+                      Variants are managed separately. Edit individual variants from the table.
+                    </Typography>
+                  </Box>
+                </AccordionDetails>
+              </Accordion>
+            </Grid>
+          )}
+
+          {/* Brands Section - Only show for existing materials */}
           {isEdit && material && (
             <Grid size={12}>
               <Accordion defaultExpanded={activeBrands.length > 0 || fieldVisibility.defaultShowBrands}>
                 <AccordionSummary expandIcon={<ExpandMoreIcon />}>
                   <Typography>
-                    Brands & Variants ({activeBrands.length})
+                    Brands ({activeBrands.length})
                   </Typography>
                 </AccordionSummary>
                 <AccordionDetails>
@@ -914,6 +1007,15 @@ export default function MaterialDialog({
           {isSubmitting ? "Saving..." : isEdit ? "Update" : "Create"}
         </Button>
       </DialogActions>
+
+      {/* Inline Category Creation Dialog */}
+      <CategoryDialog
+        open={categoryDialogOpen}
+        onClose={() => setCategoryDialogOpen(false)}
+        onSubmit={handleCreateCategory}
+        category={null}
+        isLoading={createCategory.isPending}
+      />
     </Dialog>
   );
 }

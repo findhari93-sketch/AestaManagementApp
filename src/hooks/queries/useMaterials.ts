@@ -1032,11 +1032,14 @@ export function useCreateMaterialWithVariants() {
             unit: parentData.unit,
             hsn_code: parentData.hsn_code?.trim() || null,
             gst_rate: parentData.gst_rate,
+            // Legacy fields for backward compatibility
             weight_per_unit: v.weight_per_unit,
             weight_unit: parentData.weight_unit || "kg",
             length_per_piece: v.length_per_piece,
             length_unit: parentData.length_unit || "m",
             rods_per_bundle: v.rods_per_bundle,
+            // Dynamic specifications based on category template
+            specifications: v.specifications || null,
           };
         });
 
@@ -1105,11 +1108,14 @@ export function useAddVariantToMaterial() {
           unit: parentMaterial.unit,
           hsn_code: parentMaterial.hsn_code,
           gst_rate: parentMaterial.gst_rate,
+          // Legacy fields for backward compatibility
           weight_per_unit: variant.weight_per_unit,
           weight_unit: parentMaterial.weight_unit || "kg",
           length_per_piece: variant.length_per_piece,
           length_unit: parentMaterial.length_unit || "m",
           rods_per_bundle: variant.rods_per_bundle,
+          // Dynamic specifications based on category template
+          specifications: variant.specifications || null,
         })
         .select()
         .single();

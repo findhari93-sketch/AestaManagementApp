@@ -108,6 +108,7 @@ export default function PurchaseOrdersPage() {
   // Confirmation dialog states
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deletingPO, setDeletingPO] = useState<PurchaseOrderWithDetails | null>(null);
+  const [deleteError, setDeleteError] = useState("");
 
   const [submitDialogOpen, setSubmitDialogOpen] = useState(false);
   const [submittingPO, setSubmittingPO] = useState<PurchaseOrderWithDetails | null>(null);
@@ -243,17 +244,21 @@ export default function PurchaseOrdersPage() {
 
   const handleDelete = useCallback((po: PurchaseOrderWithDetails) => {
     setDeletingPO(po);
+    setDeleteError("");
     setDeleteDialogOpen(true);
   }, []);
 
   const handleConfirmDelete = useCallback(async () => {
     if (!deletingPO) return;
+    setDeleteError("");
     try {
       await deletePO.mutateAsync({ id: deletingPO.id, siteId: deletingPO.site_id });
       setDeleteDialogOpen(false);
       setDeletingPO(null);
     } catch (error) {
       console.error("Failed to delete PO:", error);
+      const message = error instanceof Error ? error.message : "Failed to delete purchase order";
+      setDeleteError(message);
     }
   }, [deletePO, deletingPO]);
 
@@ -371,10 +376,12 @@ export default function PurchaseOrdersPage() {
         accessorKey: "total_amount",
         header: "Amount",
         size: 120,
-        Cell: ({ row }) =>
-          row.original.total_amount
-            ? formatCurrency(row.original.total_amount)
-            : "-",
+        Cell: ({ row }) => {
+          const itemsTotal = row.original.total_amount || 0;
+          const transportCost = row.original.transport_cost || 0;
+          const grandTotal = itemsTotal + transportCost;
+          return grandTotal > 0 ? formatCurrency(grandTotal) : "-";
+        },
       },
       {
         accessorKey: "items",
@@ -784,12 +791,18 @@ export default function PurchaseOrdersPage() {
         onClose={() => {
           setDeleteDialogOpen(false);
           setDeletingPO(null);
+          setDeleteError("");
         }}
         maxWidth="xs"
         fullWidth
       >
         <DialogTitle>Delete Purchase Order</DialogTitle>
         <DialogContent>
+          {deleteError && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {deleteError}
+            </Alert>
+          )}
           <Typography variant="body2" color="text.secondary">
             Are you sure you want to delete PO <strong>{deletingPO?.po_number}</strong>? This action cannot be undone.
           </Typography>
@@ -799,6 +812,7 @@ export default function PurchaseOrdersPage() {
             onClick={() => {
               setDeleteDialogOpen(false);
               setDeletingPO(null);
+              setDeleteError("");
             }}
           >
             Cancel

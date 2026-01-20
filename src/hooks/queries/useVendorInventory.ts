@@ -220,28 +220,46 @@ export function useMaterialBrandPrices(materialId: string | undefined) {
       if (error) throw error;
 
       // Group by brand and find best price
+      // Track unique vendors per brand to avoid counting duplicates
       const brandPriceMap = new Map<string, { bestPrice: number; vendorName: string; vendorCount: number; includesGst: boolean }>();
+      const brandVendorSets = new Map<string, Set<string>>(); // brandId -> Set of vendor IDs
 
       for (const inv of data || []) {
         if (!inv.brand_id) continue;
 
+        const vendorId = inv.vendor?.id;
         const existing = brandPriceMap.get(inv.brand_id);
         const currentPrice = inv.current_price || 0;
+
+        // Track unique vendors for this brand
+        if (!brandVendorSets.has(inv.brand_id)) {
+          brandVendorSets.set(inv.brand_id, new Set());
+        }
+        if (vendorId) {
+          brandVendorSets.get(inv.brand_id)!.add(vendorId);
+        }
 
         if (!existing) {
           brandPriceMap.set(inv.brand_id, {
             bestPrice: currentPrice,
             vendorName: inv.vendor?.name || "Unknown",
-            vendorCount: 1,
+            vendorCount: 1, // Will be updated below
             includesGst: inv.price_includes_gst || false,
           });
         } else {
-          existing.vendorCount++;
           if (currentPrice > 0 && (existing.bestPrice === 0 || currentPrice < existing.bestPrice)) {
             existing.bestPrice = currentPrice;
             existing.vendorName = inv.vendor?.name || "Unknown";
             existing.includesGst = inv.price_includes_gst || false;
           }
+        }
+      }
+
+      // Update vendor counts to use unique vendor count
+      for (const [brandId, vendorSet] of brandVendorSets) {
+        const priceInfo = brandPriceMap.get(brandId);
+        if (priceInfo) {
+          priceInfo.vendorCount = vendorSet.size;
         }
       }
 
@@ -359,13 +377,21 @@ export function useUpsertVendorInventory() {
       await ensureFreshSession();
 
       // Check if item exists
-      const { data: existing } = await (supabase as any)
+      // Note: For null comparisons, we must use .is() not .eq() (Supabase/PostgREST requirement)
+      let existingQuery = (supabase as any)
         .from("vendor_inventory")
         .select("id")
         .eq("vendor_id", data.vendor_id)
-        .eq("material_id", data.material_id || null)
-        .eq("brand_id", data.brand_id || null)
-        .maybeSingle();
+        .eq("material_id", data.material_id);
+
+      // Handle brand_id: use .is() for null, .eq() for actual values
+      if (data.brand_id) {
+        existingQuery = existingQuery.eq("brand_id", data.brand_id);
+      } else {
+        existingQuery = existingQuery.is("brand_id", null);
+      }
+
+      const { data: existing } = await existingQuery.maybeSingle();
 
       if (existing) {
         // Update existing
@@ -603,13 +629,20 @@ export function useRecordPriceEntry() {
       if (error) throw error;
 
       // Also update vendor inventory current price
-      const { data: existingInventory } = await (supabase as any)
+      // Note: For null comparisons, we must use .is() not .eq() (Supabase/PostgREST requirement)
+      let inventoryQuery = (supabase as any)
         .from("vendor_inventory")
         .select("id")
         .eq("vendor_id", data.vendor_id)
-        .eq("material_id", data.material_id)
-        .eq("brand_id", data.brand_id || null)
-        .maybeSingle();
+        .eq("material_id", data.material_id);
+
+      if (data.brand_id) {
+        inventoryQuery = inventoryQuery.eq("brand_id", data.brand_id);
+      } else {
+        inventoryQuery = inventoryQuery.is("brand_id", null);
+      }
+
+      const { data: existingInventory } = await inventoryQuery.maybeSingle();
 
       if (existingInventory) {
         await (supabase as any)
@@ -910,7 +943,8 @@ export function useVendorMaterialCounts() {
 
 /**
  * Get vendor counts for all materials (batch query for list view)
- * Returns a map of materialId -> count
+ * Returns a map of materialId -> unique vendor count
+ * Also aggregates variant vendor counts to parent materials
  */
 export function useMaterialVendorCounts() {
   const supabase = createClient();
@@ -918,21 +952,69 @@ export function useMaterialVendorCounts() {
   return useQuery({
     queryKey: ["vendorInventory", "materialCounts"],
     queryFn: async () => {
-      const { data, error } = await (supabase as any)
+      // Fetch vendor_id along with material_id to count unique vendors
+      const { data: inventoryData, error: invError } = await (supabase as any)
         .from("vendor_inventory")
-        .select("material_id")
+        .select("material_id, vendor_id")
         .eq("is_available", true)
         .not("material_id", "is", null);
 
-      if (error) throw error;
+      if (invError) throw invError;
 
-      // Group by material_id and count
-      const counts: Record<string, number> = {};
-      (data || []).forEach((item: { material_id: string | null }) => {
-        if (item.material_id) {
-          counts[item.material_id] = (counts[item.material_id] || 0) + 1;
+      // Fetch materials with parent_id to aggregate variant counts to parents
+      const { data: materialsData, error: matError } = await supabase
+        .from("materials")
+        .select("id, parent_id")
+        .not("parent_id", "is", null);
+
+      if (matError) throw matError;
+
+      // Build parent lookup map: childId -> parentId
+      const parentMap = new Map<string, string>();
+      for (const mat of materialsData || []) {
+        if (mat.parent_id) {
+          parentMap.set(mat.id, mat.parent_id);
         }
-      });
+      }
+
+      // Track unique vendors per material using Sets
+      const vendorSets: Record<string, Set<string>> = {};
+      // Also track unique vendors for parent materials (aggregated from variants)
+      const parentVendorSets: Record<string, Set<string>> = {};
+
+      for (const item of inventoryData || []) {
+        if (!item.material_id || !item.vendor_id) continue;
+
+        // Count for the material itself
+        if (!vendorSets[item.material_id]) {
+          vendorSets[item.material_id] = new Set();
+        }
+        vendorSets[item.material_id].add(item.vendor_id);
+
+        // Also aggregate to parent if this is a variant
+        const parentId = parentMap.get(item.material_id);
+        if (parentId) {
+          if (!parentVendorSets[parentId]) {
+            parentVendorSets[parentId] = new Set();
+          }
+          parentVendorSets[parentId].add(item.vendor_id);
+        }
+      }
+
+      // Convert Sets to counts
+      const counts: Record<string, number> = {};
+
+      // Add counts for materials with direct vendors
+      for (const [materialId, vendorSet] of Object.entries(vendorSets)) {
+        counts[materialId] = vendorSet.size;
+      }
+
+      // Add/update counts for parent materials (aggregated from variants)
+      for (const [parentId, vendorSet] of Object.entries(parentVendorSets)) {
+        // Use the aggregated count (parent may also have direct vendors, so take max)
+        counts[parentId] = Math.max(counts[parentId] || 0, vendorSet.size);
+      }
+
       return counts;
     },
   });
@@ -1008,6 +1090,73 @@ export function useMaterialsWithoutVendors() {
       );
       return (materials || []).filter((m) => !materialsWithVendors.has(m.id));
     },
+  });
+}
+
+/**
+ * Get vendor inventory price for a specific vendor + material combination
+ * Used for auto-filling prices in PO creation
+ */
+export function useVendorMaterialPrice(
+  vendorId: string | undefined,
+  materialId: string | undefined,
+  brandId?: string | null
+) {
+  const supabase = createClient();
+
+  return useQuery({
+    queryKey: ["vendor-material-price", vendorId, materialId, brandId],
+    queryFn: async () => {
+      if (!vendorId || !materialId) return null;
+
+      let query = (supabase as any)
+        .from("vendor_inventory")
+        .select(
+          `
+          id,
+          current_price,
+          price_includes_gst,
+          gst_rate,
+          price_includes_transport,
+          transport_cost,
+          loading_cost,
+          unloading_cost,
+          min_order_qty,
+          unit,
+          updated_at
+        `
+        )
+        .eq("vendor_id", vendorId)
+        .eq("material_id", materialId)
+        .eq("is_available", true)
+        .limit(1);
+
+      if (brandId) {
+        query = query.eq("brand_id", brandId);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+
+      if (!data || data.length === 0) return null;
+
+      const item = data[0];
+      return {
+        price: item.current_price,
+        price_includes_gst: item.price_includes_gst,
+        gst_rate: item.gst_rate,
+        transport_cost: item.price_includes_transport ? 0 : item.transport_cost,
+        loading_cost: item.loading_cost,
+        unloading_cost: item.unloading_cost,
+        total_landed_cost:
+          (item.current_price || 0) +
+          (item.price_includes_transport ? 0 : item.transport_cost || 0) +
+          (item.loading_cost || 0) +
+          (item.unloading_cost || 0),
+        recorded_date: item.updated_at,
+      };
+    },
+    enabled: !!vendorId && !!materialId,
   });
 }
 

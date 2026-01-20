@@ -1071,9 +1071,12 @@ export interface VariantFormData {
   name: string;
   code?: string;
   local_name?: string;
+  // Legacy fields (for backward compatibility with TMT materials)
   weight_per_unit?: number | null;
   length_per_piece?: number | null;
-  rods_per_bundle?: number | null; // Number of rods per bundle (e.g., 10 for 8mm TMT)
+  rods_per_bundle?: number | null;
+  // Dynamic specifications based on category template
+  specifications?: Record<string, unknown>;
 }
 
 // Extended form data for creating a material with variants in one operation

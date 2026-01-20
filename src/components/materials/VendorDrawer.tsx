@@ -147,7 +147,13 @@ export default function VendorDrawer({
 
       if (existingVendor) {
         existingVendor.variantPrices = existingVendor.variantPrices || [];
-        existingVendor.variantPrices.push(variantPrice);
+        // Avoid duplicates - check if this variant is already in the list
+        const alreadyExists = existingVendor.variantPrices.some(
+          (vp) => vp.variantId === variantPrice.variantId
+        );
+        if (!alreadyExists) {
+          existingVendor.variantPrices.push(variantPrice);
+        }
         // Update lowest variant price
         if (inv.current_price && (!existingVendor.lowestVariantPrice || inv.current_price < existingVendor.lowestVariantPrice)) {
           existingVendor.lowestVariantPrice = inv.current_price;

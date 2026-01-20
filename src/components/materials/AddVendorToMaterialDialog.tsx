@@ -40,7 +40,7 @@ import VariantChecklistSection from "@/components/materials/VariantChecklistSect
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useCreateVendor, useVendors } from "@/hooks/queries/useVendors";
 import { useUpsertVendorInventory } from "@/hooks/queries/useVendorInventory";
-import { ensureFreshSession } from "@/lib/supabase/client";
+import { useMaterialVariants } from "@/hooks/queries/useMaterials";
 import type {
   MaterialWithDetails,
   VendorWithCategories,
@@ -135,6 +135,14 @@ export default function AddVendorToMaterialDialog({
   const [selectedBrands, setSelectedBrands] = useState<Set<string>>(new Set());
   const [brandPrices, setBrandPrices] = useState<Record<string, number>>({});
 
+  // Track if we've auto-selected variants for this dialog session
+  const [hasAutoSelected, setHasAutoSelected] = useState(false);
+
+  // Fetch variants for parent material (used for auto-selection)
+  const { data: materialVariants = [] } = useMaterialVariants(
+    hasVariants && open ? material?.id : undefined
+  );
+
   // Mutations
   const createVendor = useCreateVendor();
   const upsertInventory = useUpsertVendorInventory();
@@ -156,6 +164,7 @@ export default function AddVendorToMaterialDialog({
       setSelectedVendor(null);
       setSelectedVariants(new Set());
       setVariantPrices({});
+      setHasAutoSelected(false); // Reset auto-selection flag
       // Pre-select brand if provided
       if (preSelectedBrandId) {
         setSelectedBrands(new Set([preSelectedBrandId]));
@@ -189,6 +198,21 @@ export default function AddVendorToMaterialDialog({
       });
     }
   }, [open, material, preSelectedBrandId]);
+
+  // Auto-select all variants when they load (for parent materials with variants)
+  useEffect(() => {
+    if (
+      open &&
+      hasVariants &&
+      materialVariants.length > 0 &&
+      !hasAutoSelected &&
+      selectedVariants.size === 0
+    ) {
+      // Auto-select all variants
+      setSelectedVariants(new Set(materialVariants.map((v) => v.id)));
+      setHasAutoSelected(true);
+    }
+  }, [open, hasVariants, materialVariants, hasAutoSelected, selectedVariants.size]);
 
   const handleVendorChange = (field: keyof VendorFormData, value: unknown) => {
     setVendorFormData((prev) => ({ ...prev, [field]: value }));
@@ -282,8 +306,8 @@ export default function AddVendorToMaterialDialog({
     }
 
     try {
-      // Ensure fresh session ONCE at the start (prevents multiple 15-second timeouts)
-      await ensureFreshSession();
+      // Note: ensureFreshSession is called internally by mutations with debouncing
+      // No need to call it here - the mutation hooks handle session checks
 
       let vendorId: string;
 

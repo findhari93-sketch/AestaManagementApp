@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import {
   Box,
   Table,
@@ -22,7 +22,10 @@ import {
   AutoAwesome as AutoGenerateIcon,
 } from "@mui/icons-material";
 import type { VariantFormData } from "@/types/material.types";
-import { TMT_WEIGHTS, TMT_STANDARD_LENGTH, TMT_STANDARD_LENGTH_UNIT, TMT_RODS_PER_BUNDLE } from "@/lib/weightCalculation";
+import type { MaterialCategory } from "@/types/material.types";
+import type { CategoryVariantTemplate } from "@/types/category-variant-fields.types";
+import { getCategoryTemplate } from "@/lib/category-variant-templates";
+import DynamicVariantField from "./DynamicVariantField";
 
 interface VariantInlineTableProps {
   parentName: string;
@@ -30,21 +33,58 @@ interface VariantInlineTableProps {
   parentUnit: string;
   variants: VariantFormData[];
   onVariantsChange: (variants: VariantFormData[]) => void;
+  /** Category ID for determining which variant fields to show */
+  categoryId?: string | null;
+  /** Categories list for resolving category by ID */
+  categories?: MaterialCategory[];
 }
 
 export default function VariantInlineTable({
   parentName,
   parentCode,
-  parentUnit,
   variants,
   onVariantsChange,
+  categoryId,
+  categories,
 }: VariantInlineTableProps) {
-  const [newVariant, setNewVariant] = useState<Partial<VariantFormData>>({
-    name: "",
-    weight_per_unit: null,
-    length_per_piece: null,
-    rods_per_bundle: null,
-  });
+  // Resolve category and get template
+  const category = useMemo(() => {
+    if (!categoryId || !categories) return null;
+    return categories.find((c) => c.id === categoryId) ?? null;
+  }, [categoryId, categories]);
+
+  // Get parent category for hierarchical matching
+  const parentCategory = useMemo(() => {
+    if (!category?.parent_id || !categories) return null;
+    return categories.find((c) => c.id === category.parent_id) ?? null;
+  }, [category, categories]);
+
+  // Get the variant template for this category
+  const template: CategoryVariantTemplate = useMemo(() => {
+    return getCategoryTemplate(category, parentCategory);
+  }, [category, parentCategory]);
+
+  // Initialize new variant state with empty specifications
+  const getEmptyVariant = useCallback((): Partial<VariantFormData> => {
+    const specs: Record<string, unknown> = {};
+    // Set default values from template
+    template.fields.forEach((field) => {
+      if (field.defaultValue !== undefined) {
+        specs[field.key] = field.defaultValue;
+      }
+    });
+    return {
+      name: "",
+      specifications: specs,
+    };
+  }, [template]);
+
+  const [newVariant, setNewVariant] = useState<Partial<VariantFormData>>(getEmptyVariant);
+
+  // Update new variant state when template changes
+  useMemo(() => {
+    setNewVariant(getEmptyVariant());
+  }, [getEmptyVariant]);
 
   const handleAddVariant = useCallback(() => {
     if (!newVariant.name?.trim()) return;
@@ -53,19 +93,25 @@ export default function VariantInlineTable({
       ? `${parentCode}-V${(variants.length + 1).toString().padStart(2, "0")}`
       : undefined;
 
+    // Extract legacy fields from specifications for backward compatibility
+    const specs = newVariant.specifications ?? {};
+
     onVariantsChange([
       ...variants,
       {
         name: newVariant.name.trim(),
         code: variantCode,
-        weight_per_unit: newVariant.weight_per_unit,
-        length_per_piece: newVariant.length_per_piece,
-        rods_per_bundle: newVariant.rods_per_bundle,
+        // Legacy fields for backward compatibility
+        weight_per_unit: specs.weight_per_unit as number | null ?? null,
+        length_per_piece: specs.length_per_piece as number | null ?? null,
+        rods_per_bundle: specs.rods_per_bundle as number | null ?? null,
+        // All specifications including dynamic fields
+        specifications: specs,
       },
     ]);
 
-    setNewVariant({ name: "", weight_per_unit: null, length_per_piece: null, rods_per_bundle: null });
-  }, [newVariant, variants, parentCode, onVariantsChange]);
+    setNewVariant(getEmptyVariant());
+  }, [newVariant, variants, parentCode, onVariantsChange, getEmptyVariant]);
 
   const handleRemoveVariant = useCallback(
     (index: number) => {
@@ -75,38 +121,85 @@ export default function VariantInlineTable({
   );
 
   const handleVariantChange = useCallback(
-    (index: number, field: keyof VariantFormData, value: unknown) => {
+    (index: number, field: keyof VariantFormData | string, value: unknown) => {
       onVariantsChange(
-        variants.map((v, i) => (i === index ? { ...v, [field]: value } : v))
+        variants.map((v, i) => {
+          if (i !== index) return v;
+
+          // Handle specification fields
+          if (field !== "name" && field !== "code" && field !== "local_name") {
+            const newSpecs = { ...(v.specifications ?? {}), [field]: value };
+            return {
+              ...v,
+              specifications: newSpecs,
+              // Also update legacy fields if applicable
+              ...(field === "weight_per_unit" && { weight_per_unit: value as number | null }),
+              ...(field === "length_per_piece" && { length_per_piece: value as number | null }),
+              ...(field === "rods_per_bundle" && { rods_per_bundle: value as number | null }),
+            };
+          }
+
+          return { ...v, [field]: value };
+        })
       );
     },
     [variants, onVariantsChange]
   );
 
-  // Auto-generate common TMT sizes
+  const handleNewVariantSpecChange = useCallback(
+    (field: string, value: unknown) => {
+      setNewVariant((prev) => ({
+        ...prev,
+        specifications: {
+          ...(prev.specifications ?? {}),
+          [field]: value,
+        },
+      }));
+    },
+    []
+  );
+
+  // Auto-generate variants from template presets
   const handleAutoGenerate = useCallback(() => {
-    const commonSizes = Object.entries(TMT_WEIGHTS).map(
-      ([size, weight], index) => ({
-        name: `${parentName} ${size}`,
-        code: parentCode
-          ? `${parentCode}-V${(variants.length + index + 1).toString().padStart(2, "0")}`
-          : undefined,
-        weight_per_unit: weight,
-        length_per_piece: TMT_STANDARD_LENGTH,
-        rods_per_bundle: TMT_RODS_PER_BUNDLE[size] ?? null,
-      })
-    );
+    const config = template.autoGenerateConfig;
+    if (!config?.enabled || !config.presets) return;
 
-    onVariantsChange([...variants, ...commonSizes]);
-  }, [parentName, parentCode, variants, onVariantsChange]);
+    const newVariants = config.presets.map((preset, index) => ({
+      name: `${parentName} ${preset.name}`,
+      code: parentCode
+        ? `${parentCode}-V${(variants.length + index + 1).toString().padStart(2, "0")}`
+        : undefined,
+      // Legacy fields
+      weight_per_unit: preset.values.weight_per_unit as number | null ?? null,
+      length_per_piece: preset.values.length_per_piece as number | null ?? null,
+      rods_per_bundle: preset.values.rods_per_bundle as number | null ?? null,
+      // All specifications
+      specifications: preset.values,
+    }));
 
-  // Check if parent name contains TMT for showing auto-generate button
-  const isTMT = parentName.toLowerCase().includes("tmt");
+    onVariantsChange([...variants, ...newVariants]);
+  }, [template, parentName, parentCode, variants, onVariantsChange]);
+
+  // Check if auto-generate is available
+  const hasAutoGenerate = template.autoGenerateConfig?.enabled ?? false;
+
+  // Get value from variant (check specifications first, then legacy fields)
+  const getVariantValue = (variant: VariantFormData, fieldKey: string): unknown => {
+    // First check specifications
+    if (variant.specifications && fieldKey in variant.specifications) {
+      return variant.specifications[fieldKey];
+    }
+    // Then check legacy fields
+    if (fieldKey === "weight_per_unit") return variant.weight_per_unit;
+    if (fieldKey === "length_per_piece") return variant.length_per_piece;
+    if (fieldKey === "rods_per_bundle") return variant.rods_per_bundle;
+    return null;
+  };
 
   return (
     <Box>
       {/* Quick Actions */}
-      {isTMT && variants.length === 0 && (
+      {hasAutoGenerate && variants.length === 0 && (
         <Box sx={{ mb: 2 }}>
           <Button
             size="small"
@@ -114,7 +207,7 @@ export default function VariantInlineTable({
             onClick={handleAutoGenerate}
             variant="outlined"
           >
-            Auto-generate TMT sizes (8mm - 32mm)
+            {template.autoGenerateConfig?.buttonLabel ?? "Auto-generate variants"}
           </Button>
         </Box>
       )}
@@ -125,18 +218,19 @@ export default function VariantInlineTable({
           <TableHead>
             <TableRow>
               <TableCell>Variant Name *</TableCell>
-              <TableCell align="center" sx={{ width: 100 }}>
+              <TableCell align="center" sx={{ width: 80 }}>
                 Code
               </TableCell>
-              <TableCell align="right" sx={{ width: 120 }}>
-                Weight/Unit (kg)
-              </TableCell>
-              <TableCell align="right" sx={{ width: 110 }}>
-                Length/Pc (ft)
-              </TableCell>
-              <TableCell align="right" sx={{ width: 100 }}>
-                Rods/Bundle
-              </TableCell>
+              {template.fields.map((field) => (
+                <TableCell
+                  key={field.key}
+                  align={field.type === "number" ? "right" : "left"}
+                  sx={{ width: field.columnWidth ?? 100 }}
+                >
+                  {field.name}
+                  {field.unit && ` (${field.unit})`}
+                </TableCell>
+              ))}
               <TableCell sx={{ width: 50 }}></TableCell>
             </TableRow>
           </TableHead>
@@ -152,7 +246,7 @@ export default function VariantInlineTable({
                       handleVariantChange(index, "name", e.target.value)
                     }
                     variant="standard"
-                    placeholder="e.g., TMT Bars 8mm"
+                    placeholder="e.g., 8mm, 20mm, 50kg..."
                   />
                 </TableCell>
                 <TableCell align="center">
@@ -160,63 +254,22 @@ export default function VariantInlineTable({
                     {variant.code || "Auto"}
                   </Typography>
                 </TableCell>
-                <TableCell align="right">
-                  <TextField
-                    size="small"
-                    type="number"
-                    value={variant.weight_per_unit ?? ""}
-                    onChange={(e) =>
-                      handleVariantChange(
-                        index,
-                        "weight_per_unit",
-                        e.target.value ? parseFloat(e.target.value) : null
-                      )
-                    }
-                    variant="standard"
-                    slotProps={{
-                      input: { inputProps: { step: 0.001, min: 0 } },
-                    }}
-                    sx={{ width: 100 }}
-                  />
-                </TableCell>
-                <TableCell align="right">
-                  <TextField
-                    size="small"
-                    type="number"
-                    value={variant.length_per_piece ?? ""}
-                    onChange={(e) =>
-                      handleVariantChange(
-                        index,
-                        "length_per_piece",
-                        e.target.value ? parseFloat(e.target.value) : null
-                      )
-                    }
-                    variant="standard"
-                    slotProps={{
-                      input: { inputProps: { step: 0.1, min: 0 } },
-                    }}
-                    sx={{ width: 90 }}
-                  />
-                </TableCell>
-                <TableCell align="right">
-                  <TextField
-                    size="small"
-                    type="number"
-                    value={variant.rods_per_bundle ?? ""}
-                    onChange={(e) =>
-                      handleVariantChange(
-                        index,
-                        "rods_per_bundle",
-                        e.target.value ? parseInt(e.target.value, 10) : null
-                      )
-                    }
-                    variant="standard"
-                    slotProps={{
-                      input: { inputProps: { step: 1, min: 1 } },
-                    }}
-                    sx={{ width: 70 }}
-                  />
-                </TableCell>
+                {template.fields.map((field) => (
+                  <TableCell
+                    key={field.key}
+                    align={field.type === "number" ? "right" : "left"}
+                  >
+                    <DynamicVariantField
+                      field={field}
+                      value={getVariantValue(variant, field.key)}
+                      onChange={(value) =>
+                        handleVariantChange(index, field.key, value)
+                      }
+                      size="small"
+                      variant="standard"
+                    />
+                  </TableCell>
+                ))}
                 <TableCell>
                   <Tooltip title="Remove variant">
                     <IconButton
@@ -251,69 +304,22 @@ export default function VariantInlineTable({
                   Auto
                 </Typography>
               </TableCell>
-              <TableCell align="right">
-                <TextField
-                  size="small"
-                  type="number"
-                  placeholder="0.000"
-                  value={newVariant.weight_per_unit ?? ""}
-                  onChange={(e) =>
-                    setNewVariant((prev) => ({
-                      ...prev,
-                      weight_per_unit: e.target.value
-                        ? parseFloat(e.target.value)
-                        : null,
-                    }))
-                  }
-                  variant="standard"
-                  slotProps={{
-                    input: { inputProps: { step: 0.001, min: 0 } },
-                  }}
-                  sx={{ width: 100 }}
-                />
-              </TableCell>
-              <TableCell align="right">
-                <TextField
-                  size="small"
-                  type="number"
-                  placeholder="0.0"
-                  value={newVariant.length_per_piece ?? ""}
-                  onChange={(e) =>
-                    setNewVariant((prev) => ({
-                      ...prev,
-                      length_per_piece: e.target.value
-                        ? parseFloat(e.target.value)
-                        : null,
-                    }))
-                  }
-                  variant="standard"
-                  slotProps={{
-                    input: { inputProps: { step: 0.1, min: 0 } },
-                  }}
-                  sx={{ width: 90 }}
-                />
-              </TableCell>
-              <TableCell align="right">
-                <TextField
-                  size="small"
-                  type="number"
-                  placeholder="0"
-                  value={newVariant.rods_per_bundle ?? ""}
-                  onChange={(e) =>
-                    setNewVariant((prev) => ({
-                      ...prev,
-                      rods_per_bundle: e.target.value
-                        ? parseInt(e.target.value, 10)
-                        : null,
-                    }))
-                  }
-                  variant="standard"
-                  slotProps={{
-                    input: { inputProps: { step: 1, min: 1 } },
-                  }}
-                  sx={{ width: 70 }}
-                />
-              </TableCell>
+              {template.fields.map((field) => (
+                <TableCell
+                  key={field.key}
+                  align={field.type === "number" ? "right" : "left"}
+                >
+                  <DynamicVariantField
+                    field={field}
+                    value={newVariant.specifications?.[field.key] ?? null}
+                    onChange={(value) =>
+                      handleNewVariantSpecChange(field.key, value)
+                    }
+                    size="small"
+                    variant="standard"
+                  />
+                </TableCell>
+              ))}
               <TableCell>
                 <Tooltip title="Add variant">
                   <span>
@@ -339,7 +345,7 @@ export default function VariantInlineTable({
           color="text.secondary"
           sx={{ display: "block", mt: 1, textAlign: "center" }}
         >
-          Add variants for different sizes (e.g., 8mm, 10mm, 12mm for TMT bars)
+          Add variants for different sizes or specifications
         </Typography>
       )}
 

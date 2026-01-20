@@ -104,6 +104,10 @@ export default function VariantSubTable({ parentMaterial }: VariantSubTableProps
       let bestVendorName = "";
       let includesGst = false;
 
+      // Count unique vendors (not total records, to handle duplicates)
+      const uniqueVendorIds = new Set(invItems.map((inv) => inv.vendor_id));
+      const uniqueVendorCount = uniqueVendorIds.size;
+
       for (const inv of invItems) {
         if (inv.current_price && inv.current_price < bestPrice) {
           bestPrice = inv.current_price;
@@ -116,14 +120,14 @@ export default function VariantSubTable({ parentMaterial }: VariantSubTableProps
         priceMap.set(variantId, {
           price: bestPrice,
           vendorName: bestVendorName,
-          vendorCount: invItems.length,
+          vendorCount: uniqueVendorCount,
           includesGst,
         });
       } else {
         priceMap.set(variantId, {
           price: 0,
           vendorName: "",
-          vendorCount: invItems.length,
+          vendorCount: uniqueVendorCount,
           includesGst: false,
         });
       }

@@ -39,8 +39,8 @@ import {
 } from "@mui/icons-material";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useVendors } from "@/hooks/queries/useVendors";
-import { useMaterials } from "@/hooks/queries/useMaterials";
-import { useLatestPrice } from "@/hooks/queries/useVendorInventory";
+import { useMaterialsGrouped } from "@/hooks/queries/useMaterials";
+import { useLatestPrice, useVendorMaterialPrice } from "@/hooks/queries/useVendorInventory";
 import { useSiteGroupMembership } from "@/hooks/queries/useSiteGroups";
 import {
   useCreatePurchaseOrder,
@@ -96,7 +96,7 @@ export default function PurchaseOrderDialog({
   const isEdit = !!purchaseOrder;
 
   const { data: vendors = [] } = useVendors();
-  const { data: materials = [] } = useMaterials();
+  const { data: materials = [] } = useMaterialsGrouped();
 
   const createPO = useCreatePurchaseOrder();
   const updatePO = useUpdatePurchaseOrder();
@@ -133,6 +133,7 @@ export default function PurchaseOrderDialog({
 
   // New item form
   const [selectedMaterial, setSelectedMaterial] = useState<MaterialWithDetails | null>(null);
+  const [selectedVariant, setSelectedVariant] = useState<MaterialWithDetails | null>(null);
   const [selectedBrand, setSelectedBrand] = useState<MaterialBrand | null>(null);
   const [newItemQty, setNewItemQty] = useState("");
   const [newItemPrice, setNewItemPrice] = useState("");
@@ -141,18 +142,40 @@ export default function PurchaseOrderDialog({
   // Track if we've auto-filled the price to prevent infinite loops
   const hasAutofilledPrice = useRef(false);
 
-  // Fetch latest price for the selected vendor + material + brand
-  const { data: latestPrice } = useLatestPrice(
+  // Get available variants for selected parent material
+  const availableVariants = useMemo(() => {
+    if (!selectedMaterial?.variants) return [];
+    return selectedMaterial.variants.filter((v: MaterialWithDetails) => v.is_active !== false);
+  }, [selectedMaterial]);
+
+  const hasVariants = availableVariants.length > 0;
+
+  // The effective material for price lookup and brand selection (variant if selected, otherwise parent)
+  const effectiveMaterial = selectedVariant || selectedMaterial;
+  const effectiveMaterialId = effectiveMaterial?.id;
+
+  // Fetch price from vendor_inventory (primary source - catalog prices)
+  const { data: vendorInventoryPrice } = useVendorMaterialPrice(
     selectedVendor?.id,
-    selectedMaterial?.id,
+    effectiveMaterialId,
     selectedBrand?.id
   );
 
-  // Get available brands for selected material
+  // Fetch price from price_history (fallback - historical prices)
+  const { data: priceHistoryPrice } = useLatestPrice(
+    selectedVendor?.id,
+    effectiveMaterialId,
+    selectedBrand?.id
+  );
+
+  // Use vendor_inventory price first (catalog), fallback to price_history
+  const latestPrice = vendorInventoryPrice || priceHistoryPrice;
+
+  // Get available brands for effective material (variant or parent)
   const availableBrands = useMemo(() => {
-    if (!selectedMaterial?.brands) return [];
-    return selectedMaterial.brands.filter((b) => b.is_active);
-  }, [selectedMaterial]);
+    if (!effectiveMaterial?.brands) return [];
+    return effectiveMaterial.brands.filter((b) => b.is_active);
+  }, [effectiveMaterial]);
 
   // Calculate price change info
   const priceChangeInfo = useMemo(() => {
@@ -186,6 +209,7 @@ export default function PurchaseOrderDialog({
       setExpectedDeliveryDate(purchaseOrder.expected_delivery_date || "");
       setDeliveryAddress(purchaseOrder.delivery_address || "");
       setPaymentTerms(purchaseOrder.payment_terms || "");
+      setTransportCost(purchaseOrder.transport_cost?.toString() || "");
       setNotes(purchaseOrder.notes || "");
 
       // Map existing items
@@ -215,9 +239,6 @@ export default function PurchaseOrderDialog({
         const prefillMaterial = materials.find((m) => m.id === prefilledMaterialId);
         if (prefillMaterial) {
           setSelectedMaterial(prefillMaterial);
-          if (prefillMaterial.gst_rate) {
-            setNewItemTaxRate(prefillMaterial.gst_rate.toString());
-          }
         }
       }
 
@@ -236,6 +257,7 @@ export default function PurchaseOrderDialog({
     // Only reset these if no prefilled material
     if (!prefilledMaterialId) {
       setSelectedMaterial(null);
+      setSelectedVariant(null);
       setSelectedBrand(null);
       setNewItemTaxRate("");
     }
@@ -243,23 +265,33 @@ export default function PurchaseOrderDialog({
     setNewItemPrice("");
   }, [purchaseOrder, vendors, materials, open, prefilledVendorId, prefilledMaterialId]);
 
-  // Reset brand when material changes
+  // Reset variant and brand when material changes
   useEffect(() => {
+    setSelectedVariant(null);
     setSelectedBrand(null);
   }, [selectedMaterial]);
 
-  // Auto-fill price when latest price is found (only once per material/brand selection)
+  // Reset brand when variant changes
   useEffect(() => {
-    if (latestPrice && !hasAutofilledPrice.current) {
+    setSelectedBrand(null);
+  }, [selectedVariant]);
+
+  // Auto-fill price when latest price is found (only once per vendor/material/variant/brand selection)
+  useEffect(() => {
+    if (latestPrice && !hasAutofilledPrice.current && !newItemPrice) {
       hasAutofilledPrice.current = true;
       setNewItemPrice(latestPrice.price.toString());
+      // Also auto-fill transport cost if available and not already set
+      if (latestPrice.transport_cost && !transportCost) {
+        setTransportCost(latestPrice.transport_cost.toString());
+      }
     }
-  }, [latestPrice]);
+  }, [latestPrice, selectedVendor, selectedMaterial, selectedVariant, selectedBrand, newItemPrice, transportCost]);
 
-  // Reset auto-fill flag when material or brand changes
+  // Reset auto-fill flag when vendor, material, variant, or brand changes
   useEffect(() => {
     hasAutofilledPrice.current = false;
-  }, [selectedMaterial, selectedBrand]);
+  }, [selectedVendor, selectedMaterial, selectedVariant, selectedBrand]);
 
   // Update payingSiteId when siteId changes (separate effect to avoid loops)
   useEffect(() => {
@@ -295,6 +327,11 @@ export default function PurchaseOrderDialog({
       setError("Please select a material");
       return;
     }
+    // Require variant selection if material has variants
+    if (hasVariants && !selectedVariant) {
+      setError("Please select a variant");
+      return;
+    }
     if (!newItemQty || parseFloat(newItemQty) <= 0) {
       setError("Please enter a valid quantity");
       return;
@@ -304,25 +341,29 @@ export default function PurchaseOrderDialog({
       return;
     }
 
+    // Use variant for item data if selected, otherwise parent material
+    const materialToAdd = selectedVariant || selectedMaterial;
+
     const newItem: POItemRow = {
-      material_id: selectedMaterial.id,
+      material_id: materialToAdd.id,
       brand_id: selectedBrand?.id,
       quantity: parseFloat(newItemQty),
       unit_price: parseFloat(newItemPrice),
-      tax_rate: newItemTaxRate ? parseFloat(newItemTaxRate) : selectedMaterial.gst_rate || undefined,
-      materialName: selectedMaterial.name,
+      tax_rate: newItemTaxRate ? parseFloat(newItemTaxRate) : undefined,
+      materialName: materialToAdd.name,
       brandName: selectedBrand
         ? selectedBrand.variant_name
           ? `${selectedBrand.brand_name} ${selectedBrand.variant_name}`
           : selectedBrand.brand_name
         : undefined,
-      unit: selectedMaterial.unit,
-      weight_per_unit: selectedMaterial.weight_per_unit,
-      weight_unit: selectedMaterial.weight_unit,
+      unit: materialToAdd.unit,
+      weight_per_unit: materialToAdd.weight_per_unit,
+      weight_unit: materialToAdd.weight_unit,
     };
 
     setItems([...items, newItem]);
     setSelectedMaterial(null);
+    setSelectedVariant(null);
     setSelectedBrand(null);
     setNewItemQty("");
     setNewItemPrice("");
@@ -428,6 +469,7 @@ export default function PurchaseOrderDialog({
             expected_delivery_date: expectedDeliveryDate || undefined,
             delivery_address: deliveryAddress || undefined,
             payment_terms: paymentTerms || undefined,
+            transport_cost: transportCost ? parseFloat(transportCost) : undefined,
             notes: notes || undefined,
           },
         });
@@ -770,26 +812,29 @@ export default function PurchaseOrderDialog({
             </Grid>
           )}
 
-          {/* Transport Cost for non-group purchases (not shown in historical mode for grouped sites) */}
-          {(!groupMembership?.isInGroup || (!isGroupStock && !isHistoricalMode)) && !isEdit && (
-            <Grid size={{ xs: 12, md: 6 }}>
-              <TextField
-                fullWidth
-                type="number"
-                label="Transport Cost (Optional)"
-                value={transportCost}
-                onChange={(e) => setTransportCost(e.target.value)}
-                slotProps={{
-                  input: {
-                    startAdornment: (
-                      <InputAdornment position="start">₹</InputAdornment>
-                    ),
-                    inputProps: { min: 0, step: 0.01 },
-                  },
-                }}
-              />
-            </Grid>
-          )}
+          {/* Transport Cost - visible for both new and edit */}
+          <Grid size={{ xs: 12, md: 6 }}>
+            <TextField
+              fullWidth
+              type="number"
+              label="Transport Cost"
+              value={transportCost}
+              onChange={(e) => setTransportCost(e.target.value)}
+              slotProps={{
+                input: {
+                  startAdornment: (
+                    <InputAdornment position="start">₹</InputAdornment>
+                  ),
+                  inputProps: { min: 0, step: 0.01 },
+                },
+              }}
+              helperText={
+                latestPrice?.transport_cost
+                  ? `Last: ${formatCurrency(latestPrice.transport_cost)}`
+                  : "Enter transport/delivery cost"
+              }
+            />
+          </Grid>
 
           {/* Add Item Section */}
           <Grid size={12}>
@@ -807,9 +852,6 @@ export default function PurchaseOrderDialog({
               value={selectedMaterial}
               onChange={(_, value) => {
                 setSelectedMaterial(value);
-                if (value?.gst_rate) {
-                  setNewItemTaxRate(value.gst_rate.toString());
-                }
                 // Reset price when material changes
                 setNewItemPrice("");
               }}
@@ -832,6 +874,30 @@ export default function PurchaseOrderDialog({
             />
           </Grid>
 
+          {/* Variant Selection - show when material has variants */}
+          {hasVariants && (
+            <Grid size={{ xs: 12, md: 2 }}>
+              <Autocomplete
+                options={availableVariants}
+                getOptionLabel={(option) => option.name}
+                value={selectedVariant}
+                onChange={(_, value) => {
+                  setSelectedVariant(value);
+                  // Reset price to trigger re-fetch
+                  setNewItemPrice("");
+                }}
+                renderInput={(params) => (
+                  <TextField {...params} label="Variant" size="small" required />
+                )}
+                renderOption={(props, option) => (
+                  <li {...props} key={option.id}>
+                    <Typography variant="body2">{option.name}</Typography>
+                  </li>
+                )}
+              />
+            </Grid>
+          )}
+
           {/* Brand Selection */}
           <Grid size={{ xs: 12, md: 2 }}>
             <Autocomplete
@@ -847,15 +913,15 @@ export default function PurchaseOrderDialog({
                 // Reset price to trigger re-fetch
                 setNewItemPrice("");
               }}
-              disabled={!selectedMaterial || availableBrands.length === 0}
+              disabled={!effectiveMaterial || availableBrands.length === 0}
               renderInput={(params) => (
                 <TextField
                   {...params}
                   label="Brand"
                   size="small"
                   placeholder={
-                    !selectedMaterial
-                      ? "Select material"
+                    !effectiveMaterial
+                      ? hasVariants ? "Select variant" : "Select material"
                       : availableBrands.length === 0
                       ? "No brands"
                       : "Optional"

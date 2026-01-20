@@ -375,6 +375,17 @@ export function useGenerateMaterialRefCode() {
 }
 
 /**
+ * Generate a fallback reference code if RPC function doesn't exist
+ */
+function generateFallbackRefCode(type: MaterialPurchaseType): string {
+  const date = new Date();
+  const dateStr = date.toISOString().slice(2, 10).replace(/-/g, "");
+  const random = Math.random().toString(36).substring(2, 6).toUpperCase();
+  const prefix = type === "own_site" ? "MAT" : "GSP";
+  return `${prefix}-${dateStr}-${random}`;
+}
+
+/**
  * Create a new material purchase expense
  */
 export function useCreateMaterialPurchase() {
@@ -385,13 +396,23 @@ export function useCreateMaterialPurchase() {
     mutationFn: async (data: MaterialPurchaseExpenseFormData) => {
       await ensureFreshSession();
 
-      // Generate reference code
-      const functionName = data.purchase_type === "own_site"
-        ? "generate_material_purchase_reference"
-        : "generate_group_stock_purchase_reference";
+      // Generate reference code (with fallback if RPC doesn't exist)
+      let refCode: string;
+      try {
+        const functionName = data.purchase_type === "own_site"
+          ? "generate_material_purchase_reference"
+          : "generate_group_stock_purchase_reference";
 
-      const { data: refCode, error: refError } = await (supabase as any).rpc(functionName);
-      if (refError) throw refError;
+        const { data: rpcRefCode, error: refError } = await (supabase as any).rpc(functionName);
+        if (refError) {
+          console.warn("RPC function not found, using fallback:", refError);
+          refCode = generateFallbackRefCode(data.purchase_type);
+        } else {
+          refCode = rpcRefCode;
+        }
+      } catch {
+        refCode = generateFallbackRefCode(data.purchase_type);
+      }
 
       // Calculate total amount from items
       const totalAmount = data.items.reduce(
@@ -429,7 +450,13 @@ export function useCreateMaterialPurchase() {
         .select()
         .single();
 
-      if (purchaseError) throw purchaseError;
+      if (purchaseError) {
+        // Check if it's a table not found error
+        if (purchaseError.code === "42P01" || purchaseError.message?.includes("does not exist")) {
+          throw new Error("Database migration required: material_purchase_expenses table does not exist. Please run database migrations.");
+        }
+        throw purchaseError;
+      }
 
       // Insert items
       if (data.items.length > 0) {
@@ -553,7 +580,7 @@ export function useUpdateMaterialPurchase() {
 }
 
 /**
- * Delete a material purchase expense
+ * Delete a material purchase expense (with two-way cascade to linked PO)
  */
 export function useDeleteMaterialPurchase() {
   const supabase = createClient();
@@ -563,6 +590,16 @@ export function useDeleteMaterialPurchase() {
     mutationFn: async (id: string) => {
       await ensureFreshSession();
 
+      // Get the material expense to find linked PO and site_id
+      const { data: expense } = await (supabase as any)
+        .from("material_purchase_expenses")
+        .select("purchase_order_id, site_id")
+        .eq("id", id)
+        .single();
+
+      const siteId = expense?.site_id;
+      const linkedPoId = expense?.purchase_order_id;
+
       // Items will be deleted automatically via ON DELETE CASCADE
       const { error } = await (supabase as any)
         .from("material_purchase_expenses")
@@ -570,10 +607,60 @@ export function useDeleteMaterialPurchase() {
         .eq("id", id);
 
       if (error) throw error;
-      return { id };
+
+      // Two-way cascade: Also delete linked PO if exists
+      if (linkedPoId) {
+        try {
+          // Get deliveries for this PO
+          const { data: deliveries } = await supabase
+            .from("deliveries")
+            .select("id")
+            .eq("po_id", linkedPoId);
+
+          // Delete delivery items first
+          if (deliveries && deliveries.length > 0) {
+            const deliveryIds = deliveries.map((d) => d.id);
+            await supabase
+              .from("delivery_items")
+              .delete()
+              .in("delivery_id", deliveryIds);
+
+            // Delete deliveries
+            await supabase
+              .from("deliveries")
+              .delete()
+              .eq("po_id", linkedPoId);
+          }
+
+          // Delete PO items
+          await supabase
+            .from("purchase_order_items")
+            .delete()
+            .eq("po_id", linkedPoId);
+
+          // Delete the PO
+          await supabase
+            .from("purchase_orders")
+            .delete()
+            .eq("id", linkedPoId);
+        } catch (poDeleteError) {
+          console.warn("Failed to delete linked PO:", poDeleteError);
+        }
+      }
+
+      return { id, siteId };
     },
-    onSuccess: () => {
+    onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.materialPurchases.all });
+      // Also invalidate PO and deliveries caches
+      if (result.siteId) {
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.purchaseOrders.bySite(result.siteId),
+        });
+        queryClient.invalidateQueries({
+          queryKey: ["deliveries", result.siteId],
+        });
+      }
     },
   });
 }
