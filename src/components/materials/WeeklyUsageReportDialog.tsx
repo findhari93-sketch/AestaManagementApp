@@ -96,6 +96,13 @@ export default function WeeklyUsageReportDialog({
   );
   const batchRecordUsage = useBatchRecordGroupStockUsage();
 
+  // Debug logging
+  console.log("[WeeklyUsageDialog] Render", {
+    groupMembership,
+    inventoryCount: groupInventory.length,
+    inventory: groupInventory
+  });
+
   // Default to current week
   const [weekStart, setWeekStart] = useState(() => getWeekDates(new Date()).start);
   const [weekEnd, setWeekEnd] = useState(() => getWeekDates(new Date()).end);
@@ -182,33 +189,47 @@ export default function WeeklyUsageReportDialog({
   };
 
   const handleSubmit = async () => {
+    console.log("[WeeklyUsage] Submit started", {
+      groupMembership,
+      entriesCount: entries.length,
+      weekEnd
+    });
+
     if (!groupMembership?.isInGroup || !groupMembership.groupId) {
       setError("Site is not part of a group");
+      console.error("[WeeklyUsage] Site is not part of a group");
       return;
     }
     if (entries.length === 0) {
       setError("Please add at least one usage entry");
+      console.error("[WeeklyUsage] No entries to submit");
       return;
     }
 
+    const payload = {
+      groupId: groupMembership.groupId,
+      entries: entries.map((entry) => ({
+        materialId: entry.materialId,
+        brandId: entry.brandId,
+        quantity: entry.quantity,
+        usageSiteId: entry.usageSiteId,
+        workDescription: entry.workDescription,
+        transactionDate: weekEnd, // Use week end date
+      })),
+    };
+
+    console.log("[WeeklyUsage] Submitting payload:", JSON.stringify(payload, null, 2));
+
     try {
-      await batchRecordUsage.mutateAsync({
-        groupId: groupMembership.groupId,
-        entries: entries.map((entry) => ({
-          materialId: entry.materialId,
-          brandId: entry.brandId,
-          quantity: entry.quantity,
-          usageSiteId: entry.usageSiteId,
-          workDescription: entry.workDescription,
-          transactionDate: weekEnd, // Use week end date
-        })),
-      });
+      const result = await batchRecordUsage.mutateAsync(payload);
+      console.log("[WeeklyUsage] Submit successful:", result);
 
       // Reset form
       setEntries([]);
       setError("");
       onClose();
     } catch (err: unknown) {
+      console.error("[WeeklyUsage] Submit failed:", err);
       const message =
         err instanceof Error ? err.message : "Failed to submit usage report";
       setError(message);
@@ -334,7 +355,10 @@ export default function WeeklyUsageReportDialog({
                 }`;
               }}
               value={selectedInventory}
-              onChange={(_, value) => setSelectedInventory(value)}
+              onChange={(_, value) => {
+                console.log("[WeeklyUsageDialog] Material selected:", value);
+                setSelectedInventory(value);
+              }}
               renderInput={(params) => (
                 <TextField {...params} label="Material from Stock" size="small" />
               )}

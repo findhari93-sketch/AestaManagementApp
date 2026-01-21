@@ -30,7 +30,9 @@ import {
   Delete,
 } from "@mui/icons-material";
 import { SupabaseClient } from "@supabase/supabase-js";
-import type { PaymentPhase } from "@/types/database.types";
+import type { Database } from "@/types/database.types";
+
+type PaymentPhase = Database["public"]["Tables"]["payment_phases"]["Row"];
 
 export type SitePlanUpdatePayload = {
   planName: string;

@@ -56,7 +56,20 @@ import AuditAvatarGroup from "@/components/common/AuditAvatarGroup";
 import TeaShopSettlementDialog from "@/components/tea-shop/TeaShopSettlementDialog";
 import GroupTeaShopEntryDialog from "@/components/tea-shop/GroupTeaShopEntryDialog";
 import GroupTeaShopSettlementDialog from "@/components/tea-shop/GroupTeaShopSettlementDialog";
-import type { TeaShopAccount, TeaShopEntry, TeaShopSettlement, TeaShopEntryExtended, SiteHoliday, TeaShopGroupEntryWithAllocations } from "@/types/database.types";
+import type { Database } from "@/types/database.types";
+
+type TeaShopAccount = Database["public"]["Tables"]["tea_shop_accounts"]["Row"];
+type TeaShopEntry = Database["public"]["Tables"]["tea_shop_entries"]["Row"];
+type TeaShopSettlement = Database["public"]["Tables"]["tea_shop_settlements"]["Row"];
+type SiteHoliday = Database["public"]["Tables"]["site_holidays"]["Row"];
+
+// Extended types - these might not exist in database.types
+interface TeaShopEntryExtended extends TeaShopEntry {
+  // Add any extended fields here
+}
+interface TeaShopGroupEntryWithAllocations {
+  // Add fields here
+}
 import type { SiteGroupWithSites } from "@/types/material.types";
 import {
   useGroupTeaShopAccount,
@@ -1452,6 +1465,8 @@ export default function TeaShopPage() {
           qr_code_url: bestQrCode,
           notes: companyTeaShop.notes,
           is_active: companyTeaShop.is_active,
+          is_group_shop: false,
+          site_group_id: null,
           created_at: companyTeaShop.created_at,
           updated_at: companyTeaShop.updated_at,
         } : null);

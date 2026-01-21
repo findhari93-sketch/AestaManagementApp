@@ -73,11 +73,11 @@ export default function GroupStockBatchCard({
   compact = false,
   currentSiteId,
 }: GroupStockBatchCardProps) {
+  const originalQty = batch.original_quantity ?? 0;
+  const remainingQty = batch.remaining_quantity ?? 0;
   const usagePercent =
-    batch.original_quantity > 0
-      ? ((batch.original_quantity - batch.remaining_quantity) /
-          batch.original_quantity) *
-        100
+    originalQty > 0
+      ? ((originalQty - remainingQty) / originalQty) * 100
       : 0;
 
   const isEditable = batch.status === "in_stock" || batch.status === "partial_used";
@@ -228,10 +228,10 @@ export default function GroupStockBatchCard({
             />
             <Box display="flex" justifyContent="space-between" mt={0.5}>
               <Typography variant="caption" color="text.secondary">
-                Remaining: {batch.remaining_quantity.toFixed(2)}
+                Remaining: {(batch.remaining_quantity ?? 0).toFixed(2)}
               </Typography>
               <Typography variant="caption" color="text.secondary">
-                Original: {batch.original_quantity.toFixed(2)}
+                Original: {(batch.original_quantity ?? 0).toFixed(2)}
               </Typography>
             </Box>
           </Box>

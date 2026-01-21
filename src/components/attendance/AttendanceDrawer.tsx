@@ -66,10 +66,10 @@ import { WorkUpdatesSection } from "./work-updates";
 import SectionAutocomplete from "../common/SectionAutocomplete";
 import { useDrawerPersistence } from "@/hooks/useDrawerPersistence";
 import type { WorkUpdates } from "@/types/work-updates.types";
-import type {
-  TeaShopEntry,
-  TeaShopAccount as TeaShopAccountType,
-} from "@/types/database.types";
+import type { Database } from "@/types/database.types";
+
+type TeaShopEntry = Database["public"]["Tables"]["tea_shop_entries"]["Row"];
+type TeaShopAccountType = Database["public"]["Tables"]["tea_shop_accounts"]["Row"];
 
 type AttendanceMode = "morning" | "evening" | "full";
 

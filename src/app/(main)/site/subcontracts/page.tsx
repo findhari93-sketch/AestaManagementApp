@@ -47,15 +47,15 @@ import { useSite } from "@/contexts/SiteContext";
 import PageHeader from "@/components/layout/PageHeader";
 import { hasEditPermission } from "@/lib/permissions";
 import SubcontractPaymentBreakdown from "@/components/subcontracts/SubcontractPaymentBreakdown";
-import type {
-  Subcontract,
-  ContractType,
-  ContractStatus,
-  MeasurementUnit,
-  PaymentMode,
-  PaymentType,
-  PaymentChannel,
-} from "@/types/database.types";
+import type { Database } from "@/types/database.types";
+
+type Subcontract = Database["public"]["Tables"]["subcontracts"]["Row"];
+type ContractType = Database["public"]["Enums"]["contract_type"];
+type ContractStatus = Database["public"]["Enums"]["contract_status"];
+type MeasurementUnit = Database["public"]["Enums"]["measurement_unit"];
+type PaymentMode = Database["public"]["Enums"]["payment_mode"];
+type PaymentType = Database["public"]["Enums"]["contract_payment_type"];
+type PaymentChannel = string;
 import { calculateSubcontractTotals } from "@/lib/services/subcontractService";
 import { withTimeout, TIMEOUTS } from "@/lib/utils/timeout";
 import dayjs from "dayjs";

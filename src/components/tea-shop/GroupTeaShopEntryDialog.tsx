@@ -18,13 +18,28 @@ import {
 } from "@mui/material";
 import { Close as CloseIcon, Groups as GroupsIcon } from "@mui/icons-material";
 import { useAuth } from "@/contexts/AuthContext";
-import type {
-  TeaShopAccount,
-  TeaShopGroupEntry,
-  TeaShopGroupEntryWithAllocations,
-  SiteAttendanceData,
-  LaborGroupPercentageSplit,
-} from "@/types/database.types";
+import type { Database } from "@/types/database.types";
+
+type TeaShopAccount = Database["public"]["Tables"]["tea_shop_accounts"]["Row"];
+type TeaShopGroupEntry = Database["public"]["Tables"]["tea_shop_group_entries"]["Row"];
+
+interface TeaShopGroupEntryWithAllocations extends TeaShopGroupEntry {
+  allocations?: any[];
+}
+interface SiteAttendanceData {
+  siteId: string;
+  siteName: string;
+  totalCount: number;
+  namedLaborerCount: number;
+  marketLaborerCount: number;
+  percentage: number;
+  allocatedAmount: number;
+}
+interface LaborGroupPercentageSplit {
+  daily: number;
+  contract: number;
+  market: number;
+}
 import type { SiteGroupWithSites } from "@/types/material.types";
 import GroupSiteAllocationPreview from "./GroupSiteAllocationPreview";
 import PercentageSplitInput from "./PercentageSplitInput";
@@ -93,7 +108,7 @@ export default function GroupTeaShopEntryDialog({
         setNotes(entry.notes || "");
         setIsOverride(entry.is_percentage_override);
         if (entry.percentage_split) {
-          setPercentageSplit(entry.percentage_split);
+          setPercentageSplit(entry.percentage_split as unknown as LaborGroupPercentageSplit);
         }
 
         // Restore allocations from entry

@@ -24,9 +24,129 @@ interface PendingDeliveryVerification {
   driver_name: string | null;
 }
 
+// Type for POs awaiting delivery
+export interface POAwaitingDelivery {
+  id: string;
+  po_number: string;
+  vendor_name: string | null;
+  vendor_id: string | null;
+  site_id: string;
+  order_date: string;
+  expected_delivery_date: string | null;
+  total_amount: number;
+  item_count: number;
+  status: string;
+  is_group_stock: boolean;
+  site_group_id: string | null;
+  items: Array<{
+    id: string;
+    material_id: string;
+    material_name: string;
+    brand_id: string | null;
+    brand_name: string | null;
+    quantity: number;
+    received_qty: number;
+    unit: string;
+    unit_price: number;
+  }>;
+}
+
 // ============================================
 // DELIVERY VERIFICATION
 // ============================================
+
+/**
+ * Fetch POs awaiting delivery (status = ordered or partial_delivered)
+ * These are POs that need delivery to be recorded by site engineer
+ */
+export function usePOsAwaitingDelivery(siteId: string | undefined) {
+  const supabase = createClient();
+
+  return useQuery({
+    queryKey: siteId
+      ? [...queryKeys.purchaseOrders.bySite(siteId), "awaiting-delivery"]
+      : ["purchase-orders", "awaiting-delivery"],
+    queryFn: async () => {
+      if (!siteId) return [] as POAwaitingDelivery[];
+
+      const { data, error } = await supabase
+        .from("purchase_orders")
+        .select(`
+          id,
+          po_number,
+          site_id,
+          vendor_id,
+          order_date,
+          expected_delivery_date,
+          total_amount,
+          status,
+          internal_notes,
+          vendor:vendors(name),
+          items:purchase_order_items(
+            id,
+            material_id,
+            quantity,
+            received_qty,
+            unit_price,
+            material:materials(id, name, code, unit),
+            brand:material_brands(id, brand_name)
+          )
+        `)
+        .eq("site_id", siteId)
+        .in("status", ["ordered", "partial_delivered"])
+        .order("order_date", { ascending: false });
+
+      if (error) throw error;
+
+      // Transform data
+      const transformed: POAwaitingDelivery[] = (data || []).map((po: any) => {
+        // Parse internal_notes to check if group stock
+        let isGroupStock = false;
+        let siteGroupId: string | null = null;
+        if (po.internal_notes) {
+          try {
+            const notes = typeof po.internal_notes === "string"
+              ? JSON.parse(po.internal_notes)
+              : po.internal_notes;
+            isGroupStock = notes?.is_group_stock === true;
+            siteGroupId = notes?.site_group_id || null;
+          } catch {
+            // Ignore parse errors
+          }
+        }
+
+        return {
+          id: po.id,
+          po_number: po.po_number,
+          vendor_name: po.vendor?.name || null,
+          vendor_id: po.vendor_id,
+          site_id: po.site_id,
+          order_date: po.order_date,
+          expected_delivery_date: po.expected_delivery_date,
+          total_amount: Number(po.total_amount || 0),
+          item_count: po.items?.length || 0,
+          status: po.status,
+          is_group_stock: isGroupStock,
+          site_group_id: siteGroupId,
+          items: (po.items || []).map((item: any) => ({
+            id: item.id,
+            material_id: item.material_id,
+            material_name: item.material?.name || "Unknown",
+            brand_id: item.brand?.id || null,
+            brand_name: item.brand?.brand_name || null,
+            quantity: Number(item.quantity || 0),
+            received_qty: Number(item.received_qty || 0),
+            unit: item.material?.unit || "nos",
+            unit_price: Number(item.unit_price || 0),
+          })),
+        };
+      });
+
+      return transformed;
+    },
+    enabled: !!siteId,
+  });
+}
 
 /**
  * Fetch pending delivery verifications for a site

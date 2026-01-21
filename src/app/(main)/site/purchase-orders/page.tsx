@@ -17,8 +17,6 @@ import {
   Card,
   CardContent,
   Grid,
-  Stack,
-  Drawer,
   Alert,
   Dialog,
   DialogTitle,
@@ -33,7 +31,6 @@ import {
   Search as SearchIcon,
   Visibility as ViewIcon,
   LocalShipping as DeliveryIcon,
-  CheckCircle as ApproveIcon,
   Send as SendIcon,
   Cancel as CancelIcon,
   Groups as GroupStockIcon,
@@ -49,15 +46,13 @@ import { hasAdminPermission, hasEditPermission } from "@/lib/permissions";
 import {
   usePurchaseOrders,
   usePOSummary,
-  useDeletePurchaseOrder,
-  useSubmitPOForApproval,
-  useApprovePurchaseOrder,
   useMarkPOAsOrdered,
   useCancelPurchaseOrder,
 } from "@/hooks/queries/usePurchaseOrders";
 import PurchaseOrderDialog from "@/components/materials/PurchaseOrderDialog";
 import DeliveryDialog from "@/components/materials/DeliveryDialog";
 import PODetailsDrawer from "@/components/materials/PODetailsDrawer";
+import PODeleteConfirmationDialog from "@/components/materials/PODeleteConfirmationDialog";
 import type {
   PurchaseOrderWithDetails,
   POStatus,
@@ -85,7 +80,7 @@ const STATUS_LABELS: Record<POStatus, string> = {
   cancelled: "Cancelled",
 };
 
-type TabValue = "all" | "draft" | "pending" | "active" | "delivered";
+type TabValue = "all" | "draft" | "active" | "delivered";
 
 // Prefilled data from URL params (e.g., from material-search)
 interface PrefilledPOData {
@@ -109,16 +104,9 @@ export default function PurchaseOrdersPage() {
   // Confirmation dialog states
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deletingPO, setDeletingPO] = useState<PurchaseOrderWithDetails | null>(null);
-  const [deleteError, setDeleteError] = useState("");
 
-  const [submitDialogOpen, setSubmitDialogOpen] = useState(false);
-  const [submittingPO, setSubmittingPO] = useState<PurchaseOrderWithDetails | null>(null);
-
-  const [approveDialogOpen, setApproveDialogOpen] = useState(false);
-  const [approvingPO, setApprovingPO] = useState<PurchaseOrderWithDetails | null>(null);
-
-  const [markOrderedDialogOpen, setMarkOrderedDialogOpen] = useState(false);
-  const [markingOrderedPO, setMarkingOrderedPO] = useState<PurchaseOrderWithDetails | null>(null);
+  const [placeOrderDialogOpen, setPlaceOrderDialogOpen] = useState(false);
+  const [placingOrderPO, setPlacingOrderPO] = useState<PurchaseOrderWithDetails | null>(null);
 
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   const [cancellingPO, setCancellingPO] = useState<PurchaseOrderWithDetails | null>(null);
@@ -171,9 +159,6 @@ export default function PurchaseOrdersPage() {
   const { data: allPOs = [], isLoading } = usePurchaseOrders(selectedSite?.id);
   const { data: summary } = usePOSummary(selectedSite?.id);
 
-  const deletePO = useDeletePurchaseOrder();
-  const submitForApproval = useSubmitPOForApproval();
-  const approvePO = useApprovePurchaseOrder();
   const markAsOrdered = useMarkPOAsOrdered();
   const cancelPO = useCancelPurchaseOrder();
 
@@ -186,12 +171,9 @@ export default function PurchaseOrdersPage() {
       case "draft":
         filtered = filtered.filter((po) => po.status === "draft");
         break;
-      case "pending":
-        filtered = filtered.filter((po) => po.status === "pending_approval");
-        break;
       case "active":
         filtered = filtered.filter((po) =>
-          ["approved", "ordered", "partial_delivered"].includes(po.status)
+          ["ordered", "partial_delivered"].includes(po.status)
         );
         break;
       case "delivered":
@@ -245,71 +227,30 @@ export default function PurchaseOrdersPage() {
 
   const handleDelete = useCallback((po: PurchaseOrderWithDetails) => {
     setDeletingPO(po);
-    setDeleteError("");
     setDeleteDialogOpen(true);
   }, []);
 
-  const handleConfirmDelete = useCallback(async () => {
-    if (!deletingPO) return;
-    setDeleteError("");
-    try {
-      await deletePO.mutateAsync({ id: deletingPO.id, siteId: deletingPO.site_id });
-      setDeleteDialogOpen(false);
-      setDeletingPO(null);
-    } catch (error) {
-      console.error("Failed to delete PO:", error);
-      const message = error instanceof Error ? error.message : "Failed to delete purchase order";
-      setDeleteError(message);
-    }
-  }, [deletePO, deletingPO]);
-
-  const handleSubmitForApproval = useCallback((po: PurchaseOrderWithDetails) => {
-    setSubmittingPO(po);
-    setSubmitDialogOpen(true);
+  const handleDeleteSuccess = useCallback(() => {
+    setDeleteDialogOpen(false);
+    setDeletingPO(null);
   }, []);
 
-  const handleConfirmSubmit = useCallback(async () => {
-    if (!submittingPO) return;
-    try {
-      await submitForApproval.mutateAsync(submittingPO.id);
-      setSubmitDialogOpen(false);
-      setSubmittingPO(null);
-    } catch (error) {
-      console.error("Failed to submit PO:", error);
-    }
-  }, [submitForApproval, submittingPO]);
-
-  const handleApprove = useCallback((po: PurchaseOrderWithDetails) => {
-    setApprovingPO(po);
-    setApproveDialogOpen(true);
+  // Place order - moves draft PO directly to ordered status
+  const handlePlaceOrder = useCallback((po: PurchaseOrderWithDetails) => {
+    setPlacingOrderPO(po);
+    setPlaceOrderDialogOpen(true);
   }, []);
 
-  const handleConfirmApprove = useCallback(async () => {
-    if (!approvingPO || !user?.id) return;
+  const handleConfirmPlaceOrder = useCallback(async () => {
+    if (!placingOrderPO) return;
     try {
-      await approvePO.mutateAsync({ id: approvingPO.id, userId: user.id });
-      setApproveDialogOpen(false);
-      setApprovingPO(null);
+      await markAsOrdered.mutateAsync(placingOrderPO.id);
+      setPlaceOrderDialogOpen(false);
+      setPlacingOrderPO(null);
     } catch (error) {
-      console.error("Failed to approve PO:", error);
+      console.error("Failed to place order:", error);
     }
-  }, [approvePO, approvingPO, user?.id]);
-
-  const handleMarkOrdered = useCallback((po: PurchaseOrderWithDetails) => {
-    setMarkingOrderedPO(po);
-    setMarkOrderedDialogOpen(true);
-  }, []);
-
-  const handleConfirmMarkOrdered = useCallback(async () => {
-    if (!markingOrderedPO) return;
-    try {
-      await markAsOrdered.mutateAsync(markingOrderedPO.id);
-      setMarkOrderedDialogOpen(false);
-      setMarkingOrderedPO(null);
-    } catch (error) {
-      console.error("Failed to update PO:", error);
-    }
-  }, [markAsOrdered, markingOrderedPO]);
+  }, [markAsOrdered, placingOrderPO]);
 
   const handleCancel = useCallback((po: PurchaseOrderWithDetails) => {
     setCancellingPO(po);
@@ -442,6 +383,7 @@ export default function PurchaseOrdersPage() {
             </IconButton>
           </Tooltip>
 
+          {/* Draft POs - can edit, place order, or delete */}
           {po.status === "draft" && canEdit && (
             <>
               <Tooltip title="Edit">
@@ -449,11 +391,11 @@ export default function PurchaseOrdersPage() {
                   <EditIcon fontSize="small" />
                 </IconButton>
               </Tooltip>
-              <Tooltip title="Submit for Approval">
+              <Tooltip title="Place Order">
                 <IconButton
                   size="small"
                   color="primary"
-                  onClick={() => handleSubmitForApproval(po)}
+                  onClick={() => handlePlaceOrder(po)}
                 >
                   <SendIcon fontSize="small" />
                 </IconButton>
@@ -470,55 +412,7 @@ export default function PurchaseOrdersPage() {
             </>
           )}
 
-          {po.status === "pending_approval" && isAdmin && (
-            <>
-              <Tooltip title="Edit">
-                <IconButton size="small" onClick={() => handleOpenDialog(po)}>
-                  <EditIcon fontSize="small" />
-                </IconButton>
-              </Tooltip>
-              <Tooltip title="Approve">
-                <IconButton
-                  size="small"
-                  color="success"
-                  onClick={() => handleApprove(po)}
-                >
-                  <ApproveIcon fontSize="small" />
-                </IconButton>
-              </Tooltip>
-              <Tooltip title="Cancel">
-                <IconButton
-                  size="small"
-                  color="error"
-                  onClick={() => handleCancel(po)}
-                >
-                  <CancelIcon fontSize="small" />
-                </IconButton>
-              </Tooltip>
-              <Tooltip title="Delete">
-                <IconButton
-                  size="small"
-                  color="error"
-                  onClick={() => handleDelete(po)}
-                >
-                  <DeleteIcon fontSize="small" />
-                </IconButton>
-              </Tooltip>
-            </>
-          )}
-
-          {po.status === "approved" && canEdit && (
-            <Tooltip title="Mark as Ordered">
-              <IconButton
-                size="small"
-                color="primary"
-                onClick={() => handleMarkOrdered(po)}
-              >
-                <SendIcon fontSize="small" />
-              </IconButton>
-            </Tooltip>
-          )}
-
+          {/* Ordered or Partial - can record delivery */}
           {["ordered", "partial_delivered"].includes(po.status) && canEdit && (
             <Tooltip title="Record Delivery">
               <IconButton
@@ -531,6 +425,7 @@ export default function PurchaseOrdersPage() {
             </Tooltip>
           )}
 
+          {/* Cancelled - can delete */}
           {po.status === "cancelled" && canEdit && (
             <Tooltip title="Delete">
               <IconButton
@@ -543,6 +438,7 @@ export default function PurchaseOrdersPage() {
             </Tooltip>
           )}
 
+          {/* Delivered - can edit and delete */}
           {po.status === "delivered" && canEdit && (
             <>
               <Tooltip title="Edit">
@@ -566,14 +462,10 @@ export default function PurchaseOrdersPage() {
     },
     [
       canEdit,
-      isAdmin,
       handleViewDetails,
       handleOpenDialog,
-      handleSubmitForApproval,
+      handlePlaceOrder,
       handleDelete,
-      handleApprove,
-      handleCancel,
-      handleMarkOrdered,
       handleOpenDeliveryDialog,
     ]
   );
@@ -632,23 +524,10 @@ export default function PurchaseOrdersPage() {
           <Card>
             <CardContent sx={{ py: 1.5 }}>
               <Typography variant="caption" color="text.secondary">
-                Pending Approval
-              </Typography>
-              <Typography variant="h5" color="warning.main">
-                {summary?.pending_approval || 0}
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid size={{ xs: 6, sm: 3 }}>
-          <Card>
-            <CardContent sx={{ py: 1.5 }}>
-              <Typography variant="caption" color="text.secondary">
                 Active Orders
               </Typography>
               <Typography variant="h5" color="info.main">
-                {(summary?.approved || 0) +
-                  (summary?.ordered || 0) +
+                {(summary?.ordered || 0) +
                   (summary?.partial_delivered || 0)}
               </Typography>
             </CardContent>
@@ -666,6 +545,21 @@ export default function PurchaseOrdersPage() {
             </CardContent>
           </Card>
         </Grid>
+        <Grid size={{ xs: 6, sm: 3 }}>
+          <Card>
+            <CardContent sx={{ py: 1.5 }}>
+              <Typography variant="caption" color="text.secondary">
+                Total
+              </Typography>
+              <Typography variant="h5">
+                {(summary?.draft || 0) +
+                  (summary?.ordered || 0) +
+                  (summary?.partial_delivered || 0) +
+                  (summary?.delivered || 0)}
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
       </Grid>
 
       {/* Tabs and Search */}
@@ -679,7 +573,6 @@ export default function PurchaseOrdersPage() {
         >
           <Tab label="All" value="all" />
           <Tab label="Draft" value="draft" />
-          <Tab label="Pending" value="pending" />
           <Tab label="Active" value="active" />
           <Tab label="Delivered" value="delivered" />
         </Tabs>
@@ -813,71 +706,40 @@ export default function PurchaseOrdersPage() {
         </DialogActions>
       </Dialog>
 
-      {/* Delete Confirmation Dialog */}
-      <Dialog
+      {/* Delete Confirmation Dialog with Impact Summary */}
+      <PODeleteConfirmationDialog
         open={deleteDialogOpen}
         onClose={() => {
           setDeleteDialogOpen(false);
           setDeletingPO(null);
-          setDeleteError("");
         }}
-        maxWidth="xs"
-        fullWidth
-      >
-        <DialogTitle>Delete Purchase Order</DialogTitle>
-        <DialogContent>
-          {deleteError && (
-            <Alert severity="error" sx={{ mb: 2 }}>
-              {deleteError}
-            </Alert>
-          )}
-          <Typography variant="body2" color="text.secondary">
-            Are you sure you want to delete PO <strong>{deletingPO?.po_number}</strong>? This action cannot be undone.
-          </Typography>
-        </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2 }}>
-          <Button
-            onClick={() => {
-              setDeleteDialogOpen(false);
-              setDeletingPO(null);
-              setDeleteError("");
-            }}
-          >
-            Cancel
-          </Button>
-          <Button
-            variant="contained"
-            color="error"
-            onClick={handleConfirmDelete}
-            disabled={deletePO.isPending}
-            startIcon={deletePO.isPending ? <CircularProgress size={16} color="inherit" /> : null}
-          >
-            {deletePO.isPending ? "Deleting..." : "Delete"}
-          </Button>
-        </DialogActions>
-      </Dialog>
+        poId={deletingPO?.id}
+        poNumber={deletingPO?.po_number}
+        siteId={selectedSite?.id || ""}
+        onSuccess={handleDeleteSuccess}
+      />
 
-      {/* Submit for Approval Confirmation Dialog */}
+      {/* Place Order Confirmation Dialog */}
       <Dialog
-        open={submitDialogOpen}
+        open={placeOrderDialogOpen}
         onClose={() => {
-          setSubmitDialogOpen(false);
-          setSubmittingPO(null);
+          setPlaceOrderDialogOpen(false);
+          setPlacingOrderPO(null);
         }}
         maxWidth="xs"
         fullWidth
       >
-        <DialogTitle>Submit for Approval</DialogTitle>
+        <DialogTitle>Place Order</DialogTitle>
         <DialogContent>
           <Typography variant="body2" color="text.secondary">
-            Are you sure you want to submit PO <strong>{submittingPO?.po_number}</strong> for approval?
+            Are you sure you want to place order for PO <strong>{placingOrderPO?.po_number}</strong>? This indicates the order has been sent to the vendor.
           </Typography>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2 }}>
           <Button
             onClick={() => {
-              setSubmitDialogOpen(false);
-              setSubmittingPO(null);
+              setPlaceOrderDialogOpen(false);
+              setPlacingOrderPO(null);
             }}
           >
             Cancel
@@ -885,85 +747,11 @@ export default function PurchaseOrdersPage() {
           <Button
             variant="contained"
             color="primary"
-            onClick={handleConfirmSubmit}
-            disabled={submitForApproval.isPending}
-            startIcon={submitForApproval.isPending ? <CircularProgress size={16} color="inherit" /> : null}
-          >
-            {submitForApproval.isPending ? "Submitting..." : "Submit"}
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* Approve Confirmation Dialog */}
-      <Dialog
-        open={approveDialogOpen}
-        onClose={() => {
-          setApproveDialogOpen(false);
-          setApprovingPO(null);
-        }}
-        maxWidth="xs"
-        fullWidth
-      >
-        <DialogTitle>Approve Purchase Order</DialogTitle>
-        <DialogContent>
-          <Typography variant="body2" color="text.secondary">
-            Are you sure you want to approve PO <strong>{approvingPO?.po_number}</strong>?
-          </Typography>
-        </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2 }}>
-          <Button
-            onClick={() => {
-              setApproveDialogOpen(false);
-              setApprovingPO(null);
-            }}
-          >
-            Cancel
-          </Button>
-          <Button
-            variant="contained"
-            color="success"
-            onClick={handleConfirmApprove}
-            disabled={approvePO.isPending}
-            startIcon={approvePO.isPending ? <CircularProgress size={16} color="inherit" /> : null}
-          >
-            {approvePO.isPending ? "Approving..." : "Approve"}
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* Mark as Ordered Confirmation Dialog */}
-      <Dialog
-        open={markOrderedDialogOpen}
-        onClose={() => {
-          setMarkOrderedDialogOpen(false);
-          setMarkingOrderedPO(null);
-        }}
-        maxWidth="xs"
-        fullWidth
-      >
-        <DialogTitle>Mark as Ordered</DialogTitle>
-        <DialogContent>
-          <Typography variant="body2" color="text.secondary">
-            Are you sure you want to mark PO <strong>{markingOrderedPO?.po_number}</strong> as ordered? This indicates the order has been placed with the vendor.
-          </Typography>
-        </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2 }}>
-          <Button
-            onClick={() => {
-              setMarkOrderedDialogOpen(false);
-              setMarkingOrderedPO(null);
-            }}
-          >
-            Cancel
-          </Button>
-          <Button
-            variant="contained"
-            color="primary"
-            onClick={handleConfirmMarkOrdered}
+            onClick={handleConfirmPlaceOrder}
             disabled={markAsOrdered.isPending}
             startIcon={markAsOrdered.isPending ? <CircularProgress size={16} color="inherit" /> : null}
           >
-            {markAsOrdered.isPending ? "Updating..." : "Mark as Ordered"}
+            {markAsOrdered.isPending ? "Placing Order..." : "Place Order"}
           </Button>
         </DialogActions>
       </Dialog>

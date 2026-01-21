@@ -35,7 +35,6 @@ import {
   TrendingUp as TrendingUpIcon,
   TrendingDown as TrendingDownIcon,
   TrendingFlat as TrendingFlatIcon,
-  History as HistoryIcon,
 } from "@mui/icons-material";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useVendors } from "@/hooks/queries/useVendors";
@@ -48,15 +47,12 @@ import {
   useAddPOItem,
   useRemovePOItem,
 } from "@/hooks/queries/usePurchaseOrders";
-import { useAddHistoricalGroupStockPurchase } from "@/hooks/queries/useSiteGroups";
-import { useCreateMaterialPurchase } from "@/hooks/queries/useMaterialPurchases";
 import type {
   PurchaseOrderWithDetails,
   PurchaseOrderItemFormData,
   Vendor,
   MaterialWithDetails,
   MaterialBrand,
-  MaterialPurchaseType,
 } from "@/types/material.types";
 import { formatCurrency } from "@/lib/formatters";
 import WeightCalculationDisplay from "./WeightCalculationDisplay";
@@ -102,24 +98,20 @@ export default function PurchaseOrderDialog({
   const updatePO = useUpdatePurchaseOrder();
   const addItem = useAddPOItem();
   const removeItem = useRemovePOItem();
-  const addHistoricalPurchase = useAddHistoricalGroupStockPurchase();
-  const createMaterialPurchase = useCreateMaterialPurchase();
 
   // Check if site belongs to a group
   const { data: groupMembership } = useSiteGroupMembership(siteId);
 
-  // Get today's date in YYYY-MM-DD format for comparison
+  // Get today's date in YYYY-MM-DD format
   const today = new Date().toISOString().split("T")[0];
 
   const [error, setError] = useState("");
   const [selectedVendor, setSelectedVendor] = useState<Vendor | null>(null);
   const [purchaseDate, setPurchaseDate] = useState(today);
   const [expectedDeliveryDate, setExpectedDeliveryDate] = useState("");
-
-  // Determine if this is historical mode (date is in the past)
-  const isHistoricalMode = Boolean(purchaseDate && purchaseDate < today);
   const [deliveryAddress, setDeliveryAddress] = useState("");
   const [paymentTerms, setPaymentTerms] = useState("");
+  const [paymentTiming, setPaymentTiming] = useState<"advance" | "on_delivery">("on_delivery");
   const [notes, setNotes] = useState("");
   const [items, setItems] = useState<POItemRow[]>([]);
 
@@ -127,9 +119,6 @@ export default function PurchaseOrderDialog({
   const [isGroupStock, setIsGroupStock] = useState(false);
   const [payingSiteId, setPayingSiteId] = useState<string>(siteId);
   const [transportCost, setTransportCost] = useState("");
-
-  // Historical mode purchase type (group_stock or own_site)
-  const [purchaseType, setPurchaseType] = useState<MaterialPurchaseType>("group_stock");
 
   // New item form
   const [selectedMaterial, setSelectedMaterial] = useState<MaterialWithDetails | null>(null);
@@ -283,7 +272,6 @@ export default function PurchaseOrderDialog({
       // Reset group stock fields
       setIsGroupStock(false);
       setTransportCost("");
-      setPurchaseType("group_stock");
     }
     setError("");
     // Only reset these if no prefilled material
@@ -433,7 +421,8 @@ export default function PurchaseOrderDialog({
     setItems(items.filter((_, i) => i !== index));
   };
 
-  const handleSubmit = async () => {
+  // Create PO with specified status (ordered or draft)
+  const handleCreatePO = async (status: "ordered" | "draft") => {
     if (!selectedVendor) {
       setError("Please select a vendor");
       return;
@@ -444,76 +433,6 @@ export default function PurchaseOrderDialog({
     }
 
     try {
-      // Historical Mode: Direct entry (skip PO workflow)
-      if (isHistoricalMode && !isEdit && groupMembership?.isInGroup) {
-        if (purchaseType === "own_site") {
-          // Own Site Purchase: Create BOTH a PO record (for visibility) AND expense record
-
-          // 1. Create a "delivered" PO for visibility in Purchase Orders list
-          const poResult = await createPO.mutateAsync({
-            site_id: siteId,
-            vendor_id: selectedVendor.id,
-            order_date: purchaseDate, // Use historical date
-            status: "delivered", // Mark as already delivered
-            notes: notes ? `[HISTORICAL] ${notes}` : "[HISTORICAL]",
-            transport_cost: parseFloat(transportCost) || undefined,
-            items: items.map((item) => ({
-              material_id: item.material_id,
-              brand_id: item.brand_id,
-              quantity: item.quantity,
-              unit_price: item.unit_price,
-              tax_rate: item.tax_rate,
-            })),
-          });
-
-          // 2. Create material purchase expense linked to PO for cascade delete
-          await createMaterialPurchase.mutateAsync({
-            site_id: siteId,
-            purchase_type: "own_site",
-            purchase_order_id: poResult.id, // Link to PO for cascade delete
-            vendor_id: selectedVendor.id,
-            vendor_name: selectedVendor.name,
-            purchase_date: purchaseDate,
-            transport_cost: parseFloat(transportCost) || 0,
-            is_paid: true,
-            paid_date: purchaseDate,
-            notes: notes || undefined,
-            items: items.map((item) => ({
-              material_id: item.material_id,
-              brand_id: item.brand_id,
-              quantity: item.quantity,
-              unit_price: item.unit_price,
-            })),
-          });
-        } else {
-          // Group Stock Purchase: Keep existing behavior
-          for (const item of items) {
-            // Calculate per-item transport cost (distributed by value)
-            const itemValue = item.quantity * item.unit_price;
-            const totalValue = totals.subtotal;
-            const itemTransportCost =
-              totalValue > 0
-                ? (parseFloat(transportCost) || 0) * (itemValue / totalValue)
-                : 0;
-
-            await addHistoricalPurchase.mutateAsync({
-              groupId: groupMembership.groupId!,
-              materialId: item.material_id,
-              brandId: item.brand_id,
-              quantity: item.quantity,
-              unitCost: item.unit_price,
-              transportCost: itemTransportCost,
-              paymentSiteId: payingSiteId || siteId,
-              purchaseDate,
-              vendorName: selectedVendor.name,
-              notes: notes || undefined,
-            });
-          }
-        }
-        onClose();
-        return;
-      }
-
       if (isEdit) {
         await updatePO.mutateAsync({
           id: purchaseOrder.id,
@@ -522,6 +441,7 @@ export default function PurchaseOrderDialog({
             expected_delivery_date: expectedDeliveryDate || undefined,
             delivery_address: deliveryAddress || undefined,
             payment_terms: paymentTerms || undefined,
+            payment_timing: paymentTiming,
             transport_cost: transportCost ? parseFloat(transportCost) : undefined,
             notes: notes || undefined,
           },
@@ -553,16 +473,19 @@ export default function PurchaseOrderDialog({
         await createPO.mutateAsync({
           site_id: siteId,
           vendor_id: selectedVendor.id,
+          status, // Use the passed status (ordered or draft)
+          order_date: purchaseDate,
           expected_delivery_date: expectedDeliveryDate || undefined,
           delivery_address: deliveryAddress || undefined,
           payment_terms: paymentTerms || undefined,
+          payment_timing: paymentTiming,
           transport_cost: transportCost ? parseFloat(transportCost) : undefined,
           notes: finalNotes || undefined,
           // Pass group stock info via internal_notes for processing on delivery
           internal_notes: isGroupStock
             ? JSON.stringify({
                 is_group_stock: true,
-                group_id: groupMembership?.groupId,
+                site_group_id: groupMembership?.groupId, // Used by delivery recording
                 payment_source_site_id: payingSiteId,
               })
             : undefined,
@@ -582,8 +505,14 @@ export default function PurchaseOrderDialog({
     }
   };
 
+  // Main submit creates as "ordered" directly (no approval needed)
+  const handleSubmit = () => handleCreatePO("ordered");
+
+  // Save as draft option
+  const handleSaveAsDraft = () => handleCreatePO("draft");
+
   const isSubmitting =
-    createPO.isPending || updatePO.isPending || addItem.isPending || addHistoricalPurchase.isPending || createMaterialPurchase.isPending;
+    createPO.isPending || updatePO.isPending || addItem.isPending;
 
   return (
     <Dialog
@@ -615,24 +544,6 @@ export default function PurchaseOrderDialog({
           </Alert>
         )}
 
-        {/* Historical Mode Indicator */}
-        {isHistoricalMode && !isEdit && (
-          <Alert
-            severity="info"
-            icon={<HistoryIcon />}
-            sx={{ mb: 2, bgcolor: "warning.50", borderColor: "warning.main" }}
-            variant="outlined"
-          >
-            <Typography variant="subtitle2" fontWeight={600}>
-              Historical Purchase Mode
-            </Typography>
-            <Typography variant="body2">
-              This is a past date ({purchaseDate}). The purchase will be recorded directly to
-              {groupMembership?.isInGroup ? " group stock" : " inventory"} without creating a purchase order.
-            </Typography>
-          </Alert>
-        )}
-
         <Grid container spacing={2}>
           {/* Vendor Selection */}
           <Grid size={{ xs: 12, md: 4 }}>
@@ -659,7 +570,7 @@ export default function PurchaseOrderDialog({
             />
           </Grid>
 
-          {/* Purchase Date - determines if historical mode */}
+          {/* Purchase Date */}
           {!isEdit && (
             <Grid size={{ xs: 12, md: 2.5 }}>
               <TextField
@@ -669,9 +580,6 @@ export default function PurchaseOrderDialog({
                 value={purchaseDate}
                 onChange={(e) => setPurchaseDate(e.target.value)}
                 slotProps={{ inputLabel: { shrink: true } }}
-                helperText={isHistoricalMode ? "Historical entry" : ""}
-                color={isHistoricalMode ? "warning" : undefined}
-                focused={isHistoricalMode}
               />
             </Grid>
           )}
@@ -684,7 +592,6 @@ export default function PurchaseOrderDialog({
               value={expectedDeliveryDate}
               onChange={(e) => setExpectedDeliveryDate(e.target.value)}
               slotProps={{ inputLabel: { shrink: true } }}
-              disabled={isHistoricalMode}
             />
           </Grid>
 
@@ -696,6 +603,20 @@ export default function PurchaseOrderDialog({
               onChange={(e) => setPaymentTerms(e.target.value)}
               placeholder="e.g., Net 30"
             />
+          </Grid>
+
+          <Grid size={{ xs: 12, md: 3 }}>
+            <TextField
+              fullWidth
+              select
+              label="Payment Timing"
+              value={paymentTiming}
+              onChange={(e) => setPaymentTiming(e.target.value as "advance" | "on_delivery")}
+              helperText="When should payment be made?"
+            >
+              <MenuItem value="on_delivery">Pay on Delivery</MenuItem>
+              <MenuItem value="advance">Pay in Advance</MenuItem>
+            </TextField>
           </Grid>
 
           <Grid size={12}>
@@ -716,108 +637,43 @@ export default function PurchaseOrderDialog({
                 variant="outlined"
                 sx={{
                   p: 2,
-                  bgcolor: (isGroupStock || (isHistoricalMode && purchaseType === "group_stock"))
-                    ? "primary.50"
-                    : (isHistoricalMode && purchaseType === "own_site")
-                    ? "success.50"
-                    : "transparent",
-                  borderColor: (isGroupStock || isHistoricalMode) ? "primary.main" : "divider",
+                  bgcolor: isGroupStock ? "primary.50" : "transparent",
+                  borderColor: isGroupStock ? "primary.main" : "divider",
                 }}
               >
                 <Box sx={{ display: "flex", alignItems: "flex-start", gap: 2 }}>
                   <GroupsIcon
-                    color={(isGroupStock || (isHistoricalMode && purchaseType === "group_stock")) ? "primary" : "action"}
+                    color={isGroupStock ? "primary" : "action"}
                     sx={{ mt: 0.5 }}
                   />
                   <Box sx={{ flex: 1 }}>
-                    {!isHistoricalMode ? (
-                      <FormControlLabel
-                        control={
-                          <Switch
-                            checked={isGroupStock}
-                            onChange={(e) => {
-                              setIsGroupStock(e.target.checked);
-                              if (e.target.checked && !payingSiteId) {
-                                setPayingSiteId(siteId);
-                              }
-                            }}
-                          />
-                        }
-                        label={
-                          <Typography fontWeight={500}>
-                            Purchase for Group Shared Stock
-                          </Typography>
-                        }
-                      />
-                    ) : (
-                      // Historical Mode: Show purchase type selector
-                      <Box>
-                        <Typography variant="subtitle2" gutterBottom fontWeight={500}>
-                          Purchase Type (Historical)
+                    <FormControlLabel
+                      control={
+                        <Switch
+                          checked={isGroupStock}
+                          onChange={(e) => {
+                            setIsGroupStock(e.target.checked);
+                            if (e.target.checked && !payingSiteId) {
+                              setPayingSiteId(siteId);
+                            }
+                          }}
+                        />
+                      }
+                      label={
+                        <Typography fontWeight={500}>
+                          Purchase for Group Shared Stock
                         </Typography>
-                        <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
-                          <Box
-                            onClick={() => setPurchaseType("own_site")}
-                            sx={{
-                              flex: 1,
-                              minWidth: 180,
-                              p: 1.5,
-                              border: 2,
-                              borderColor: purchaseType === "own_site" ? "success.main" : "divider",
-                              borderRadius: 1,
-                              cursor: "pointer",
-                              bgcolor: purchaseType === "own_site" ? "success.50" : "transparent",
-                              "&:hover": { bgcolor: purchaseType === "own_site" ? "success.50" : "action.hover" },
-                            }}
-                          >
-                            <Typography
-                              variant="body2"
-                              fontWeight={500}
-                              color={purchaseType === "own_site" ? "success.main" : "text.primary"}
-                            >
-                              Own Site Purchase
-                            </Typography>
-                            <Typography variant="caption" color="text.secondary">
-                              Materials for this site only
-                            </Typography>
-                          </Box>
-                          <Box
-                            onClick={() => setPurchaseType("group_stock")}
-                            sx={{
-                              flex: 1,
-                              minWidth: 180,
-                              p: 1.5,
-                              border: 2,
-                              borderColor: purchaseType === "group_stock" ? "primary.main" : "divider",
-                              borderRadius: 1,
-                              cursor: "pointer",
-                              bgcolor: purchaseType === "group_stock" ? "primary.50" : "transparent",
-                              "&:hover": { bgcolor: purchaseType === "group_stock" ? "primary.50" : "action.hover" },
-                            }}
-                          >
-                            <Typography
-                              variant="body2"
-                              fontWeight={500}
-                              color={purchaseType === "group_stock" ? "primary" : "text.primary"}
-                            >
-                              Group Shared Stock
-                            </Typography>
-                            <Typography variant="caption" color="text.secondary">
-                              Shared across {groupMembership.groupName}
-                            </Typography>
-                          </Box>
-                        </Box>
-                      </Box>
-                    )}
-                    {(!isHistoricalMode || purchaseType === "group_stock") && (
+                      }
+                    />
+                    {isGroupStock && (
                       <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
                         Materials will be shared across all sites in{" "}
                         <strong>{groupMembership.groupName}</strong>
                       </Typography>
                     )}
 
-                    {/* Show paying site for group stock mode (normal or historical) */}
-                    <Collapse in={isGroupStock || (isHistoricalMode && purchaseType === "group_stock")}>
+                    {/* Show paying site and transport cost for group stock mode */}
+                    <Collapse in={isGroupStock}>
                       <Grid container spacing={2} sx={{ mt: 1 }}>
                         <Grid size={{ xs: 12, sm: 6 }}>
                           <TextField
@@ -828,7 +684,6 @@ export default function PurchaseOrderDialog({
                             value={payingSiteId}
                             onChange={(e) => setPayingSiteId(e.target.value)}
                             helperText="Which site's money was used"
-                            required={isHistoricalMode}
                           >
                             {groupMembership.allSites?.map((site) => (
                               <MenuItem key={site.id} value={site.id}>
@@ -866,7 +721,7 @@ export default function PurchaseOrderDialog({
           )}
 
           {/* Transport Cost - visible when NOT in group stock mode (group stock has its own transport field) */}
-          {!isGroupStock && !(isHistoricalMode && purchaseType === "group_stock") && (
+          {!isGroupStock && (
             <Grid size={{ xs: 12, md: 6 }}>
               <TextField
                 fullWidth
@@ -1265,20 +1120,25 @@ export default function PurchaseOrderDialog({
         <Button onClick={onClose} disabled={isSubmitting}>
           Cancel
         </Button>
+        {!isEdit && (
+          <Button
+            variant="outlined"
+            onClick={handleSaveAsDraft}
+            disabled={isSubmitting || !selectedVendor || items.length === 0}
+          >
+            {isSubmitting ? "Saving..." : "Save as Draft"}
+          </Button>
+        )}
         <Button
           variant="contained"
           onClick={handleSubmit}
           disabled={isSubmitting || !selectedVendor || items.length === 0}
-          color={isHistoricalMode && !isEdit ? "warning" : "primary"}
-          startIcon={isHistoricalMode && !isEdit ? <HistoryIcon /> : undefined}
         >
           {isSubmitting
             ? "Saving..."
             : isEdit
             ? "Update"
-            : isHistoricalMode
-            ? "Record Purchase"
-            : "Create Draft PO"}
+            : "Create Order"}
         </Button>
       </DialogActions>
     </Dialog>

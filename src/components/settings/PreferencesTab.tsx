@@ -32,7 +32,7 @@ import {
 import { useAuth } from "@/contexts/AuthContext";
 import { useThemeMode } from "@/contexts/ThemeContext";
 import { createClient } from "@/lib/supabase/client";
-import { ThemePreference } from "@/types/database.types";
+type ThemePreference = string;
 
 interface PreferencesTabProps {
   onSuccess?: (message: string) => void;

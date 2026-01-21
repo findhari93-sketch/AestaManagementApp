@@ -23,7 +23,9 @@ import {
 } from "@mui/icons-material";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import type { TeaShopAccount } from "@/types/database.types";
+import type { Database } from "@/types/database.types";
+
+type TeaShopAccount = Database["public"]["Tables"]["tea_shop_accounts"]["Row"];
 
 interface TeaShopDrawerProps {
   open: boolean;

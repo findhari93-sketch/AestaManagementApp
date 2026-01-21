@@ -40,12 +40,16 @@ import { createClient } from "@/lib/supabase/client";
 import FileUploader, { UploadedFile } from "@/components/common/FileUploader";
 import PayerSourceSelector from "@/components/settlement/PayerSourceSelector";
 import { useAuth } from "@/contexts/AuthContext";
-import type {
-  TeaShopAccount,
-  TeaShopGroupEntryWithAllocations,
-  TeaShopGroupSettlement,
-  PaymentMode,
-} from "@/types/database.types";
+import type { Database } from "@/types/database.types";
+
+type TeaShopAccount = Database["public"]["Tables"]["tea_shop_accounts"]["Row"];
+type TeaShopGroupEntry = Database["public"]["Tables"]["tea_shop_group_entries"]["Row"];
+type TeaShopGroupSettlement = Database["public"]["Tables"]["tea_shop_group_settlements"]["Row"];
+type PaymentMode = Database["public"]["Enums"]["payment_mode"];
+
+interface TeaShopGroupEntryWithAllocations extends TeaShopGroupEntry {
+  allocations?: any[];
+}
 import type { SiteGroupWithSites } from "@/types/material.types";
 import type { PayerSource } from "@/types/settlement.types";
 import {

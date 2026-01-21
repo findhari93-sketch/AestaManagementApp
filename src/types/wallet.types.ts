@@ -4,7 +4,10 @@
  */
 
 import type { PayerSource } from "./settlement.types";
-import type { PaymentMode, SiteEngineerTransaction } from "./database.types";
+import type { Database } from "./database.types";
+
+type PaymentMode = Database["public"]["Enums"]["payment_mode"];
+type SiteEngineerTransaction = Database["public"]["Tables"]["site_engineer_transactions"]["Row"];
 
 // ============================================
 // Batch Code Prefixes

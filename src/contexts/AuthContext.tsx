@@ -4,7 +4,9 @@ import { createContext, useContext, useEffect, useState, useCallback, useRef } f
 import { User as SupabaseUser } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
 import { initializeSessionManager, stopSessionManager } from "@/lib/auth/sessionManager";
-import { User } from "@/types/database.types";
+import type { Database } from "@/types/database.types";
+
+type User = Database["public"]["Tables"]["users"]["Row"];
 
 interface AuthContextType {
   user: SupabaseUser | null;

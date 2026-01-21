@@ -3,7 +3,10 @@
  * Extracted from attendance-content.tsx for better organization
  */
 
-import type { LaborerType, DailyWorkSummary } from "@/types/database.types";
+import type { Database } from "@/types/database.types";
+
+type LaborerType = string;
+type DailyWorkSummary = Database["public"]["Tables"]["daily_work_summary"]["Row"];
 import type { WorkUpdates } from "@/types/work-updates.types";
 import type { AttendancePageData } from "@/lib/data/attendance";
 

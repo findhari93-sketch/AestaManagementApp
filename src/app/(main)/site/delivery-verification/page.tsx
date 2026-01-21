@@ -14,6 +14,14 @@ import {
   Divider,
   Stack,
   Badge,
+  Paper,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Tooltip,
 } from "@mui/material";
 import {
   LocalShipping as DeliveryIcon,
@@ -22,6 +30,9 @@ import {
   Cancel as RejectedIcon,
   HourglassEmpty as PendingIcon,
   PhotoCamera as CameraIcon,
+  ShoppingCart as POIcon,
+  Groups as GroupStockIcon,
+  Inventory as InventoryIcon,
 } from "@mui/icons-material";
 import PageHeader from "@/components/layout/PageHeader";
 import { useAuth } from "@/contexts/AuthContext";
@@ -30,9 +41,12 @@ import { useIsMobile } from "@/hooks/useIsMobile";
 import {
   usePendingDeliveryVerifications,
   useDeliveriesWithVerification,
+  usePOsAwaitingDelivery,
+  type POAwaitingDelivery,
 } from "@/hooks/queries/useDeliveryVerification";
 import DeliveryVerificationDialog from "@/components/materials/DeliveryVerificationDialog";
-import type { DeliveryVerificationStatus } from "@/types/material.types";
+import DeliveryDialog from "@/components/materials/DeliveryDialog";
+import type { DeliveryVerificationStatus, PurchaseOrderWithDetails } from "@/types/material.types";
 
 // Format currency
 const formatCurrency = (amount: number | null | undefined) => {
@@ -220,16 +234,20 @@ function PendingDeliveryCard({
 
 export default function DeliveryVerificationPage() {
   const [verificationDialogOpen, setVerificationDialogOpen] = useState(false);
-  const [selectedDeliveryId, setSelectedDeliveryId] = useState<string | null>(
-    null
-  );
-  const [activeTab, setActiveTab] = useState<"pending" | "all">("pending");
+  const [deliveryDialogOpen, setDeliveryDialogOpen] = useState(false);
+  const [selectedDeliveryId, setSelectedDeliveryId] = useState<string | null>(null);
+  const [selectedPO, setSelectedPO] = useState<POAwaitingDelivery | null>(null);
+  const [activeTab, setActiveTab] = useState<"awaiting" | "pending" | "all">("awaiting");
 
   const { userProfile } = useAuth();
   const { selectedSite } = useSite();
   const isMobile = useIsMobile();
 
-  // Fetch pending deliveries
+  // Fetch POs awaiting delivery
+  const { data: posAwaitingDelivery = [], isLoading: posLoading } =
+    usePOsAwaitingDelivery(selectedSite?.id);
+
+  // Fetch pending deliveries (already delivered, need verification)
   const { data: pendingDeliveries = [], isLoading: pendingLoading } =
     usePendingDeliveryVerifications(selectedSite?.id);
 
@@ -242,9 +260,19 @@ export default function DeliveryVerificationPage() {
     setVerificationDialogOpen(true);
   }, []);
 
-  const handleCloseDialog = useCallback(() => {
+  const handleCloseVerificationDialog = useCallback(() => {
     setVerificationDialogOpen(false);
     setSelectedDeliveryId(null);
+  }, []);
+
+  const handleRecordDelivery = useCallback((po: POAwaitingDelivery) => {
+    setSelectedPO(po);
+    setDeliveryDialogOpen(true);
+  }, []);
+
+  const handleCloseDeliveryDialog = useCallback(() => {
+    setDeliveryDialogOpen(false);
+    setSelectedPO(null);
   }, []);
 
   // Filter recent deliveries for "all" tab
@@ -268,7 +296,18 @@ export default function DeliveryVerificationPage() {
       )}
 
       {/* Tab Buttons */}
-      <Box sx={{ display: "flex", gap: 1, mb: 3 }}>
+      <Box sx={{ display: "flex", gap: 1, mb: 3, flexWrap: "wrap" }}>
+        <Button
+          variant={activeTab === "awaiting" ? "contained" : "outlined"}
+          onClick={() => setActiveTab("awaiting")}
+          startIcon={
+            <Badge badgeContent={posAwaitingDelivery.length} color="primary">
+              <POIcon />
+            </Badge>
+          }
+        >
+          Awaiting Delivery
+        </Button>
         <Button
           variant={activeTab === "pending" ? "contained" : "outlined"}
           onClick={() => setActiveTab("pending")}
@@ -290,7 +329,140 @@ export default function DeliveryVerificationPage() {
       </Box>
 
       {/* Content */}
-      {activeTab === "pending" ? (
+      {activeTab === "awaiting" ? (
+        // POs Awaiting Delivery
+        posLoading ? (
+          <Grid container spacing={2}>
+            {[1, 2, 3].map((i) => (
+              <Grid key={i} size={{ xs: 12, sm: 6, md: 4 }}>
+                <Skeleton height={280} variant="rounded" />
+              </Grid>
+            ))}
+          </Grid>
+        ) : posAwaitingDelivery.length === 0 ? (
+          <Card>
+            <CardContent>
+              <Box sx={{ textAlign: "center", py: 4 }}>
+                <POIcon sx={{ fontSize: 64, mb: 2, color: "text.secondary" }} />
+                <Typography variant="h6" gutterBottom>
+                  No Orders Awaiting Delivery
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  All purchase orders have been delivered or are not yet
+                  ordered.
+                </Typography>
+              </Box>
+            </CardContent>
+          </Card>
+        ) : (
+          <Grid container spacing={2}>
+            {posAwaitingDelivery.map((po) => (
+              <Grid key={po.id} size={{ xs: 12, sm: 6, md: 4 }}>
+                <Card
+                  variant="outlined"
+                  sx={{
+                    cursor: "pointer",
+                    "&:hover": { borderColor: "primary.main", boxShadow: 1 },
+                    transition: "all 0.2s",
+                  }}
+                  onClick={() => handleRecordDelivery(po)}
+                >
+                  <CardContent>
+                    <Stack spacing={1.5}>
+                      {/* Header */}
+                      <Box
+                        sx={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "flex-start",
+                        }}
+                      >
+                        <Box>
+                          <Typography variant="subtitle1" fontWeight="medium">
+                            {po.po_number}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            Ordered: {formatDate(po.order_date)}
+                          </Typography>
+                        </Box>
+                        <Stack direction="row" spacing={0.5}>
+                          {po.is_group_stock && (
+                            <Chip
+                              icon={<GroupStockIcon fontSize="small" />}
+                              label="Group"
+                              size="small"
+                              color="secondary"
+                            />
+                          )}
+                          <Chip
+                            label={po.status === "partial_delivered" ? "Partial" : "Ordered"}
+                            size="small"
+                            color={po.status === "partial_delivered" ? "warning" : "info"}
+                          />
+                        </Stack>
+                      </Box>
+
+                      <Divider />
+
+                      {/* Vendor */}
+                      <Box>
+                        <Typography variant="caption" color="text.secondary">
+                          Vendor
+                        </Typography>
+                        <Typography variant="body2" fontWeight="medium">
+                          {po.vendor_name || "-"}
+                        </Typography>
+                      </Box>
+
+                      {/* Items Summary */}
+                      <Box sx={{ display: "flex", justifyContent: "space-between" }}>
+                        <Box>
+                          <Typography variant="caption" color="text.secondary">
+                            Items
+                          </Typography>
+                          <Typography variant="body2">
+                            {po.item_count} item{po.item_count !== 1 ? "s" : ""}
+                          </Typography>
+                        </Box>
+                        <Box sx={{ textAlign: "right" }}>
+                          <Typography variant="caption" color="text.secondary">
+                            Total Value
+                          </Typography>
+                          <Typography variant="body2" fontWeight="medium" color="primary">
+                            {formatCurrency(po.total_amount)}
+                          </Typography>
+                        </Box>
+                      </Box>
+
+                      {/* Expected Delivery */}
+                      {po.expected_delivery_date && (
+                        <Chip
+                          label={`Expected: ${formatDate(po.expected_delivery_date)}`}
+                          size="small"
+                          variant="outlined"
+                        />
+                      )}
+
+                      {/* Action Button */}
+                      <Button
+                        variant="contained"
+                        startIcon={<DeliveryIcon />}
+                        fullWidth
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleRecordDelivery(po);
+                        }}
+                      >
+                        Record Delivery
+                      </Button>
+                    </Stack>
+                  </CardContent>
+                </Card>
+              </Grid>
+            ))}
+          </Grid>
+        )
+      ) : activeTab === "pending" ? (
         // Pending Deliveries
         pendingLoading ? (
           <Grid container spacing={2}>
@@ -406,11 +578,63 @@ export default function DeliveryVerificationPage() {
       {selectedDeliveryId && (
         <DeliveryVerificationDialog
           open={verificationDialogOpen}
-          onClose={handleCloseDialog}
+          onClose={handleCloseVerificationDialog}
           deliveryId={selectedDeliveryId}
           userId={userProfile?.id}
         />
       )}
+
+      {/* Delivery Dialog for recording deliveries */}
+      {selectedPO && (
+        <DeliveryDialog
+          open={deliveryDialogOpen}
+          onClose={handleCloseDeliveryDialog}
+          purchaseOrder={transformPOForDialog(selectedPO)}
+          siteId={selectedSite?.id || ""}
+        />
+      )}
     </Box>
   );
+}
+
+// Helper function to transform POAwaitingDelivery to PurchaseOrderWithDetails format
+function transformPOForDialog(po: POAwaitingDelivery): PurchaseOrderWithDetails {
+  // Create a partial object with the fields DeliveryDialog actually uses
+  // and cast to PurchaseOrderWithDetails
+  return {
+    id: po.id,
+    po_number: po.po_number,
+    site_id: po.site_id,
+    vendor_id: po.vendor_id || "",
+    status: po.status,
+    order_date: po.order_date,
+    expected_delivery_date: po.expected_delivery_date,
+    total_amount: po.total_amount,
+    internal_notes: po.is_group_stock
+      ? JSON.stringify({ is_group_stock: true, site_group_id: po.site_group_id })
+      : null,
+    vendor: po.vendor_name
+      ? { id: po.vendor_id || "", name: po.vendor_name }
+      : undefined,
+    items: po.items.map((item) => ({
+      id: item.id,
+      po_id: po.id,
+      material_id: item.material_id,
+      brand_id: item.brand_id,
+      quantity: item.quantity,
+      unit_price: item.unit_price,
+      received_qty: item.received_qty,
+      pending_qty: item.quantity - item.received_qty,
+      total_amount: item.quantity * item.unit_price,
+      material: {
+        id: item.material_id,
+        name: item.material_name || "",
+        code: "",
+        unit: item.unit || "nos",
+      },
+      brand: item.brand_id
+        ? { id: item.brand_id, brand_name: item.brand_name || "" }
+        : null,
+    })),
+  } as unknown as PurchaseOrderWithDetails;
 }

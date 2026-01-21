@@ -19,7 +19,9 @@ import {
 import { Edit as EditIcon } from "@mui/icons-material";
 import { createClient } from "@/lib/supabase/client";
 import type { UnifiedSettlementRecord } from "@/types/wallet.types";
-import type { PaymentMode } from "@/types/database.types";
+import type { Database } from "@/types/database.types";
+
+type PaymentMode = Database["public"]["Enums"]["payment_mode"];
 import dayjs from "dayjs";
 
 interface SettlementEditDialogProps {

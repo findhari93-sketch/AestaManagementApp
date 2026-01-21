@@ -26,7 +26,20 @@ import { useQueryClient } from "@tanstack/react-query";
 import { queryKeys } from "@/lib/cache/keys";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSite } from "@/contexts/SiteContext";
-import type { TeaShopAccount, TeaShopEntry, LaborGroupPercentageSplit, TeaShopEntryExtended } from "@/types/database.types";
+import type { Database } from "@/types/database.types";
+
+type TeaShopAccount = Database["public"]["Tables"]["tea_shop_accounts"]["Row"];
+type TeaShopEntry = Database["public"]["Tables"]["tea_shop_entries"]["Row"];
+
+interface LaborGroupPercentageSplit {
+  daily: number;
+  contract: number;
+  market: number;
+}
+
+interface TeaShopEntryExtended extends TeaShopEntry {
+  // Add extended fields if needed
+}
 import SimpleEntryModeContent from "./SimpleEntryModeContent";
 import GroupAllocationSection from "./GroupAllocationSection";
 import { useDayUnitsForDate, useTeaShopForSite, useCreateEntryAllocations } from "@/hooks/queries/useCompanyTeaShops";

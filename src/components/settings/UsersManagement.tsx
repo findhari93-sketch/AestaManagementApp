@@ -30,7 +30,10 @@ import {
 } from "@mui/icons-material";
 import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
 import { createClient } from "@/lib/supabase/client";
-import type { User, Site } from "@/types/database.types";
+import type { Database } from "@/types/database.types";
+
+type User = Database["public"]["Tables"]["users"]["Row"];
+type Site = Database["public"]["Tables"]["sites"]["Row"];
 import dayjs from "dayjs";
 
 export default function UsersManagement() {

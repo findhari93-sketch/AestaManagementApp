@@ -2,7 +2,9 @@
 
 import { createContext, useContext, useEffect, useState, useCallback, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { Site } from "@/types/database.types";
+import type { Database } from "@/types/database.types";
+
+type Site = Database["public"]["Tables"]["sites"]["Row"];
 import { useAuth } from "./AuthContext";
 import {
   setSelectedSiteCookie,

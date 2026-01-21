@@ -21,7 +21,7 @@ import {
   AccountBalanceWallet as WalletIcon,
   Receipt as ReceiptIcon,
 } from "@mui/icons-material";
-import type { SiteEngineerTransactionType } from "@/types/database.types";
+type SiteEngineerTransactionType = string;
 import dayjs from "dayjs";
 
 interface TransactionWithDetails {

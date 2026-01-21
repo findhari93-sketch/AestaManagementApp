@@ -368,6 +368,7 @@ export function useApprovePurchaseOrder() {
 
 /**
  * Mark PO as ordered (sent to vendor)
+ * Works from both "draft" and "approved" status (approval step is optional)
  */
 export function useMarkPOAsOrdered() {
   const queryClient = useQueryClient();
@@ -385,7 +386,7 @@ export function useMarkPOAsOrdered() {
           updated_at: new Date().toISOString(),
         })
         .eq("id", id)
-        .eq("status", "approved")
+        .in("status", ["draft", "approved"]) // Allow from draft or approved
         .select()
         .single();
 
@@ -551,6 +552,316 @@ export function useDeletePurchaseOrder() {
       // Invalidate material purchases cache
       queryClient.invalidateQueries({
         queryKey: queryKeys.materialPurchases.bySite(result.siteId),
+      });
+    },
+  });
+}
+
+/**
+ * Deletion impact summary type
+ */
+export interface PODeletionImpact {
+  deliveries: { id: string; grn_number: string; delivery_date: string }[];
+  deliveryItemsCount: number;
+  materialExpenses: { id: string; ref_code: string; total_amount: number; purchase_type: string }[];
+  materialExpenseItemsCount: number;
+  batchUsageRecords: { id: string; usage_site_id: string; quantity: number; site_name?: string }[];
+  interSiteSettlements: { id: string; settlement_code: string; total_amount: number; debtor_site_name?: string }[];
+  derivedExpenses: { id: string; ref_code: string; total_amount: number; site_name?: string }[];
+  poItemsCount: number;
+  hasGroupStockBatch: boolean;
+  batchRefCode: string | null;
+}
+
+/**
+ * Fetch the impact of deleting a PO - shows all related records that will be affected
+ */
+export function usePODeletionImpact(poId: string | undefined) {
+  const supabase = createClient();
+
+  return useQuery({
+    queryKey: poId ? ["po-deletion-impact", poId] : ["po-deletion-impact"],
+    queryFn: async (): Promise<PODeletionImpact> => {
+      if (!poId) {
+        return {
+          deliveries: [],
+          deliveryItemsCount: 0,
+          materialExpenses: [],
+          materialExpenseItemsCount: 0,
+          batchUsageRecords: [],
+          interSiteSettlements: [],
+          derivedExpenses: [],
+          poItemsCount: 0,
+          hasGroupStockBatch: false,
+          batchRefCode: null,
+        };
+      }
+
+      // Get deliveries for this PO
+      const { data: deliveries } = await supabase
+        .from("deliveries")
+        .select("id, grn_number, delivery_date")
+        .eq("po_id", poId);
+
+      // Count delivery items
+      let deliveryItemsCount = 0;
+      if (deliveries && deliveries.length > 0) {
+        const deliveryIds = deliveries.map((d) => d.id);
+        const { count } = await supabase
+          .from("delivery_items")
+          .select("id", { count: "exact", head: true })
+          .in("delivery_id", deliveryIds);
+        deliveryItemsCount = count || 0;
+      }
+
+      // Get material purchase expenses linked to this PO
+      const { data: materialExpenses } = await (supabase as any)
+        .from("material_purchase_expenses")
+        .select("id, ref_code, total_amount, purchase_type")
+        .eq("purchase_order_id", poId);
+
+      // Count material expense items
+      let materialExpenseItemsCount = 0;
+      if (materialExpenses && materialExpenses.length > 0) {
+        const expenseIds = materialExpenses.map((e: { id: string }) => e.id);
+        const { count } = await (supabase as any)
+          .from("material_purchase_expense_items")
+          .select("id", { count: "exact", head: true })
+          .in("expense_id", expenseIds);
+        materialExpenseItemsCount = count || 0;
+      }
+
+      // Check if this is a group stock batch
+      const groupStockExpense = materialExpenses?.find(
+        (e: { purchase_type: string }) => e.purchase_type === "group_stock"
+      );
+      const hasGroupStockBatch = !!groupStockExpense;
+      const batchRefCode = groupStockExpense?.ref_code || null;
+
+      // Get batch usage records if it's a group stock
+      let batchUsageRecords: { id: string; usage_site_id: string; quantity: number; site_name?: string }[] = [];
+      if (batchRefCode) {
+        const { data: usageRecords } = await (supabase as any)
+          .from("batch_usage_records")
+          .select("id, usage_site_id, quantity, sites:usage_site_id(name)")
+          .eq("batch_ref_code", batchRefCode);
+
+        if (usageRecords) {
+          batchUsageRecords = usageRecords.map((r: any) => ({
+            id: r.id,
+            usage_site_id: r.usage_site_id,
+            quantity: r.quantity,
+            site_name: r.sites?.name,
+          }));
+        }
+      }
+
+      // Get inter-site settlements for this batch
+      let interSiteSettlements: { id: string; settlement_code: string; total_amount: number; debtor_site_name?: string }[] = [];
+      if (batchRefCode) {
+        const { data: settlements } = await (supabase as any)
+          .from("inter_site_material_settlements")
+          .select("id, settlement_code, total_amount, debtor_site:debtor_site_id(name)")
+          .eq("batch_ref_code", batchRefCode);
+
+        if (settlements) {
+          interSiteSettlements = settlements.map((s: any) => ({
+            id: s.id,
+            settlement_code: s.settlement_code,
+            total_amount: s.total_amount,
+            debtor_site_name: s.debtor_site?.name,
+          }));
+        }
+      }
+
+      // Get derived expenses (debtor expenses and self-use expenses) that reference this batch
+      let derivedExpenses: { id: string; ref_code: string; total_amount: number; site_name?: string }[] = [];
+      if (batchRefCode) {
+        const { data: derived } = await (supabase as any)
+          .from("material_purchase_expenses")
+          .select("id, ref_code, total_amount, site:site_id(name)")
+          .eq("original_batch_code", batchRefCode);
+
+        if (derived) {
+          derivedExpenses = derived.map((e: any) => ({
+            id: e.id,
+            ref_code: e.ref_code,
+            total_amount: e.total_amount,
+            site_name: e.site?.name,
+          }));
+        }
+      }
+
+      // Count PO items
+      const { count: poItemsCount } = await supabase
+        .from("purchase_order_items")
+        .select("id", { count: "exact", head: true })
+        .eq("po_id", poId);
+
+      return {
+        deliveries: deliveries || [],
+        deliveryItemsCount,
+        materialExpenses: materialExpenses || [],
+        materialExpenseItemsCount,
+        batchUsageRecords,
+        interSiteSettlements,
+        derivedExpenses,
+        poItemsCount: poItemsCount || 0,
+        hasGroupStockBatch,
+        batchRefCode,
+      };
+    },
+    enabled: !!poId,
+    staleTime: 0, // Always fetch fresh data
+  });
+}
+
+/**
+ * Delete a purchase order with full cascade (includes group stock cleanup)
+ * This enhanced version also cleans up batch usage records, settlements, and derived expenses
+ */
+export function useDeletePurchaseOrderCascade() {
+  const queryClient = useQueryClient();
+  const supabase = createClient();
+
+  return useMutation({
+    mutationFn: async ({ id, siteId }: { id: string; siteId: string }) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
+      // First, get material purchase expenses to find batch ref_code
+      const { data: materialExpenses } = await (supabase as any)
+        .from("material_purchase_expenses")
+        .select("id, ref_code, purchase_type")
+        .eq("purchase_order_id", id);
+
+      // Find group stock batch if exists
+      const groupStockExpense = materialExpenses?.find(
+        (e: { purchase_type: string }) => e.purchase_type === "group_stock"
+      );
+      const batchRefCode = groupStockExpense?.ref_code || null;
+
+      // If this is a group stock batch, clean up related records
+      if (batchRefCode) {
+        // 1. Delete settlement expense allocations
+        const { data: settlements } = await (supabase as any)
+          .from("inter_site_material_settlements")
+          .select("id")
+          .eq("batch_ref_code", batchRefCode);
+
+        if (settlements && settlements.length > 0) {
+          const settlementIds = settlements.map((s: { id: string }) => s.id);
+
+          // Delete settlement expense allocations
+          await (supabase as any)
+            .from("settlement_expense_allocations")
+            .delete()
+            .in("settlement_id", settlementIds);
+        }
+
+        // 2. Delete inter-site settlements for this batch
+        await (supabase as any)
+          .from("inter_site_material_settlements")
+          .delete()
+          .eq("batch_ref_code", batchRefCode);
+
+        // 3. Delete batch usage records
+        await (supabase as any)
+          .from("batch_usage_records")
+          .delete()
+          .eq("batch_ref_code", batchRefCode);
+
+        // 4. Delete derived expenses (debtor expenses and self-use expenses)
+        // First get the IDs to delete their items
+        const { data: derivedExpenses } = await (supabase as any)
+          .from("material_purchase_expenses")
+          .select("id")
+          .eq("original_batch_code", batchRefCode);
+
+        if (derivedExpenses && derivedExpenses.length > 0) {
+          const derivedExpenseIds = derivedExpenses.map((e: { id: string }) => e.id);
+
+          // Delete derived expense items
+          await (supabase as any)
+            .from("material_purchase_expense_items")
+            .delete()
+            .in("expense_id", derivedExpenseIds);
+
+          // Delete derived expenses
+          await (supabase as any)
+            .from("material_purchase_expenses")
+            .delete()
+            .eq("original_batch_code", batchRefCode);
+        }
+      }
+
+      // Now proceed with the standard deletion flow
+      // Get all deliveries for this PO
+      const { data: deliveries } = await supabase
+        .from("deliveries")
+        .select("id")
+        .eq("po_id", id);
+
+      // Delete delivery items for all deliveries
+      if (deliveries && deliveries.length > 0) {
+        const deliveryIds = deliveries.map((d) => d.id);
+        await supabase
+          .from("delivery_items")
+          .delete()
+          .in("delivery_id", deliveryIds);
+
+        // Delete deliveries
+        await supabase.from("deliveries").delete().eq("po_id", id);
+      }
+
+      // Delete material purchase expense items linked to this PO
+      if (materialExpenses && materialExpenses.length > 0) {
+        const expenseIds = materialExpenses.map((e: { id: string }) => e.id);
+
+        // Delete material purchase expense items
+        await (supabase as any)
+          .from("material_purchase_expense_items")
+          .delete()
+          .in("expense_id", expenseIds);
+
+        // Delete material purchase expenses
+        await (supabase as any)
+          .from("material_purchase_expenses")
+          .delete()
+          .eq("purchase_order_id", id);
+      }
+
+      // Delete PO items
+      await supabase.from("purchase_order_items").delete().eq("po_id", id);
+
+      // Delete the PO itself
+      const { error } = await supabase
+        .from("purchase_orders")
+        .delete()
+        .eq("id", id);
+
+      if (error) throw error;
+      return { id, siteId };
+    },
+    onSuccess: (result) => {
+      // Invalidate all related caches
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.purchaseOrders.bySite(result.siteId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["deliveries", result.siteId],
+      });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.materialPurchases.bySite(result.siteId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["inter-site-settlements"],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["batch-usage-records"],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["site-material-expenses"],
       });
     },
   });
@@ -746,6 +1057,52 @@ async function updatePOTotals(
   }
 }
 
+/**
+ * Record advance payment for a PO
+ * Updates the advance_paid field and marks payment details
+ */
+export function useRecordAdvancePayment() {
+  const supabase = createClient();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (data: {
+      po_id: string;
+      site_id: string;
+      amount_paid: number;
+      payment_date: string;
+      payment_mode?: string;
+      payment_reference?: string;
+      payment_screenshot_url?: string;
+      notes?: string;
+    }) => {
+      await ensureFreshSession();
+
+      const { error } = await supabase
+        .from("purchase_orders")
+        .update({
+          advance_paid: data.amount_paid,
+          payment_terms: data.notes
+            ? `${data.payment_mode || "Advance"} payment on ${data.payment_date}. ${data.notes}`
+            : `${data.payment_mode || "Advance"} payment on ${data.payment_date}`,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", data.po_id);
+
+      if (error) throw error;
+      return { po_id: data.po_id, site_id: data.site_id };
+    },
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.purchaseOrders.bySite(result.site_id),
+      });
+      queryClient.invalidateQueries({
+        queryKey: [...queryKeys.materialPurchases.bySite(result.site_id), "expenses"],
+      });
+    },
+  });
+}
+
 // ============================================
 // DELIVERIES (GRN)
 // ============================================
@@ -845,50 +1202,99 @@ export function useRecordDelivery() {
       const random = Math.random().toString(36).substring(2, 6).toUpperCase();
       const grnNumber = `GRN-${timestamp}-${random}`;
 
-      // Insert delivery
+      // Validate and get vendor_id - it's required in the database
+      let vendorId = data.vendor_id && data.vendor_id.trim() !== "" ? data.vendor_id : null;
+
+      // If vendor_id is missing but we have a PO, fetch it from the PO
+      if (!vendorId && data.po_id) {
+        const { data: po } = await supabase
+          .from("purchase_orders")
+          .select("vendor_id")
+          .eq("id", data.po_id)
+          .single();
+
+        if (po?.vendor_id) {
+          vendorId = po.vendor_id;
+        }
+      }
+
+      // vendor_id is required - throw error if still missing
+      if (!vendorId) {
+        throw new Error("Vendor ID is required for delivery. Please ensure the PO has a vendor.");
+      }
+
+      // Handle empty strings as null for optional UUID fields
+      const locationId = data.location_id && data.location_id.trim() !== "" ? data.location_id : null;
+
+      // Get current user for tracking who recorded the delivery
+      const { data: { user } } = await supabase.auth.getUser();
+
+      // Build the insert payload
+      // Set requires_verification=false and verification_status='verified' to:
+      // 1. Prevent the notification trigger from firing (it has a bug with site_id column)
+      // 2. Mark delivery as already verified since we're recording a completed delivery
+      const deliveryPayload = {
+        po_id: data.po_id || null,
+        site_id: data.site_id,
+        vendor_id: vendorId,
+        location_id: locationId,
+        grn_number: grnNumber,
+        delivery_date: data.delivery_date,
+        delivery_status: "delivered",
+        verification_status: "verified",
+        requires_verification: false,
+        challan_number: data.challan_number || null,
+        challan_date: data.challan_date || null,
+        vehicle_number: data.vehicle_number || null,
+        driver_name: data.driver_name || null,
+        driver_phone: data.driver_phone || null,
+        delivery_photos: data.delivery_photos && data.delivery_photos.length > 0 ? JSON.stringify(data.delivery_photos) : null,
+        recorded_by: user?.id || null,
+        recorded_at: new Date().toISOString(),
+        notes: data.notes || null,
+      };
+
+      // Debug logging
+      console.log("[useRecordDelivery] Inserting delivery with payload:", deliveryPayload);
+
       const { data: delivery, error: deliveryError } = await (
         supabase.from("deliveries") as any
       )
-        .insert({
-          po_id: data.po_id,
-          site_id: data.site_id,
-          vendor_id: data.vendor_id,
-          location_id: data.location_id,
-          grn_number: grnNumber,
-          delivery_date: data.delivery_date,
-          delivery_status: "delivered",
-          challan_number: data.challan_number,
-          challan_date: data.challan_date,
-          vehicle_number: data.vehicle_number,
-          driver_name: data.driver_name,
-          driver_phone: data.driver_phone,
-          notes: data.notes,
-        })
+        .insert(deliveryPayload)
         .select()
         .single();
 
-      if (deliveryError) throw deliveryError;
+      if (deliveryError) {
+        console.error("[useRecordDelivery] Delivery insert error:", deliveryError);
+        throw deliveryError;
+      }
 
       // Insert delivery items
+      // Handle empty strings as null for UUID fields
       const deliveryItems = data.items.map((item) => ({
         delivery_id: delivery.id,
-        po_item_id: item.po_item_id,
+        po_item_id: item.po_item_id || null,
         material_id: item.material_id,
-        brand_id: item.brand_id,
+        brand_id: item.brand_id || null,
         ordered_qty: item.ordered_qty,
         received_qty: item.received_qty,
         accepted_qty: item.accepted_qty ?? item.received_qty,
         rejected_qty: item.rejected_qty ?? 0,
-        rejection_reason: item.rejection_reason,
+        rejection_reason: item.rejection_reason || null,
         unit_price: item.unit_price,
-        notes: item.notes,
+        notes: item.notes || null,
       }));
+
+      console.log("[useRecordDelivery] Inserting delivery items:", deliveryItems);
 
       const { error: itemsError } = await supabase
         .from("delivery_items")
         .insert(deliveryItems);
 
-      if (itemsError) throw itemsError;
+      if (itemsError) {
+        console.error("[useRecordDelivery] Delivery items insert error:", itemsError);
+        throw itemsError;
+      }
 
       // Update PO item received quantities
       if (data.po_id) {
@@ -961,7 +1367,7 @@ export function useRecordDelivery() {
                 if (po) {
                   // Check if PO is a group stock purchase
                   // Parse internal_notes if it's a JSON string
-                  let parsedNotes: { is_group_stock?: boolean; site_group_id?: string } | null = null;
+                  let parsedNotes: { is_group_stock?: boolean; site_group_id?: string; group_id?: string } | null = null;
                   if (po.internal_notes) {
                     try {
                       parsedNotes = typeof po.internal_notes === "string"
@@ -972,7 +1378,13 @@ export function useRecordDelivery() {
                     }
                   }
                   const isGroupStock = parsedNotes?.is_group_stock === true;
-                  const siteGroupId = parsedNotes?.site_group_id || null;
+                  // Backward compatibility: check both site_group_id (new) and group_id (old)
+                  const siteGroupId = parsedNotes?.site_group_id || parsedNotes?.group_id || null;
+
+                  console.log("[useRecordDelivery] Creating material expense - PO:", po.po_number);
+                  console.log("[useRecordDelivery] internal_notes:", po.internal_notes);
+                  console.log("[useRecordDelivery] Parsed:", { isGroupStock, siteGroupId });
+                  console.log("[useRecordDelivery] Will create expense with purchase_type:", isGroupStock ? "group_stock" : "own_site");
 
                   // Generate reference code for material purchase
                   const { data: refCode } = await (supabase as any).rpc(
@@ -995,40 +1407,58 @@ export function useRecordDelivery() {
                   // Get current user
                   const { data: { user } } = await supabase.auth.getUser();
 
+                  // Build expense payload
+                  const expensePayload = {
+                    site_id: po.site_id,
+                    ref_code: refCode || `MAT-${Date.now()}`,
+                    purchase_type: isGroupStock ? "group_stock" : "own_site",
+                    purchase_order_id: po.id,
+                    vendor_id: po.vendor_id,
+                    vendor_name: po.vendor?.name || null,
+                    purchase_date: new Date().toISOString().split("T")[0],
+                    total_amount: totalAmount,
+                    transport_cost: po.transport_cost || 0,
+                    status: "recorded", // Use "recorded" for both group stock and own site
+                    is_paid: false,
+                    created_by: user?.id,
+                    notes: isGroupStock
+                      ? `Group stock batch from PO ${po.po_number}`
+                      : `Auto-created from PO ${po.po_number}`,
+                    // Group stock batch tracking fields
+                    paying_site_id: isGroupStock ? po.site_id : null,
+                    site_group_id: isGroupStock ? siteGroupId : null,
+                    original_qty: isGroupStock ? totalQuantity : null,
+                    remaining_qty: isGroupStock ? totalQuantity : null,
+                  };
+
+                  console.log("[useRecordDelivery] Expense payload:", JSON.stringify(expensePayload, null, 2));
+
                   // Create material_purchase_expense linked to PO
                   // For group stock, this becomes a batch with tracking fields
                   const { data: expense, error: expenseError } = await (supabase as any)
                     .from("material_purchase_expenses")
-                    .insert({
-                      site_id: po.site_id,
-                      ref_code: refCode || `MAT-${Date.now()}`,
-                      purchase_type: isGroupStock ? "group_stock" : "own_site",
-                      purchase_order_id: po.id,
-                      vendor_id: po.vendor_id,
-                      vendor_name: po.vendor?.name || null,
-                      purchase_date: new Date().toISOString().split("T")[0],
-                      total_amount: totalAmount,
-                      transport_cost: po.transport_cost || 0,
-                      status: isGroupStock ? "in_stock" : "recorded",
-                      is_paid: false,
-                      created_by: user?.id,
-                      notes: isGroupStock
-                        ? `Group stock batch from PO ${po.po_number}`
-                        : `Auto-created from PO ${po.po_number}`,
-                      // Group stock batch tracking fields
-                      paying_site_id: isGroupStock ? po.site_id : null,
-                      site_group_id: isGroupStock ? siteGroupId : null,
-                      original_qty: isGroupStock ? totalQuantity : null,
-                      remaining_qty: isGroupStock ? totalQuantity : null,
-                    })
+                    .insert(expensePayload)
                     .select()
                     .single();
 
                   if (expenseError) {
-                    console.warn("Failed to create material expense:", expenseError);
-                  } else if (expense && po.items?.length > 0) {
-                    // Create expense items from PO items (ordered quantity)
-                    const expenseItems = po.items.map((item: any) => ({
+                    console.error("[useRecordDelivery] Failed to create material expense:", expenseError);
+                    console.error("[useRecordDelivery] Error details:", JSON.stringify(expenseError, null, 2));
+                    console.error("[useRecordDelivery] Error message:", expenseError.message);
+                    console.error("[useRecordDelivery] Error code:", expenseError.code);
+                    console.error("[useRecordDelivery] Error hint:", expenseError.hint);
+                  } else if (expense) {
+                    console.log("[useRecordDelivery] Material expense created successfully:", {
+                      id: expense.id,
+                      ref_code: expense.ref_code,
+                      purchase_type: expense.purchase_type,
+                      site_id: expense.site_id,
+                      total_amount: expense.total_amount,
+                    });
+
+                    if (po.items?.length > 0) {
+                      // Create expense items from PO items (ordered quantity)
+                      const expenseItems = po.items.map((item: any) => ({
                       purchase_expense_id: expense.id,
                       material_id: item.material_id,
                       brand_id: item.brand_id || null,
@@ -1080,6 +1510,7 @@ export function useRecordDelivery() {
                                 avg_unit_cost: newAvgCost,
                                 last_received_date: new Date().toISOString().split("T")[0],
                                 updated_at: new Date().toISOString(),
+                                batch_code: expense.ref_code, // Update batch code (latest batch)
                               })
                               .eq("id", existingInv.id);
                           } else {
@@ -1093,6 +1524,7 @@ export function useRecordDelivery() {
                                 current_qty: Number(item.quantity),
                                 avg_unit_cost: Number(item.unit_price),
                                 last_received_date: new Date().toISOString().split("T")[0],
+                                batch_code: expense.ref_code, // Store batch code for usage tracking
                               });
                           }
                         } catch (invError) {
@@ -1101,6 +1533,7 @@ export function useRecordDelivery() {
                       }
                     }
                   }
+                }
                 }
               } catch (autoCreateError) {
                 // Don't fail the delivery if material expense creation fails

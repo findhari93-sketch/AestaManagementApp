@@ -8,7 +8,7 @@ import React, {
   useCallback,
   useMemo,
 } from "react";
-import { ThemePreference } from "@/types/database.types";
+type ThemePreference = string;
 
 const STORAGE_KEY = "aesta_theme_preference";
 

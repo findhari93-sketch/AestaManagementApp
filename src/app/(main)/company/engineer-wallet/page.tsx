@@ -63,14 +63,14 @@ import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import PageHeader from "@/components/layout/PageHeader";
 import { hasEditPermission } from "@/lib/permissions";
-import type {
-  SiteEngineerTransaction,
-  SiteEngineerSettlement,
-  SiteEngineerTransactionType,
-  PaymentMode,
-  RecipientType,
-} from "@/types/database.types";
+import type { Database } from "@/types/database.types";
 import dayjs from "dayjs";
+
+type SiteEngineerTransaction = Database["public"]["Tables"]["site_engineer_transactions"]["Row"];
+type SiteEngineerSettlement = Database["public"]["Tables"]["site_engineer_settlements"]["Row"];
+type SiteEngineerTransactionType = string;
+type PaymentMode = Database["public"]["Enums"]["payment_mode"];
+type RecipientType = string;
 import { createPaymentSettlementNotification, createSalaryExpense, clearPendingSalaryExpense } from "@/lib/services/notificationService";
 import PayerSourceSelector, { getPayerSourceLabel, getPayerSourceColor } from "@/components/settlement/PayerSourceSelector";
 import BatchSelector from "@/components/wallet/BatchSelector";

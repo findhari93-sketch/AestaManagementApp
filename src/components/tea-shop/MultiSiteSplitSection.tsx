@@ -24,7 +24,9 @@ import {
   People as PeopleIcon,
 } from "@mui/icons-material";
 import { createClient } from "@/lib/supabase/client";
-import type { Site } from "@/types/database.types";
+import type { Database } from "@/types/database.types";
+
+type Site = Database["public"]["Tables"]["sites"]["Row"];
 
 interface MultiSiteSplitSectionProps {
   enabled: boolean;

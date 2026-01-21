@@ -166,8 +166,7 @@ export function useInterSiteBalances(groupId: string | undefined) {
       if (!groupId) return [] as InterSiteBalance[];
 
       try {
-        // Get all usage transactions that haven't been settled
-        // Usage transactions have negative quantity and usage_site_id set
+        // Get all usage transactions that haven't been settled (old approach)
         const { data: usageTransactions, error: txError } = await (supabase as any)
           .from("group_stock_transactions")
           .select(`
@@ -185,9 +184,37 @@ export function useInterSiteBalances(groupId: string | undefined) {
         if (txError) {
           if (isQueryError(txError)) {
             console.warn("Group stock transactions query failed:", txError.message);
-            return [] as InterSiteBalance[];
+          } else {
+            throw txError;
           }
-          throw txError;
+        }
+
+        // ALSO get pending batch usage records (new approach)
+        const { data: batchUsageRecords, error: batchError } = await (supabase as any)
+          .from("batch_usage_records")
+          .select(`
+            *,
+            material:materials(id, name, code, unit),
+            usage_site:sites!batch_usage_records_usage_site_id_fkey(id, name),
+            batch:material_purchase_expenses!batch_usage_records_batch_ref_code_fkey(
+              ref_code,
+              paying_site_id,
+              site_id,
+              paying_site:sites!material_purchase_expenses_paying_site_id_fkey(id, name)
+            )
+          `)
+          .eq("site_group_id", groupId)
+          .eq("settlement_status", "pending")
+          .not("usage_site_id", "is", null)
+          .eq("is_self_use", false) // Exclude self-use
+          .order("usage_date", { ascending: false });
+
+        if (batchError) {
+          if (isQueryError(batchError)) {
+            console.warn("Batch usage records query failed:", batchError.message);
+          } else {
+            throw batchError;
+          }
         }
 
         // Get related purchase transactions to identify payment source
@@ -257,6 +284,44 @@ export function useInterSiteBalances(groupId: string | undefined) {
               transaction_count: 1,
               material_count: 1,
               total_quantity: Math.abs(tx.quantity || 0),
+              total_amount_owed: amount,
+              is_settled: false,
+            });
+          }
+        }
+
+        // Process batch usage records (new approach)
+        for (const record of batchUsageRecords || []) {
+          const paymentSourceSiteId = record.batch?.paying_site_id || record.batch?.site_id;
+
+          if (!record.usage_site_id || !paymentSourceSiteId) continue;
+
+          // Skip if the using site is the same as the paying site
+          if (record.usage_site_id === paymentSourceSiteId) continue;
+
+          const key = `${paymentSourceSiteId}-${record.usage_site_id}`;
+          const amount = record.total_cost || 0;
+
+          if (balanceMap.has(key)) {
+            const existing = balanceMap.get(key)!;
+            existing.total_amount_owed += amount;
+            existing.transaction_count += 1;
+            existing.total_quantity += record.quantity || 0;
+          } else {
+            balanceMap.set(key, {
+              site_group_id: groupId,
+              group_name: group.name,
+              creditor_site_id: paymentSourceSiteId,
+              creditor_site_name: record.batch?.paying_site?.name || "Unknown",
+              debtor_site_id: record.usage_site_id,
+              debtor_site_name: record.usage_site?.name || "Unknown",
+              year: new Date(record.usage_date).getFullYear(),
+              week_number: getWeekNumber(new Date(record.usage_date)),
+              week_start: getWeekStart(new Date(record.usage_date)).toISOString().split("T")[0],
+              week_end: getWeekEnd(new Date(record.usage_date)).toISOString().split("T")[0],
+              transaction_count: 1,
+              material_count: 1,
+              total_quantity: record.quantity || 0,
               total_amount_owed: amount,
               is_settled: false,
             });
@@ -461,6 +526,23 @@ export function useGenerateSettlement() {
         throw new Error("No unsettled transactions found between these sites");
       }
 
+      // Find batch_ref_code from batch_usage_records
+      // Query batch_usage_records for the debtor site to find which batch they used
+      const { data: batchUsageRecords, error: batchError } = await (supabase as any)
+        .from("batch_usage_records")
+        .select("batch_ref_code")
+        .eq("site_group_id", data.siteGroupId)
+        .eq("usage_site_id", data.toSiteId)
+        .eq("settlement_status", "pending")
+        .limit(1);
+
+      if (batchError) {
+        console.warn("Failed to find batch_ref_code:", batchError);
+      }
+
+      // Get the batch_ref_code (should be the same for all records in this settlement)
+      const batchRefCode = batchUsageRecords?.[0]?.batch_ref_code || null;
+
       // Calculate total amount
       const totalAmount = transactions.reduce(
         (sum: number, tx: { total_cost: number }) => sum + Math.abs(tx.total_cost || 0),
@@ -478,6 +560,7 @@ export function useGenerateSettlement() {
           site_group_id: data.siteGroupId,
           from_site_id: data.fromSiteId,
           to_site_id: data.toSiteId,
+          batch_ref_code: batchRefCode, // NEW: Store batch reference for settlement dialog
           year,
           week_number: weekNumber,
           period_start: getWeekStart(new Date(year, 0, 1 + (weekNumber - 1) * 7))
@@ -488,7 +571,7 @@ export function useGenerateSettlement() {
             .split("T")[0],
           total_amount: totalAmount,
           paid_amount: 0,
-          pending_amount: totalAmount,
+          // pending_amount is a generated column (total_amount - paid_amount)
           status: "pending",
           created_by: data.userId || null,
         })
@@ -582,6 +665,94 @@ export function useApproveSettlement() {
     onSuccess: (settlement) => {
       queryClient.invalidateQueries({
         queryKey: queryKeys.interSiteSettlements.byId(settlement.id),
+      });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.interSiteSettlements.bySite(settlement.from_site_id),
+      });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.interSiteSettlements.bySite(settlement.to_site_id),
+      });
+    },
+  });
+}
+
+/**
+ * Delete a settlement
+ */
+export function useDeleteSettlement() {
+  const queryClient = useQueryClient();
+  const supabase = createClient();
+
+  return useMutation({
+    mutationFn: async (settlementId: string) => {
+      await ensureFreshSession();
+
+      // First, get settlement details for cache invalidation
+      const { data: settlement, error: getError } = await (supabase as any)
+        .from("inter_site_material_settlements")
+        .select("site_group_id, from_site_id, to_site_id, settlement_code")
+        .eq("id", settlementId)
+        .single();
+
+      if (getError) throw getError;
+
+      // CRITICAL: Reset batch_usage_records back to unsettled state
+      // This makes them reappear in "Unsettled Balances" after deletion
+      const { error: resetBatchError } = await (supabase as any)
+        .from("batch_usage_records")
+        .update({
+          settlement_id: null,
+          settlement_status: 'pending', // Keep as pending so they show in Unsettled Balances
+          updated_at: new Date().toISOString(),
+        })
+        .eq("settlement_id", settlementId);
+
+      if (resetBatchError) {
+        console.error("Error resetting batch usage records:", resetBatchError);
+        throw new Error("Failed to reset batch usage records. Cannot delete settlement.");
+      }
+
+      // ALSO reset group_stock_transactions (used by Unsettled Balances query)
+      const { error: resetTxError } = await (supabase as any)
+        .from("group_stock_transactions")
+        .update({
+          settlement_id: null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("settlement_id", settlementId);
+
+      if (resetTxError) {
+        console.error("Error resetting group stock transactions:", resetTxError);
+        // Don't throw - this might not exist for batch-based settlements
+      }
+
+      // Delete settlement items
+      const { error: itemsError } = await (supabase as any)
+        .from("inter_site_settlement_items")
+        .delete()
+        .eq("settlement_id", settlementId);
+
+      if (itemsError) throw itemsError;
+
+      // Delete the settlement itself
+      const { error } = await (supabase as any)
+        .from("inter_site_material_settlements")
+        .delete()
+        .eq("id", settlementId);
+
+      if (error) throw error;
+      return settlement;
+    },
+    onSuccess: (settlement) => {
+      // Invalidate all related settlement queries
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.interSiteSettlements.all,
+      });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.interSiteSettlements.byGroup(settlement.site_group_id),
+      });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.interSiteSettlements.balances(settlement.site_group_id),
       });
       queryClient.invalidateQueries({
         queryKey: queryKeys.interSiteSettlements.bySite(settlement.from_site_id),
@@ -752,6 +923,7 @@ export interface GroupStockTransaction {
   usage_site_id: string | null;
   reference_type: string | null;
   reference_id: string | null;
+  batch_ref_code: string | null;
   notes: string | null;
   recorded_by: string | null;
   settlement_id: string | null;

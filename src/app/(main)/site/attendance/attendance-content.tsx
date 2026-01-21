@@ -123,8 +123,10 @@ import {
   PhotoThumbnailStrip,
   PhotoFullscreenDialog,
 } from "@/components/attendance/work-updates";
-import type { TeaShopAccount } from "@/types/database.types";
+import type { Database } from "@/types/database.types";
 import type { WorkUpdates } from "@/types/work-updates.types";
+
+type TeaShopAccount = Database["public"]["Tables"]["tea_shop_accounts"]["Row"];
 import type { DailyPaymentRecord } from "@/types/payment.types";
 import { createClient } from "@/lib/supabase/client";
 import { useSite } from "@/contexts/SiteContext";
@@ -139,8 +141,10 @@ import PageHeader from "@/components/layout/PageHeader";
 import AttendanceSkeleton from "./attendance-skeleton";
 import { hasEditPermission } from "@/lib/permissions";
 import { useSearchParams, useRouter } from "next/navigation";
-import type { LaborerType, DailyWorkSummary } from "@/types/database.types";
 import type { AttendancePageData } from "@/lib/data/attendance";
+
+type LaborerType = string;
+type DailyWorkSummary = Database["public"]["Tables"]["daily_work_summary"]["Row"];
 import dayjs from "dayjs";
 import {
   groupHolidays,

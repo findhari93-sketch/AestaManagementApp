@@ -302,6 +302,8 @@ export function useGroupStockInventory(groupId: string | undefined) {
     queryFn: async () => {
       if (!groupId) return [] as GroupStockInventoryWithDetails[];
 
+      console.log("[useGroupStockInventory] Fetching inventory for groupId:", groupId);
+
       const { data, error } = await (supabase as any)
         .from("group_stock_inventory")
         .select(
@@ -316,7 +318,13 @@ export function useGroupStockInventory(groupId: string | undefined) {
         .gt("current_qty", 0)
         .order("material_id");
 
-      if (error) throw error;
+      if (error) {
+        console.error("[useGroupStockInventory] Query error:", error);
+        throw error;
+      }
+
+      console.log("[useGroupStockInventory] Fetched inventory:", data);
+
       return (data || []) as GroupStockInventoryWithDetails[];
     },
     enabled: !!groupId,
@@ -741,18 +749,25 @@ export function useBatchRecordGroupStockUsage() {
       }>;
       userId?: string;
     }) => {
-      // Ensure fresh session before mutation
-      await ensureFreshSession();
+      console.log("[useBatchRecordGroupStockUsage] Starting mutation", { data });
 
-      const results = [];
+      try {
+        // Ensure fresh session before mutation
+        console.log("[useBatchRecordGroupStockUsage] Ensuring fresh session...");
+        await ensureFreshSession();
+        console.log("[useBatchRecordGroupStockUsage] Session refreshed");
 
-      for (const entry of data.entries) {
-        // Get current inventory to calculate cost
-        let query = (supabase as any)
-          .from("group_stock_inventory")
-          .select("*")
-          .eq("site_group_id", data.groupId)
-          .eq("material_id", entry.materialId);
+        const results = [];
+
+        for (const entry of data.entries) {
+          console.log("[useBatchRecordGroupStockUsage] Processing entry", { entry });
+
+          // Get current inventory to calculate cost
+          let query = (supabase as any)
+            .from("group_stock_inventory")
+            .select("*")
+            .eq("site_group_id", data.groupId)
+            .eq("material_id", entry.materialId);
 
         // Handle null brand_id correctly - use .is() for null values
         if (entry.brandId) {
@@ -761,11 +776,27 @@ export function useBatchRecordGroupStockUsage() {
           query = query.is("brand_id", null);
         }
 
+        console.log("[useBatchRecordGroupStockUsage] Querying inventory", {
+          groupId: data.groupId,
+          materialId: entry.materialId,
+          brandId: entry.brandId
+        });
+
+        console.log("[useBatchRecordGroupStockUsage] Executing query...");
         const { data: inventory, error: invError } = await query.single();
+        console.log("[useBatchRecordGroupStockUsage] Query completed", { inventory, invError });
 
         if (invError) {
-          throw new Error(`Material ${entry.materialId} not found in group stock`);
+          console.error("[useBatchRecordGroupStockUsage] Inventory query error", invError);
+          throw new Error(`Material ${entry.materialId} not found in group stock: ${invError.message}`);
         }
+
+        console.log("[useBatchRecordGroupStockUsage] Inventory found", {
+          inventory,
+          requestedQty: entry.quantity,
+          availableQty: inventory.current_qty
+        });
+
         if (inventory.current_qty < entry.quantity) {
           throw new Error(`Insufficient stock for material ${entry.materialId}`);
         }
@@ -774,42 +805,161 @@ export function useBatchRecordGroupStockUsage() {
         const totalCost = entry.quantity * unitCost;
         const transactionDate = entry.transactionDate || new Date().toISOString().split("T")[0];
 
+        const insertData = {
+          site_group_id: data.groupId,
+          inventory_id: inventory.id,
+          material_id: entry.materialId,
+          brand_id: entry.brandId || null,
+          transaction_type: "usage",
+          transaction_date: transactionDate,
+          quantity: -entry.quantity,
+          unit_cost: unitCost,
+          total_cost: -totalCost,
+          usage_site_id: entry.usageSiteId,
+          work_description: entry.workDescription || null,
+          reference_type: "weekly_report",
+          created_by: data.userId || null,
+        };
+
+        console.log("[useBatchRecordGroupStockUsage] Inserting transaction", { insertData });
+
         // Insert usage transaction
         const { data: transaction, error: txError } = await (supabase as any)
           .from("group_stock_transactions")
-          .insert({
-            site_group_id: data.groupId,
-            material_id: entry.materialId,
-            brand_id: entry.brandId || null,
-            transaction_type: "usage",
-            transaction_date: transactionDate,
-            quantity: -entry.quantity,
-            unit_cost: unitCost,
-            total_cost: -totalCost,
-            usage_site_id: entry.usageSiteId,
-            work_description: entry.workDescription || null,
-            reference_type: "weekly_report",
-            created_by: data.userId || null,
-          })
+          .insert(insertData)
           .select()
           .single();
 
-        if (txError) throw txError;
+        if (txError) {
+          console.error("[useBatchRecordGroupStockUsage] Transaction insert error", txError);
+          throw txError;
+        }
+
+        console.log("[useBatchRecordGroupStockUsage] Transaction inserted", { transaction });
+
+        // Find the batch ref_code and paying_site_id for batch_usage_record and payment tracking
+        console.log("[useBatchRecordGroupStockUsage] Finding batch details for usage tracking");
+
+        let batchQuery = (supabase as any)
+          .from("material_purchase_expenses")
+          .select("ref_code, paying_site_id, site_id, purchase_date")
+          .eq("site_group_id", data.groupId)
+          .eq("purchase_type", "group_stock")
+          .eq("status", "recorded")
+          .order("purchase_date", { ascending: false })
+          .order("created_at", { ascending: false });
+
+        const { data: batches, error: batchError } = await batchQuery;
+
+        if (batchError) {
+          console.error("[useBatchRecordGroupStockUsage] Batch query error:", batchError);
+          throw new Error(`Failed to find batch for material: ${batchError.message}`);
+        }
+
+        if (!batches || batches.length === 0) {
+          console.error("[useBatchRecordGroupStockUsage] No group stock batches found");
+          throw new Error("No group stock batches found for this material");
+        }
+
+        // Use the most recent batch (already ordered by date)
+        const batch = batches[0];
+        const batchRefCode = batch.ref_code;
+        const paymentSourceSiteId = batch.paying_site_id || batch.site_id;
+
+        console.log("[useBatchRecordGroupStockUsage] Found batch:", {
+          batchRefCode,
+          paymentSourceSiteId,
+          purchaseDate: batch.purchase_date,
+        });
+
+        // Update transaction with payment_source_site_id for balance tracking
+        console.log("[useBatchRecordGroupStockUsage] Updating transaction with payment_source_site_id");
+        const { error: txUpdateError } = await (supabase as any)
+          .from("group_stock_transactions")
+          .update({ payment_source_site_id: paymentSourceSiteId })
+          .eq("id", transaction.id);
+
+        if (txUpdateError) {
+          console.error("[useBatchRecordGroupStockUsage] Failed to update transaction:", txUpdateError);
+          throw txUpdateError;
+        }
+
+        // Get material unit for batch_usage_record
+        const { data: material, error: matError } = await (supabase as any)
+          .from("materials")
+          .select("unit")
+          .eq("id", entry.materialId)
+          .single();
+
+        if (matError) {
+          console.error("[useBatchRecordGroupStockUsage] Material query error:", matError);
+          throw new Error(`Failed to get material unit: ${matError.message}`);
+        }
+
+        // Create batch_usage_record for settlement tracking
+        console.log("[useBatchRecordGroupStockUsage] Creating batch_usage_record");
+        const batchUsageData = {
+          batch_ref_code: batchRefCode,
+          site_group_id: data.groupId,
+          usage_site_id: entry.usageSiteId,
+          material_id: entry.materialId,
+          brand_id: entry.brandId || null,
+          quantity: entry.quantity,
+          unit: material.unit,
+          unit_cost: unitCost,
+          // total_cost is a generated column (quantity * unit_cost)
+          usage_date: transactionDate,
+          work_description: entry.workDescription || "Usage from weekly report",
+          settlement_status: "pending",
+          is_self_use: false,
+          transaction_id: transaction.id,
+        };
+
+        const { error: batchUsageError } = await (supabase as any)
+          .from("batch_usage_records")
+          .insert(batchUsageData);
+
+        if (batchUsageError) {
+          console.error("[useBatchRecordGroupStockUsage] Batch usage record error:", batchUsageError);
+          throw new Error(`Failed to create batch usage record: ${batchUsageError.message}`);
+        }
+
+        console.log("[useBatchRecordGroupStockUsage] Batch usage record created successfully");
 
         // Update inventory
-        await (supabase as any)
+        const updateData = {
+          current_qty: inventory.current_qty - entry.quantity,
+          last_used_date: transactionDate,
+          updated_at: new Date().toISOString(),
+        };
+
+        console.log("[useBatchRecordGroupStockUsage] Updating inventory", {
+          inventoryId: inventory.id,
+          updateData
+        });
+
+        const { error: updateError } = await (supabase as any)
           .from("group_stock_inventory")
-          .update({
-            current_qty: inventory.current_qty - entry.quantity,
-            last_used_date: transactionDate,
-            updated_at: new Date().toISOString(),
-          })
+          .update(updateData)
           .eq("id", inventory.id);
+
+        if (updateError) {
+          console.error("[useBatchRecordGroupStockUsage] Inventory update error", updateError);
+          throw updateError;
+        }
+
+        console.log("[useBatchRecordGroupStockUsage] Inventory updated successfully");
 
         results.push(transaction);
       }
 
-      return results;
+        console.log("[useBatchRecordGroupStockUsage] All entries processed successfully", { results });
+
+        return results;
+      } catch (error) {
+        console.error("[useBatchRecordGroupStockUsage] Mutation failed", error);
+        throw error;
+      }
     },
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({
@@ -1101,6 +1251,22 @@ export function useDeleteGroupStockTransaction() {
         }
       }
 
+      // ALSO delete corresponding batch_usage_record if this is a usage transaction
+      if (tx.transaction_type === 'usage' && tx.batch_ref_code) {
+        const { error: batchDeleteError } = await (supabase as any)
+          .from("batch_usage_records")
+          .delete()
+          .eq("batch_ref_code", tx.batch_ref_code)
+          .eq("usage_site_id", tx.usage_site_id)
+          .eq("material_id", tx.material_id)
+          .eq("quantity", Math.abs(tx.quantity)); // batch_usage_records stores positive quantity
+
+        if (batchDeleteError) {
+          console.error("Error deleting batch usage record:", batchDeleteError);
+          // Don't throw - the transaction should still be deleted even if batch record doesn't exist
+        }
+      }
+
       // Delete the transaction
       const { error: deleteError } = await (supabase as any)
         .from("group_stock_transactions")
@@ -1120,6 +1286,10 @@ export function useDeleteGroupStockTransaction() {
       });
       queryClient.invalidateQueries({
         queryKey: queryKeys.interSiteSettlements.balances(variables.groupId),
+      });
+      // Also invalidate batch queries since we might have deleted a batch usage record
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.batchUsage.all,
       });
     },
   });

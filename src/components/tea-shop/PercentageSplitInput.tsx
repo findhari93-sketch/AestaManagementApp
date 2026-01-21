@@ -17,7 +17,11 @@ import {
   CheckCircle as CheckIcon,
   Error as ErrorIcon,
 } from "@mui/icons-material";
-import type { LaborGroupPercentageSplit } from "@/types/database.types";
+interface LaborGroupPercentageSplit {
+  daily: number;
+  contract: number;
+  market: number;
+}
 
 interface PercentageSplitInputProps {
   daily: number;

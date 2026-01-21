@@ -45,16 +45,16 @@ import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import PageHeader from "@/components/layout/PageHeader";
 import { hasEditPermission } from "@/lib/permissions";
-import type {
-  Subcontract,
-  ContractType,
-  ContractStatus,
-  MeasurementUnit,
-  PaymentMode,
-  PaymentType,
-} from "@/types/database.types";
+import type { Database } from "@/types/database.types";
 import { calculateSubcontractTotals } from "@/lib/services/subcontractService";
 import dayjs from "dayjs";
+
+type Subcontract = Database["public"]["Tables"]["subcontracts"]["Row"];
+type ContractType = Database["public"]["Enums"]["contract_type"];
+type ContractStatus = Database["public"]["Enums"]["contract_status"];
+type MeasurementUnit = Database["public"]["Enums"]["measurement_unit"];
+type PaymentMode = Database["public"]["Enums"]["payment_mode"];
+type PaymentType = Database["public"]["Enums"]["contract_payment_type"];
 
 interface SubcontractWithDetails extends Subcontract {
   team_name?: string;

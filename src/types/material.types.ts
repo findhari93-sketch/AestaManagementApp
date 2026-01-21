@@ -185,6 +185,7 @@ export interface GroupStockTransaction {
   work_description: string | null;
   reference_type: string | null;
   reference_id: string | null;
+  batch_ref_code: string | null;
   notes: string | null;
   created_by: string | null;
   created_at: string;
@@ -209,6 +210,7 @@ export interface InterSiteSettlement {
   site_group_id: string;
   from_site_id: string; // Creditor site (paid for materials)
   to_site_id: string; // Debtor site (used the materials)
+  batch_ref_code: string | null; // NEW: Reference to the batch being settled
   year: number;
   week_number: number;
   period_start: string;
@@ -648,6 +650,7 @@ export interface PurchaseOrder {
   other_charges: number | null;
   total_amount: number | null;
   payment_terms: string | null;
+  payment_timing: "advance" | "on_delivery";
   advance_paid: number | null;
   quotation_url: string | null;
   po_document_url: string | null;
@@ -718,6 +721,10 @@ export interface Delivery {
   engineer_verified_by: string | null;
   engineer_verified_at: string | null;
   requires_verification: boolean;
+  // Delivery recording tracking fields
+  delivery_photos: string[] | null;
+  recorded_by: string | null;
+  recorded_at: string | null;
 }
 
 export interface DeliveryItem {
@@ -1146,6 +1153,7 @@ export interface PurchaseOrderFormData {
   delivery_address?: string;
   delivery_location_id?: string;
   payment_terms?: string;
+  payment_timing?: "advance" | "on_delivery";
   transport_cost?: number;
   notes?: string;
   internal_notes?: string; // For storing group stock info as JSON
@@ -1176,6 +1184,7 @@ export interface DeliveryFormData {
   vehicle_number?: string;
   driver_name?: string;
   driver_phone?: string;
+  delivery_photos?: string[];
   notes?: string;
   items: DeliveryItemFormData[];
 }
@@ -1609,6 +1618,7 @@ export interface MaterialPurchaseExpense {
   payment_screenshot_url: string | null;
   is_paid: boolean;
   paid_date: string | null;
+  amount_paid: number | null; // Actual amount paid after bargaining
 
   // Documents
   bill_url: string | null;
@@ -1695,6 +1705,8 @@ export interface GroupStockBatch {
     unit_price: number;
   }>;
   allocations: BatchAllocation[];
+  // Site allocations with settlement status (from useBatchesWithUsage hook)
+  site_allocations?: BatchSiteAllocation[];
   // Actual usage recorded from sites
   site_usage?: Array<{
     site_id: string;
@@ -1702,6 +1714,15 @@ export interface GroupStockBatch {
     quantity_used: number;
     amount: number;
   }>;
+  // Optional joined data
+  material?: { id: string; name: string; code: string | null; unit: string };
+  brand?: { id: string; brand_name: string };
+  paying_site?: { id: string; name: string };
+  id?: string;
+  site_id?: string;
+  site_group_id?: string | null;
+  inventory_id?: string;
+  material_id?: string;
 }
 
 // Extended types with relationships

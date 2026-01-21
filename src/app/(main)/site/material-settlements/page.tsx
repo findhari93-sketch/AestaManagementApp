@@ -42,7 +42,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { formatCurrency, formatDate } from "@/lib/formatters";
 import { hasEditPermission } from "@/lib/permissions";
 import { useSiteMaterialExpenses, useDeleteMaterialPurchase } from "@/hooks/queries/useMaterialPurchases";
-import type { MaterialPurchaseExpenseWithDetails } from "@/types/material.types";
+import type { MaterialPurchaseExpenseWithDetails, PurchaseOrderWithDetails } from "@/types/material.types";
 import ConfirmDialog from "@/components/common/ConfirmDialog";
 import MaterialSettlementDialog from "@/components/materials/MaterialSettlementDialog";
 import { useRouter } from "next/navigation";
@@ -59,6 +59,7 @@ export default function MaterialSettlementsPage() {
   // Settlement dialog state
   const [settlementDialogOpen, setSettlementDialogOpen] = useState(false);
   const [settlementPurchase, setSettlementPurchase] = useState<MaterialPurchaseExpenseWithDetails | null>(null);
+  const [settlementPO, setSettlementPO] = useState<PurchaseOrderWithDetails | null>(null);
 
   // Hooks
   const { data: materialExpensesData, isLoading } = useSiteMaterialExpenses(selectedSite?.id);
@@ -70,42 +71,68 @@ export default function MaterialSettlementsPage() {
 
   // Extract data
   const allPurchases = materialExpensesData?.expenses || [];
+  const allAdvancePOs = materialExpensesData?.advancePOs || [];
   const totalAmount = materialExpensesData?.total || 0;
 
-  // Filter purchases by settlement status
-  const filteredPurchases = useMemo(() => {
-    if (statusFilter === "all") return allPurchases;
-    // For now, consider all purchases as "pending" settlement
-    // Once we add settlement_status field, we'll filter properly
+  // Create a unified list with type indicators for filtering and display
+  type SettlementItem = (MaterialPurchaseExpenseWithDetails & { itemType: 'expense' }) | (PurchaseOrderWithDetails & { itemType: 'po' });
+
+  const allItems = useMemo(() => {
+    const expenses: SettlementItem[] = allPurchases.map(p => ({ ...p, itemType: 'expense' as const }));
+    const pos: SettlementItem[] = allAdvancePOs.map(po => ({ ...po, itemType: 'po' as const }));
+    return [...expenses, ...pos];
+  }, [allPurchases, allAdvancePOs]);
+
+  // Filter items by settlement status
+  const filteredItems = useMemo(() => {
+    if (statusFilter === "all") return allItems;
     if (statusFilter === "pending") {
-      return allPurchases.filter((p) => !p.settlement_reference);
+      return allItems.filter((item) => {
+        if (item.itemType === 'expense') {
+          return !item.settlement_reference;
+        } else {
+          // POs are pending if advance_paid is null
+          return !item.advance_paid;
+        }
+      });
     }
     if (statusFilter === "settled") {
-      return allPurchases.filter((p) => !!p.settlement_reference);
+      return allItems.filter((item) => {
+        if (item.itemType === 'expense') {
+          return !!item.settlement_reference;
+        } else {
+          // POs are settled if advance_paid exists
+          return !!item.advance_paid;
+        }
+      });
     }
-    return allPurchases;
-  }, [allPurchases, statusFilter]);
+    return allItems;
+  }, [allItems, statusFilter]);
 
   // Calculate summaries
   const summaries = useMemo(() => {
-    const pending = allPurchases.filter((p) => !p.settlement_reference);
-    const settled = allPurchases.filter((p) => !!p.settlement_reference);
+    const pendingExpenses = allPurchases.filter((p) => !p.settlement_reference);
+    const settledExpenses = allPurchases.filter((p) => !!p.settlement_reference);
+    const pendingPOs = allAdvancePOs.filter((po) => !po.advance_paid);
+    const settledPOs = allAdvancePOs.filter((po) => !!po.advance_paid);
 
     return {
       total: {
-        count: allPurchases.length,
+        count: allItems.length,
         amount: totalAmount,
       },
       pending: {
-        count: pending.length,
-        amount: pending.reduce((sum, p) => sum + Number(p.total_amount || 0), 0),
+        count: pendingExpenses.length + pendingPOs.length,
+        amount: pendingExpenses.reduce((sum, p) => sum + Number(p.total_amount || 0), 0) +
+                pendingPOs.reduce((sum, po) => sum + Number(po.total_amount || 0), 0),
       },
       settled: {
-        count: settled.length,
-        amount: settled.reduce((sum, p) => sum + Number(p.total_amount || 0), 0),
+        count: settledExpenses.length + settledPOs.length,
+        amount: settledExpenses.reduce((sum, p) => sum + Number(p.total_amount || 0), 0) +
+                settledPOs.reduce((sum, po) => sum + Number(po.total_amount || 0), 0),
       },
     };
-  }, [allPurchases, totalAmount]);
+  }, [allPurchases, allAdvancePOs, allItems.length, totalAmount]);
 
   // Handle delete
   const handleDeleteClick = (purchase: MaterialPurchaseExpenseWithDetails) => {
@@ -124,15 +151,22 @@ export default function MaterialSettlementsPage() {
     }
   };
 
-  // Handle settle
-  const handleSettle = (purchase: MaterialPurchaseExpenseWithDetails) => {
-    setSettlementPurchase(purchase);
+  // Handle settle - for both expenses and POs
+  const handleSettle = (item: SettlementItem) => {
+    if (item.itemType === 'expense') {
+      setSettlementPurchase(item);
+      setSettlementPO(null);
+    } else {
+      setSettlementPO(item);
+      setSettlementPurchase(null);
+    }
     setSettlementDialogOpen(true);
   };
 
   const handleSettlementClose = () => {
     setSettlementDialogOpen(false);
     setSettlementPurchase(null);
+    setSettlementPO(null);
   };
 
   return (
@@ -288,26 +322,64 @@ export default function MaterialSettlementsPage() {
                     <TableCell><Skeleton /></TableCell>
                   </TableRow>
                 ))
-              ) : filteredPurchases.length > 0 ? (
-                filteredPurchases.map((purchase) => {
+              ) : filteredItems.length > 0 ? (
+                filteredItems.map((item) => {
+                  // Determine item type and extract common fields
+                  const isPO = item.itemType === 'po';
+                  const purchase = isPO ? null : (item as MaterialPurchaseExpenseWithDetails);
+                  const po = isPO ? (item as PurchaseOrderWithDetails) : null;
+
                   // Check if this is from a group settlement (has original_batch_code)
-                  const isFromGroupSettlement = !!purchase.original_batch_code;
+                  const isFromGroupSettlement = purchase ? !!purchase.original_batch_code : false;
+                  // Check if this is a group stock parent purchase (paying site's batch)
+                  const isGroupStockParent = purchase ? (purchase.purchase_type === "group_stock" && !isFromGroupSettlement) : false;
+
+                  // Extract common display fields
+                  const refCode = purchase?.ref_code || po?.po_number || '';
+                  const dateField = purchase?.purchase_date || po?.order_date || '';
+                  const vendorName = item.vendor?.name || (purchase?.vendor_name) || '-';
+                  const amount = Number(item.total_amount || 0);
+                  const materialsText = item.items && item.items.length > 0
+                    ? item.items.map((i: any) => i.material?.name || "Unknown").join(", ")
+                    : "Material purchase";
 
                   return (
-                  <TableRow key={purchase.id} hover>
+                  <TableRow key={item.id} hover>
                     <TableCell>
                       <Typography variant="body2" fontWeight={500} sx={{ fontFamily: "monospace" }}>
-                        {purchase.ref_code}
+                        {refCode}
                       </Typography>
                     </TableCell>
                     <TableCell>
-                      {isFromGroupSettlement ? (
-                        <Tooltip title={`From batch ${purchase.original_batch_code}`}>
+                      {isPO ? (
+                        <Tooltip title="Advance payment PO - payment before delivery">
+                          <Chip
+                            icon={<PaymentIcon sx={{ fontSize: 16 }} />}
+                            label="Advance PO"
+                            size="small"
+                            color="warning"
+                            variant="outlined"
+                            sx={{ fontSize: "0.75rem" }}
+                          />
+                        </Tooltip>
+                      ) : isFromGroupSettlement ? (
+                        <Tooltip title={`From batch ${purchase!.original_batch_code}`}>
                           <Chip
                             icon={<GroupIcon sx={{ fontSize: 16 }} />}
-                            label="Group"
+                            label="Allocated"
                             size="small"
                             color="info"
+                            variant="outlined"
+                            sx={{ fontSize: "0.75rem" }}
+                          />
+                        </Tooltip>
+                      ) : isGroupStockParent ? (
+                        <Tooltip title="Group stock purchase - you paid the vendor">
+                          <Chip
+                            icon={<GroupIcon sx={{ fontSize: 16 }} />}
+                            label="Group PO"
+                            size="small"
+                            color="secondary"
                             variant="outlined"
                             sx={{ fontSize: "0.75rem" }}
                           />
@@ -324,13 +396,17 @@ export default function MaterialSettlementsPage() {
                       )}
                     </TableCell>
                     <TableCell>
-                      {purchase.purchase_order?.po_number ? (
+                      {po ? (
+                        <Typography variant="body2" color="warning.main" sx={{ fontFamily: "monospace" }}>
+                          {po.po_number} (Advance)
+                        </Typography>
+                      ) : purchase?.purchase_order?.po_number ? (
                         <Typography variant="body2" fontWeight={500} sx={{ fontFamily: "monospace" }}>
                           {purchase.purchase_order.po_number}
                         </Typography>
                       ) : isFromGroupSettlement ? (
                         <Typography variant="body2" color="text.secondary" sx={{ fontFamily: "monospace" }}>
-                          {purchase.original_batch_code}
+                          {purchase!.original_batch_code}
                         </Typography>
                       ) : (
                         <Typography variant="body2" color="text.secondary">
@@ -340,38 +416,88 @@ export default function MaterialSettlementsPage() {
                     </TableCell>
                     <TableCell>
                       <Typography variant="body2">
-                        {formatDate(purchase.purchase_date)}
+                        {formatDate(dateField)}
                       </Typography>
                     </TableCell>
                     <TableCell>
                       <Typography variant="body2">
-                        {purchase.items && purchase.items.length > 0
-                          ? purchase.items.map((i) => i.material?.name || "Unknown").join(", ")
-                          : "Material purchase"}
+                        {materialsText}
                       </Typography>
-                      {purchase.items && purchase.items.length > 0 && (
+                      {item.items && item.items.length > 0 && (
                         <Typography variant="caption" color="text.secondary">
-                          {purchase.items.length} item(s)
+                          {item.items.length} item(s)
                         </Typography>
                       )}
                     </TableCell>
                     <TableCell>
                       <Typography variant="body2">
-                        {purchase.vendor?.name || purchase.vendor_name || "-"}
+                        {vendorName}
                       </Typography>
                     </TableCell>
                     <TableCell align="right">
                       <Typography variant="body2" fontWeight={600}>
-                        {formatCurrency(Number(purchase.total_amount || 0))}
+                        {formatCurrency(amount)}
                       </Typography>
                       {isFromGroupSettlement && (
                         <Typography variant="caption" color="success.main" display="block">
                           Usage settled
                         </Typography>
                       )}
+                      {isPO && (
+                        <Typography variant="caption" color="warning.main" display="block">
+                          Advance payment
+                        </Typography>
+                      )}
                     </TableCell>
                     <TableCell>
-                      {purchase.settlement_reference ? (
+                      {isPO ? (
+                        // PO advance payment status
+                        po!.advance_paid ? (
+                          <Chip
+                            icon={<SettledIcon />}
+                            label="Advance Paid"
+                            size="small"
+                            color="success"
+                            variant="outlined"
+                          />
+                        ) : (
+                          <Chip
+                            icon={<PendingIcon />}
+                            label="Payment Pending"
+                            size="small"
+                            color="warning"
+                            variant="outlined"
+                          />
+                        )
+                      ) : isGroupStockParent ? (
+                        // Group stock parent: show vendor payment status
+                        purchase!.is_paid ? (
+                          <Chip
+                            icon={<SettledIcon />}
+                            label="Vendor Paid"
+                            size="small"
+                            color="success"
+                            variant="outlined"
+                          />
+                        ) : (
+                          <Chip
+                            icon={<PendingIcon />}
+                            label="Vendor Unpaid"
+                            size="small"
+                            color="warning"
+                            variant="outlined"
+                          />
+                        )
+                      ) : isFromGroupSettlement ? (
+                        // Allocated from group: always show as settled
+                        <Chip
+                          icon={<SettledIcon />}
+                          label="Allocated"
+                          size="small"
+                          color="info"
+                          variant="outlined"
+                        />
+                      ) : purchase!.settlement_reference ? (
                         <Chip
                           icon={<SettledIcon />}
                           label="Settled"
@@ -392,38 +518,87 @@ export default function MaterialSettlementsPage() {
                     <TableCell>
                       <Box sx={{ display: "flex", gap: 0.5, flexWrap: "wrap" }}>
                         {/* View Bill Button - shown when bill_url exists */}
-                        {purchase.bill_url && (
+                        {purchase?.bill_url && (
                           <Tooltip title="View Bill">
                             <IconButton
                               size="small"
                               color="primary"
-                              onClick={() => window.open(purchase.bill_url!, "_blank")}
+                              onClick={() => window.open(purchase!.bill_url!, "_blank")}
                             >
                               <BillIcon fontSize="small" />
                             </IconButton>
                           </Tooltip>
                         )}
-                        {!purchase.settlement_reference && canEdit && !isFromGroupSettlement && (
+                        {/* Pay Advance button for POs with advance payment timing */}
+                        {isPO && !po!.advance_paid && canEdit && (
+                          <Tooltip title="Record advance payment">
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              color="warning"
+                              onClick={() => handleSettle(item)}
+                              startIcon={<PaymentIcon />}
+                            >
+                              Pay Advance
+                            </Button>
+                          </Tooltip>
+                        )}
+                        {/* Pay Vendor button for group stock parent purchases */}
+                        {isGroupStockParent && !purchase!.is_paid && canEdit && (
+                          <Tooltip title="Record vendor payment">
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              color="secondary"
+                              onClick={() => handleSettle(item)}
+                              startIcon={<PaymentIcon />}
+                            >
+                              Pay Vendor
+                            </Button>
+                          </Tooltip>
+                        )}
+                        {/* Settle button for own site purchases */}
+                        {!isPO && !isGroupStockParent && !purchase!.settlement_reference && canEdit && !isFromGroupSettlement && (
                           <Tooltip title="Settle">
                             <Button
                               size="small"
                               variant="outlined"
                               color="success"
-                              onClick={() => handleSettle(purchase)}
+                              onClick={() => handleSettle(item)}
                               startIcon={<PaymentIcon />}
                             >
                               Settle
                             </Button>
                           </Tooltip>
                         )}
-                        {purchase.settlement_reference && (
+                        {/* Advance Paid indicator for POs */}
+                        {isPO && po!.advance_paid && (
+                          <Chip
+                            icon={<SettledIcon />}
+                            label="Advance Paid"
+                            size="small"
+                            color="success"
+                            variant="outlined"
+                          />
+                        )}
+                        {/* Vendor Paid indicator for group stock */}
+                        {isGroupStockParent && purchase!.is_paid && (
+                          <Chip
+                            icon={<SettledIcon />}
+                            label="Vendor Paid"
+                            size="small"
+                            color="success"
+                            variant="outlined"
+                          />
+                        )}
+                        {purchase && purchase.settlement_reference && !isGroupStockParent && (
                           <Tooltip title="View Settlement">
                             <IconButton size="small">
                               <ViewIcon fontSize="small" />
                             </IconButton>
                           </Tooltip>
                         )}
-                        {canEdit && !purchase.settlement_reference && !isFromGroupSettlement && (
+                        {canEdit && purchase && !purchase.settlement_reference && !isFromGroupSettlement && !isGroupStockParent && (
                           <Tooltip title="Delete">
                             <IconButton
                               size="small"
@@ -505,6 +680,7 @@ export default function MaterialSettlementsPage() {
       <MaterialSettlementDialog
         open={settlementDialogOpen}
         purchase={settlementPurchase}
+        purchaseOrder={settlementPO}
         onClose={handleSettlementClose}
         onSuccess={handleSettlementClose}
       />

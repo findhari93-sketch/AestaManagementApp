@@ -64,7 +64,7 @@ export function useMaterialPurchases(
           .from("material_purchase_expenses")
           .select(`
             *,
-            site:sites(id, name),
+            site:sites!site_id(id, name),
             vendor:vendors(id, name),
             site_group:site_groups(id, name),
             items:material_purchase_expense_items(
@@ -131,7 +131,7 @@ export function useGroupMaterialPurchases(
           .from("material_purchase_expenses")
           .select(`
             *,
-            site:sites(id, name),
+            site:sites!site_id(id, name),
             vendor:vendors(id, name),
             site_group:site_groups(id, name),
             items:material_purchase_expense_items(
@@ -190,7 +190,7 @@ export function useMaterialPurchaseById(id: string | undefined) {
         .from("material_purchase_expenses")
         .select(`
           *,
-          site:sites(id, name),
+          site:sites!site_id(id, name),
           vendor:vendors(id, name),
           site_group:site_groups(id, name),
           items:material_purchase_expense_items(
@@ -226,7 +226,7 @@ export function useMaterialPurchaseByRefCode(refCode: string | undefined) {
         .from("material_purchase_expenses")
         .select(`
           *,
-          site:sites(id, name),
+          site:sites!site_id(id, name),
           vendor:vendors(id, name),
           site_group:site_groups(id, name),
           items:material_purchase_expense_items(
@@ -273,7 +273,7 @@ export function useGroupStockBatches(
           .from("material_purchase_expenses")
           .select(`
             *,
-            site:sites(id, name),
+            site:sites!site_id(id, name),
             vendor:vendors(id, name),
             items:material_purchase_expense_items(
               *,
@@ -306,36 +306,58 @@ export function useGroupStockBatches(
           throw error;
         }
 
+        if (!purchases || purchases.length === 0) return [] as GroupStockBatch[];
+
+        // Fetch usage records for all batches
+        const batchRefCodes = purchases.map((p: any) => p.ref_code);
+        const { data: usageRecords, error: usageError } = await (supabase as any)
+          .from("batch_usage_records")
+          .select("batch_ref_code, quantity")
+          .in("batch_ref_code", batchRefCodes);
+
+        // Group usage by batch ref code
+        const usageByBatch = new Map<string, number>();
+        (usageRecords || []).forEach((u: any) => {
+          const current = usageByBatch.get(u.batch_ref_code) || 0;
+          usageByBatch.set(u.batch_ref_code, current + Number(u.quantity || 0));
+        });
+
         // Transform to GroupStockBatch format
-        const batches: GroupStockBatch[] = (purchases || []).map((p: any) => ({
-          batch_code: p.ref_code, // Use ref_code as batch_code
-          ref_code: p.ref_code,
-          purchase_date: p.purchase_date,
-          vendor_id: p.vendor_id,
-          vendor_name: p.vendor_name || p.vendor?.name,
-          payment_source_site_id: p.site_id,
-          payment_source_site_name: p.site?.name,
-          total_amount: p.total_amount,
-          original_quantity: p.items?.reduce((sum: number, item: any) => sum + Number(item.quantity), 0) || 0,
-          remaining_quantity: p.items?.reduce((sum: number, item: any) => sum + Number(item.quantity), 0) || 0, // TODO: Calculate from usage
-          status: p.status,
-          bill_url: p.bill_url,
-          payment_mode: p.payment_mode,
-          payment_reference: p.payment_reference,
-          payment_screenshot_url: p.payment_screenshot_url,
-          notes: p.notes,
-          items: (p.items || []).map((item: any) => ({
-            material_id: item.material_id,
-            material_name: item.material?.name || "",
-            material_code: item.material?.code,
-            brand_id: item.brand_id,
-            brand_name: item.brand?.brand_name,
-            quantity: item.quantity,
-            unit: item.material?.unit || "piece",
-            unit_price: item.unit_price,
-          })),
-          allocations: [], // TODO: Calculate from usage transactions
-        }));
+        const batches: GroupStockBatch[] = (purchases || []).map((p: any) => {
+          const original_quantity = p.items?.reduce((sum: number, item: any) => sum + Number(item.quantity), 0) || 0;
+          const used_quantity = usageByBatch.get(p.ref_code) || 0;
+          const remaining_quantity = original_quantity - used_quantity;
+
+          return {
+            batch_code: p.ref_code, // Use ref_code as batch_code
+            ref_code: p.ref_code,
+            purchase_date: p.purchase_date,
+            vendor_id: p.vendor_id,
+            vendor_name: p.vendor_name || p.vendor?.name,
+            payment_source_site_id: p.site_id,
+            payment_source_site_name: p.site?.name,
+            total_amount: p.total_amount,
+            original_quantity,
+            remaining_quantity,
+            status: p.status,
+            bill_url: p.bill_url,
+            payment_mode: p.payment_mode,
+            payment_reference: p.payment_reference,
+            payment_screenshot_url: p.payment_screenshot_url,
+            notes: p.notes,
+            items: (p.items || []).map((item: any) => ({
+              material_id: item.material_id,
+              material_name: item.material?.name || "",
+              material_code: item.material?.code,
+              brand_id: item.brand_id,
+              brand_name: item.brand?.brand_name,
+              quantity: item.quantity,
+              unit: item.material?.unit || "piece",
+              unit_price: item.unit_price,
+            })),
+            allocations: [], // Calculated by useBatchesWithUsage hook
+          };
+        });
 
         return batches;
       } catch (err) {
@@ -690,11 +712,16 @@ export interface SettleMaterialPurchaseData {
   bill_url?: string;
   payment_screenshot_url?: string;
   notes?: string;
+  /** Actual amount paid after bargaining (may differ from total_amount) */
+  amount_paid?: number;
+  /** Set to true for group stock vendor payments (no settlement reference) */
+  isVendorPaymentOnly?: boolean;
 }
 
 /**
  * Settle a material purchase expense
  * Generates a settlement reference and marks the purchase as settled
+ * For group stock (isVendorPaymentOnly=true), only marks vendor as paid without settlement reference
  */
 export function useSettleMaterialPurchase() {
   const supabase = createClient();
@@ -704,24 +731,32 @@ export function useSettleMaterialPurchase() {
     mutationFn: async (data: SettleMaterialPurchaseData) => {
       await ensureFreshSession();
 
-      const settlementRef = generateSettlementRef();
+      // For vendor-only payment (group stock), don't set settlement_reference
+      const settlementRef = data.isVendorPaymentOnly ? null : generateSettlementRef();
+
+      const updateData: Record<string, unknown> = {
+        payment_mode: data.payment_mode,
+        payment_reference: data.payment_reference || null,
+        bill_url: data.bill_url || null,
+        payment_screenshot_url: data.payment_screenshot_url || null,
+        is_paid: true,
+        paid_date: data.settlement_date,
+        amount_paid: data.amount_paid || null,
+        notes: data.notes || null,
+        updated_at: new Date().toISOString(),
+      };
+
+      // Only set settlement fields for non-vendor-only payments
+      if (!data.isVendorPaymentOnly) {
+        updateData.settlement_reference = settlementRef;
+        updateData.settlement_date = data.settlement_date;
+        updateData.settlement_payer_source = data.payer_source;
+        updateData.settlement_payer_name = data.payer_name || null;
+      }
 
       const { error } = await (supabase as any)
         .from("material_purchase_expenses")
-        .update({
-          settlement_reference: settlementRef,
-          settlement_date: data.settlement_date,
-          settlement_payer_source: data.payer_source,
-          settlement_payer_name: data.payer_name || null,
-          payment_mode: data.payment_mode,
-          payment_reference: data.payment_reference || null,
-          bill_url: data.bill_url || null,
-          payment_screenshot_url: data.payment_screenshot_url || null,
-          is_paid: true,
-          paid_date: data.settlement_date,
-          notes: data.notes || null,
-          updated_at: new Date().toISOString(),
-        })
+        .update(updateData)
         .eq("id", data.id);
 
       if (error) throw error;
@@ -797,10 +832,13 @@ export function useConvertGroupToOwnSite() {
 // ============================================
 
 /**
- * Fetch material expenses for a site (for display in Site Expenses page)
+ * Fetch material expenses for a site (for display in Material Settlements page)
+ * This is for VENDOR PAYMENT tracking - shows all purchases this site needs to pay vendors for.
  * Includes:
  * - Own site purchases (purchase_type = 'own_site')
- * - Allocated group stock purchases (original_batch_code IS NOT NULL)
+ * - Allocated group stock purchases (original_batch_code IS NOT NULL) - debtor expenses
+ * - Group stock parent purchases (purchase_type = 'group_stock') - for paying site to record vendor payment
+ * - POs with payment_timing='advance' that need advance payment (before delivery)
  */
 export function useSiteMaterialExpenses(siteId: string | undefined) {
   const supabase = createClient();
@@ -810,17 +848,22 @@ export function useSiteMaterialExpenses(siteId: string | undefined) {
       ? [...queryKeys.materialPurchases.bySite(siteId), "expenses"]
       : ["material-expenses"],
     queryFn: async () => {
-      if (!siteId) return { expenses: [], total: 0 };
+      if (!siteId) return { expenses: [], advancePOs: [], total: 0 };
 
       try {
-        // Fetch material purchase expenses for this site
-        // Include both own_site purchases AND allocated group purchases
-        const { data, error } = await (supabase as any)
+        // 1. Fetch material purchase expenses for this site
+        // Include:
+        // - own_site purchases - direct purchases for this site
+        // - original_batch_code IS NOT NULL - allocated expenses from inter-site settlements
+        // - group_stock purchases - parent batches where this site paid the vendor
+        // Use proper OR syntax: site_id must match AND one of the conditions
+        let expensesQuery = (supabase as any)
           .from("material_purchase_expenses")
           .select(`
             *,
             vendor:vendors(id, name),
             purchase_order:purchase_orders(id, po_number),
+            paying_site:sites!material_purchase_expenses_paying_site_id_fkey(id, name),
             items:material_purchase_expense_items(
               *,
               material:materials(id, name, code, unit),
@@ -828,29 +871,365 @@ export function useSiteMaterialExpenses(siteId: string | undefined) {
             )
           `)
           .eq("site_id", siteId)
-          .or("purchase_type.eq.own_site,original_batch_code.not.is.null")
           .order("purchase_date", { ascending: false });
 
-        if (error) {
-          if (isQueryError(error)) {
-            console.warn("Site material expenses query failed:", error.message);
-            return { expenses: [], total: 0 };
-          }
-          throw error;
+        // Apply OR filter for purchase types - must be within the site filter
+        const { data: expensesData, error: expensesError } = await expensesQuery
+          .or("purchase_type.eq.own_site,purchase_type.eq.group_stock,original_batch_code.not.is.null");
+
+        if (expensesError && !isQueryError(expensesError)) {
+          throw expensesError;
         }
 
-        const expenses = (data || []) as MaterialPurchaseExpenseWithDetails[];
-        const total = expenses.reduce((sum, exp) => sum + Number(exp.total_amount || 0), 0);
+        // 2. Fetch POs with advance payment that haven't been paid yet
+        const { data: advancePOsData, error: advancePOsError } = await (supabase as any)
+          .from("purchase_orders")
+          .select(`
+            *,
+            vendor:vendors(id, name),
+            items:purchase_order_items(
+              *,
+              material:materials(id, name, code, unit),
+              brand:material_brands(id, brand_name)
+            )
+          `)
+          .eq("site_id", siteId)
+          .eq("payment_timing", "advance")
+          .in("status", ["ordered", "draft"])
+          .is("advance_paid", null) // Not yet paid
+          .order("order_date", { ascending: false });
 
-        return { expenses, total };
+        if (advancePOsError && !isQueryError(advancePOsError)) {
+          throw advancePOsError;
+        }
+
+        const expenses = (expensesData || []) as MaterialPurchaseExpenseWithDetails[];
+        const advancePOs = (advancePOsData || []) as any[];
+
+        // Debug logging
+        console.log("[useSiteMaterialExpenses] Fetched expenses:", expenses.length);
+        console.log("[useSiteMaterialExpenses] Expense types:", expenses.map(e => ({
+          ref_code: e.ref_code,
+          purchase_type: e.purchase_type,
+          is_paid: e.is_paid,
+          amount: e.total_amount,
+        })));
+        console.log("[useSiteMaterialExpenses] Fetched advance POs:", advancePOs.length);
+
+        // Calculate total from both expenses and advance POs
+        const expensesTotal = expenses.reduce((sum, exp) => sum + Number(exp.total_amount || 0), 0);
+        const advancePOsTotal = advancePOs.reduce((sum, po) => sum + Number(po.total_amount || 0), 0);
+        const total = expensesTotal + advancePOsTotal;
+
+        return { expenses, advancePOs, total };
       } catch (err) {
         if (isQueryError(err)) {
           console.warn("Site material expenses query failed:", err);
-          return { expenses: [], total: 0 };
+          return { expenses: [], advancePOs: [], total: 0 };
         }
         throw err;
       }
     },
     enabled: !!siteId,
+  });
+}
+
+// ============================================
+// SITE MATERIAL EXPENSES (for Material Expenses Page - site-level costs)
+// ============================================
+
+/**
+ * Type for site-level material expense
+ */
+export interface SiteMaterialExpense {
+  id: string;
+  ref_code: string;
+  type: "own_site" | "self_use" | "allocated";
+  purchase_date: string;
+  material_name: string;
+  material_id: string | null;
+  brand_name: string | null;
+  quantity: number | null;
+  unit: string | null;
+  amount: number;
+  source_ref: string; // PO number, batch code, or settlement reference
+  status: "paid" | "settled" | "pending";
+  vendor_name: string | null;
+  bill_url: string | null;
+  // For linking
+  purchase_expense_id: string | null;
+  batch_ref_code: string | null;
+  settlement_reference: string | null;
+}
+
+/**
+ * Fetch site-level material expenses (actual costs this site bears)
+ * This is for SITE EXPENSE tracking - shows only what THIS site pays for.
+ * Includes:
+ * - Own site purchases that are settled/paid
+ * - Allocated expenses from inter-site settlements (debtor portion)
+ * - Self-use portion from group batches where this site paid (creditor portion)
+ */
+export function useSiteLevelMaterialExpenses(siteId: string | undefined) {
+  const supabase = createClient();
+
+  return useQuery({
+    queryKey: siteId
+      ? [...queryKeys.materialPurchases.bySite(siteId), "site-level-expenses"]
+      : ["site-level-expenses"],
+    queryFn: async () => {
+      if (!siteId) return { expenses: [] as SiteMaterialExpense[], total: 0 };
+
+      try {
+        const expenses: SiteMaterialExpense[] = [];
+
+        // 1. Fetch own site purchases that are paid/settled
+        const { data: ownSitePurchases, error: ownSiteError } = await (supabase as any)
+          .from("material_purchase_expenses")
+          .select(`
+            id,
+            ref_code,
+            purchase_date,
+            total_amount,
+            is_paid,
+            settlement_reference,
+            vendor_name,
+            bill_url,
+            purchase_order:purchase_orders(po_number),
+            items:material_purchase_expense_items(
+              quantity,
+              material:materials(id, name, unit),
+              brand:material_brands(brand_name)
+            )
+          `)
+          .eq("site_id", siteId)
+          .eq("purchase_type", "own_site")
+          .eq("is_paid", true)
+          .order("purchase_date", { ascending: false });
+
+        if (ownSiteError) {
+          console.warn("Own site purchases query failed:", ownSiteError.message);
+        } else {
+          for (const purchase of (ownSitePurchases || [])) {
+            const firstItem = purchase.items?.[0];
+            expenses.push({
+              id: purchase.id,
+              ref_code: purchase.ref_code,
+              type: "own_site",
+              purchase_date: purchase.purchase_date,
+              material_name: firstItem?.material?.name || "Materials",
+              material_id: firstItem?.material?.id || null,
+              brand_name: firstItem?.brand?.brand_name || null,
+              quantity: purchase.items?.reduce((sum: number, i: any) => sum + Number(i.quantity || 0), 0) || null,
+              unit: firstItem?.material?.unit || null,
+              amount: Number(purchase.total_amount || 0),
+              source_ref: purchase.purchase_order?.po_number || purchase.ref_code,
+              status: purchase.settlement_reference ? "settled" : "paid",
+              vendor_name: purchase.vendor_name,
+              bill_url: purchase.bill_url,
+              purchase_expense_id: purchase.id,
+              batch_ref_code: null,
+              settlement_reference: purchase.settlement_reference,
+            });
+          }
+        }
+
+        // 2. Fetch allocated expenses from inter-site settlements
+        const { data: allocatedExpenses, error: allocatedError } = await (supabase as any)
+          .from("material_purchase_expenses")
+          .select(`
+            id,
+            ref_code,
+            purchase_date,
+            total_amount,
+            original_batch_code,
+            settlement_reference,
+            vendor_name,
+            bill_url,
+            items:material_purchase_expense_items(
+              quantity,
+              material:materials(id, name, unit),
+              brand:material_brands(brand_name)
+            )
+          `)
+          .eq("site_id", siteId)
+          .not("original_batch_code", "is", null)
+          .not("settlement_reference", "is", null)
+          .neq("settlement_reference", "SELF-USE")
+          .order("purchase_date", { ascending: false });
+
+        if (allocatedError) {
+          console.warn("Allocated expenses query failed:", allocatedError.message);
+        } else {
+          for (const expense of (allocatedExpenses || [])) {
+            const firstItem = expense.items?.[0];
+            expenses.push({
+              id: expense.id,
+              ref_code: expense.ref_code,
+              type: "allocated",
+              purchase_date: expense.purchase_date,
+              material_name: firstItem?.material?.name || "Materials",
+              material_id: firstItem?.material?.id || null,
+              brand_name: firstItem?.brand?.brand_name || null,
+              quantity: expense.items?.reduce((sum: number, i: any) => sum + Number(i.quantity || 0), 0) || null,
+              unit: firstItem?.material?.unit || null,
+              amount: Number(expense.total_amount || 0),
+              source_ref: expense.settlement_reference || expense.original_batch_code,
+              status: "settled",
+              vendor_name: expense.vendor_name,
+              bill_url: expense.bill_url,
+              purchase_expense_id: expense.id,
+              batch_ref_code: expense.original_batch_code,
+              settlement_reference: expense.settlement_reference,
+            });
+          }
+        }
+
+        // 3. Fetch self-use from group batches where this site paid
+        // These are created when batch settlement is complete (with settlement_reference = 'SELF-USE')
+        const { data: selfUseExpenses, error: selfUseError } = await (supabase as any)
+          .from("material_purchase_expenses")
+          .select(`
+            id,
+            ref_code,
+            purchase_date,
+            total_amount,
+            original_batch_code,
+            settlement_reference,
+            vendor_name,
+            bill_url,
+            items:material_purchase_expense_items(
+              quantity,
+              material:materials(id, name, unit),
+              brand:material_brands(brand_name)
+            )
+          `)
+          .eq("site_id", siteId)
+          .not("original_batch_code", "is", null)
+          .eq("settlement_reference", "SELF-USE")
+          .order("purchase_date", { ascending: false });
+
+        if (selfUseError) {
+          console.warn("Self-use expenses query failed:", selfUseError.message);
+        } else {
+          for (const expense of (selfUseExpenses || [])) {
+            const firstItem = expense.items?.[0];
+            expenses.push({
+              id: expense.id,
+              ref_code: expense.ref_code,
+              type: "self_use",
+              purchase_date: expense.purchase_date,
+              material_name: firstItem?.material?.name || "Materials",
+              material_id: firstItem?.material?.id || null,
+              brand_name: firstItem?.brand?.brand_name || null,
+              quantity: expense.items?.reduce((sum: number, i: any) => sum + Number(i.quantity || 0), 0) || null,
+              unit: firstItem?.material?.unit || null,
+              amount: Number(expense.total_amount || 0),
+              source_ref: `Self-use from ${expense.original_batch_code}`,
+              status: "settled",
+              vendor_name: expense.vendor_name,
+              bill_url: expense.bill_url,
+              purchase_expense_id: expense.id,
+              batch_ref_code: expense.original_batch_code,
+              settlement_reference: expense.settlement_reference,
+            });
+          }
+        }
+
+        // Sort by date descending
+        expenses.sort((a, b) => new Date(b.purchase_date).getTime() - new Date(a.purchase_date).getTime());
+
+        const total = expenses.reduce((sum, exp) => sum + exp.amount, 0);
+
+        return { expenses, total };
+      } catch (err) {
+        if (isQueryError(err)) {
+          console.warn("Site level material expenses query failed:", err);
+          return { expenses: [] as SiteMaterialExpense[], total: 0 };
+        }
+        throw err;
+      }
+    },
+    enabled: !!siteId,
+  });
+}
+
+// ============================================
+// DELETE BATCH WITH CASCADE
+// ============================================
+
+/**
+ * Delete a batch and all related records (settlements, usage records, transactions, items)
+ * Uses the delete_batch_cascade database function which handles all cascading deletes
+ */
+export function useDeleteBatchCascade() {
+  const queryClient = useQueryClient();
+  const supabase = createClient();
+
+  return useMutation({
+    mutationFn: async (batchRefCode: string) => {
+      await ensureFreshSession();
+
+      // First, get the batch details for cache invalidation
+      const { data: batch, error: fetchError } = await (supabase as any)
+        .from("material_purchase_expenses")
+        .select("id, site_id, site_group_id, ref_code")
+        .eq("ref_code", batchRefCode)
+        .single();
+
+      if (fetchError) throw fetchError;
+
+      // Call the database function to delete batch and all related records
+      const { data, error } = await (supabase as any).rpc("delete_batch_cascade", {
+        p_batch_ref_code: batchRefCode,
+      });
+
+      if (error) throw error;
+
+      return { batch, deletionResult: data };
+    },
+    onSuccess: (result) => {
+      const { batch, deletionResult } = result;
+
+      console.log('Batch deleted with cascade:', {
+        batch_ref_code: batch.ref_code,
+        deleted_settlements: deletionResult[0]?.deleted_settlements,
+        deleted_usage_records: deletionResult[0]?.deleted_usage_records,
+        deleted_transactions: deletionResult[0]?.deleted_transactions,
+        deleted_expense_items: deletionResult[0]?.deleted_expense_items,
+      });
+
+      // Invalidate all related queries
+      // Material purchases queries
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.materialPurchases.all,
+      });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.materialPurchases.bySite(batch.site_id),
+      });
+
+      // Group stock queries
+      if (batch.site_group_id) {
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.groupStock.byGroup(batch.site_group_id),
+        });
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.groupStock.transactions(batch.site_group_id),
+        });
+      }
+
+      // Batch usage queries
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.batchUsage.all,
+      });
+
+      // Settlement queries
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.interSiteSettlements.all,
+      });
+    },
+    onError: (error) => {
+      console.error("Delete batch cascade error:", error);
+    },
   });
 }

@@ -47,11 +47,11 @@ import { createBrowserClient } from "@supabase/ssr";
 import PageHeader from "@/components/layout/PageHeader";
 import { useSite } from "@/contexts/SiteContext";
 import type { Database } from "@/types/database.types";
-import type {
-  ClientPaymentPlan,
-  PaymentPhase,
-  ClientPayment,
-} from "@/types/database.types";
+
+type ClientPaymentPlan = Database["public"]["Tables"]["client_payment_plans"]["Row"];
+type PaymentPhase = Database["public"]["Tables"]["payment_phases"]["Row"];
+type ClientPayment = Database["public"]["Tables"]["client_payments"]["Row"];
+
 import SitePaymentPlanDrawer, {
   type SitePlanUpdatePayload,
 } from "@/components/payments/SitePaymentPlanDrawer";

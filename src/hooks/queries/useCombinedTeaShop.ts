@@ -3,7 +3,10 @@
 import { useQuery } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase/client";
 import { queryKeys } from "@/lib/cache/keys";
-import type { TeaShopEntry, TeaShopSettlement } from "@/types/database.types";
+import type { Database } from "@/types/database.types";
+
+type TeaShopEntry = Database["public"]["Tables"]["tea_shop_entries"]["Row"];
+type TeaShopSettlement = Database["public"]["Tables"]["tea_shop_settlements"]["Row"];
 
 // =============================================================================
 // TYPES

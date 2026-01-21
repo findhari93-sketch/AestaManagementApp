@@ -12,7 +12,10 @@ import type {
   HolidayDialogMode,
   TeaShopData,
 } from "../types";
-import type { DailyWorkSummary, TeaShopAccount } from "@/types/database.types";
+import type { Database } from "@/types/database.types";
+
+type DailyWorkSummary = Database["public"]["Tables"]["daily_work_summary"]["Row"];
+type TeaShopAccount = Database["public"]["Tables"]["tea_shop_accounts"]["Row"];
 import type { WorkUpdates } from "@/types/work-updates.types";
 import type { DailyPaymentRecord } from "@/types/payment.types";
 import type { UnifiedSettlementConfig } from "@/types/settlement.types";

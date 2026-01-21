@@ -11,7 +11,15 @@ import {
 import { LocalCafe } from "@mui/icons-material";
 import PercentageSplitInput from "./PercentageSplitInput";
 import MultiSiteSplitSection from "./MultiSiteSplitSection";
-import type { Site, LaborGroupPercentageSplit } from "@/types/database.types";
+import type { Database } from "@/types/database.types";
+
+type Site = Database["public"]["Tables"]["sites"]["Row"];
+
+interface LaborGroupPercentageSplit {
+  daily: number;
+  contract: number;
+  market: number;
+}
 
 interface SimpleEntryModeContentProps {
   date: string;

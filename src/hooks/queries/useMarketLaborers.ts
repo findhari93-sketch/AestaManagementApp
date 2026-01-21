@@ -1,7 +1,9 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { createClient, ensureFreshSession } from "@/lib/supabase/client";
 import { queryKeys } from "@/lib/cache/keys";
-import type { MarketLaborerAttendance } from "@/types/database.types";
+import type { Database } from "@/types/database.types";
+
+type MarketLaborerAttendance = Database["public"]["Tables"]["market_laborer_attendance"]["Row"];
 
 interface MarketLaborerWithCategory extends MarketLaborerAttendance {
   labor_categories: {

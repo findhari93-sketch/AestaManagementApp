@@ -496,6 +496,21 @@ export function useBatchesWithUsage(groupId: string | undefined) {
         return batches.map((batch: any) => {
           const batchUsage = usageByBatch.get(batch.ref_code) || [];
 
+          // Calculate original quantity from batch items
+          const original_quantity = (batch.items || []).reduce(
+            (sum: number, item: any) => sum + Number(item.quantity || 0),
+            0
+          );
+
+          // Calculate used quantity from batch_usage_records
+          const used_quantity = batchUsage.reduce(
+            (sum: number, u: any) => sum + Number(u.quantity || 0),
+            0
+          );
+
+          // Calculate remaining quantity
+          const remaining_quantity = original_quantity - used_quantity;
+
           // Aggregate usage by site
           const siteUsageMap = new Map<string, {
             site_id: string;
@@ -529,6 +544,8 @@ export function useBatchesWithUsage(groupId: string | undefined) {
 
           return {
             ...batch,
+            original_quantity,
+            remaining_quantity,
             site_allocations: Array.from(siteUsageMap.values()),
           };
         });
@@ -543,3 +560,66 @@ export function useBatchesWithUsage(groupId: string | undefined) {
     enabled: !!groupId,
   });
 }
+
+// ============================================
+// MUTATIONS
+// ============================================
+
+/**
+ * Complete a batch by settling with all debtor sites
+ * Calls process_batch_settlement for each site with pending usage
+ */
+export function useCompleteBatch() {
+  const supabase = createClient();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (data: {
+      batchRefCode: string;
+      allocations: BatchSiteAllocation[];
+      paymentDate?: string;
+      paymentMode?: string;
+      paymentReference?: string;
+    }) => {
+      // Filter only sites that have pending usage (not self-use)
+      const debtorSites = data.allocations.filter(
+        (alloc) => !alloc.is_payer && alloc.settlement_status === "pending"
+      );
+
+      if (debtorSites.length === 0) {
+        throw new Error("No debtor sites to settle");
+      }
+
+      const paymentDate = data.paymentDate || new Date().toISOString().split("T")[0];
+      const paymentMode = data.paymentMode || "upi";
+
+      // Process settlement for each debtor site sequentially
+      const results = [];
+      for (const debtor of debtorSites) {
+        const { data: result, error } = await (supabase as any).rpc("process_batch_settlement", {
+          p_batch_ref_code: data.batchRefCode,
+          p_debtor_site_id: debtor.site_id,
+          p_payment_mode: paymentMode,
+          p_payment_date: paymentDate,
+          p_payment_reference: data.paymentReference || null,
+          p_settlement_amount: debtor.amount, // Use calculated amount
+        });
+
+        if (error) {
+          throw new Error(`Failed to settle with ${debtor.site_name}: ${error.message}`);
+        }
+
+        results.push(result);
+      }
+
+      return results;
+    },
+    onSuccess: (_, variables) => {
+      // Invalidate relevant queries
+      queryClient.invalidateQueries({ queryKey: queryKeys.batchUsage.all });
+      queryClient.invalidateQueries({ queryKey: queryKeys.materialPurchases.all });
+      queryClient.invalidateQueries({ queryKey: queryKeys.interSiteSettlements.all });
+    },
+  });
+}
+

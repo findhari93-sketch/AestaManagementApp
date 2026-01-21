@@ -1,7 +1,9 @@
 // Miscellaneous Expenses Types
 
 import type { PayerSource } from "./settlement.types";
-import type { PaymentMode } from "./database.types";
+import type { Database } from "./database.types";
+
+type PaymentMode = Database["public"]["Enums"]["payment_mode"];
 import type { BatchAllocation } from "./wallet.types";
 
 /**

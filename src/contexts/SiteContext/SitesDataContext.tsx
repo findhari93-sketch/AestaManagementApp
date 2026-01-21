@@ -1,7 +1,9 @@
 "use client";
 
 import { createContext, useContext } from "react";
-import { Site } from "@/types/database.types";
+import type { Database } from "@/types/database.types";
+
+type Site = Database["public"]["Tables"]["sites"]["Row"];
 
 /**
  * Context for the sites list

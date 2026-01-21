@@ -25,8 +25,17 @@ import {
   People as PeopleIcon,
   Warning as WarningIcon,
 } from "@mui/icons-material";
-import type { SiteAttendanceData } from "@/types/database.types";
 import { allocateAmounts } from "@/hooks/queries/useGroupTeaShop";
+
+interface SiteAttendanceData {
+  siteId: string;
+  siteName: string;
+  totalCount: number;
+  namedLaborerCount: number;
+  marketLaborerCount: number;
+  percentage: number;
+  allocatedAmount: number;
+}
 
 interface GroupSiteAllocationPreviewProps {
   sites: SiteAttendanceData[];

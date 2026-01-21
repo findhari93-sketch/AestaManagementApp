@@ -60,10 +60,11 @@ import {
   useInterSiteBalances,
   useGenerateSettlement,
   useApproveSettlement,
+  useDeleteSettlement,
   useGroupStockTransactions,
 } from '@/hooks/queries/useInterSiteSettlements'
 import { useGroupStockBatches } from '@/hooks/queries/useMaterialPurchases'
-import { useBatchesWithUsage } from '@/hooks/queries/useBatchUsage'
+import { useBatchesWithUsage, useCompleteBatch } from '@/hooks/queries/useBatchUsage'
 import WeeklyUsageReportDialog from '@/components/materials/WeeklyUsageReportDialog'
 import GroupStockBatchCard from '@/components/materials/GroupStockBatchCard'
 import EditMaterialPurchaseDialog from '@/components/materials/EditMaterialPurchaseDialog'
@@ -72,6 +73,8 @@ import GroupStockTransactionDrawer from '@/components/materials/GroupStockTransa
 import EditGroupStockTransactionDialog from '@/components/materials/EditGroupStockTransactionDialog'
 import RecordBatchUsageDialog from '@/components/materials/RecordBatchUsageDialog'
 import InitiateBatchSettlementDialog from '@/components/materials/InitiateBatchSettlementDialog'
+import BatchCompletionDialog from '@/components/materials/BatchCompletionDialog'
+import PurchaseBatchRow from '@/components/materials/PurchaseBatchRow'
 import ConfirmDialog from '@/components/common/ConfirmDialog'
 import type { InterSiteSettlementWithDetails, InterSiteBalance, GroupStockBatch, MaterialPurchaseExpenseWithDetails } from '@/types/material.types'
 import type { GroupStockTransaction } from '@/hooks/queries/useInterSiteSettlements'
@@ -100,6 +103,7 @@ export default function InterSiteSettlementPage() {
   // Dialog states for batch management
   const [editPurchaseOpen, setEditPurchaseOpen] = useState(false)
   const [convertDialogOpen, setConvertDialogOpen] = useState(false)
+  const [batchCompletionOpen, setBatchCompletionOpen] = useState(false)
   const [selectedBatch, setSelectedBatch] = useState<GroupStockBatch | null>(null)
 
   // Filters for transactions tab
@@ -132,6 +136,10 @@ export default function InterSiteSettlementPage() {
     amount: number
   } | null>(null)
 
+  // Settlement delete states
+  const [deleteSettlementId, setDeleteSettlementId] = useState<string | null>(null)
+  const [deleteSettlementConfirmOpen, setDeleteSettlementConfirmOpen] = useState(false)
+
   // Hooks
   const { data: groupMembership, isLoading: membershipLoading } = useSiteGroupMembership(
     selectedSite?.id
@@ -159,7 +167,9 @@ export default function InterSiteSettlementPage() {
 
   const generateSettlement = useGenerateSettlement()
   const approveSettlement = useApproveSettlement()
+  const deleteSettlement = useDeleteSettlement()
   const deleteTransactionMutation = useDeleteGroupStockTransaction()
+  const completeBatchMutation = useCompleteBatch()
 
   // Auth and permissions
   const { userProfile } = useAuth()
@@ -201,6 +211,54 @@ export default function InterSiteSettlementPage() {
     return sourceBatches.filter((batch: any) => batch.status === batchStatusFilter)
   }, [batches, batchesWithUsage, batchStatusFilter])
 
+  // Group transactions by batch for collapsible view (only used when typeFilter === 'all')
+  const groupedTransactions = useMemo(() => {
+    const sourceBatches = batchesWithUsage.length > 0 ? batchesWithUsage : batches
+
+    return sourceBatches.map((batch: any) => ({
+      batch,
+      transactions: transactions.filter(tx => {
+        // Match by batch_ref_code (most common)
+        if (tx.batch_ref_code === batch.ref_code) return true
+
+        // Match by reference_id
+        if (tx.reference_id === batch.id) return true
+
+        // Match by inventory_id (for purchase transactions)
+        if (tx.inventory_id === batch.inventory_id) return true
+
+        // Match purchase transactions by material and date (fallback)
+        if (tx.transaction_type === 'purchase' &&
+            tx.material_id === batch.material_id &&
+            tx.transaction_date === batch.purchase_date) {
+          return true
+        }
+
+        return false
+      })
+    }))
+  }, [batches, batchesWithUsage, transactions])
+
+  // Filter grouped transactions for "All" view
+  const filteredGroupedTransactions = useMemo(() => {
+    return groupedTransactions.filter((group: any) => {
+      const { batch } = group
+
+      // Site filter
+      if (siteFilter !== 'all') {
+        const hasMatchingSite =
+          batch.payment_source_site_id === siteFilter ||
+          batch.paying_site_id === siteFilter ||
+          (batch.site_allocations && batch.site_allocations.some((alloc: any) =>
+            alloc.site_id === siteFilter
+          ))
+        if (!hasMatchingSite) return false
+      }
+
+      return true
+    })
+  }, [groupedTransactions, siteFilter])
+
   // Batch action handlers
   const handleEditBatch = (batch: GroupStockBatch) => {
     setSelectedBatch(batch)
@@ -213,8 +271,15 @@ export default function InterSiteSettlementPage() {
   }
 
   const handleCompleteBatch = (batch: GroupStockBatch) => {
-    // TODO: Open batch completion dialog
-    console.log('Complete batch:', batch.ref_code)
+    setSelectedBatch(batch)
+    setBatchCompletionOpen(true)
+  }
+
+  const handleConfirmBatchCompletion = async (batchRefCode: string, allocations: any[]) => {
+    await completeBatchMutation.mutateAsync({
+      batchRefCode,
+      allocations,
+    })
   }
 
   // Batch usage handlers
@@ -332,12 +397,85 @@ export default function InterSiteSettlementPage() {
     }
   }
 
-  // Handle approve settlement
+  // Handle approve settlement (DEPRECATED - use handleSettlePayment instead)
   const handleApproveSettlement = async (settlementId: string) => {
     try {
       await approveSettlement.mutateAsync({ settlementId })
     } catch (error) {
       console.error('Failed to approve settlement:', error)
+    }
+  }
+
+  // Handle settle payment from pending settlement
+  const handleSettlePayment = (settlement: InterSiteSettlementWithDetails) => {
+    if (!settlement.from_site || !settlement.to_site) {
+      console.error('Settlement missing site details')
+      return
+    }
+
+    // Get batch ref code from settlement (added via migration)
+    const batchRefCode = settlement.batch_ref_code
+
+    if (!batchRefCode) {
+      console.error('Settlement missing batch_ref_code - cannot open settlement dialog')
+      alert('Cannot settle: batch information missing. Please regenerate this settlement.')
+      return
+    }
+
+    setSettlementData({
+      batchRefCode: batchRefCode,
+      debtorSiteId: settlement.to_site_id,
+      debtorSiteName: settlement.to_site.name,
+      creditorSiteId: settlement.from_site_id,
+      creditorSiteName: settlement.from_site.name,
+      amount: Number(settlement.total_amount),
+    })
+    setSettlementDialogOpen(true)
+  }
+
+  // Handle settle now from unsettled balances (direct settlement)
+  const handleSettleNow = (balance: InterSiteBalance) => {
+    if (!groupMembership?.allSites) return
+
+    const creditorSite = groupMembership.allSites.find((s: any) => s.id === balance.creditor_site_id)
+    const debtorSite = groupMembership.allSites.find((s: any) => s.id === balance.debtor_site_id)
+
+    if (!creditorSite || !debtorSite) {
+      console.error('Could not find site details')
+      return
+    }
+
+    // Find batch_ref_code from the balance
+    // The balance already has this information from the unsettled balances query
+    const batchRefCode = (balance as any).batch_ref_code || null
+
+    if (!batchRefCode) {
+      console.error('Balance missing batch_ref_code')
+      alert('Cannot settle: batch information missing.')
+      return
+    }
+
+    setSettlementData({
+      batchRefCode: batchRefCode,
+      debtorSiteId: balance.debtor_site_id,
+      debtorSiteName: debtorSite.name,
+      creditorSiteId: balance.creditor_site_id,
+      creditorSiteName: creditorSite.name,
+      amount: Number(balance.total_amount_owed),
+    })
+    setSettlementDialogOpen(true)
+  }
+
+  // Handle delete settlement
+  const handleDeleteSettlement = async () => {
+    if (!deleteSettlementId) return
+
+    try {
+      await deleteSettlement.mutateAsync(deleteSettlementId)
+      setDeleteSettlementConfirmOpen(false)
+      setDeleteSettlementId(null)
+    } catch (error) {
+      console.error('Failed to delete settlement:', error)
     }
   }
 
@@ -617,7 +755,9 @@ export default function InterSiteSettlementPage() {
             )}
 
             <Typography variant="body2" color="text.secondary" sx={{ ml: 'auto' }}>
-              Showing {filteredTransactions.length} of {transactions.length} transactions
+              {typeFilter === 'all'
+                ? `Showing ${filteredGroupedTransactions.length} purchases`
+                : `Showing ${filteredTransactions.length} of ${transactions.length} transactions`}
             </Typography>
           </Box>
 
@@ -625,13 +765,14 @@ export default function InterSiteSettlementPage() {
             <Table>
               <TableHead>
                 <TableRow>
+                  {typeFilter === 'all' && <TableCell sx={{ width: 48 }}></TableCell>}
                   <TableCell>Date</TableCell>
                   <TableCell>Type</TableCell>
                   <TableCell>Material</TableCell>
-                  <TableCell align="right">Quantity</TableCell>
+                  <TableCell align="right">{typeFilter === 'all' ? 'Quantity & Usage' : 'Quantity'}</TableCell>
                   <TableCell align="right">Unit Cost</TableCell>
                   <TableCell align="right">Total</TableCell>
-                  <TableCell>Paid By / Used By</TableCell>
+                  <TableCell>{typeFilter === 'all' ? 'Paid By' : 'Paid By / Used By'}</TableCell>
                   <TableCell>Notes</TableCell>
                   <TableCell>Actions</TableCell>
                 </TableRow>
@@ -640,6 +781,7 @@ export default function InterSiteSettlementPage() {
                 {isLoading ? (
                   [...Array(5)].map((_, i) => (
                     <TableRow key={i}>
+                      {typeFilter === 'all' && <TableCell><Skeleton /></TableCell>}
                       <TableCell><Skeleton /></TableCell>
                       <TableCell><Skeleton /></TableCell>
                       <TableCell><Skeleton /></TableCell>
@@ -651,7 +793,63 @@ export default function InterSiteSettlementPage() {
                       <TableCell><Skeleton /></TableCell>
                     </TableRow>
                   ))
+                ) : typeFilter === 'all' ? (
+                  // Grouped collapsible view for "All" filter
+                  filteredGroupedTransactions.length > 0 ? (
+                    filteredGroupedTransactions.map((group: any) => (
+                      <PurchaseBatchRow
+                        key={group.batch.ref_code}
+                        batch={group.batch}
+                        transactions={group.transactions}
+                        currentSiteId={selectedSite?.id}
+                        onViewTransaction={handleViewTransaction}
+                        onEditTransaction={handleEditTransaction}
+                        onDeleteTransaction={handleDeleteTransaction}
+                        canEdit={canEdit}
+                      />
+                    ))
+                  ) : (
+                    <TableRow>
+                      <TableCell colSpan={10} align="center" sx={{ py: 4 }}>
+                        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                          <TransactionsIcon sx={{ fontSize: 48, color: 'text.disabled' }} />
+                          <Box sx={{ textAlign: 'center' }}>
+                            <Typography variant="h6" color="text.secondary" gutterBottom>
+                              No transactions yet
+                            </Typography>
+                            <Typography variant="body2" color="text.disabled" sx={{ mb: 2 }}>
+                              Transactions will appear here when you:
+                            </Typography>
+                            <Box component="ul" sx={{ textAlign: 'left', display: 'inline-block', pl: 3 }}>
+                              <Typography component="li" variant="body2" color="text.secondary">
+                                Create a Group Stock Purchase Order (Group PO)
+                              </Typography>
+                              <Typography component="li" variant="body2" color="text.secondary">
+                                Record delivery for the purchase
+                              </Typography>
+                              <Typography component="li" variant="body2" color="text.secondary">
+                                Record batch usage by sites
+                              </Typography>
+                            </Box>
+                          </Box>
+                          {groupMembership?.groupId && (
+                            <Alert severity="info" sx={{ maxWidth: 500 }}>
+                              <Typography variant="body2">
+                                You're in the group <strong>{groupMembership.groupName}</strong>.
+                                {batches.length === 0 ? (
+                                  <> Go to the <strong>Batches</strong> tab to create your first group stock purchase.</>
+                                ) : (
+                                  <> Switch to the <strong>Batches</strong> tab to view existing batches.</>
+                                )}
+                              </Typography>
+                            </Alert>
+                          )}
+                        </Box>
+                      </TableCell>
+                    </TableRow>
+                  )
                 ) : filteredTransactions.length > 0 ? (
+                  // Flat view for "Purchases" or "Usage" filters
                   filteredTransactions.map((tx) => (
                     <TableRow key={tx.id} hover>
                       <TableCell>
@@ -741,14 +939,39 @@ export default function InterSiteSettlementPage() {
                 ) : (
                   <TableRow>
                     <TableCell colSpan={9} align="center" sx={{ py: 4 }}>
-                      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
+                      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
                         <TransactionsIcon sx={{ fontSize: 48, color: 'text.disabled' }} />
-                        <Typography color="text.secondary">
-                          No transactions yet
-                        </Typography>
-                        <Typography variant="caption" color="text.disabled">
-                          Create a Group PO and record delivery, or record weekly usage to see transactions here
-                        </Typography>
+                        <Box sx={{ textAlign: 'center' }}>
+                          <Typography variant="h6" color="text.secondary" gutterBottom>
+                            No transactions yet
+                          </Typography>
+                          <Typography variant="body2" color="text.disabled" sx={{ mb: 2 }}>
+                            Transactions will appear here when you:
+                          </Typography>
+                          <Box component="ul" sx={{ textAlign: 'left', display: 'inline-block', pl: 3 }}>
+                            <Typography component="li" variant="body2" color="text.secondary">
+                              Create a Group Stock Purchase Order (Group PO)
+                            </Typography>
+                            <Typography component="li" variant="body2" color="text.secondary">
+                              Record delivery for the purchase
+                            </Typography>
+                            <Typography component="li" variant="body2" color="text.secondary">
+                              Record batch usage by sites
+                            </Typography>
+                          </Box>
+                        </Box>
+                        {groupMembership?.groupId && (
+                          <Alert severity="info" sx={{ maxWidth: 500 }}>
+                            <Typography variant="body2">
+                              You're in the group <strong>{groupMembership.groupName}</strong>.
+                              {batches.length === 0 ? (
+                                <> Go to the <strong>Batches</strong> tab to create your first group stock purchase.</>
+                              ) : (
+                                <> Switch to the <strong>Batches</strong> tab to view existing batches.</>
+                              )}
+                            </Typography>
+                          </Alert>
+                        )}
                       </Box>
                     </TableCell>
                   </TableRow>
@@ -1004,19 +1227,33 @@ export default function InterSiteSettlementPage() {
                               <ViewIcon fontSize="small" />
                             </IconButton>
                           </Tooltip>
-                          {settlement.status === 'pending' &&
-                            settlement.from_site_id === selectedSite?.id && (
-                              <Tooltip title="Approve">
-                                <IconButton
+                          {(settlement.status === 'pending' || settlement.status === 'approved') &&
+                            settlement.to_site_id === selectedSite?.id && (
+                              <Tooltip title="Settle Payment with Proof">
+                                <Button
                                   size="small"
-                                  color="success"
-                                  onClick={() => handleApproveSettlement(settlement.id)}
-                                  disabled={approveSettlement.isPending}
+                                  variant="contained"
+                                  color="primary"
+                                  onClick={() => handleSettlePayment(settlement)}
                                 >
-                                  <ApproveIcon fontSize="small" />
-                                </IconButton>
+                                  Settle
+                                </Button>
                               </Tooltip>
                             )}
+                          {canEdit && (
+                            <Tooltip title="Delete Settlement">
+                              <IconButton
+                                size="small"
+                                color="error"
+                                onClick={() => {
+                                  setDeleteSettlementId(settlement.id)
+                                  setDeleteSettlementConfirmOpen(true)
+                                }}
+                              >
+                                <DeleteIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                          )}
                         </Box>
                       </TableCell>
                     </TableRow>
@@ -1200,6 +1437,21 @@ export default function InterSiteSettlementPage() {
         }}
       />
 
+      {/* Settlement Delete Confirmation Dialog */}
+      <ConfirmDialog
+        open={deleteSettlementConfirmOpen}
+        title="Delete Settlement"
+        message="Are you sure you want to delete this settlement record? The balance will move back to 'Unsettled Balances' and you can regenerate the settlement later."
+        confirmText="Delete"
+        confirmColor="error"
+        isLoading={deleteSettlement.isPending}
+        onConfirm={handleDeleteSettlement}
+        onCancel={() => {
+          setDeleteSettlementConfirmOpen(false)
+          setDeleteSettlementId(null)
+        }}
+      />
+
       {/* Batch Usage Dialog */}
       {selectedSite?.id && (
         <RecordBatchUsageDialog
@@ -1229,6 +1481,17 @@ export default function InterSiteSettlementPage() {
           amount={settlementData.amount}
         />
       )}
+
+      {/* Batch Completion Dialog */}
+      <BatchCompletionDialog
+        open={batchCompletionOpen}
+        onClose={() => {
+          setBatchCompletionOpen(false)
+          setSelectedBatch(null)
+        }}
+        batch={selectedBatch}
+        onComplete={handleConfirmBatchCompletion}
+      />
 
       {/* Mobile FAB */}
       <Box

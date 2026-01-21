@@ -249,6 +249,164 @@ export type Database = {
           },
         ]
       }
+      batch_usage_records: {
+        Row: {
+          batch_ref_code: string
+          brand_id: string | null
+          created_at: string | null
+          created_by: string | null
+          group_stock_transaction_id: string | null
+          id: string
+          is_self_use: boolean | null
+          material_id: string
+          quantity: number
+          settlement_id: string | null
+          settlement_status: string | null
+          site_group_id: string | null
+          total_cost: number | null
+          unit: string
+          unit_cost: number
+          updated_at: string | null
+          usage_date: string
+          usage_site_id: string
+          work_description: string | null
+        }
+        Insert: {
+          batch_ref_code: string
+          brand_id?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          group_stock_transaction_id?: string | null
+          id?: string
+          is_self_use?: boolean | null
+          material_id: string
+          quantity: number
+          settlement_id?: string | null
+          settlement_status?: string | null
+          site_group_id?: string | null
+          total_cost?: number | null
+          unit: string
+          unit_cost: number
+          updated_at?: string | null
+          usage_date: string
+          usage_site_id: string
+          work_description?: string | null
+        }
+        Update: {
+          batch_ref_code?: string
+          brand_id?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          group_stock_transaction_id?: string | null
+          id?: string
+          is_self_use?: boolean | null
+          material_id?: string
+          quantity?: number
+          settlement_id?: string | null
+          settlement_status?: string | null
+          site_group_id?: string | null
+          total_cost?: number | null
+          unit?: string
+          unit_cost?: number
+          updated_at?: string | null
+          usage_date?: string
+          usage_site_id?: string
+          work_description?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "batch_usage_records_brand_id_fkey"
+            columns: ["brand_id"]
+            isOneToOne: false
+            referencedRelation: "material_brands"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "batch_usage_records_group_stock_transaction_id_fkey"
+            columns: ["group_stock_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "group_stock_transactions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "batch_usage_records_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "materials"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "batch_usage_records_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_group_stock_summary"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "batch_usage_records_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_low_stock_alerts"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "batch_usage_records_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_materials_with_variants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "batch_usage_records_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_stock_summary"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "batch_usage_records_settlement_id_fkey"
+            columns: ["settlement_id"]
+            isOneToOne: false
+            referencedRelation: "inter_site_material_settlements"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "batch_usage_records_settlement_id_fkey"
+            columns: ["settlement_id"]
+            isOneToOne: false
+            referencedRelation: "v_pending_inter_site_settlements"
+            referencedColumns: ["settlement_id"]
+          },
+          {
+            foreignKeyName: "batch_usage_records_settlement_id_fkey"
+            columns: ["settlement_id"]
+            isOneToOne: false
+            referencedRelation: "v_settlement_details"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "batch_usage_records_site_group_id_fkey"
+            columns: ["site_group_id"]
+            isOneToOne: false
+            referencedRelation: "site_groups"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "batch_usage_records_usage_site_id_fkey"
+            columns: ["usage_site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "batch_usage_records_usage_site_id_fkey"
+            columns: ["usage_site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
+          },
+        ]
+      }
       building_sections: {
         Row: {
           actual_end_date: string | null
@@ -1322,6 +1480,7 @@ export type Database = {
           created_at: string | null
           created_by: string | null
           delivery_date: string
+          delivery_photos: Json | null
           delivery_status: Database["public"]["Enums"]["delivery_status"] | null
           discrepancies: Json | null
           driver_name: string | null
@@ -1339,6 +1498,8 @@ export type Database = {
           notes: string | null
           po_id: string | null
           received_by: string | null
+          recorded_at: string | null
+          recorded_by: string | null
           requires_verification: boolean | null
           site_id: string
           updated_at: string | null
@@ -1358,6 +1519,7 @@ export type Database = {
           created_at?: string | null
           created_by?: string | null
           delivery_date?: string
+          delivery_photos?: Json | null
           delivery_status?:
             | Database["public"]["Enums"]["delivery_status"]
             | null
@@ -1377,6 +1539,8 @@ export type Database = {
           notes?: string | null
           po_id?: string | null
           received_by?: string | null
+          recorded_at?: string | null
+          recorded_by?: string | null
           requires_verification?: boolean | null
           site_id: string
           updated_at?: string | null
@@ -1396,6 +1560,7 @@ export type Database = {
           created_at?: string | null
           created_by?: string | null
           delivery_date?: string
+          delivery_photos?: Json | null
           delivery_status?:
             | Database["public"]["Enums"]["delivery_status"]
             | null
@@ -1415,6 +1580,8 @@ export type Database = {
           notes?: string | null
           po_id?: string | null
           received_by?: string | null
+          recorded_at?: string | null
+          recorded_by?: string | null
           requires_verification?: boolean | null
           site_id?: string
           updated_at?: string | null
@@ -1990,6 +2157,7 @@ export type Database = {
           available_qty: number | null
           avg_unit_cost: number | null
           batch_code: string | null
+          batch_status: string | null
           brand_id: string | null
           can_be_shared: boolean | null
           created_at: string | null
@@ -2001,6 +2169,8 @@ export type Database = {
           last_used_date: string | null
           location_id: string | null
           material_id: string
+          original_quantity: number | null
+          remaining_quantity: number | null
           reorder_level: number | null
           reorder_qty: number | null
           reserved_qty: number
@@ -2012,6 +2182,7 @@ export type Database = {
           available_qty?: number | null
           avg_unit_cost?: number | null
           batch_code?: string | null
+          batch_status?: string | null
           brand_id?: string | null
           can_be_shared?: boolean | null
           created_at?: string | null
@@ -2023,6 +2194,8 @@ export type Database = {
           last_used_date?: string | null
           location_id?: string | null
           material_id: string
+          original_quantity?: number | null
+          remaining_quantity?: number | null
           reorder_level?: number | null
           reorder_qty?: number | null
           reserved_qty?: number
@@ -2034,6 +2207,7 @@ export type Database = {
           available_qty?: number | null
           avg_unit_cost?: number | null
           batch_code?: string | null
+          batch_status?: string | null
           brand_id?: string | null
           can_be_shared?: boolean | null
           created_at?: string | null
@@ -2045,6 +2219,8 @@ export type Database = {
           last_used_date?: string | null
           location_id?: string | null
           material_id?: string
+          original_quantity?: number | null
+          remaining_quantity?: number | null
           reorder_level?: number | null
           reorder_qty?: number | null
           reserved_qty?: number
@@ -2128,68 +2304,101 @@ export type Database = {
       group_stock_transactions: {
         Row: {
           batch_code: string | null
+          batch_status: string | null
+          bill_url: string | null
           brand_id: string | null
           created_at: string | null
           created_by: string | null
+          expense_id: string | null
           id: string
           inventory_id: string
           material_id: string
           notes: string | null
+          payment_mode: string | null
+          payment_reference: string | null
+          payment_screenshot_url: string | null
           payment_source: string | null
           payment_source_site_id: string | null
           quantity: number
+          ref_code: string | null
           reference_id: string | null
           reference_type: string | null
+          settlement_id: string | null
           site_group_id: string
           total_cost: number | null
           transaction_date: string
           transaction_type: Database["public"]["Enums"]["stock_transaction_type"]
           unit_cost: number | null
+          updated_at: string
           usage_site_id: string | null
+          vendor_id: string | null
+          vendor_name: string | null
           work_description: string | null
         }
         Insert: {
           batch_code?: string | null
+          batch_status?: string | null
+          bill_url?: string | null
           brand_id?: string | null
           created_at?: string | null
           created_by?: string | null
+          expense_id?: string | null
           id?: string
           inventory_id: string
           material_id: string
           notes?: string | null
+          payment_mode?: string | null
+          payment_reference?: string | null
+          payment_screenshot_url?: string | null
           payment_source?: string | null
           payment_source_site_id?: string | null
           quantity: number
+          ref_code?: string | null
           reference_id?: string | null
           reference_type?: string | null
+          settlement_id?: string | null
           site_group_id: string
           total_cost?: number | null
           transaction_date?: string
           transaction_type: Database["public"]["Enums"]["stock_transaction_type"]
           unit_cost?: number | null
+          updated_at?: string
           usage_site_id?: string | null
+          vendor_id?: string | null
+          vendor_name?: string | null
           work_description?: string | null
         }
         Update: {
           batch_code?: string | null
+          batch_status?: string | null
+          bill_url?: string | null
           brand_id?: string | null
           created_at?: string | null
           created_by?: string | null
+          expense_id?: string | null
           id?: string
           inventory_id?: string
           material_id?: string
           notes?: string | null
+          payment_mode?: string | null
+          payment_reference?: string | null
+          payment_screenshot_url?: string | null
           payment_source?: string | null
           payment_source_site_id?: string | null
           quantity?: number
+          ref_code?: string | null
           reference_id?: string | null
           reference_type?: string | null
+          settlement_id?: string | null
           site_group_id?: string
           total_cost?: number | null
           transaction_date?: string
           transaction_type?: Database["public"]["Enums"]["stock_transaction_type"]
           unit_cost?: number | null
+          updated_at?: string
           usage_site_id?: string | null
+          vendor_id?: string | null
+          vendor_name?: string | null
           work_description?: string | null
         }
         Relationships: [
@@ -2357,14 +2566,17 @@ export type Database = {
         Row: {
           approved_at: string | null
           approved_by: string | null
+          bill_url: string | null
           cancellation_reason: string | null
           cancelled_at: string | null
           cancelled_by: string | null
           created_at: string | null
           created_by: string | null
+          final_settlement_amount: number | null
           from_site_id: string
           id: string
           notes: string | null
+          original_calculated_amount: number | null
           paid_amount: number | null
           pending_amount: number | null
           period_end: string
@@ -2385,14 +2597,17 @@ export type Database = {
         Insert: {
           approved_at?: string | null
           approved_by?: string | null
+          bill_url?: string | null
           cancellation_reason?: string | null
           cancelled_at?: string | null
           cancelled_by?: string | null
           created_at?: string | null
           created_by?: string | null
+          final_settlement_amount?: number | null
           from_site_id: string
           id?: string
           notes?: string | null
+          original_calculated_amount?: number | null
           paid_amount?: number | null
           pending_amount?: number | null
           period_end: string
@@ -2413,14 +2628,17 @@ export type Database = {
         Update: {
           approved_at?: string | null
           approved_by?: string | null
+          bill_url?: string | null
           cancellation_reason?: string | null
           cancelled_at?: string | null
           cancelled_by?: string | null
           created_at?: string | null
           created_by?: string | null
+          final_settlement_amount?: number | null
           from_site_id?: string
           id?: string
           notes?: string | null
+          original_calculated_amount?: number | null
           paid_amount?: number | null
           pending_amount?: number | null
           period_end?: string
@@ -3453,6 +3671,7 @@ export type Database = {
           updated_by_user_id: string | null
           work_days: number
           work_hours: number | null
+          worker_index: number
         }
         Insert: {
           attendance_status?: string | null
@@ -3498,6 +3717,7 @@ export type Database = {
           updated_by_user_id?: string | null
           work_days?: number
           work_hours?: number | null
+          worker_index?: number
         }
         Update: {
           attendance_status?: string | null
@@ -3543,6 +3763,7 @@ export type Database = {
           updated_by_user_id?: string | null
           work_days?: number
           work_hours?: number | null
+          worker_index?: number
         }
         Relationships: [
           {
@@ -3648,6 +3869,7 @@ export type Database = {
           material_id: string
           notes: string | null
           quality_rating: number | null
+          variant_name: string | null
         }
         Insert: {
           brand_name: string
@@ -3658,6 +3880,7 @@ export type Database = {
           material_id: string
           notes?: string | null
           quality_rating?: number | null
+          variant_name?: string | null
         }
         Update: {
           brand_name?: string
@@ -3668,6 +3891,7 @@ export type Database = {
           material_id?: string
           notes?: string | null
           quality_rating?: number | null
+          variant_name?: string | null
         }
         Relationships: [
           {
@@ -3750,6 +3974,297 @@ export type Database = {
             columns: ["parent_id"]
             isOneToOne: false
             referencedRelation: "material_categories"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      material_purchase_expense_items: {
+        Row: {
+          brand_id: string | null
+          created_at: string | null
+          id: string
+          material_id: string
+          notes: string | null
+          purchase_expense_id: string
+          quantity: number
+          total_price: number | null
+          unit_price: number
+        }
+        Insert: {
+          brand_id?: string | null
+          created_at?: string | null
+          id?: string
+          material_id: string
+          notes?: string | null
+          purchase_expense_id: string
+          quantity: number
+          total_price?: number | null
+          unit_price: number
+        }
+        Update: {
+          brand_id?: string | null
+          created_at?: string | null
+          id?: string
+          material_id?: string
+          notes?: string | null
+          purchase_expense_id?: string
+          quantity?: number
+          total_price?: number | null
+          unit_price?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "material_purchase_expense_items_brand_id_fkey"
+            columns: ["brand_id"]
+            isOneToOne: false
+            referencedRelation: "material_brands"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "material_purchase_expense_items_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "materials"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "material_purchase_expense_items_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_group_stock_summary"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "material_purchase_expense_items_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_low_stock_alerts"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "material_purchase_expense_items_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_materials_with_variants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "material_purchase_expense_items_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_stock_summary"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "material_purchase_expense_items_purchase_expense_id_fkey"
+            columns: ["purchase_expense_id"]
+            isOneToOne: false
+            referencedRelation: "material_purchase_expenses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      material_purchase_expenses: {
+        Row: {
+          amount_paid: number | null
+          bill_url: string | null
+          converted_from_group: boolean | null
+          created_at: string | null
+          created_by: string | null
+          group_stock_transaction_id: string | null
+          id: string
+          is_paid: boolean | null
+          local_purchase_id: string | null
+          notes: string | null
+          original_batch_code: string | null
+          original_qty: number | null
+          paid_date: string | null
+          paying_site_id: string | null
+          payment_mode: string | null
+          payment_reference: string | null
+          payment_screenshot_url: string | null
+          purchase_date: string
+          purchase_order_id: string | null
+          purchase_type: string
+          ref_code: string
+          remaining_qty: number | null
+          self_used_amount: number | null
+          self_used_qty: number | null
+          settlement_date: string | null
+          settlement_payer_name: string | null
+          settlement_payer_source: string | null
+          settlement_reference: string | null
+          site_group_id: string | null
+          site_id: string
+          status: string | null
+          total_amount: number
+          transport_cost: number | null
+          updated_at: string | null
+          used_qty: number | null
+          vendor_id: string | null
+          vendor_name: string | null
+        }
+        Insert: {
+          amount_paid?: number | null
+          bill_url?: string | null
+          converted_from_group?: boolean | null
+          created_at?: string | null
+          created_by?: string | null
+          group_stock_transaction_id?: string | null
+          id?: string
+          is_paid?: boolean | null
+          local_purchase_id?: string | null
+          notes?: string | null
+          original_batch_code?: string | null
+          original_qty?: number | null
+          paid_date?: string | null
+          paying_site_id?: string | null
+          payment_mode?: string | null
+          payment_reference?: string | null
+          payment_screenshot_url?: string | null
+          purchase_date: string
+          purchase_order_id?: string | null
+          purchase_type: string
+          ref_code: string
+          remaining_qty?: number | null
+          self_used_amount?: number | null
+          self_used_qty?: number | null
+          settlement_date?: string | null
+          settlement_payer_name?: string | null
+          settlement_payer_source?: string | null
+          settlement_reference?: string | null
+          site_group_id?: string | null
+          site_id: string
+          status?: string | null
+          total_amount: number
+          transport_cost?: number | null
+          updated_at?: string | null
+          used_qty?: number | null
+          vendor_id?: string | null
+          vendor_name?: string | null
+        }
+        Update: {
+          amount_paid?: number | null
+          bill_url?: string | null
+          converted_from_group?: boolean | null
+          created_at?: string | null
+          created_by?: string | null
+          group_stock_transaction_id?: string | null
+          id?: string
+          is_paid?: boolean | null
+          local_purchase_id?: string | null
+          notes?: string | null
+          original_batch_code?: string | null
+          original_qty?: number | null
+          paid_date?: string | null
+          paying_site_id?: string | null
+          payment_mode?: string | null
+          payment_reference?: string | null
+          payment_screenshot_url?: string | null
+          purchase_date?: string
+          purchase_order_id?: string | null
+          purchase_type?: string
+          ref_code?: string
+          remaining_qty?: number | null
+          self_used_amount?: number | null
+          self_used_qty?: number | null
+          settlement_date?: string | null
+          settlement_payer_name?: string | null
+          settlement_payer_source?: string | null
+          settlement_reference?: string | null
+          site_group_id?: string | null
+          site_id?: string
+          status?: string | null
+          total_amount?: number
+          transport_cost?: number | null
+          updated_at?: string | null
+          used_qty?: number | null
+          vendor_id?: string | null
+          vendor_name?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "material_purchase_expenses_group_stock_transaction_id_fkey"
+            columns: ["group_stock_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "group_stock_transactions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "material_purchase_expenses_local_purchase_id_fkey"
+            columns: ["local_purchase_id"]
+            isOneToOne: false
+            referencedRelation: "local_purchases"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "material_purchase_expenses_local_purchase_id_fkey"
+            columns: ["local_purchase_id"]
+            isOneToOne: false
+            referencedRelation: "v_local_purchases_details"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "material_purchase_expenses_local_purchase_id_fkey"
+            columns: ["local_purchase_id"]
+            isOneToOne: false
+            referencedRelation: "v_pending_reimbursements"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "material_purchase_expenses_paying_site_id_fkey"
+            columns: ["paying_site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "material_purchase_expenses_paying_site_id_fkey"
+            columns: ["paying_site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
+          },
+          {
+            foreignKeyName: "material_purchase_expenses_purchase_order_id_fkey"
+            columns: ["purchase_order_id"]
+            isOneToOne: false
+            referencedRelation: "purchase_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "material_purchase_expenses_purchase_order_id_fkey"
+            columns: ["purchase_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_pending_purchase_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "material_purchase_expenses_site_group_id_fkey"
+            columns: ["site_group_id"]
+            isOneToOne: false
+            referencedRelation: "site_groups"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "material_purchase_expenses_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "material_purchase_expenses_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
+          },
+          {
+            foreignKeyName: "material_purchase_expenses_vendor_id_fkey"
+            columns: ["vendor_id"]
+            isOneToOne: false
+            referencedRelation: "vendors"
             referencedColumns: ["id"]
           },
         ]
@@ -4189,6 +4704,150 @@ export type Database = {
           },
         ]
       }
+      misc_expenses: {
+        Row: {
+          amount: number
+          cancellation_reason: string | null
+          cancelled_at: string | null
+          cancelled_by_user_id: string | null
+          category_id: string | null
+          created_at: string | null
+          created_by: string | null
+          created_by_name: string | null
+          date: string
+          description: string | null
+          engineer_transaction_id: string | null
+          id: string
+          is_cancelled: boolean | null
+          is_cleared: boolean | null
+          notes: string | null
+          payer_name: string | null
+          payer_source: string | null
+          payer_type: string | null
+          payment_mode: string | null
+          proof_url: string | null
+          reference_number: string
+          site_engineer_id: string | null
+          site_id: string
+          subcontract_id: string | null
+          updated_at: string | null
+          vendor_name: string | null
+        }
+        Insert: {
+          amount: number
+          cancellation_reason?: string | null
+          cancelled_at?: string | null
+          cancelled_by_user_id?: string | null
+          category_id?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          created_by_name?: string | null
+          date: string
+          description?: string | null
+          engineer_transaction_id?: string | null
+          id?: string
+          is_cancelled?: boolean | null
+          is_cleared?: boolean | null
+          notes?: string | null
+          payer_name?: string | null
+          payer_source?: string | null
+          payer_type?: string | null
+          payment_mode?: string | null
+          proof_url?: string | null
+          reference_number: string
+          site_engineer_id?: string | null
+          site_id: string
+          subcontract_id?: string | null
+          updated_at?: string | null
+          vendor_name?: string | null
+        }
+        Update: {
+          amount?: number
+          cancellation_reason?: string | null
+          cancelled_at?: string | null
+          cancelled_by_user_id?: string | null
+          category_id?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          created_by_name?: string | null
+          date?: string
+          description?: string | null
+          engineer_transaction_id?: string | null
+          id?: string
+          is_cancelled?: boolean | null
+          is_cleared?: boolean | null
+          notes?: string | null
+          payer_name?: string | null
+          payer_source?: string | null
+          payer_type?: string | null
+          payment_mode?: string | null
+          proof_url?: string | null
+          reference_number?: string
+          site_engineer_id?: string | null
+          site_id?: string
+          subcontract_id?: string | null
+          updated_at?: string | null
+          vendor_name?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "misc_expenses_cancelled_by_user_id_fkey"
+            columns: ["cancelled_by_user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "misc_expenses_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "expense_categories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "misc_expenses_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "misc_expenses_engineer_transaction_id_fkey"
+            columns: ["engineer_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "site_engineer_transactions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "misc_expenses_site_engineer_id_fkey"
+            columns: ["site_engineer_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "misc_expenses_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "misc_expenses_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
+          },
+          {
+            foreignKeyName: "misc_expenses_subcontract_id_fkey"
+            columns: ["subcontract_id"]
+            isOneToOne: false
+            referencedRelation: "subcontracts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       notifications: {
         Row: {
           action_url: string | null
@@ -4364,6 +5023,151 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "v_site_eligible_batches"
             referencedColumns: ["site_id"]
+          },
+        ]
+      }
+      price_alerts: {
+        Row: {
+          alert_type: string
+          brand_id: string | null
+          created_at: string | null
+          created_by: string | null
+          id: string
+          is_active: boolean | null
+          last_triggered_at: string | null
+          material_id: string
+          threshold_percent: number | null
+          threshold_value: number | null
+          trigger_count: number | null
+          updated_at: string | null
+        }
+        Insert: {
+          alert_type: string
+          brand_id?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          id?: string
+          is_active?: boolean | null
+          last_triggered_at?: string | null
+          material_id: string
+          threshold_percent?: number | null
+          threshold_value?: number | null
+          trigger_count?: number | null
+          updated_at?: string | null
+        }
+        Update: {
+          alert_type?: string
+          brand_id?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          id?: string
+          is_active?: boolean | null
+          last_triggered_at?: string | null
+          material_id?: string
+          threshold_percent?: number | null
+          threshold_value?: number | null
+          trigger_count?: number | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "price_alerts_brand_id_fkey"
+            columns: ["brand_id"]
+            isOneToOne: false
+            referencedRelation: "material_brands"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "price_alerts_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "materials"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "price_alerts_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_group_stock_summary"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "price_alerts_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_low_stock_alerts"
+            referencedColumns: ["material_id"]
+          },
+          {
+            foreignKeyName: "price_alerts_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_materials_with_variants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "price_alerts_material_id_fkey"
+            columns: ["material_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_stock_summary"
+            referencedColumns: ["material_id"]
+          },
+        ]
+      }
+      price_alerts_triggered: {
+        Row: {
+          acknowledged: boolean | null
+          acknowledged_at: string | null
+          acknowledged_by: string | null
+          alert_id: string
+          change_percent: number
+          id: string
+          new_price: number
+          old_price: number
+          source_reference: string | null
+          triggered_at: string | null
+          vendor_id: string | null
+        }
+        Insert: {
+          acknowledged?: boolean | null
+          acknowledged_at?: string | null
+          acknowledged_by?: string | null
+          alert_id: string
+          change_percent: number
+          id?: string
+          new_price: number
+          old_price: number
+          source_reference?: string | null
+          triggered_at?: string | null
+          vendor_id?: string | null
+        }
+        Update: {
+          acknowledged?: boolean | null
+          acknowledged_at?: string | null
+          acknowledged_by?: string | null
+          alert_id?: string
+          change_percent?: number
+          id?: string
+          new_price?: number
+          old_price?: number
+          source_reference?: string | null
+          triggered_at?: string | null
+          vendor_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "price_alerts_triggered_alert_id_fkey"
+            columns: ["alert_id"]
+            isOneToOne: false
+            referencedRelation: "price_alerts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "price_alerts_triggered_vendor_id_fkey"
+            columns: ["vendor_id"]
+            isOneToOne: false
+            referencedRelation: "vendors"
+            referencedColumns: ["id"]
           },
         ]
       }
@@ -4679,6 +5483,7 @@ export type Database = {
           order_date: string
           other_charges: number | null
           payment_terms: string | null
+          payment_timing: string | null
           po_document_url: string | null
           po_number: string
           quotation_url: string | null
@@ -4710,6 +5515,7 @@ export type Database = {
           order_date?: string
           other_charges?: number | null
           payment_terms?: string | null
+          payment_timing?: string | null
           po_document_url?: string | null
           po_number: string
           quotation_url?: string | null
@@ -4741,6 +5547,7 @@ export type Database = {
           order_date?: string
           other_charges?: number | null
           payment_terms?: string | null
+          payment_timing?: string | null
           po_document_url?: string | null
           po_number?: string
           quotation_url?: string | null
@@ -5522,11 +6329,14 @@ export type Database = {
           settlement_date: string
           settlement_group_id: string | null
           settlement_reference: string | null
+          subcontract_id: string | null
           total_advance_paid: number | null
           total_damage_amount: number | null
           total_rental_amount: number
           total_transport_amount: number | null
           updated_at: string | null
+          upi_screenshot_url: string | null
+          vendor_bill_url: string | null
         }
         Insert: {
           balance_amount: number
@@ -5546,11 +6356,14 @@ export type Database = {
           settlement_date?: string
           settlement_group_id?: string | null
           settlement_reference?: string | null
+          subcontract_id?: string | null
           total_advance_paid?: number | null
           total_damage_amount?: number | null
           total_rental_amount: number
           total_transport_amount?: number | null
           updated_at?: string | null
+          upi_screenshot_url?: string | null
+          vendor_bill_url?: string | null
         }
         Update: {
           balance_amount?: number
@@ -5570,11 +6383,14 @@ export type Database = {
           settlement_date?: string
           settlement_group_id?: string | null
           settlement_reference?: string | null
+          subcontract_id?: string | null
           total_advance_paid?: number | null
           total_damage_amount?: number | null
           total_rental_amount?: number
           total_transport_amount?: number | null
           updated_at?: string | null
+          upi_screenshot_url?: string | null
+          vendor_bill_url?: string | null
         }
         Relationships: [
           {
@@ -5596,6 +6412,13 @@ export type Database = {
             columns: ["settlement_group_id"]
             isOneToOne: false
             referencedRelation: "settlement_groups"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "rental_settlements_subcontract_id_fkey"
+            columns: ["subcontract_id"]
+            isOneToOne: false
+            referencedRelation: "subcontracts"
             referencedColumns: ["id"]
           },
         ]
@@ -5853,6 +6676,145 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "v_laborer_advance_summary"
             referencedColumns: ["laborer_id"]
+          },
+        ]
+      }
+      settlement_creation_audit: {
+        Row: {
+          attempted_reference: string | null
+          created_at: string | null
+          error_context: Json | null
+          error_message: string | null
+          id: string
+          retry_count: number | null
+          settlement_date: string
+          site_id: string
+        }
+        Insert: {
+          attempted_reference?: string | null
+          created_at?: string | null
+          error_context?: Json | null
+          error_message?: string | null
+          id?: string
+          retry_count?: number | null
+          settlement_date: string
+          site_id: string
+        }
+        Update: {
+          attempted_reference?: string | null
+          created_at?: string | null
+          error_context?: Json | null
+          error_message?: string | null
+          id?: string
+          retry_count?: number | null
+          settlement_date?: string
+          site_id?: string
+        }
+        Relationships: []
+      }
+      settlement_expense_allocations: {
+        Row: {
+          batch_ref_code: string
+          created_at: string | null
+          creditor_expense_id: string | null
+          creditor_original_amount: number | null
+          creditor_self_use_amount: number | null
+          creditor_site_id: string
+          debtor_expense_id: string | null
+          debtor_settled_amount: number | null
+          debtor_site_id: string
+          id: string
+          settlement_id: string
+        }
+        Insert: {
+          batch_ref_code: string
+          created_at?: string | null
+          creditor_expense_id?: string | null
+          creditor_original_amount?: number | null
+          creditor_self_use_amount?: number | null
+          creditor_site_id: string
+          debtor_expense_id?: string | null
+          debtor_settled_amount?: number | null
+          debtor_site_id: string
+          id?: string
+          settlement_id: string
+        }
+        Update: {
+          batch_ref_code?: string
+          created_at?: string | null
+          creditor_expense_id?: string | null
+          creditor_original_amount?: number | null
+          creditor_self_use_amount?: number | null
+          creditor_site_id?: string
+          debtor_expense_id?: string | null
+          debtor_settled_amount?: number | null
+          debtor_site_id?: string
+          id?: string
+          settlement_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "settlement_expense_allocations_creditor_expense_id_fkey"
+            columns: ["creditor_expense_id"]
+            isOneToOne: false
+            referencedRelation: "material_purchase_expenses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "settlement_expense_allocations_creditor_site_id_fkey"
+            columns: ["creditor_site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "settlement_expense_allocations_creditor_site_id_fkey"
+            columns: ["creditor_site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
+          },
+          {
+            foreignKeyName: "settlement_expense_allocations_debtor_expense_id_fkey"
+            columns: ["debtor_expense_id"]
+            isOneToOne: false
+            referencedRelation: "material_purchase_expenses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "settlement_expense_allocations_debtor_site_id_fkey"
+            columns: ["debtor_site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "settlement_expense_allocations_debtor_site_id_fkey"
+            columns: ["debtor_site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
+          },
+          {
+            foreignKeyName: "settlement_expense_allocations_settlement_id_fkey"
+            columns: ["settlement_id"]
+            isOneToOne: false
+            referencedRelation: "inter_site_material_settlements"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "settlement_expense_allocations_settlement_id_fkey"
+            columns: ["settlement_id"]
+            isOneToOne: false
+            referencedRelation: "v_pending_inter_site_settlements"
+            referencedColumns: ["settlement_id"]
+          },
+          {
+            foreignKeyName: "settlement_expense_allocations_settlement_id_fkey"
+            columns: ["settlement_id"]
+            isOneToOne: false
+            referencedRelation: "v_settlement_details"
+            referencedColumns: ["id"]
           },
         ]
       }
@@ -7295,6 +8257,7 @@ export type Database = {
           contract_id: string
           created_at: string
           id: string
+          is_deleted: boolean
           milestone_id: string | null
           paid_by: string | null
           paid_by_user_id: string | null
@@ -7318,6 +8281,7 @@ export type Database = {
           contract_id: string
           created_at?: string
           id?: string
+          is_deleted?: boolean
           milestone_id?: string | null
           paid_by?: string | null
           paid_by_user_id?: string | null
@@ -7341,6 +8305,7 @@ export type Database = {
           contract_id?: string
           created_at?: string
           id?: string
+          is_deleted?: boolean
           milestone_id?: string | null
           paid_by?: string | null
           paid_by_user_id?: string | null
@@ -7601,10 +8566,12 @@ export type Database = {
           created_at: string
           id: string
           is_active: boolean
+          is_group_shop: boolean
           notes: string | null
           owner_name: string | null
           qr_code_url: string | null
           shop_name: string
+          site_group_id: string | null
           site_id: string | null
           updated_at: string
           upi_id: string | null
@@ -7615,10 +8582,12 @@ export type Database = {
           created_at?: string
           id?: string
           is_active?: boolean
+          is_group_shop?: boolean
           notes?: string | null
           owner_name?: string | null
           qr_code_url?: string | null
           shop_name: string
+          site_group_id?: string | null
           site_id?: string | null
           updated_at?: string
           upi_id?: string | null
@@ -7629,15 +8598,24 @@ export type Database = {
           created_at?: string
           id?: string
           is_active?: boolean
+          is_group_shop?: boolean
           notes?: string | null
           owner_name?: string | null
           qr_code_url?: string | null
           shop_name?: string
+          site_group_id?: string | null
           site_id?: string | null
           updated_at?: string
           upi_id?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "tea_shop_accounts_site_group_id_fkey"
+            columns: ["site_group_id"]
+            isOneToOne: false
+            referencedRelation: "site_groups"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "tea_shop_accounts_site_id_fkey"
             columns: ["site_id"]
@@ -7805,6 +8783,7 @@ export type Database = {
         Row: {
           amount: number
           amount_paid: number | null
+          company_tea_shop_id: string | null
           created_at: string
           date: string
           entered_by: string | null
@@ -7812,6 +8791,7 @@ export type Database = {
           entry_mode: string | null
           id: string
           is_fully_paid: boolean | null
+          is_group_entry: boolean
           is_split_entry: boolean | null
           items_detail: string | null
           market_laborer_count: number | null
@@ -7825,6 +8805,7 @@ export type Database = {
           num_rounds: number | null
           percentage_split: Json | null
           simple_total_cost: number | null
+          site_group_id: string | null
           site_id: string | null
           snacks_items: Json | null
           snacks_total: number | null
@@ -7838,6 +8819,7 @@ export type Database = {
           tea_total: number | null
           team_id: string | null
           total_amount: number | null
+          total_day_units: number | null
           updated_at: string | null
           updated_by: string | null
           updated_by_user_id: string | null
@@ -7847,6 +8829,7 @@ export type Database = {
         Insert: {
           amount: number
           amount_paid?: number | null
+          company_tea_shop_id?: string | null
           created_at?: string
           date: string
           entered_by?: string | null
@@ -7854,6 +8837,7 @@ export type Database = {
           entry_mode?: string | null
           id?: string
           is_fully_paid?: boolean | null
+          is_group_entry?: boolean
           is_split_entry?: boolean | null
           items_detail?: string | null
           market_laborer_count?: number | null
@@ -7867,6 +8851,7 @@ export type Database = {
           num_rounds?: number | null
           percentage_split?: Json | null
           simple_total_cost?: number | null
+          site_group_id?: string | null
           site_id?: string | null
           snacks_items?: Json | null
           snacks_total?: number | null
@@ -7880,6 +8865,7 @@ export type Database = {
           tea_total?: number | null
           team_id?: string | null
           total_amount?: number | null
+          total_day_units?: number | null
           updated_at?: string | null
           updated_by?: string | null
           updated_by_user_id?: string | null
@@ -7889,6 +8875,7 @@ export type Database = {
         Update: {
           amount?: number
           amount_paid?: number | null
+          company_tea_shop_id?: string | null
           created_at?: string
           date?: string
           entered_by?: string | null
@@ -7896,6 +8883,7 @@ export type Database = {
           entry_mode?: string | null
           id?: string
           is_fully_paid?: boolean | null
+          is_group_entry?: boolean
           is_split_entry?: boolean | null
           items_detail?: string | null
           market_laborer_count?: number | null
@@ -7909,6 +8897,7 @@ export type Database = {
           num_rounds?: number | null
           percentage_split?: Json | null
           simple_total_cost?: number | null
+          site_group_id?: string | null
           site_id?: string | null
           snacks_items?: Json | null
           snacks_total?: number | null
@@ -7922,6 +8911,7 @@ export type Database = {
           tea_total?: number | null
           team_id?: string | null
           total_amount?: number | null
+          total_day_units?: number | null
           updated_at?: string | null
           updated_by?: string | null
           updated_by_user_id?: string | null
@@ -7930,10 +8920,24 @@ export type Database = {
         }
         Relationships: [
           {
+            foreignKeyName: "tea_shop_entries_company_tea_shop_id_fkey"
+            columns: ["company_tea_shop_id"]
+            isOneToOne: false
+            referencedRelation: "tea_shops"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "tea_shop_entries_entered_by_user_id_fkey"
             columns: ["entered_by_user_id"]
             isOneToOne: false
             referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tea_shop_entries_site_group_id_fkey"
+            columns: ["site_group_id"]
+            isOneToOne: false
+            referencedRelation: "site_groups"
             referencedColumns: ["id"]
           },
           {
@@ -8008,6 +9012,396 @@ export type Database = {
           },
         ]
       }
+      tea_shop_entry_allocations: {
+        Row: {
+          allocated_amount: number
+          allocation_percentage: number
+          amount_paid: number | null
+          created_at: string
+          day_units_sum: number
+          entry_id: string
+          id: string
+          is_fully_paid: boolean | null
+          is_manual_override: boolean
+          site_id: string
+          worker_count: number
+        }
+        Insert: {
+          allocated_amount: number
+          allocation_percentage: number
+          amount_paid?: number | null
+          created_at?: string
+          day_units_sum?: number
+          entry_id: string
+          id?: string
+          is_fully_paid?: boolean | null
+          is_manual_override?: boolean
+          site_id: string
+          worker_count?: number
+        }
+        Update: {
+          allocated_amount?: number
+          allocation_percentage?: number
+          amount_paid?: number | null
+          created_at?: string
+          day_units_sum?: number
+          entry_id?: string
+          id?: string
+          is_fully_paid?: boolean | null
+          is_manual_override?: boolean
+          site_id?: string
+          worker_count?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tea_shop_entry_allocations_entry_id_fkey"
+            columns: ["entry_id"]
+            isOneToOne: false
+            referencedRelation: "tea_shop_entries"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tea_shop_entry_allocations_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tea_shop_entry_allocations_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
+          },
+        ]
+      }
+      tea_shop_group_allocations: {
+        Row: {
+          allocated_amount: number
+          allocation_percentage: number
+          attendance_count: number
+          created_at: string
+          group_entry_id: string
+          id: string
+          market_laborer_count: number
+          named_laborer_count: number
+          site_id: string
+        }
+        Insert: {
+          allocated_amount: number
+          allocation_percentage: number
+          attendance_count?: number
+          created_at?: string
+          group_entry_id: string
+          id?: string
+          market_laborer_count?: number
+          named_laborer_count?: number
+          site_id: string
+        }
+        Update: {
+          allocated_amount?: number
+          allocation_percentage?: number
+          attendance_count?: number
+          created_at?: string
+          group_entry_id?: string
+          id?: string
+          market_laborer_count?: number
+          named_laborer_count?: number
+          site_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tea_shop_group_allocations_group_entry_id_fkey"
+            columns: ["group_entry_id"]
+            isOneToOne: false
+            referencedRelation: "tea_shop_group_entries"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tea_shop_group_allocations_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tea_shop_group_allocations_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
+          },
+        ]
+      }
+      tea_shop_group_entries: {
+        Row: {
+          amount_paid: number
+          created_at: string
+          date: string
+          entered_by: string | null
+          entered_by_user_id: string | null
+          id: string
+          is_fully_paid: boolean
+          is_percentage_override: boolean
+          notes: string | null
+          percentage_split: Json | null
+          site_group_id: string
+          tea_shop_id: string
+          total_amount: number
+          updated_at: string
+          updated_by: string | null
+          updated_by_user_id: string | null
+        }
+        Insert: {
+          amount_paid?: number
+          created_at?: string
+          date: string
+          entered_by?: string | null
+          entered_by_user_id?: string | null
+          id?: string
+          is_fully_paid?: boolean
+          is_percentage_override?: boolean
+          notes?: string | null
+          percentage_split?: Json | null
+          site_group_id: string
+          tea_shop_id: string
+          total_amount: number
+          updated_at?: string
+          updated_by?: string | null
+          updated_by_user_id?: string | null
+        }
+        Update: {
+          amount_paid?: number
+          created_at?: string
+          date?: string
+          entered_by?: string | null
+          entered_by_user_id?: string | null
+          id?: string
+          is_fully_paid?: boolean
+          is_percentage_override?: boolean
+          notes?: string | null
+          percentage_split?: Json | null
+          site_group_id?: string
+          tea_shop_id?: string
+          total_amount?: number
+          updated_at?: string
+          updated_by?: string | null
+          updated_by_user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tea_shop_group_entries_entered_by_user_id_fkey"
+            columns: ["entered_by_user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tea_shop_group_entries_site_group_id_fkey"
+            columns: ["site_group_id"]
+            isOneToOne: false
+            referencedRelation: "site_groups"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tea_shop_group_entries_tea_shop_id_fkey"
+            columns: ["tea_shop_id"]
+            isOneToOne: false
+            referencedRelation: "tea_shop_accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tea_shop_group_entries_tea_shop_id_fkey"
+            columns: ["tea_shop_id"]
+            isOneToOne: false
+            referencedRelation: "v_tea_shop_weekly"
+            referencedColumns: ["tea_shop_id"]
+          },
+          {
+            foreignKeyName: "tea_shop_group_entries_updated_by_user_id_fkey"
+            columns: ["updated_by_user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      tea_shop_group_settlement_allocations: {
+        Row: {
+          allocated_amount: number
+          created_at: string
+          group_entry_id: string
+          id: string
+          settlement_id: string
+        }
+        Insert: {
+          allocated_amount: number
+          created_at?: string
+          group_entry_id: string
+          id?: string
+          settlement_id: string
+        }
+        Update: {
+          allocated_amount?: number
+          created_at?: string
+          group_entry_id?: string
+          id?: string
+          settlement_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tea_shop_group_settlement_allocations_group_entry_id_fkey"
+            columns: ["group_entry_id"]
+            isOneToOne: false
+            referencedRelation: "tea_shop_group_entries"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tea_shop_group_settlement_allocations_settlement_id_fkey"
+            columns: ["settlement_id"]
+            isOneToOne: false
+            referencedRelation: "tea_shop_group_settlements"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      tea_shop_group_settlements: {
+        Row: {
+          amount_paid: number
+          balance_remaining: number | null
+          created_at: string
+          entries_total: number
+          id: string
+          is_cancelled: boolean | null
+          is_engineer_settled: boolean | null
+          notes: string | null
+          payer_name: string | null
+          payer_source: string | null
+          payer_type: string
+          payment_date: string
+          payment_mode: string
+          period_end: string
+          period_start: string
+          previous_balance: number | null
+          proof_url: string | null
+          recorded_by: string | null
+          recorded_by_user_id: string | null
+          settlement_reference: string | null
+          site_engineer_id: string | null
+          site_engineer_transaction_id: string | null
+          site_group_id: string
+          status: string | null
+          subcontract_id: string | null
+          tea_shop_id: string
+          total_due: number
+          updated_at: string
+        }
+        Insert: {
+          amount_paid: number
+          balance_remaining?: number | null
+          created_at?: string
+          entries_total: number
+          id?: string
+          is_cancelled?: boolean | null
+          is_engineer_settled?: boolean | null
+          notes?: string | null
+          payer_name?: string | null
+          payer_source?: string | null
+          payer_type: string
+          payment_date: string
+          payment_mode: string
+          period_end: string
+          period_start: string
+          previous_balance?: number | null
+          proof_url?: string | null
+          recorded_by?: string | null
+          recorded_by_user_id?: string | null
+          settlement_reference?: string | null
+          site_engineer_id?: string | null
+          site_engineer_transaction_id?: string | null
+          site_group_id: string
+          status?: string | null
+          subcontract_id?: string | null
+          tea_shop_id: string
+          total_due: number
+          updated_at?: string
+        }
+        Update: {
+          amount_paid?: number
+          balance_remaining?: number | null
+          created_at?: string
+          entries_total?: number
+          id?: string
+          is_cancelled?: boolean | null
+          is_engineer_settled?: boolean | null
+          notes?: string | null
+          payer_name?: string | null
+          payer_source?: string | null
+          payer_type?: string
+          payment_date?: string
+          payment_mode?: string
+          period_end?: string
+          period_start?: string
+          previous_balance?: number | null
+          proof_url?: string | null
+          recorded_by?: string | null
+          recorded_by_user_id?: string | null
+          settlement_reference?: string | null
+          site_engineer_id?: string | null
+          site_engineer_transaction_id?: string | null
+          site_group_id?: string
+          status?: string | null
+          subcontract_id?: string | null
+          tea_shop_id?: string
+          total_due?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tea_shop_group_settlements_recorded_by_user_id_fkey"
+            columns: ["recorded_by_user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tea_shop_group_settlements_site_engineer_id_fkey"
+            columns: ["site_engineer_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tea_shop_group_settlements_site_group_id_fkey"
+            columns: ["site_group_id"]
+            isOneToOne: false
+            referencedRelation: "site_groups"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tea_shop_group_settlements_subcontract_id_fkey"
+            columns: ["subcontract_id"]
+            isOneToOne: false
+            referencedRelation: "subcontracts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tea_shop_group_settlements_tea_shop_id_fkey"
+            columns: ["tea_shop_id"]
+            isOneToOne: false
+            referencedRelation: "tea_shop_accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tea_shop_group_settlements_tea_shop_id_fkey"
+            columns: ["tea_shop_id"]
+            isOneToOne: false
+            referencedRelation: "v_tea_shop_weekly"
+            referencedColumns: ["tea_shop_id"]
+          },
+        ]
+      }
       tea_shop_settlement_allocations: {
         Row: {
           allocated_amount: number
@@ -8047,16 +9441,70 @@ export type Database = {
           },
         ]
       }
+      tea_shop_settlement_site_allocations: {
+        Row: {
+          created_at: string
+          entries_amount: number
+          id: string
+          paid_amount: number
+          settlement_id: string
+          site_id: string
+        }
+        Insert: {
+          created_at?: string
+          entries_amount?: number
+          id?: string
+          paid_amount?: number
+          settlement_id: string
+          site_id: string
+        }
+        Update: {
+          created_at?: string
+          entries_amount?: number
+          id?: string
+          paid_amount?: number
+          settlement_id?: string
+          site_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tea_shop_settlement_site_allocations_settlement_id_fkey"
+            columns: ["settlement_id"]
+            isOneToOne: false
+            referencedRelation: "tea_shop_settlements"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tea_shop_settlement_site_allocations_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tea_shop_settlement_site_allocations_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
+          },
+        ]
+      }
       tea_shop_settlements: {
         Row: {
           amount_paid: number
           balance_remaining: number | null
+          company_tea_shop_id: string | null
           created_at: string | null
           entries_total: number
           id: string
           is_cancelled: boolean | null
           is_engineer_settled: boolean | null
+          is_group_settlement: boolean
+          is_standalone: boolean
           notes: string | null
+          payer_name: string | null
+          payer_source: string | null
           payer_type: string
           payment_date: string
           payment_mode: string
@@ -8069,6 +9517,8 @@ export type Database = {
           settlement_reference: string | null
           site_engineer_id: string | null
           site_engineer_transaction_id: string | null
+          site_group_id: string | null
+          site_id: string | null
           status: string | null
           subcontract_id: string | null
           tea_shop_id: string
@@ -8078,12 +9528,17 @@ export type Database = {
         Insert: {
           amount_paid: number
           balance_remaining?: number | null
+          company_tea_shop_id?: string | null
           created_at?: string | null
           entries_total: number
           id?: string
           is_cancelled?: boolean | null
           is_engineer_settled?: boolean | null
+          is_group_settlement?: boolean
+          is_standalone?: boolean
           notes?: string | null
+          payer_name?: string | null
+          payer_source?: string | null
           payer_type: string
           payment_date: string
           payment_mode: string
@@ -8096,6 +9551,8 @@ export type Database = {
           settlement_reference?: string | null
           site_engineer_id?: string | null
           site_engineer_transaction_id?: string | null
+          site_group_id?: string | null
+          site_id?: string | null
           status?: string | null
           subcontract_id?: string | null
           tea_shop_id: string
@@ -8105,12 +9562,17 @@ export type Database = {
         Update: {
           amount_paid?: number
           balance_remaining?: number | null
+          company_tea_shop_id?: string | null
           created_at?: string | null
           entries_total?: number
           id?: string
           is_cancelled?: boolean | null
           is_engineer_settled?: boolean | null
+          is_group_settlement?: boolean
+          is_standalone?: boolean
           notes?: string | null
+          payer_name?: string | null
+          payer_source?: string | null
           payer_type?: string
           payment_date?: string
           payment_mode?: string
@@ -8123,6 +9585,8 @@ export type Database = {
           settlement_reference?: string | null
           site_engineer_id?: string | null
           site_engineer_transaction_id?: string | null
+          site_group_id?: string | null
+          site_id?: string | null
           status?: string | null
           subcontract_id?: string | null
           tea_shop_id?: string
@@ -8131,11 +9595,39 @@ export type Database = {
         }
         Relationships: [
           {
+            foreignKeyName: "tea_shop_settlements_company_tea_shop_id_fkey"
+            columns: ["company_tea_shop_id"]
+            isOneToOne: false
+            referencedRelation: "tea_shops"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "tea_shop_settlements_site_engineer_id_fkey"
             columns: ["site_engineer_id"]
             isOneToOne: false
             referencedRelation: "users"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tea_shop_settlements_site_group_id_fkey"
+            columns: ["site_group_id"]
+            isOneToOne: false
+            referencedRelation: "site_groups"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tea_shop_settlements_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tea_shop_settlements_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
           },
           {
             foreignKeyName: "tea_shop_settlements_subcontract_id_fkey"
@@ -8157,6 +9649,135 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "v_tea_shop_weekly"
             referencedColumns: ["tea_shop_id"]
+          },
+        ]
+      }
+      tea_shop_site_assignments: {
+        Row: {
+          assigned_at: string
+          assigned_by: string | null
+          id: string
+          is_active: boolean
+          site_group_id: string | null
+          site_id: string | null
+          tea_shop_id: string
+        }
+        Insert: {
+          assigned_at?: string
+          assigned_by?: string | null
+          id?: string
+          is_active?: boolean
+          site_group_id?: string | null
+          site_id?: string | null
+          tea_shop_id: string
+        }
+        Update: {
+          assigned_at?: string
+          assigned_by?: string | null
+          id?: string
+          is_active?: boolean
+          site_group_id?: string | null
+          site_id?: string | null
+          tea_shop_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tea_shop_site_assignments_assigned_by_fkey"
+            columns: ["assigned_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tea_shop_site_assignments_site_group_id_fkey"
+            columns: ["site_group_id"]
+            isOneToOne: false
+            referencedRelation: "site_groups"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tea_shop_site_assignments_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tea_shop_site_assignments_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "v_site_eligible_batches"
+            referencedColumns: ["site_id"]
+          },
+          {
+            foreignKeyName: "tea_shop_site_assignments_tea_shop_id_fkey"
+            columns: ["tea_shop_id"]
+            isOneToOne: false
+            referencedRelation: "tea_shops"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      tea_shops: {
+        Row: {
+          address: string | null
+          contact_phone: string | null
+          created_at: string
+          created_by: string | null
+          id: string
+          is_active: boolean
+          name: string
+          notes: string | null
+          owner_name: string | null
+          qr_code_url: string | null
+          updated_at: string
+          updated_by: string | null
+          upi_id: string | null
+        }
+        Insert: {
+          address?: string | null
+          contact_phone?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          is_active?: boolean
+          name: string
+          notes?: string | null
+          owner_name?: string | null
+          qr_code_url?: string | null
+          updated_at?: string
+          updated_by?: string | null
+          upi_id?: string | null
+        }
+        Update: {
+          address?: string | null
+          contact_phone?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          is_active?: boolean
+          name?: string
+          notes?: string | null
+          owner_name?: string | null
+          qr_code_url?: string | null
+          updated_at?: string
+          updated_by?: string | null
+          upi_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tea_shops_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tea_shops_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
           },
         ]
       }
@@ -8578,8 +10199,10 @@ export type Database = {
           provides_loading: boolean | null
           provides_transport: boolean | null
           provides_unloading: boolean | null
+          qr_code_url: string | null
           rating: number | null
           shop_name: string | null
+          shop_photo_url: string | null
           specializations: string[] | null
           state: string | null
           store_address: string | null
@@ -8587,6 +10210,7 @@ export type Database = {
           store_pincode: string | null
           updated_at: string | null
           updated_by: string | null
+          upi_id: string | null
           vendor_type: Database["public"]["Enums"]["vendor_type"] | null
           whatsapp_number: string | null
         }
@@ -8624,8 +10248,10 @@ export type Database = {
           provides_loading?: boolean | null
           provides_transport?: boolean | null
           provides_unloading?: boolean | null
+          qr_code_url?: string | null
           rating?: number | null
           shop_name?: string | null
+          shop_photo_url?: string | null
           specializations?: string[] | null
           state?: string | null
           store_address?: string | null
@@ -8633,6 +10259,7 @@ export type Database = {
           store_pincode?: string | null
           updated_at?: string | null
           updated_by?: string | null
+          upi_id?: string | null
           vendor_type?: Database["public"]["Enums"]["vendor_type"] | null
           whatsapp_number?: string | null
         }
@@ -8670,8 +10297,10 @@ export type Database = {
           provides_loading?: boolean | null
           provides_transport?: boolean | null
           provides_unloading?: boolean | null
+          qr_code_url?: string | null
           rating?: number | null
           shop_name?: string | null
+          shop_photo_url?: string | null
           specializations?: string[] | null
           state?: string | null
           store_address?: string | null
@@ -8679,6 +10308,7 @@ export type Database = {
           store_pincode?: string | null
           updated_at?: string | null
           updated_by?: string | null
+          upi_id?: string | null
           vendor_type?: Database["public"]["Enums"]["vendor_type"] | null
           whatsapp_number?: string | null
         }
@@ -8701,6 +10331,18 @@ export type Database = {
       }
     }
     Views: {
+      mv_settlement_failures_daily: {
+        Row: {
+          error_types: string[] | null
+          failure_date: string | null
+          max_retries_seen: number | null
+          site_id: string | null
+          total_failures: number | null
+          unique_dates_affected: number | null
+          unique_references_attempted: number | null
+        }
+        Relationships: []
+      }
       payer_expense_summary: {
         Row: {
           expense_count: number | null
@@ -10120,6 +11762,20 @@ export type Database = {
           },
         ]
       }
+      v_settlement_creation_failures: {
+        Row: {
+          attempted_references: string[] | null
+          error_types: string[] | null
+          failure_count: number | null
+          failure_hour: string | null
+          first_failure: string | null
+          last_failure: string | null
+          max_retries: number | null
+          settlement_date: string | null
+          site_id: string | null
+        }
+        Relationships: []
+      }
       v_settlement_details: {
         Row: {
           approved_at: string | null
@@ -10671,6 +12327,39 @@ export type Database = {
         }
         Returns: boolean
       }
+      check_settlement_failure_alerts: {
+        Args: never
+        Returns: {
+          alert_level: string
+          alert_message: string
+          details: Json
+          site_id: string
+        }[]
+      }
+      check_settlement_reference_integrity: {
+        Args: { p_site_id?: string }
+        Returns: {
+          details: string
+          issue_type: string
+          settlement_date: string
+          settlement_id: string
+          settlement_reference: string
+        }[]
+      }
+      cleanup_old_settlement_audit_records: {
+        Args: { p_days_to_keep?: number }
+        Returns: number
+      }
+      complete_group_stock_batch: {
+        Args: { p_batch_code: string; p_site_allocations: Json }
+        Returns: {
+          child_ref_codes: string[]
+        }[]
+      }
+      convert_group_to_own_site: {
+        Args: { p_batch_code: string; p_target_site_id: string }
+        Returns: string
+      }
       copy_default_sections_to_site: {
         Args: { p_site_id: string }
         Returns: number
@@ -10691,6 +12380,33 @@ export type Database = {
         Args: { p_purchase_id: string; p_user_id: string }
         Returns: string
       }
+      create_settlement_group: {
+        Args: {
+          p_actual_payment_date?: string
+          p_created_by?: string
+          p_created_by_name?: string
+          p_engineer_transaction_id?: string
+          p_laborer_count: number
+          p_notes?: string
+          p_payer_name?: string
+          p_payer_source?: string
+          p_payment_channel: string
+          p_payment_mode?: string
+          p_payment_type?: string
+          p_proof_url?: string
+          p_proof_urls?: string[]
+          p_settlement_date: string
+          p_settlement_type?: string
+          p_site_id: string
+          p_subcontract_id?: string
+          p_total_amount: number
+          p_week_allocations?: Json
+        }
+        Returns: {
+          id: string
+          settlement_reference: string
+        }[]
+      }
       create_weekly_settlement: {
         Args: {
           p_created_by?: string
@@ -10710,11 +12426,31 @@ export type Database = {
         Args: { p_transaction_id: string }
         Returns: boolean
       }
+      fix_duplicate_settlement_reference: {
+        Args: { p_new_suffix?: string; p_settlement_id: string }
+        Returns: string
+      }
       generate_batch_code:
         | { Args: never; Returns: string }
         | { Args: { p_payer_source: string }; Returns: string }
       generate_grn_number: { Args: never; Returns: string }
+      generate_group_stock_purchase_reference: {
+        Args: { p_site_id?: string }
+        Returns: string
+      }
+      generate_group_tea_shop_settlement_reference: {
+        Args: never
+        Returns: string
+      }
       generate_local_purchase_number: { Args: never; Returns: string }
+      generate_material_purchase_reference: {
+        Args: { p_site_id?: string }
+        Returns: string
+      }
+      generate_misc_expense_reference: {
+        Args: { p_site_id: string }
+        Returns: string
+      }
       generate_mr_number: { Args: never; Returns: string }
       generate_payment_reference: {
         Args: { p_site_id: string }
@@ -10740,17 +12476,31 @@ export type Database = {
       generate_tea_shop_settlement_reference: { Args: never; Returns: string }
       generate_transfer_number: { Args: never; Returns: string }
       generate_weekly_notifications: { Args: never; Returns: number }
-      get_batch_settlement_summary: {
-        Args: { batch_id: string }
-        Returns: {
-          amount_used: number
-          laborer_count: number
-          payment_channel: string
-          settlement_date: string
-          settlement_reference: string
-          site_name: string
-        }[]
-      }
+      get_batch_settlement_summary:
+        | {
+            Args: { batch_id: string }
+            Returns: {
+              amount_used: number
+              laborer_count: number
+              payment_channel: string
+              settlement_date: string
+              settlement_reference: string
+              site_name: string
+            }[]
+          }
+        | {
+            Args: { p_batch_ref_code: string }
+            Returns: {
+              batch_ref_code: string
+              original_qty: number
+              paying_site_id: string
+              paying_site_name: string
+              remaining_qty: number
+              site_allocations: Json
+              total_amount: number
+              used_qty: number
+            }[]
+          }
       get_current_user_id: { Args: never; Returns: string }
       get_material_count_for_vendor: {
         Args: { p_vendor_id: string }
@@ -10776,6 +12526,16 @@ export type Database = {
         Args: { p_month: number; p_site_id: string; p_year: number }
         Returns: Json
       }
+      get_recent_settlement_failures: {
+        Args: { p_hours_back?: number; p_site_id?: string }
+        Returns: {
+          common_error_patterns: string[]
+          failure_count: number
+          most_recent_failure: string
+          site_id: string
+          unique_dates: number
+        }[]
+      }
       get_settlement_batch_sources: {
         Args: { p_settlement_group_id: string }
         Returns: {
@@ -10797,6 +12557,18 @@ export type Database = {
           work_date: string
         }[]
       }
+      get_settlement_reference_stats: {
+        Args: { p_days_back?: number; p_site_id: string }
+        Returns: {
+          duplicate_references: string[]
+          has_duplicates: boolean
+          has_gaps: boolean
+          max_sequence: number
+          min_sequence: number
+          settlement_date: string
+          total_settlements: number
+        }[]
+      }
       get_site_dashboard: {
         Args: { p_date?: string; p_site_id: string }
         Returns: Json
@@ -10805,6 +12577,20 @@ export type Database = {
         Args: { p_date?: string; p_site_id: string }
         Returns: Json
       }
+      get_site_unsettled_entries: {
+        Args: { p_site_id: string; p_tea_shop_id: string }
+        Returns: {
+          entry_date: string
+          entry_id: string
+          entry_total_amount: number
+          is_group_entry: boolean
+          site_allocated_amount: number
+          site_amount_paid: number
+          site_is_fully_paid: boolean
+          site_remaining: number
+        }[]
+      }
+      get_tea_shop_for_site: { Args: { p_site_id: string }; Returns: string }
       get_team_weekly_summary: {
         Args: { p_team_id: string; p_week_ending: string }
         Returns: Json
@@ -10843,13 +12629,50 @@ export type Database = {
         }[]
       }
       is_admin: { Args: never; Returns: boolean }
+      is_settlement_reference_available: {
+        Args: { p_settlement_reference: string }
+        Returns: boolean
+      }
+      process_batch_settlement: {
+        Args: {
+          p_batch_ref_code: string
+          p_created_by?: string
+          p_debtor_site_id: string
+          p_payment_date: string
+          p_payment_mode: string
+          p_payment_reference?: string
+          p_settlement_amount?: number
+        }
+        Returns: {
+          debtor_expense_id: string
+          settlement_code: string
+          settlement_id: string
+        }[]
+      }
       process_local_purchase_stock: {
         Args: { p_purchase_id: string }
         Returns: boolean
       }
-      rebuild_tea_shop_waterfall: {
-        Args: { p_tea_shop_id: string }
+      rebuild_tea_shop_waterfall:
+        | { Args: { p_tea_shop_id: string }; Returns: undefined }
+        | {
+            Args: { p_site_id?: string; p_tea_shop_id: string }
+            Returns: undefined
+          }
+      recalculate_tea_shop_allocations_for_date: {
+        Args: { p_date: string; p_site_id: string }
         Returns: undefined
+      }
+      record_batch_usage: {
+        Args: {
+          p_batch_ref_code: string
+          p_created_by?: string
+          p_quantity: number
+          p_usage_date: string
+          p_usage_site_id: string
+          p_work_description?: string
+        }
+        Returns: string
       }
       record_price_entry: {
         Args: {
@@ -11022,7 +12845,12 @@ export type Database = {
         | "disputed"
         | "rejected"
       employment_type: "daily_wage" | "contract" | "specialist"
-      expense_module: "labor" | "material" | "machinery" | "general"
+      expense_module:
+        | "labor"
+        | "material"
+        | "machinery"
+        | "general"
+        | "miscellaneous"
       inter_site_settlement_status:
         | "draft"
         | "pending"
@@ -11266,7 +13094,13 @@ export const Constants = {
         "rejected",
       ],
       employment_type: ["daily_wage", "contract", "specialist"],
-      expense_module: ["labor", "material", "machinery", "general"],
+      expense_module: [
+        "labor",
+        "material",
+        "machinery",
+        "general",
+        "miscellaneous",
+      ],
       inter_site_settlement_status: [
         "draft",
         "pending",
@@ -11331,6 +13165,8 @@ export const Constants = {
         "cancelled",
       ],
       rental_price_source: ["rental", "quotation", "manual"],
+      rental_rate_type: ["hourly", "daily"],
+      rental_source_type: ["store", "contractor"],
       rental_type: ["equipment", "scaffolding", "shuttering", "other"],
       return_condition: ["good", "damaged", "lost"],
       salary_status: ["draft", "calculated", "partial", "paid"],
@@ -11364,175 +13200,3 @@ export const Constants = {
     },
   },
 } as const
-
-// ============================================
-// Helper Type Exports for convenience
-// ============================================
-
-// Table Row types
-export type Expense = Database["public"]["Tables"]["expenses"]["Row"]
-export type SitePayer = Database["public"]["Tables"]["site_payers"]["Row"]
-export type Site = Database["public"]["Tables"]["sites"]["Row"]
-export type User = Database["public"]["Tables"]["users"]["Row"]
-export type Laborer = Database["public"]["Tables"]["laborers"]["Row"]
-export type Team = Database["public"]["Tables"]["teams"]["Row"]
-export type DailyAttendance = Database["public"]["Tables"]["daily_attendance"]["Row"]
-export type ExpenseCategory = Database["public"]["Tables"]["expense_categories"]["Row"]
-export type BuildingSection = Database["public"]["Tables"]["building_sections"]["Row"]
-export type ConstructionPhase = Database["public"]["Tables"]["construction_phases"]["Row"]
-export type Subcontract = Database["public"]["Tables"]["subcontracts"]["Row"]
-export type LaborPayment = Database["public"]["Tables"]["labor_payments"]["Row"]
-export type Vendor = Database["public"]["Tables"]["vendors"]["Row"]
-export type Material = Database["public"]["Tables"]["materials"]["Row"]
-
-// Enum types
-export type ExpenseModule = Database["public"]["Enums"]["expense_module"]
-export type PaymentMode = Database["public"]["Enums"]["payment_mode"]
-export type SiteStatus = Database["public"]["Enums"]["site_status"]
-export type SiteType = Database["public"]["Enums"]["site_type"]
-export type UserRole = Database["public"]["Enums"]["user_role"]
-export type LaborerStatus = Database["public"]["Enums"]["laborer_status"]
-export type EmploymentType = Database["public"]["Enums"]["employment_type"]
-export type ContractStatus = Database["public"]["Enums"]["contract_status"]
-export type ContractType = Database["public"]["Enums"]["contract_type"]
-export type SectionStatus = Database["public"]["Enums"]["section_status"]
-export type MaterialUnit = Database["public"]["Enums"]["material_unit"]
-export type MeasurementUnit = Database["public"]["Enums"]["measurement_unit"]
-export type POStatus = Database["public"]["Enums"]["po_status"]
-export type MaterialRequestStatus = Database["public"]["Enums"]["material_request_status"]
-export type PaymentType = Database["public"]["Enums"]["contract_payment_type"]
-export type TransactionType = Database["public"]["Enums"]["transaction_type"]
-
-// Site engineer related types
-export type SiteEngineerTransaction = Database["public"]["Tables"]["site_engineer_transactions"]["Row"]
-export type SiteEngineerSettlement = Database["public"]["Tables"]["site_engineer_settlements"]["Row"]
-export type SiteEngineerTransactionType = "received_from_company" | "spent_on_behalf" | "used_own_money" | "returned_to_company"
-export type RecipientType = "laborer" | "mesthri" | "vendor" | "other"
-export type SalaryPeriod = Database["public"]["Tables"]["salary_periods"]["Row"]
-export type ConstructionSubphase = Database["public"]["Tables"]["construction_subphases"]["Row"]
-export type SitePaymentMilestone = Database["public"]["Tables"]["site_payment_milestones"]["Row"]
-export type LaborerType = string | null
-export type TeaShopAccount = Database["public"]["Tables"]["tea_shop_accounts"]["Row"]
-export type DailyWorkSummary = Database["public"]["Tables"]["daily_work_summary"]["Row"]
-export type ClientPaymentPlan = Database["public"]["Tables"]["client_payment_plans"]["Row"]
-export type PaymentPhase = Database["public"]["Tables"]["payment_phases"]["Row"]
-export type ClientPayment = Database["public"]["Tables"]["client_payments"]["Row"]
-export type SiteHoliday = Database["public"]["Tables"]["site_holidays"]["Row"]
-export type PaymentChannel = string | null
-export type TeaShopEntry = Database["public"]["Tables"]["tea_shop_entries"]["Row"]
-export type TeaShopSettlement = Database["public"]["Tables"]["tea_shop_settlements"]["Row"]
-export type TeaShopEntryExtended = TeaShopEntry & {
-  laborer_name?: string;
-  team_name?: string;
-  entry_mode?: string | null;
-}
-export type ThemePreference = "light" | "dark" | "system"
-
-// UI helper types
-export interface LaborGroupPercentageSplit {
-  daily: number;
-  contract: number;
-  market: number;
-}
-
-export interface SnackItem {
-  name: string;
-  quantity: number;
-  rate: number;
-  total: number;
-}
-
-export type TeaShopEntryMode = "simple" | "detailed"
-export type MarketLaborerAttendance = Database["public"]["Tables"]["market_laborer_attendance"]["Row"]
-
-// Group Tea Shop types (from group_tea_shop migration)
-export interface TeaShopGroupEntry {
-  id: string;
-  tea_shop_id: string;
-  site_group_id: string;
-  date: string;
-  total_amount: number;
-  percentage_split: LaborGroupPercentageSplit | null;
-  is_percentage_override: boolean;
-  amount_paid: number;
-  is_fully_paid: boolean;
-  notes: string | null;
-  entered_by: string | null;
-  entered_by_user_id: string | null;
-  created_at: string;
-  updated_at: string;
-  updated_by: string | null;
-  updated_by_user_id: string | null;
-}
-
-export interface TeaShopGroupAllocation {
-  id: string;
-  group_entry_id: string;
-  site_id: string;
-  attendance_count: number;
-  named_laborer_count: number;
-  market_laborer_count: number;
-  allocation_percentage: number;
-  allocated_amount: number;
-  created_at: string;
-}
-
-export interface TeaShopGroupAllocationWithSite extends TeaShopGroupAllocation {
-  site: {
-    id: string;
-    name: string;
-  } | null;
-}
-
-export interface TeaShopGroupEntryWithAllocations extends TeaShopGroupEntry {
-  allocations: TeaShopGroupAllocationWithSite[];
-}
-
-export interface TeaShopGroupSettlement {
-  id: string;
-  tea_shop_id: string;
-  site_group_id: string;
-  settlement_reference: string | null;
-  period_start: string;
-  period_end: string;
-  entries_total: number;
-  previous_balance: number | null;
-  total_due: number;
-  amount_paid: number;
-  balance_remaining: number | null;
-  payment_date: string;
-  payment_mode: string;
-  payer_type: string;
-  site_engineer_id: string | null;
-  site_engineer_transaction_id: string | null;
-  is_engineer_settled: boolean | null;
-  payer_source: string | null;
-  payer_name: string | null;
-  status: string | null;
-  is_cancelled: boolean | null;
-  proof_url: string | null;
-  subcontract_id: string | null;
-  notes: string | null;
-  recorded_by: string | null;
-  recorded_by_user_id: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface TeaShopGroupSettlementAllocation {
-  id: string;
-  settlement_id: string;
-  group_entry_id: string;
-  allocated_amount: number;
-  created_at: string;
-}
-
-export interface SiteAttendanceData {
-  siteId: string;
-  siteName: string;
-  namedLaborerCount: number;
-  marketLaborerCount: number;
-  totalCount: number;
-  percentage: number;
-  allocatedAmount: number;
-}

@@ -22,7 +22,9 @@ import {
 import { useAuth } from "@/contexts/AuthContext";
 import { createClient } from "@/lib/supabase/client";
 import AvatarUploader from "@/components/profile/AvatarUploader";
-import { User } from "@/types/database.types";
+import type { Database } from "@/types/database.types";
+
+type User = Database["public"]["Tables"]["users"]["Row"];
 
 interface ProfileTabProps {
   onSuccess?: (message: string) => void;

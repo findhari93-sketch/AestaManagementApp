@@ -222,6 +222,11 @@ const siteNavCategories: NavCategory[] = [
         path: "/site/material-settlements",
       },
       {
+        text: "Material Expenses",
+        icon: <AccountBalanceWalletIcon />,
+        path: "/site/material-expenses",
+      },
+      {
         text: "Rentals",
         icon: <RentalIcon />,
         path: "/site/rentals",

@@ -21,11 +21,19 @@ import {
   Paper,
   Chip,
   Divider,
+  Collapse,
+  FormControlLabel,
+  Switch,
 } from "@mui/material";
-import { Close as CloseIcon } from "@mui/icons-material";
+import {
+  Close as CloseIcon,
+  ExpandMore as ExpandIcon,
+} from "@mui/icons-material";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useRecordDelivery } from "@/hooks/queries/usePurchaseOrders";
 import { useStockLocations } from "@/hooks/queries/useStockInventory";
+import { createClient } from "@/lib/supabase/client";
+import FileUploader, { UploadedFile } from "@/components/common/FileUploader";
 import type {
   PurchaseOrderWithDetails,
   DeliveryItemFormData,
@@ -53,6 +61,7 @@ export default function DeliveryDialog({
   siteId,
 }: DeliveryDialogProps) {
   const isMobile = useIsMobile();
+  const supabase = createClient();
 
   const { data: locations = [] } = useStockLocations(siteId);
   const recordDelivery = useRecordDelivery();
@@ -61,11 +70,13 @@ export default function DeliveryDialog({
   const [deliveryDate, setDeliveryDate] = useState(
     new Date().toISOString().split("T")[0]
   );
+  const [showAdditionalDetails, setShowAdditionalDetails] = useState(false);
   const [challanNumber, setChallanNumber] = useState("");
   const [challanDate, setChallanDate] = useState("");
   const [vehicleNumber, setVehicleNumber] = useState("");
   const [driverName, setDriverName] = useState("");
   const [driverPhone, setDriverPhone] = useState("");
+  const [deliveryPhotos, setDeliveryPhotos] = useState<string[]>([]);
   const [notes, setNotes] = useState("");
   const [items, setItems] = useState<DeliveryItemRow[]>([]);
 
@@ -77,7 +88,7 @@ export default function DeliveryDialog({
     if (purchaseOrder?.items) {
       const deliveryItems: DeliveryItemRow[] = purchaseOrder.items
         .filter((item) => {
-          const pending = item.quantity - item.received_qty;
+          const pending = item.quantity - (item.received_qty || 0);
           return pending > 0;
         })
         .map((item) => ({
@@ -85,20 +96,21 @@ export default function DeliveryDialog({
           material_id: item.material_id,
           brand_id: item.brand_id || undefined,
           ordered_qty: item.quantity,
-          received_qty: item.quantity - item.received_qty, // Default to pending qty
-          accepted_qty: item.quantity - item.received_qty,
+          received_qty: item.quantity - (item.received_qty || 0), // Default to pending qty
+          accepted_qty: item.quantity - (item.received_qty || 0),
           rejected_qty: 0,
           unit_price: item.unit_price,
           materialName: item.material?.name,
           unit: item.material?.unit,
           orderedQty: item.quantity,
-          pendingQty: item.quantity - item.received_qty,
+          pendingQty: item.quantity - (item.received_qty || 0),
         }));
       setItems(deliveryItems);
     } else {
       setItems([]);
     }
     setDeliveryDate(new Date().toISOString().split("T")[0]);
+    setShowAdditionalDetails(false);
     setChallanNumber("");
     setChallanDate("");
     setVehicleNumber("");
@@ -172,16 +184,17 @@ export default function DeliveryDialog({
     }
 
     try {
-      await recordDelivery.mutateAsync({
+      const deliveryData = {
         po_id: purchaseOrder.id,
         site_id: siteId,
-        vendor_id: purchaseOrder.vendor_id,
+        vendor_id: purchaseOrder.vendor_id || purchaseOrder.vendor?.id || "",
         delivery_date: deliveryDate,
         challan_number: challanNumber || undefined,
         challan_date: challanDate || undefined,
         vehicle_number: vehicleNumber || undefined,
         driver_name: driverName || undefined,
         driver_phone: driverPhone || undefined,
+        delivery_photos: deliveryPhotos.length > 0 ? deliveryPhotos : undefined,
         notes: notes || undefined,
         items: items
           .filter((item) => item.received_qty > 0)
@@ -196,7 +209,15 @@ export default function DeliveryDialog({
             rejection_reason: item.rejection_reason,
             unit_price: item.unit_price,
           })),
-      });
+      };
+
+      // Debug logging
+      console.log("[DeliveryDialog] PurchaseOrder:", purchaseOrder);
+      console.log("[DeliveryDialog] PurchaseOrder.vendor_id:", purchaseOrder.vendor_id);
+      console.log("[DeliveryDialog] PurchaseOrder.vendor:", purchaseOrder.vendor);
+      console.log("[DeliveryDialog] Submitting delivery data:", deliveryData);
+
+      await recordDelivery.mutateAsync(deliveryData);
       onClose();
     } catch (err: unknown) {
       const message =
@@ -237,14 +258,14 @@ export default function DeliveryDialog({
 
       <DialogContent dividers>
         {error && (
-          <Alert severity="error" sx={{ mb: 2 }}>
+          <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>
             {error}
           </Alert>
         )}
 
         <Grid container spacing={2}>
-          {/* Delivery Details */}
-          <Grid size={{ xs: 12, md: 3 }}>
+          {/* Delivery Date - Required */}
+          <Grid size={{ xs: 12, md: 4 }}>
             <TextField
               fullWidth
               type="date"
@@ -256,52 +277,123 @@ export default function DeliveryDialog({
             />
           </Grid>
 
-          <Grid size={{ xs: 6, md: 3 }}>
-            <TextField
-              fullWidth
-              label="Challan Number"
-              value={challanNumber}
-              onChange={(e) => setChallanNumber(e.target.value)}
+          {/* Toggle for additional details */}
+          <Grid size={{ xs: 12, md: 8 }}>
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={showAdditionalDetails}
+                  onChange={(e) => setShowAdditionalDetails(e.target.checked)}
+                />
+              }
+              label={
+                <Typography variant="body2" color="text.secondary">
+                  Add challan, vehicle & driver details
+                </Typography>
+              }
             />
           </Grid>
 
-          <Grid size={{ xs: 6, md: 3 }}>
-            <TextField
-              fullWidth
-              type="date"
-              label="Challan Date"
-              value={challanDate}
-              onChange={(e) => setChallanDate(e.target.value)}
-              slotProps={{ inputLabel: { shrink: true } }}
-            />
+          {/* Additional Details - Collapsible */}
+          <Grid size={12}>
+            <Collapse in={showAdditionalDetails}>
+              <Paper variant="outlined" sx={{ p: 2, bgcolor: "grey.50" }}>
+                <Grid container spacing={2}>
+                  <Grid size={{ xs: 6, md: 3 }}>
+                    <TextField
+                      fullWidth
+                      size="small"
+                      label="Challan Number"
+                      value={challanNumber}
+                      onChange={(e) => setChallanNumber(e.target.value)}
+                    />
+                  </Grid>
+
+                  <Grid size={{ xs: 6, md: 3 }}>
+                    <TextField
+                      fullWidth
+                      size="small"
+                      type="date"
+                      label="Challan Date"
+                      value={challanDate}
+                      onChange={(e) => setChallanDate(e.target.value)}
+                      slotProps={{ inputLabel: { shrink: true } }}
+                    />
+                  </Grid>
+
+                  <Grid size={{ xs: 12, md: 3 }}>
+                    <TextField
+                      fullWidth
+                      size="small"
+                      label="Vehicle Number"
+                      value={vehicleNumber}
+                      onChange={(e) => setVehicleNumber(e.target.value.toUpperCase())}
+                      placeholder="TN 00 AB 0000"
+                    />
+                  </Grid>
+
+                  <Grid size={{ xs: 6, md: 1.5 }}>
+                    <TextField
+                      fullWidth
+                      size="small"
+                      label="Driver Name"
+                      value={driverName}
+                      onChange={(e) => setDriverName(e.target.value)}
+                    />
+                  </Grid>
+
+                  <Grid size={{ xs: 6, md: 1.5 }}>
+                    <TextField
+                      fullWidth
+                      size="small"
+                      label="Driver Phone"
+                      value={driverPhone}
+                      onChange={(e) => setDriverPhone(e.target.value)}
+                    />
+                  </Grid>
+                </Grid>
+              </Paper>
+            </Collapse>
           </Grid>
 
-          <Grid size={{ xs: 12, md: 3 }}>
-            <TextField
-              fullWidth
-              label="Vehicle Number"
-              value={vehicleNumber}
-              onChange={(e) => setVehicleNumber(e.target.value.toUpperCase())}
-              placeholder="TN 00 AB 0000"
-            />
-          </Grid>
-
-          <Grid size={{ xs: 6, md: 3 }}>
-            <TextField
-              fullWidth
-              label="Driver Name"
-              value={driverName}
-              onChange={(e) => setDriverName(e.target.value)}
-            />
-          </Grid>
-
-          <Grid size={{ xs: 6, md: 3 }}>
-            <TextField
-              fullWidth
-              label="Driver Phone"
-              value={driverPhone}
-              onChange={(e) => setDriverPhone(e.target.value)}
-            />
+          {/* Delivery Photos - Optional */}
+          <Grid size={12}>
+            <Typography variant="subtitle2" fontWeight={600} sx={{ mb: 1.5 }}>
+              Delivery Photos (Optional)
+            </Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1.5 }}>
+              Upload photos of delivered materials for documentation and verification
+            </Typography>
+            <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              {[...Array(3)].map((_, index) => {
+                const existingPhoto = deliveryPhotos[index];
+                return (
+                  <FileUploader
+                    key={`photo-${index}`}
+                    supabase={supabase}
+                    bucketName="documents"
+                    folderPath={`deliveries/${siteId}/${purchaseOrder?.po_number || "direct"}`}
+                    fileNamePrefix={`delivery-photo-${index + 1}`}
+                    accept="image"
+                    label={`Photo ${index + 1}`}
+                    helperText={`Upload delivery photo ${index + 1}`}
+                    uploadOnSelect
+                    value={existingPhoto ? { name: `photo-${index + 1}`, size: 0, url: existingPhoto } : null}
+                    onUpload={(file: UploadedFile) => {
+                      const newPhotos = [...deliveryPhotos];
+                      newPhotos[index] = file.url;
+                      setDeliveryPhotos(newPhotos.filter(p => p)); // Remove empty slots
+                    }}
+                    onRemove={() => {
+                      const newPhotos = [...deliveryPhotos];
+                      newPhotos.splice(index, 1);
+                      setDeliveryPhotos(newPhotos);
+                    }}
+                    compact
+                  />
+                );
+              })}
+            </Box>
           </Grid>
 
           {/* Items Table */}

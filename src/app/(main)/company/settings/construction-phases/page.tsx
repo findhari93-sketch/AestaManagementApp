@@ -37,10 +37,10 @@ import PageHeader from "@/components/layout/PageHeader";
 import { useAuth } from "@/contexts/AuthContext";
 import { createClient } from "@/lib/supabase/client";
 import { hasEditPermission } from "@/lib/permissions";
-import type {
-  ConstructionPhase,
-  ConstructionSubphase,
-} from "@/types/database.types";
+import type { Database } from "@/types/database.types";
+
+type ConstructionPhase = Database["public"]["Tables"]["construction_phases"]["Row"];
+type ConstructionSubphase = Database["public"]["Tables"]["construction_subphases"]["Row"];
 
 // Flow Chart Node Component
 function PhaseNode({

@@ -1,5 +1,5 @@
 import { createTheme, PaletteOptions } from "@mui/material/styles";
-import { ThemePreference } from "@/types/database.types";
+type ThemePreference = string;
 
 // Light palette
 const lightPalette: PaletteOptions = {

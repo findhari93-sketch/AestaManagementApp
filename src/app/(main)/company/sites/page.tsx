@@ -67,14 +67,13 @@ import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSite } from "@/contexts/SiteContext";
 import PageHeader from "@/components/layout/PageHeader";
-import type {
-  Site,
-  ConstructionPhase,
-  ConstructionSubphase,
-  SitePaymentMilestone,
-  Database,
-} from "@/types/database.types";
+import type { Database } from "@/types/database.types";
 import dayjs from "dayjs";
+
+type Site = Database["public"]["Tables"]["sites"]["Row"];
+type ConstructionPhase = Database["public"]["Tables"]["construction_phases"]["Row"];
+type ConstructionSubphase = Database["public"]["Tables"]["construction_subphases"]["Row"];
+type SitePaymentMilestone = Database["public"]["Tables"]["site_payment_milestones"]["Row"];
 
 type SiteWithStats = Site & {
   subcontract_count: number;

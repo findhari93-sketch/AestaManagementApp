@@ -3,17 +3,35 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { createClient, ensureFreshSession } from "@/lib/supabase/client";
 import { queryKeys } from "@/lib/cache/keys";
-import type {
-  TeaShopAccount,
-  TeaShopGroupEntry,
-  TeaShopGroupEntryWithAllocations,
-  TeaShopGroupAllocation,
-  TeaShopGroupAllocationWithSite,
-  TeaShopGroupSettlement,
-  TeaShopGroupSettlementAllocation,
-  SiteAttendanceData,
-  LaborGroupPercentageSplit,
-} from "@/types/database.types";
+import type { Database } from "@/types/database.types";
+
+type TeaShopAccount = Database["public"]["Tables"]["tea_shop_accounts"]["Row"];
+type TeaShopGroupEntry = Database["public"]["Tables"]["tea_shop_group_entries"]["Row"];
+type TeaShopGroupAllocation = Database["public"]["Tables"]["tea_shop_group_allocations"]["Row"];
+type TeaShopGroupSettlement = Database["public"]["Tables"]["tea_shop_group_settlements"]["Row"];
+type TeaShopGroupSettlementAllocation = Database["public"]["Tables"]["tea_shop_group_settlement_allocations"]["Row"];
+
+// Extended types - these might need to be defined if they don't exist in database
+interface TeaShopGroupEntryWithAllocations extends TeaShopGroupEntry {
+  allocations?: TeaShopGroupAllocation[];
+}
+interface TeaShopGroupAllocationWithSite extends TeaShopGroupAllocation {
+  site?: { id: string; name: string };
+}
+interface SiteAttendanceData {
+  siteId: string;
+  siteName: string;
+  totalCount: number;
+  namedLaborerCount: number;
+  marketLaborerCount: number;
+  percentage: number;
+  allocatedAmount: number;
+}
+interface LaborGroupPercentageSplit {
+  daily: number;
+  contract: number;
+  market: number;
+}
 
 // =============================================================================
 // GROUP TEA SHOP ACCOUNT

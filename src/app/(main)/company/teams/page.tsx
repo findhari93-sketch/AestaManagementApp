@@ -32,8 +32,11 @@ import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import PageHeader from "@/components/layout/PageHeader";
 import { hasEditPermission } from "@/lib/permissions";
-import type { Team, LaborerType } from "@/types/database.types";
+import type { Database } from "@/types/database.types";
 import dayjs from "dayjs";
+
+type Team = Database["public"]["Tables"]["teams"]["Row"];
+type LaborerType = string;
 
 type TeamWithCount = Team & {
   member_count: number; // Count of laborers with associated_team_id = team.id

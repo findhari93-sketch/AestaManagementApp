@@ -207,7 +207,18 @@
       "Bash(timeout:*)",
       "Bash(ping:*)",
       "Bash(git commit -m \"$\\(cat <<''EOF''\nAdd material settlements, enhanced PO management, and misc expense categories\n\n- Add material settlements page for tracking vendor material settlements\n- Enhance purchase orders with group stock transactions and delivery tracking\n- Add inter-site settlement improvements with material transfers\n- Add vendor inventory management with brand/variant pricing\n- Add miscellaneous expense categories with database migration\n- Add new material components: BrandCard, VariantSubTable, VendorVariantPrices\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
-      "Bash(npx supabase db lint:*)"
+      "Bash(npx supabase db lint:*)",
+      "Bash(dir \"c:\\\\Users\\\\Haribabu\\\\Documents\\\\AppsCopilot\\\\AestaManagementApp\" /b)",
+      "Bash(npx husky init)",
+      "Bash(npx vitest:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nAdd inter-site batch settlement with bargaining support and bug fixes\n\nFeatures:\n- Add batch usage recording dialog and hooks for tracking material usage\n- Add batch settlement dialog with bargaining support \\(adjust settlement amount\\)\n- Auto-create batch from Group PO delivery with group_stock_inventory sync\n- Update Material Settlements page with Type column \\(Own Site vs Group\\)\n- Add View Bill button for records with bill_url\n- Update v_all_expenses view to hide group_stock until settlement\n\nBug Fixes:\n- Fix Transport Cost showing twice in PurchaseOrderDialog\n- Fix Unit Price auto-fill by using .is\\(\\) for null brand_id comparisons\n- Fix internal_notes JSON parsing for Group Stock detection\n- Fix null brand_id comparison in group stock usage recording\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nAdd inter-site batch settlement with bargaining support and bug fixes\n\n- Fix Transport Cost field showing twice in PurchaseOrderDialog\n- Fix Unit Price auto-fill for null brand_id using .is\\(\\) for proper NULL matching\n- Fix \"Material not found in group stock\" error by syncing both inventory systems\n- Add bargaining support to InitiateBatchSettlementDialog \\(modify settlement amount\\)\n- Update Material Settlements page with Type column and View Bill button\n- Add group_stock_inventory population on Group PO delivery for backward compatibility\n- Create database migrations for batch usage settlement and group settlement enhancements\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(npm run db:studio:*)",
+      "Bash(PGPASSWORD=\"Hari@2025\" psql:*)",
+      "Bash(node fix_inventory.js:*)",
+      "Bash(move:*)",
+      "Bash(tee:*)",
+      "Bash(1)"
     ],
     "deny": [],
     "ask": []

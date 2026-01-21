@@ -35,7 +35,9 @@ import { useSite } from "@/contexts/SiteContext";
 import { createMiscExpense, updateMiscExpense } from "@/lib/services/miscExpenseService";
 import type { MiscExpense, SubcontractOption, SiteEngineerOption } from "@/types/misc-expense.types";
 import type { PayerSource } from "@/types/settlement.types";
-import type { PaymentMode } from "@/types/database.types";
+import type { Database } from "@/types/database.types";
+
+type PaymentMode = Database["public"]["Enums"]["payment_mode"];
 import type { BatchAllocation } from "@/types/wallet.types";
 import dayjs from "dayjs";
 

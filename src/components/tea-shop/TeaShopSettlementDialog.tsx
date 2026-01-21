@@ -43,7 +43,13 @@ import FileUploader, { UploadedFile } from "@/components/common/FileUploader";
 import PayerSourceSelector from "@/components/settlement/PayerSourceSelector";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSite } from "@/contexts/SiteContext";
-import type { TeaShopAccount, TeaShopEntry, TeaShopSettlement, PaymentMode, Subcontract } from "@/types/database.types";
+import type { Database } from "@/types/database.types";
+
+type TeaShopAccount = Database["public"]["Tables"]["tea_shop_accounts"]["Row"];
+type TeaShopEntry = Database["public"]["Tables"]["tea_shop_entries"]["Row"];
+type TeaShopSettlement = Database["public"]["Tables"]["tea_shop_settlements"]["Row"];
+type PaymentMode = Database["public"]["Enums"]["payment_mode"];
+type Subcontract = Database["public"]["Tables"]["subcontracts"]["Row"];
 import type { PayerSource } from "@/types/settlement.types";
 import dayjs from "dayjs";
 
