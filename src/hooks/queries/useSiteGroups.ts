@@ -912,7 +912,7 @@ export function useBatchRecordGroupStockUsage() {
           work_description: entry.workDescription || "Usage from weekly report",
           settlement_status: "pending",
           is_self_use: false,
-          transaction_id: transaction.id,
+          group_stock_transaction_id: transaction.id,
         };
 
         const { error: batchUsageError } = await (supabase as any)

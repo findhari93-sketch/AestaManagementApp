@@ -59,28 +59,16 @@ interface UsageEntryRow {
   unitCost: number;
 }
 
-// Helper to get week dates
-function getWeekDates(date: Date) {
-  const d = new Date(date);
-  const day = d.getDay();
-  const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Monday
-  const start = new Date(d.setDate(diff));
-  const end = new Date(start);
-  end.setDate(end.getDate() + 6); // Sunday
-
-  return {
-    start: start.toISOString().split("T")[0],
-    end: end.toISOString().split("T")[0],
+// Format date for display
+function formatDate(dateStr: string) {
+  const date = new Date(dateStr);
+  const options: Intl.DateTimeFormatOptions = {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: "numeric"
   };
-}
-
-// Format date range for display
-function formatWeekRange(start: string, end: string) {
-  const startDate = new Date(start);
-  const endDate = new Date(end);
-  const options: Intl.DateTimeFormatOptions = { month: "short", day: "numeric" };
-
-  return `${startDate.toLocaleDateString("en-IN", options)} - ${endDate.toLocaleDateString("en-IN", options)}, ${startDate.getFullYear()}`;
+  return date.toLocaleDateString("en-IN", options);
 }
 
 export default function WeeklyUsageReportDialog({
@@ -97,15 +85,14 @@ export default function WeeklyUsageReportDialog({
   const batchRecordUsage = useBatchRecordGroupStockUsage();
 
   // Debug logging
-  console.log("[WeeklyUsageDialog] Render", {
+  console.log("[UsageReportDialog] Render", {
     groupMembership,
     inventoryCount: groupInventory.length,
     inventory: groupInventory
   });
 
-  // Default to current week
-  const [weekStart, setWeekStart] = useState(() => getWeekDates(new Date()).start);
-  const [weekEnd, setWeekEnd] = useState(() => getWeekDates(new Date()).end);
+  // Default to today's date
+  const [usageDate, setUsageDate] = useState(() => new Date().toISOString().split("T")[0]);
   const [error, setError] = useState("");
   const [entries, setEntries] = useState<UsageEntryRow[]>([]);
 
@@ -123,16 +110,6 @@ export default function WeeklyUsageReportDialog({
       0
     );
   }, [entries]);
-
-  // Handle week change
-  const handleWeekChange = (direction: "prev" | "next") => {
-    const currentStart = new Date(weekStart);
-    const daysToAdd = direction === "next" ? 7 : -7;
-    currentStart.setDate(currentStart.getDate() + daysToAdd);
-    const newWeek = getWeekDates(currentStart);
-    setWeekStart(newWeek.start);
-    setWeekEnd(newWeek.end);
-  };
 
   const handleAddEntry = () => {
     if (!selectedInventory) {
@@ -189,20 +166,20 @@ export default function WeeklyUsageReportDialog({
   };
 
   const handleSubmit = async () => {
-    console.log("[WeeklyUsage] Submit started", {
+    console.log("[UsageReport] Submit started", {
       groupMembership,
       entriesCount: entries.length,
-      weekEnd
+      usageDate
     });
 
     if (!groupMembership?.isInGroup || !groupMembership.groupId) {
       setError("Site is not part of a group");
-      console.error("[WeeklyUsage] Site is not part of a group");
+      console.error("[UsageReport] Site is not part of a group");
       return;
     }
     if (entries.length === 0) {
       setError("Please add at least one usage entry");
-      console.error("[WeeklyUsage] No entries to submit");
+      console.error("[UsageReport] No entries to submit");
       return;
     }
 
@@ -214,22 +191,22 @@ export default function WeeklyUsageReportDialog({
         quantity: entry.quantity,
         usageSiteId: entry.usageSiteId,
         workDescription: entry.workDescription,
-        transactionDate: weekEnd, // Use week end date
+        transactionDate: usageDate,
       })),
     };
 
-    console.log("[WeeklyUsage] Submitting payload:", JSON.stringify(payload, null, 2));
+    console.log("[UsageReport] Submitting payload:", JSON.stringify(payload, null, 2));
 
     try {
       const result = await batchRecordUsage.mutateAsync(payload);
-      console.log("[WeeklyUsage] Submit successful:", result);
+      console.log("[UsageReport] Submit successful:", result);
 
       // Reset form
       setEntries([]);
       setError("");
       onClose();
     } catch (err: unknown) {
-      console.error("[WeeklyUsage] Submit failed:", err);
+      console.error("[UsageReport] Submit failed:", err);
       const message =
         err instanceof Error ? err.message : "Failed to submit usage report";
       setError(message);
@@ -241,7 +218,7 @@ export default function WeeklyUsageReportDialog({
   if (!groupMembership?.isInGroup) {
     return (
       <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
-        <DialogTitle>Weekly Usage Report</DialogTitle>
+        <DialogTitle>Usage Report Entry</DialogTitle>
         <DialogContent>
           <Alert severity="warning">
             This site is not part of a site group. Usage reports can only be
@@ -278,7 +255,7 @@ export default function WeeklyUsageReportDialog({
       >
         <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
           <ReportIcon color="primary" />
-          <Typography component="span" variant="h6">Weekly Usage Report</Typography>
+          <Typography component="span" variant="h6">Usage Report Entry</Typography>
         </Box>
         <IconButton onClick={onClose} size="small">
           <CloseIcon />
@@ -298,41 +275,27 @@ export default function WeeklyUsageReportDialog({
         </Alert>
 
         <Grid container spacing={2}>
-          {/* Week Selector */}
-          <Grid size={12}>
-            <Paper
-              variant="outlined"
-              sx={{
-                p: 2,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: 2,
+          {/* Date Selector */}
+          <Grid size={{ xs: 12, md: 4 }}>
+            <TextField
+              fullWidth
+              size="small"
+              type="date"
+              label="Usage Date"
+              value={usageDate}
+              onChange={(e) => setUsageDate(e.target.value)}
+              slotProps={{
+                inputLabel: { shrink: true },
+                input: {
+                  inputProps: {
+                    max: new Date().toISOString().split("T")[0]
+                  }
+                }
               }}
-            >
-              <Button
-                size="small"
-                onClick={() => handleWeekChange("prev")}
-              >
-                &lt; Prev Week
-              </Button>
-              <Box sx={{ textAlign: "center" }}>
-                <Typography variant="subtitle1" fontWeight={600}>
-                  {formatWeekRange(weekStart, weekEnd)}
-                </Typography>
-                <Typography variant="caption" color="text.secondary">
-                  Reporting week
-                </Typography>
-              </Box>
-              <Button
-                size="small"
-                onClick={() => handleWeekChange("next")}
-                disabled={new Date(weekEnd) >= new Date()}
-              >
-                Next Week &gt;
-              </Button>
-            </Paper>
+              helperText={formatDate(usageDate)}
+            />
           </Grid>
+          <Grid size={{ xs: 12, md: 8 }} />
 
           {/* Add Entry Section */}
           <Grid size={12}>
