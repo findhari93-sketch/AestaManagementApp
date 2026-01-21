@@ -28,28 +28,36 @@ import {
   Store as StoreIcon,
   Payment as PaymentIcon,
   OpenInNew as OpenIcon,
+  Add as AddIcon,
+  AccountBalance as SettleIcon,
 } from "@mui/icons-material";
 import type {
   GroupStockBatch,
   MaterialBatchStatus,
+  BatchSiteAllocation,
 } from "@/types/material.types";
 import {
   MATERIAL_BATCH_STATUS_LABELS,
   MATERIAL_BATCH_STATUS_COLORS,
   MATERIAL_PAYMENT_MODE_LABELS,
+  BATCH_USAGE_SETTLEMENT_STATUS_LABELS,
+  BATCH_USAGE_SETTLEMENT_STATUS_COLORS,
 } from "@/types/material.types";
 import { formatCurrency } from "@/lib/formatters";
 import dayjs from "dayjs";
 
 interface GroupStockBatchCardProps {
-  batch: GroupStockBatch;
+  batch: GroupStockBatch & { site_allocations?: BatchSiteAllocation[] };
   onViewBill?: () => void;
   onEdit?: () => void;
   onConvertToOwnSite?: () => void;
   onComplete?: () => void;
+  onRecordUsage?: () => void;
+  onSettleUsage?: (siteId: string, siteName: string, amount: number) => void;
   onClick?: () => void;
   showActions?: boolean;
   compact?: boolean;
+  currentSiteId?: string;
 }
 
 export default function GroupStockBatchCard({
@@ -58,9 +66,12 @@ export default function GroupStockBatchCard({
   onEdit,
   onConvertToOwnSite,
   onComplete,
+  onRecordUsage,
+  onSettleUsage,
   onClick,
   showActions = true,
   compact = false,
+  currentSiteId,
 }: GroupStockBatchCardProps) {
   const usagePercent =
     batch.original_quantity > 0
@@ -243,8 +254,8 @@ export default function GroupStockBatchCard({
           </Box>
         )}
 
-        {/* Site Usage Breakdown - for expanded view */}
-        {!compact && batch.site_usage && batch.site_usage.length > 0 && (
+        {/* Site Usage Breakdown - enhanced with settlement status */}
+        {!compact && (batch.site_allocations || batch.site_usage) && ((batch.site_allocations?.length ?? 0) > 0 || (batch.site_usage?.length ?? 0) > 0) && (
           <>
             <Divider sx={{ my: 1.5 }} />
             <Typography
@@ -273,28 +284,73 @@ export default function GroupStockBatchCard({
                   >
                     Amount
                   </TableCell>
+                  <TableCell
+                    align="center"
+                    sx={{ py: 0.5, fontSize: "0.75rem" }}
+                  >
+                    Status
+                  </TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {batch.site_usage.map((usage, idx) => (
-                  <TableRow key={idx}>
-                    <TableCell sx={{ py: 0.5, fontSize: "0.75rem" }}>
-                      {usage.site_name}
-                    </TableCell>
-                    <TableCell
-                      align="right"
-                      sx={{ py: 0.5, fontSize: "0.75rem" }}
-                    >
-                      {usage.quantity_used.toFixed(2)}
-                    </TableCell>
-                    <TableCell
-                      align="right"
-                      sx={{ py: 0.5, fontSize: "0.75rem" }}
-                    >
-                      {formatCurrency(usage.amount)}
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {(batch.site_allocations || batch.site_usage || []).map((usage: any, idx: number) => {
+                  const isPayer = usage.is_payer || usage.site_id === batch.payment_source_site_id;
+                  const settlementStatus = usage.settlement_status || (isPayer ? "self_use" : "pending");
+                  const canSettle = settlementStatus === "pending" && onSettleUsage && usage.site_id === currentSiteId;
+
+                  return (
+                    <TableRow key={idx}>
+                      <TableCell sx={{ py: 0.5, fontSize: "0.75rem" }}>
+                        <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                          {usage.site_name}
+                          {isPayer && (
+                            <Chip
+                              label="Payer"
+                              size="small"
+                              color="success"
+                              sx={{ height: 18, fontSize: "0.65rem" }}
+                            />
+                          )}
+                        </Box>
+                      </TableCell>
+                      <TableCell
+                        align="right"
+                        sx={{ py: 0.5, fontSize: "0.75rem" }}
+                      >
+                        {(usage.quantity_used || 0).toFixed(2)}
+                      </TableCell>
+                      <TableCell
+                        align="right"
+                        sx={{ py: 0.5, fontSize: "0.75rem" }}
+                      >
+                        {formatCurrency(usage.amount || 0)}
+                      </TableCell>
+                      <TableCell align="center" sx={{ py: 0.5, fontSize: "0.75rem" }}>
+                        {canSettle ? (
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            color="warning"
+                            sx={{ minWidth: 60, fontSize: "0.7rem", py: 0 }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onSettleUsage(usage.site_id, usage.site_name, usage.amount);
+                            }}
+                          >
+                            Settle
+                          </Button>
+                        ) : (
+                          <Chip
+                            label={BATCH_USAGE_SETTLEMENT_STATUS_LABELS[settlementStatus as keyof typeof BATCH_USAGE_SETTLEMENT_STATUS_LABELS] || settlementStatus}
+                            size="small"
+                            color={BATCH_USAGE_SETTLEMENT_STATUS_COLORS[settlementStatus as keyof typeof BATCH_USAGE_SETTLEMENT_STATUS_COLORS] || "default"}
+                            sx={{ height: 20, fontSize: "0.65rem" }}
+                          />
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           </>
@@ -304,62 +360,82 @@ export default function GroupStockBatchCard({
       {showActions && (
         <>
           <Divider />
-          <CardActions sx={{ justifyContent: "flex-end", gap: 1 }}>
-            {batch.bill_url && (
-              <Tooltip title="View Bill">
-                <IconButton
+          <CardActions sx={{ justifyContent: "space-between", gap: 1, flexWrap: "wrap" }}>
+            {/* Left side - Record Usage */}
+            <Box>
+              {isEditable && onRecordUsage && (
+                <Button
                   size="small"
+                  startIcon={<AddIcon />}
+                  color="primary"
                   onClick={(e) => {
                     e.stopPropagation();
-                    if (onViewBill) {
-                      onViewBill();
-                    } else {
-                      window.open(batch.bill_url!, "_blank");
-                    }
+                    onRecordUsage();
                   }}
                 >
-                  <ReceiptIcon fontSize="small" />
-                </IconButton>
-              </Tooltip>
-            )}
-            {isEditable && onEdit && (
-              <Tooltip title="Edit Purchase">
-                <IconButton
+                  Record Usage
+                </Button>
+              )}
+            </Box>
+
+            {/* Right side - Other actions */}
+            <Box sx={{ display: "flex", gap: 1, alignItems: "center" }}>
+              {batch.bill_url && (
+                <Tooltip title="View Bill">
+                  <IconButton
+                    size="small"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (onViewBill) {
+                        onViewBill();
+                      } else {
+                        window.open(batch.bill_url!, "_blank");
+                      }
+                    }}
+                  >
+                    <ReceiptIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              )}
+              {isEditable && onEdit && (
+                <Tooltip title="Edit Purchase">
+                  <IconButton
+                    size="small"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onEdit();
+                    }}
+                  >
+                    <EditIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              )}
+              {canConvert && onConvertToOwnSite && (
+                <Button
                   size="small"
+                  startIcon={<ConvertIcon />}
                   onClick={(e) => {
                     e.stopPropagation();
-                    onEdit();
+                    onConvertToOwnSite();
                   }}
                 >
-                  <EditIcon fontSize="small" />
-                </IconButton>
-              </Tooltip>
-            )}
-            {canConvert && onConvertToOwnSite && (
-              <Button
-                size="small"
-                startIcon={<ConvertIcon />}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onConvertToOwnSite();
-                }}
-              >
-                Convert
-              </Button>
-            )}
-            {canComplete && onComplete && (
-              <Button
-                size="small"
-                variant="contained"
-                startIcon={<CompleteIcon />}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onComplete();
-                }}
-              >
-                Complete
-              </Button>
-            )}
+                  Convert
+                </Button>
+              )}
+              {canComplete && onComplete && (
+                <Button
+                  size="small"
+                  variant="contained"
+                  startIcon={<CompleteIcon />}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onComplete();
+                  }}
+                >
+                  Complete
+                </Button>
+              )}
+            </Box>
           </CardActions>
         </>
       )}

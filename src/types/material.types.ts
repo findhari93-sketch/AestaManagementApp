@@ -1632,6 +1632,14 @@ export interface MaterialPurchaseExpense {
   local_purchase_id: string | null;
   site_group_id: string | null;
 
+  // Batch tracking fields (for group stock)
+  paying_site_id: string | null;
+  original_qty: number | null;
+  used_qty: number | null;
+  remaining_qty: number | null;
+  self_used_qty: number | null;
+  self_used_amount: number | null;
+
   // Metadata
   notes: string | null;
   created_by: string | null;
@@ -1699,6 +1707,7 @@ export interface GroupStockBatch {
 // Extended types with relationships
 export interface MaterialPurchaseExpenseWithDetails extends MaterialPurchaseExpense {
   site?: { id: string; name: string };
+  paying_site?: { id: string; name: string } | null;
   vendor?: Vendor | null;
   site_group?: SiteGroup | null;
   purchase_order?: { id: string; po_number: string } | null;
@@ -1800,4 +1809,111 @@ export const MATERIAL_PAYMENT_MODE_LABELS: Record<MaterialPaymentMode, string> =
   bank_transfer: "Bank Transfer",
   cheque: "Cheque",
   credit: "Credit",
+};
+
+// ============================================
+// BATCH USAGE & SETTLEMENT TYPES
+// ============================================
+
+export type BatchUsageSettlementStatus = "pending" | "settled" | "self_use";
+
+export interface BatchUsageRecord {
+  id: string;
+  batch_ref_code: string;
+  site_group_id: string | null;
+  usage_site_id: string;
+  material_id: string;
+  brand_id: string | null;
+  quantity: number;
+  unit: string;
+  unit_cost: number;
+  total_cost: number;
+  usage_date: string;
+  work_description: string | null;
+  is_self_use: boolean;
+  settlement_status: BatchUsageSettlementStatus;
+  settlement_id: string | null;
+  group_stock_transaction_id: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BatchUsageRecordWithDetails extends BatchUsageRecord {
+  usage_site?: { id: string; name: string };
+  material?: Material;
+  brand?: MaterialBrand | null;
+  settlement?: InterSiteSettlement | null;
+}
+
+export interface SettlementExpenseAllocation {
+  id: string;
+  settlement_id: string;
+  batch_ref_code: string;
+  creditor_site_id: string;
+  creditor_expense_id: string | null;
+  creditor_original_amount: number | null;
+  creditor_self_use_amount: number | null;
+  debtor_site_id: string;
+  debtor_expense_id: string | null;
+  debtor_settled_amount: number | null;
+  created_at: string;
+}
+
+export interface BatchSiteAllocation {
+  site_id: string;
+  site_name: string;
+  quantity_used: number;
+  amount: number;
+  is_payer: boolean;
+  settlement_status: BatchUsageSettlementStatus;
+}
+
+export interface BatchSettlementSummary {
+  batch_ref_code: string;
+  paying_site_id: string;
+  paying_site_name: string;
+  total_amount: number;
+  original_qty: number;
+  used_qty: number;
+  remaining_qty: number;
+  site_allocations: BatchSiteAllocation[];
+}
+
+// Form data for recording batch usage
+export interface RecordBatchUsageFormData {
+  batch_ref_code: string;
+  usage_site_id: string;
+  quantity: number;
+  usage_date: string;
+  work_description?: string;
+}
+
+// Form data for initiating batch settlement
+export interface InitiateBatchSettlementFormData {
+  batch_ref_code: string;
+  debtor_site_id: string;
+  payment_mode: string;
+  payment_date: string;
+  payment_reference?: string;
+}
+
+// Response from process_batch_settlement function
+export interface BatchSettlementResult {
+  settlement_id: string;
+  debtor_expense_id: string;
+  settlement_code: string;
+}
+
+// Labels for batch usage settlement status
+export const BATCH_USAGE_SETTLEMENT_STATUS_LABELS: Record<BatchUsageSettlementStatus, string> = {
+  pending: "Pending Settlement",
+  settled: "Settled",
+  self_use: "Self Use",
+};
+
+export const BATCH_USAGE_SETTLEMENT_STATUS_COLORS: Record<BatchUsageSettlementStatus, "warning" | "success" | "info"> = {
+  pending: "warning",
+  settled: "success",
+  self_use: "info",
 };

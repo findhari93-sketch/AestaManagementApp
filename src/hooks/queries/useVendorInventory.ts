@@ -711,6 +711,9 @@ export function useLatestPrice(
 
       if (brandId) {
         query = query.eq("brand_id", brandId);
+      } else {
+        // When no brand is specified, look for prices without brand (base material price)
+        query = query.is("brand_id", null);
       }
 
       const { data, error } = await query;
@@ -1133,6 +1136,9 @@ export function useVendorMaterialPrice(
 
       if (brandId) {
         query = query.eq("brand_id", brandId);
+      } else {
+        // When no brand is specified, look for prices without brand (base material price)
+        query = query.is("brand_id", null);
       }
 
       const { data, error } = await query;

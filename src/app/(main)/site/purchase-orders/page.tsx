@@ -36,6 +36,7 @@ import {
   CheckCircle as ApproveIcon,
   Send as SendIcon,
   Cancel as CancelIcon,
+  Groups as GroupStockIcon,
 } from "@mui/icons-material";
 import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
 import PageHeader from "@/components/layout/PageHeader";
@@ -337,22 +338,49 @@ export default function PurchaseOrdersPage() {
       {
         accessorKey: "po_number",
         header: "PO Number",
-        size: 130,
-        Cell: ({ row }) => (
-          <Box>
-            <Typography
-              variant="body2"
-              fontWeight={500}
-              sx={{ cursor: "pointer", color: "primary.main" }}
-              onClick={() => handleViewDetails(row.original)}
-            >
-              {row.original.po_number}
-            </Typography>
-            <Typography variant="caption" color="text.secondary">
-              {formatDate(row.original.order_date)}
-            </Typography>
-          </Box>
-        ),
+        size: 160,
+        Cell: ({ row }) => {
+          // Parse internal_notes if it's a JSON string
+          let parsedNotes: { is_group_stock?: boolean; site_group_id?: string } | null = null;
+          if (row.original.internal_notes) {
+            try {
+              parsedNotes = typeof row.original.internal_notes === "string"
+                ? JSON.parse(row.original.internal_notes)
+                : row.original.internal_notes;
+            } catch {
+              // Ignore parse errors
+            }
+          }
+          const isGroupStock = parsedNotes?.is_group_stock === true;
+          return (
+            <Box>
+              <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                <Typography
+                  variant="body2"
+                  fontWeight={500}
+                  sx={{ cursor: "pointer", color: "primary.main" }}
+                  onClick={() => handleViewDetails(row.original)}
+                >
+                  {row.original.po_number}
+                </Typography>
+                {isGroupStock && (
+                  <Tooltip title="Group Stock Purchase">
+                    <Chip
+                      icon={<GroupStockIcon sx={{ fontSize: 14 }} />}
+                      label="Group"
+                      size="small"
+                      color="secondary"
+                      sx={{ height: 20, fontSize: "0.65rem", "& .MuiChip-icon": { ml: 0.5 } }}
+                    />
+                  </Tooltip>
+                )}
+              </Box>
+              <Typography variant="caption" color="text.secondary">
+                {formatDate(row.original.order_date)}
+              </Typography>
+            </Box>
+          );
+        },
       },
       {
         accessorKey: "vendor.name",

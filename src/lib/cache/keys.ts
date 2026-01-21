@@ -235,6 +235,17 @@ export const queryKeys = {
     groupStock: (groupId: string) => ['material-purchases', 'group-stock', groupId] as const,
   },
 
+  // ==================== BATCH USAGE ====================
+
+  batchUsage: {
+    all: ['batch-usage'] as const,
+    byBatch: (batchRefCode: string) => ['batch-usage', 'batch', batchRefCode] as const,
+    bySite: (siteId: string) => ['batch-usage', 'site', siteId] as const,
+    byGroup: (groupId: string) => ['batch-usage', 'group', groupId] as const,
+    summary: (batchRefCode: string) => ['batch-usage', 'summary', batchRefCode] as const,
+    allocations: (settlementId: string) => ['batch-usage', 'allocations', settlementId] as const,
+  },
+
   // ==================== VENDOR INVENTORY & PRICE HISTORY ====================
 
   vendorInventory: {

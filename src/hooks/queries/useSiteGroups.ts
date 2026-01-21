@@ -748,13 +748,20 @@ export function useBatchRecordGroupStockUsage() {
 
       for (const entry of data.entries) {
         // Get current inventory to calculate cost
-        const { data: inventory, error: invError } = await (supabase as any)
+        let query = (supabase as any)
           .from("group_stock_inventory")
           .select("*")
           .eq("site_group_id", data.groupId)
-          .eq("material_id", entry.materialId)
-          .eq("brand_id", entry.brandId || null)
-          .single();
+          .eq("material_id", entry.materialId);
+
+        // Handle null brand_id correctly - use .is() for null values
+        if (entry.brandId) {
+          query = query.eq("brand_id", entry.brandId);
+        } else {
+          query = query.is("brand_id", null);
+        }
+
+        const { data: inventory, error: invError } = await query.single();
 
         if (invError) {
           throw new Error(`Material ${entry.materialId} not found in group stock`);

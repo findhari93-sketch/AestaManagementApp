@@ -959,6 +959,21 @@ export function useRecordDelivery() {
                   .single();
 
                 if (po) {
+                  // Check if PO is a group stock purchase
+                  // Parse internal_notes if it's a JSON string
+                  let parsedNotes: { is_group_stock?: boolean; site_group_id?: string } | null = null;
+                  if (po.internal_notes) {
+                    try {
+                      parsedNotes = typeof po.internal_notes === "string"
+                        ? JSON.parse(po.internal_notes)
+                        : po.internal_notes;
+                    } catch {
+                      // Ignore parse errors
+                    }
+                  }
+                  const isGroupStock = parsedNotes?.is_group_stock === true;
+                  const siteGroupId = parsedNotes?.site_group_id || null;
+
                   // Generate reference code for material purchase
                   const { data: refCode } = await (supabase as any).rpc(
                     "generate_material_purchase_reference"
@@ -971,26 +986,40 @@ export function useRecordDelivery() {
                   );
                   const totalAmount = itemsTotal + (po.transport_cost || 0);
 
+                  // Calculate total quantity for batch tracking (for group stock)
+                  const totalQuantity = (po.items || []).reduce(
+                    (sum: number, item: any) => sum + Number(item.quantity),
+                    0
+                  );
+
                   // Get current user
                   const { data: { user } } = await supabase.auth.getUser();
 
                   // Create material_purchase_expense linked to PO
+                  // For group stock, this becomes a batch with tracking fields
                   const { data: expense, error: expenseError } = await (supabase as any)
                     .from("material_purchase_expenses")
                     .insert({
                       site_id: po.site_id,
                       ref_code: refCode || `MAT-${Date.now()}`,
-                      purchase_type: "own_site",
+                      purchase_type: isGroupStock ? "group_stock" : "own_site",
                       purchase_order_id: po.id,
                       vendor_id: po.vendor_id,
                       vendor_name: po.vendor?.name || null,
                       purchase_date: new Date().toISOString().split("T")[0],
                       total_amount: totalAmount,
                       transport_cost: po.transport_cost || 0,
-                      status: "recorded", // Pending settlement
+                      status: isGroupStock ? "in_stock" : "recorded",
                       is_paid: false,
                       created_by: user?.id,
-                      notes: `Auto-created from PO ${po.po_number}`,
+                      notes: isGroupStock
+                        ? `Group stock batch from PO ${po.po_number}`
+                        : `Auto-created from PO ${po.po_number}`,
+                      // Group stock batch tracking fields
+                      paying_site_id: isGroupStock ? po.site_id : null,
+                      site_group_id: isGroupStock ? siteGroupId : null,
+                      original_qty: isGroupStock ? totalQuantity : null,
+                      remaining_qty: isGroupStock ? totalQuantity : null,
                     })
                     .select()
                     .single();
@@ -1014,6 +1043,63 @@ export function useRecordDelivery() {
                     if (itemsInsertError) {
                       console.warn("Failed to create material expense items:", itemsInsertError);
                     }
+
+                    // For group stock, also populate group_stock_inventory for backward compatibility
+                    // with the Weekly Usage Report dialog
+                    if (isGroupStock && siteGroupId) {
+                      for (const item of po.items) {
+                        try {
+                          // Check if inventory record exists
+                          // Use .is() for null brand_id to properly match NULL values in PostgreSQL
+                          let invQuery = (supabase as any)
+                            .from("group_stock_inventory")
+                            .select("id, current_qty, avg_unit_cost")
+                            .eq("site_group_id", siteGroupId)
+                            .eq("material_id", item.material_id);
+
+                          if (item.brand_id) {
+                            invQuery = invQuery.eq("brand_id", item.brand_id);
+                          } else {
+                            invQuery = invQuery.is("brand_id", null);
+                          }
+
+                          const { data: existingInv } = await invQuery.maybeSingle();
+
+                          if (existingInv) {
+                            // Update existing inventory - add quantity and recalculate avg cost
+                            const newQty = Number(existingInv.current_qty) + Number(item.quantity);
+                            const newAvgCost = newQty > 0
+                              ? ((Number(existingInv.current_qty) * Number(existingInv.avg_unit_cost || 0)) +
+                                 (Number(item.quantity) * Number(item.unit_price))) / newQty
+                              : Number(item.unit_price);
+
+                            await (supabase as any)
+                              .from("group_stock_inventory")
+                              .update({
+                                current_qty: newQty,
+                                avg_unit_cost: newAvgCost,
+                                last_received_date: new Date().toISOString().split("T")[0],
+                                updated_at: new Date().toISOString(),
+                              })
+                              .eq("id", existingInv.id);
+                          } else {
+                            // Insert new inventory record
+                            await (supabase as any)
+                              .from("group_stock_inventory")
+                              .insert({
+                                site_group_id: siteGroupId,
+                                material_id: item.material_id,
+                                brand_id: item.brand_id || null,
+                                current_qty: Number(item.quantity),
+                                avg_unit_cost: Number(item.unit_price),
+                                last_received_date: new Date().toISOString().split("T")[0],
+                              });
+                          }
+                        } catch (invError) {
+                          console.warn("Failed to update group_stock_inventory:", invError);
+                        }
+                      }
+                    }
                   }
                 }
               } catch (autoCreateError) {
@@ -1034,9 +1120,17 @@ export function useRecordDelivery() {
       queryClient.invalidateQueries({
         queryKey: queryKeys.materialStock.bySite(variables.site_id),
       });
-      // Invalidate material purchases cache (for auto-created settlement)
+      // Invalidate material purchases cache (for auto-created settlement/batch)
       queryClient.invalidateQueries({
         queryKey: queryKeys.materialPurchases.bySite(variables.site_id),
+      });
+      // Invalidate all material purchases (for group stock batches that show on inter-site settlement)
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.materialPurchases.all,
+      });
+      // Invalidate batch usage queries (for inter-site settlement batches tab)
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.batchUsage.all,
       });
       if (variables.po_id) {
         queryClient.invalidateQueries({

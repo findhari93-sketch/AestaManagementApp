@@ -31,6 +31,9 @@ import {
   Delete as DeleteIcon,
   Inventory as InventoryIcon,
   Add as AddIcon,
+  Receipt as BillIcon,
+  Groups as GroupIcon,
+  Store as OwnSiteIcon,
 } from "@mui/icons-material";
 import PageHeader from "@/components/layout/PageHeader";
 import Breadcrumbs from "@/components/layout/Breadcrumbs";
@@ -260,6 +263,7 @@ export default function MaterialSettlementsPage() {
             <TableHead>
               <TableRow>
                 <TableCell>Ref Code</TableCell>
+                <TableCell>Type</TableCell>
                 <TableCell>PO Number</TableCell>
                 <TableCell>Date</TableCell>
                 <TableCell>Materials</TableCell>
@@ -281,10 +285,15 @@ export default function MaterialSettlementsPage() {
                     <TableCell><Skeleton /></TableCell>
                     <TableCell><Skeleton /></TableCell>
                     <TableCell><Skeleton /></TableCell>
+                    <TableCell><Skeleton /></TableCell>
                   </TableRow>
                 ))
               ) : filteredPurchases.length > 0 ? (
-                filteredPurchases.map((purchase) => (
+                filteredPurchases.map((purchase) => {
+                  // Check if this is from a group settlement (has original_batch_code)
+                  const isFromGroupSettlement = !!purchase.original_batch_code;
+
+                  return (
                   <TableRow key={purchase.id} hover>
                     <TableCell>
                       <Typography variant="body2" fontWeight={500} sx={{ fontFamily: "monospace" }}>
@@ -292,9 +301,36 @@ export default function MaterialSettlementsPage() {
                       </Typography>
                     </TableCell>
                     <TableCell>
+                      {isFromGroupSettlement ? (
+                        <Tooltip title={`From batch ${purchase.original_batch_code}`}>
+                          <Chip
+                            icon={<GroupIcon sx={{ fontSize: 16 }} />}
+                            label="Group"
+                            size="small"
+                            color="info"
+                            variant="outlined"
+                            sx={{ fontSize: "0.75rem" }}
+                          />
+                        </Tooltip>
+                      ) : (
+                        <Chip
+                          icon={<OwnSiteIcon sx={{ fontSize: 16 }} />}
+                          label="Own Site"
+                          size="small"
+                          color="default"
+                          variant="outlined"
+                          sx={{ fontSize: "0.75rem" }}
+                        />
+                      )}
+                    </TableCell>
+                    <TableCell>
                       {purchase.purchase_order?.po_number ? (
                         <Typography variant="body2" fontWeight={500} sx={{ fontFamily: "monospace" }}>
                           {purchase.purchase_order.po_number}
+                        </Typography>
+                      ) : isFromGroupSettlement ? (
+                        <Typography variant="body2" color="text.secondary" sx={{ fontFamily: "monospace" }}>
+                          {purchase.original_batch_code}
                         </Typography>
                       ) : (
                         <Typography variant="body2" color="text.secondary">
@@ -328,6 +364,11 @@ export default function MaterialSettlementsPage() {
                       <Typography variant="body2" fontWeight={600}>
                         {formatCurrency(Number(purchase.total_amount || 0))}
                       </Typography>
+                      {isFromGroupSettlement && (
+                        <Typography variant="caption" color="success.main" display="block">
+                          Usage settled
+                        </Typography>
+                      )}
                     </TableCell>
                     <TableCell>
                       {purchase.settlement_reference ? (
@@ -349,8 +390,20 @@ export default function MaterialSettlementsPage() {
                       )}
                     </TableCell>
                     <TableCell>
-                      <Box sx={{ display: "flex", gap: 0.5 }}>
-                        {!purchase.settlement_reference && canEdit && (
+                      <Box sx={{ display: "flex", gap: 0.5, flexWrap: "wrap" }}>
+                        {/* View Bill Button - shown when bill_url exists */}
+                        {purchase.bill_url && (
+                          <Tooltip title="View Bill">
+                            <IconButton
+                              size="small"
+                              color="primary"
+                              onClick={() => window.open(purchase.bill_url!, "_blank")}
+                            >
+                              <BillIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        )}
+                        {!purchase.settlement_reference && canEdit && !isFromGroupSettlement && (
                           <Tooltip title="Settle">
                             <Button
                               size="small"
@@ -370,7 +423,7 @@ export default function MaterialSettlementsPage() {
                             </IconButton>
                           </Tooltip>
                         )}
-                        {canEdit && !purchase.settlement_reference && (
+                        {canEdit && !purchase.settlement_reference && !isFromGroupSettlement && (
                           <Tooltip title="Delete">
                             <IconButton
                               size="small"
@@ -384,10 +437,11 @@ export default function MaterialSettlementsPage() {
                       </Box>
                     </TableCell>
                   </TableRow>
-                ))
+                  );
+                })
               ) : (
                 <TableRow>
-                  <TableCell colSpan={8} align="center" sx={{ py: 4 }}>
+                  <TableCell colSpan={9} align="center" sx={{ py: 4 }}>
                     <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 1 }}>
                       <InventoryIcon sx={{ fontSize: 48, color: "text.disabled" }} />
                       <Typography color="text.secondary">
@@ -416,12 +470,17 @@ export default function MaterialSettlementsPage() {
         <Box component="ul" sx={{ mt: 0.5, pl: 2, mb: 0 }}>
           <li>
             <Typography variant="body2">
-              <strong>Pending:</strong> Purchase recorded but not yet paid/settled
+              <strong>Own Site:</strong> Direct purchases for this site - settle to record payment
             </Typography>
           </li>
           <li>
             <Typography variant="body2">
-              <strong>Settled:</strong> Payment recorded with proof - appears in All Site Expenses
+              <strong>Group Settlement:</strong> Your share from inter-site batch settlement - automatically settled when batch is completed
+            </Typography>
+          </li>
+          <li>
+            <Typography variant="body2">
+              <strong>Settled:</strong> Payment recorded - appears in All Site Expenses
             </Typography>
           </li>
         </Box>

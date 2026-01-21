@@ -134,7 +134,9 @@ export default function PurchaseOrderDialog({
   // New item form
   const [selectedMaterial, setSelectedMaterial] = useState<MaterialWithDetails | null>(null);
   const [selectedVariant, setSelectedVariant] = useState<MaterialWithDetails | null>(null);
-  const [selectedBrand, setSelectedBrand] = useState<MaterialBrand | null>(null);
+  // Brand selection is now split into two steps: brand name, then brand variant
+  const [selectedBrandName, setSelectedBrandName] = useState<string | null>(null);
+  const [selectedBrandVariant, setSelectedBrandVariant] = useState<MaterialBrand | null>(null);
   const [newItemQty, setNewItemQty] = useState("");
   const [newItemPrice, setNewItemPrice] = useState("");
   const [newItemTaxRate, setNewItemTaxRate] = useState("");
@@ -154,28 +156,58 @@ export default function PurchaseOrderDialog({
   const effectiveMaterial = selectedVariant || selectedMaterial;
   const effectiveMaterialId = effectiveMaterial?.id;
 
+  // Get unique brand names for effective material (variant or parent)
+  const uniqueBrandNames = useMemo(() => {
+    if (!effectiveMaterial?.brands) return [];
+    const brandNames = new Set<string>();
+    effectiveMaterial.brands
+      .filter((b) => b.is_active)
+      .forEach((b) => brandNames.add(b.brand_name));
+    return Array.from(brandNames).sort();
+  }, [effectiveMaterial]);
+
+  // Get brand variants for the selected brand name
+  const brandVariantsForSelectedBrand = useMemo(() => {
+    if (!selectedBrandName || !effectiveMaterial?.brands) return [];
+    return effectiveMaterial.brands.filter(
+      (b) => b.is_active && b.brand_name === selectedBrandName
+    );
+  }, [selectedBrandName, effectiveMaterial]);
+
+  // Determine if we need to show the brand variant dropdown
+  // Show if: multiple variants exist OR single variant has a variant_name
+  const hasBrandVariants = brandVariantsForSelectedBrand.length > 1 ||
+    (brandVariantsForSelectedBrand.length === 1 && brandVariantsForSelectedBrand[0].variant_name);
+
+  // The effective brand ID for price lookup
+  // If brand variant is selected, use it; otherwise if brand has no variants, use the single brand record
+  const effectiveBrandId = useMemo(() => {
+    if (selectedBrandVariant) {
+      return selectedBrandVariant.id;
+    }
+    // If brand is selected but has no variants, use the brand record directly
+    if (selectedBrandName && !hasBrandVariants && brandVariantsForSelectedBrand.length === 1) {
+      return brandVariantsForSelectedBrand[0].id;
+    }
+    return null;
+  }, [selectedBrandVariant, selectedBrandName, hasBrandVariants, brandVariantsForSelectedBrand]);
+
   // Fetch price from vendor_inventory (primary source - catalog prices)
   const { data: vendorInventoryPrice } = useVendorMaterialPrice(
     selectedVendor?.id,
     effectiveMaterialId,
-    selectedBrand?.id
+    effectiveBrandId
   );
 
   // Fetch price from price_history (fallback - historical prices)
   const { data: priceHistoryPrice } = useLatestPrice(
     selectedVendor?.id,
     effectiveMaterialId,
-    selectedBrand?.id
+    effectiveBrandId
   );
 
   // Use vendor_inventory price first (catalog), fallback to price_history
   const latestPrice = vendorInventoryPrice || priceHistoryPrice;
-
-  // Get available brands for effective material (variant or parent)
-  const availableBrands = useMemo(() => {
-    if (!effectiveMaterial?.brands) return [];
-    return effectiveMaterial.brands.filter((b) => b.is_active);
-  }, [effectiveMaterial]);
 
   // Calculate price change info
   const priceChangeInfo = useMemo(() => {
@@ -258,7 +290,8 @@ export default function PurchaseOrderDialog({
     if (!prefilledMaterialId) {
       setSelectedMaterial(null);
       setSelectedVariant(null);
-      setSelectedBrand(null);
+      setSelectedBrandName(null);
+      setSelectedBrandVariant(null);
       setNewItemTaxRate("");
     }
     setNewItemQty("");
@@ -268,13 +301,20 @@ export default function PurchaseOrderDialog({
   // Reset variant and brand when material changes
   useEffect(() => {
     setSelectedVariant(null);
-    setSelectedBrand(null);
+    setSelectedBrandName(null);
+    setSelectedBrandVariant(null);
   }, [selectedMaterial]);
 
   // Reset brand when variant changes
   useEffect(() => {
-    setSelectedBrand(null);
+    setSelectedBrandName(null);
+    setSelectedBrandVariant(null);
   }, [selectedVariant]);
+
+  // Reset brand variant when brand name changes
+  useEffect(() => {
+    setSelectedBrandVariant(null);
+  }, [selectedBrandName]);
 
   // Auto-fill price when latest price is found (only once per vendor/material/variant/brand selection)
   useEffect(() => {
@@ -286,12 +326,12 @@ export default function PurchaseOrderDialog({
         setTransportCost(latestPrice.transport_cost.toString());
       }
     }
-  }, [latestPrice, selectedVendor, selectedMaterial, selectedVariant, selectedBrand, newItemPrice, transportCost]);
+  }, [latestPrice, selectedVendor, selectedMaterial, selectedVariant, selectedBrandName, selectedBrandVariant, newItemPrice, transportCost]);
 
   // Reset auto-fill flag when vendor, material, variant, or brand changes
   useEffect(() => {
     hasAutofilledPrice.current = false;
-  }, [selectedVendor, selectedMaterial, selectedVariant, selectedBrand]);
+  }, [selectedVendor, selectedMaterial, selectedVariant, selectedBrandName, selectedBrandVariant]);
 
   // Update payingSiteId when siteId changes (separate effect to avoid loops)
   useEffect(() => {
@@ -344,17 +384,29 @@ export default function PurchaseOrderDialog({
     // Use variant for item data if selected, otherwise parent material
     const materialToAdd = selectedVariant || selectedMaterial;
 
+    // Determine the brand to use: selectedBrandVariant if brand variants exist,
+    // otherwise find the brand record by brand name (for brands without variants)
+    let brandToUse: MaterialBrand | null = null;
+    if (selectedBrandVariant) {
+      brandToUse = selectedBrandVariant;
+    } else if (selectedBrandName && effectiveMaterial?.brands) {
+      // Find the brand record without variant_name for this brand
+      brandToUse = effectiveMaterial.brands.find(
+        (b) => b.is_active && b.brand_name === selectedBrandName && !b.variant_name
+      ) || null;
+    }
+
     const newItem: POItemRow = {
       material_id: materialToAdd.id,
-      brand_id: selectedBrand?.id,
+      brand_id: brandToUse?.id,
       quantity: parseFloat(newItemQty),
       unit_price: parseFloat(newItemPrice),
       tax_rate: newItemTaxRate ? parseFloat(newItemTaxRate) : undefined,
       materialName: materialToAdd.name,
-      brandName: selectedBrand
-        ? selectedBrand.variant_name
-          ? `${selectedBrand.brand_name} ${selectedBrand.variant_name}`
-          : selectedBrand.brand_name
+      brandName: brandToUse
+        ? brandToUse.variant_name
+          ? `${brandToUse.brand_name} ${brandToUse.variant_name}`
+          : brandToUse.brand_name
         : undefined,
       unit: materialToAdd.unit,
       weight_per_unit: materialToAdd.weight_per_unit,
@@ -364,7 +416,8 @@ export default function PurchaseOrderDialog({
     setItems([...items, newItem]);
     setSelectedMaterial(null);
     setSelectedVariant(null);
-    setSelectedBrand(null);
+    setSelectedBrandName(null);
+    setSelectedBrandVariant(null);
     setNewItemQty("");
     setNewItemPrice("");
     setNewItemTaxRate("");
@@ -812,29 +865,31 @@ export default function PurchaseOrderDialog({
             </Grid>
           )}
 
-          {/* Transport Cost - visible for both new and edit */}
-          <Grid size={{ xs: 12, md: 6 }}>
-            <TextField
-              fullWidth
-              type="number"
-              label="Transport Cost"
-              value={transportCost}
-              onChange={(e) => setTransportCost(e.target.value)}
-              slotProps={{
-                input: {
-                  startAdornment: (
-                    <InputAdornment position="start">₹</InputAdornment>
-                  ),
-                  inputProps: { min: 0, step: 0.01 },
-                },
-              }}
-              helperText={
-                latestPrice?.transport_cost
-                  ? `Last: ${formatCurrency(latestPrice.transport_cost)}`
-                  : "Enter transport/delivery cost"
-              }
-            />
-          </Grid>
+          {/* Transport Cost - visible when NOT in group stock mode (group stock has its own transport field) */}
+          {!isGroupStock && !(isHistoricalMode && purchaseType === "group_stock") && (
+            <Grid size={{ xs: 12, md: 6 }}>
+              <TextField
+                fullWidth
+                type="number"
+                label="Transport Cost"
+                value={transportCost}
+                onChange={(e) => setTransportCost(e.target.value)}
+                slotProps={{
+                  input: {
+                    startAdornment: (
+                      <InputAdornment position="start">₹</InputAdornment>
+                    ),
+                    inputProps: { min: 0, step: 0.01 },
+                  },
+                }}
+                helperText={
+                  latestPrice?.transport_cost
+                    ? `Last: ${formatCurrency(latestPrice.transport_cost)}`
+                    : "Enter transport/delivery cost"
+                }
+              />
+            </Grid>
+          )}
 
           {/* Add Item Section */}
           <Grid size={12}>
@@ -901,19 +956,15 @@ export default function PurchaseOrderDialog({
           {/* Brand Selection */}
           <Grid size={{ xs: 12, md: 2 }}>
             <Autocomplete
-              options={availableBrands}
-              getOptionLabel={(brand) =>
-                brand.variant_name
-                  ? `${brand.brand_name} ${brand.variant_name}`
-                  : brand.brand_name
-              }
-              value={selectedBrand}
+              options={uniqueBrandNames}
+              getOptionLabel={(brandName) => brandName}
+              value={selectedBrandName}
               onChange={(_, value) => {
-                setSelectedBrand(value);
+                setSelectedBrandName(value);
                 // Reset price to trigger re-fetch
                 setNewItemPrice("");
               }}
-              disabled={!effectiveMaterial || availableBrands.length === 0}
+              disabled={!effectiveMaterial || uniqueBrandNames.length === 0}
               renderInput={(params) => (
                 <TextField
                   {...params}
@@ -922,26 +973,45 @@ export default function PurchaseOrderDialog({
                   placeholder={
                     !effectiveMaterial
                       ? hasVariants ? "Select variant" : "Select material"
-                      : availableBrands.length === 0
+                      : uniqueBrandNames.length === 0
                       ? "No brands"
                       : "Optional"
                   }
                 />
               )}
-              renderOption={(props, brand) => (
-                <li {...props} key={brand.id}>
-                  <Typography variant="body2">
-                    {brand.brand_name}
-                    {brand.variant_name && (
-                      <Typography component="span" color="text.secondary">
-                        {" "}- {brand.variant_name}
-                      </Typography>
-                    )}
-                  </Typography>
+              renderOption={(props, brandName) => (
+                <li {...props} key={brandName}>
+                  <Typography variant="body2">{brandName}</Typography>
                 </li>
               )}
             />
           </Grid>
+
+          {/* Brand Variant Selection - show when brand has variants */}
+          {hasBrandVariants && (
+            <Grid size={{ xs: 12, md: 2 }}>
+              <Autocomplete
+                options={brandVariantsForSelectedBrand}
+                getOptionLabel={(brand) => brand.variant_name || "Standard"}
+                value={selectedBrandVariant}
+                onChange={(_, value) => {
+                  setSelectedBrandVariant(value);
+                  // Reset price to trigger re-fetch
+                  setNewItemPrice("");
+                }}
+                renderInput={(params) => (
+                  <TextField {...params} label="Variant" size="small" required />
+                )}
+                renderOption={(props, brand) => (
+                  <li {...props} key={brand.id}>
+                    <Typography variant="body2">
+                      {brand.variant_name || "Standard"}
+                    </Typography>
+                  </li>
+                )}
+              />
+            </Grid>
+          )}
 
           <Grid size={{ xs: 4, md: 1.5 }}>
             <TextField

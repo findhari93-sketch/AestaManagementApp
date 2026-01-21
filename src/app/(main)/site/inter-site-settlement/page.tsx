@@ -38,7 +38,6 @@ import {
   TrendingUp as TrendingUpIcon,
   TrendingDown as TrendingDownIcon,
   Add as AddIcon,
-  History as HistoryIcon,
   Assessment as ReportIcon,
   Receipt as TransactionsIcon,
   ShoppingCart as PurchaseIcon,
@@ -64,13 +63,15 @@ import {
   useGroupStockTransactions,
 } from '@/hooks/queries/useInterSiteSettlements'
 import { useGroupStockBatches } from '@/hooks/queries/useMaterialPurchases'
-import AddHistoricalPurchaseDialog from '@/components/materials/AddHistoricalPurchaseDialog'
+import { useBatchesWithUsage } from '@/hooks/queries/useBatchUsage'
 import WeeklyUsageReportDialog from '@/components/materials/WeeklyUsageReportDialog'
 import GroupStockBatchCard from '@/components/materials/GroupStockBatchCard'
 import EditMaterialPurchaseDialog from '@/components/materials/EditMaterialPurchaseDialog'
 import ConvertToOwnSiteDialog from '@/components/materials/ConvertToOwnSiteDialog'
 import GroupStockTransactionDrawer from '@/components/materials/GroupStockTransactionDrawer'
 import EditGroupStockTransactionDialog from '@/components/materials/EditGroupStockTransactionDialog'
+import RecordBatchUsageDialog from '@/components/materials/RecordBatchUsageDialog'
+import InitiateBatchSettlementDialog from '@/components/materials/InitiateBatchSettlementDialog'
 import ConfirmDialog from '@/components/common/ConfirmDialog'
 import type { InterSiteSettlementWithDetails, InterSiteBalance, GroupStockBatch, MaterialPurchaseExpenseWithDetails } from '@/types/material.types'
 import type { GroupStockTransaction } from '@/hooks/queries/useInterSiteSettlements'
@@ -94,7 +95,6 @@ function TabPanel(props: TabPanelProps) {
 export default function InterSiteSettlementPage() {
   const { selectedSite } = useSite()
   const [tabValue, setTabValue] = useState(0)
-  const [historicalPurchaseOpen, setHistoricalPurchaseOpen] = useState(false)
   const [usageReportOpen, setUsageReportOpen] = useState(false)
 
   // Dialog states for batch management
@@ -117,6 +117,21 @@ export default function InterSiteSettlementPage() {
   const [editDialogOpen, setEditDialogOpen] = useState(false)
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
 
+  // Batch usage dialog states
+  const [recordUsageOpen, setRecordUsageOpen] = useState(false)
+  const [selectedBatchForUsage, setSelectedBatchForUsage] = useState<string | undefined>(undefined)
+
+  // Settlement dialog states
+  const [settlementDialogOpen, setSettlementDialogOpen] = useState(false)
+  const [settlementData, setSettlementData] = useState<{
+    batchRefCode: string
+    debtorSiteId: string
+    debtorSiteName: string
+    creditorSiteId: string
+    creditorSiteName: string
+    amount: number
+  } | null>(null)
+
   // Hooks
   const { data: groupMembership, isLoading: membershipLoading } = useSiteGroupMembership(
     selectedSite?.id
@@ -138,6 +153,9 @@ export default function InterSiteSettlementPage() {
     groupMembership?.groupId,
     { enabled: !!groupMembership?.groupId }
   )
+
+  // Fetch batches with usage breakdown for enhanced display
+  const { data: batchesWithUsage = [] } = useBatchesWithUsage(groupMembership?.groupId)
 
   const generateSettlement = useGenerateSettlement()
   const approveSettlement = useApproveSettlement()
@@ -176,11 +194,12 @@ export default function InterSiteSettlementPage() {
     })
   }, [transactions, siteFilter, typeFilter])
 
-  // Filter batches based on status
+  // Filter batches based on status - prefer batchesWithUsage for enhanced display
   const filteredBatches = useMemo(() => {
-    if (batchStatusFilter === 'all') return batches
-    return batches.filter((batch) => batch.status === batchStatusFilter)
-  }, [batches, batchStatusFilter])
+    const sourceBatches = batchesWithUsage.length > 0 ? batchesWithUsage : batches
+    if (batchStatusFilter === 'all') return sourceBatches
+    return sourceBatches.filter((batch: any) => batch.status === batchStatusFilter)
+  }, [batches, batchesWithUsage, batchStatusFilter])
 
   // Batch action handlers
   const handleEditBatch = (batch: GroupStockBatch) => {
@@ -196,6 +215,31 @@ export default function InterSiteSettlementPage() {
   const handleCompleteBatch = (batch: GroupStockBatch) => {
     // TODO: Open batch completion dialog
     console.log('Complete batch:', batch.ref_code)
+  }
+
+  // Batch usage handlers
+  const handleRecordUsage = (batchRefCode?: string) => {
+    setSelectedBatchForUsage(batchRefCode)
+    setRecordUsageOpen(true)
+  }
+
+  const handleSettleUsage = (
+    batchRefCode: string,
+    creditorSiteId: string,
+    creditorSiteName: string,
+    debtorSiteId: string,
+    debtorSiteName: string,
+    amount: number
+  ) => {
+    setSettlementData({
+      batchRefCode,
+      debtorSiteId,
+      debtorSiteName,
+      creditorSiteId,
+      creditorSiteName,
+      amount,
+    })
+    setSettlementDialogOpen(true)
   }
 
   // Transaction action handlers
@@ -336,13 +380,6 @@ export default function InterSiteSettlementPage() {
 
       {/* Action Buttons */}
       <Box sx={{ display: 'flex', gap: 2, mb: 3 }}>
-        <Button
-          variant="outlined"
-          startIcon={<HistoryIcon />}
-          onClick={() => setHistoricalPurchaseOpen(true)}
-        >
-          Add Historical Purchase
-        </Button>
         <Button
           variant="contained"
           startIcon={<ReportIcon />}
@@ -710,7 +747,7 @@ export default function InterSiteSettlementPage() {
                           No transactions yet
                         </Typography>
                         <Typography variant="caption" color="text.disabled">
-                          Add a historical purchase or record weekly usage to see transactions here
+                          Create a Group PO and record delivery, or record weekly usage to see transactions here
                         </Typography>
                       </Box>
                     </TableCell>
@@ -753,7 +790,7 @@ export default function InterSiteSettlementPage() {
             </Grid>
           ) : filteredBatches.length > 0 ? (
             <Grid container spacing={2}>
-              {filteredBatches.map((batch) => (
+              {filteredBatches.map((batch: any) => (
                 <Grid key={batch.ref_code} size={{ xs: 12, sm: 6, lg: 4 }}>
                   <GroupStockBatchCard
                     batch={batch}
@@ -761,6 +798,18 @@ export default function InterSiteSettlementPage() {
                     // onEdit={() => handleEditBatch(batch)}
                     onConvertToOwnSite={() => handleConvertBatch(batch)}
                     onComplete={() => handleCompleteBatch(batch)}
+                    onRecordUsage={() => handleRecordUsage(batch.ref_code)}
+                    onSettleUsage={(siteId, siteName, amount) =>
+                      handleSettleUsage(
+                        batch.ref_code,
+                        batch.paying_site_id || batch.payment_source_site_id,
+                        batch.paying_site?.name || batch.payment_source_site_name || 'Paying Site',
+                        siteId,
+                        siteName,
+                        amount
+                      )
+                    }
+                    currentSiteId={selectedSite?.id}
                     showActions
                   />
                 </Grid>
@@ -772,16 +821,11 @@ export default function InterSiteSettlementPage() {
               <Typography color="text.secondary" variant="h6">
                 No group stock batches
               </Typography>
-              <Typography variant="body2" color="text.disabled" sx={{ mb: 2 }}>
-                Add historical purchases with "Group Stock" type to see batches here
+              <Typography variant="body2" color="text.disabled" sx={{ mb: 2, textAlign: 'center' }}>
+                Create a Purchase Order with &quot;Group Stock&quot; enabled and record delivery.
+                <br />
+                Batches are automatically created when Group POs are delivered.
               </Typography>
-              <Button
-                variant="outlined"
-                startIcon={<HistoryIcon />}
-                onClick={() => setHistoricalPurchaseOpen(true)}
-              >
-                Add Historical Purchase
-              </Button>
             </Box>
           )}
         </TabPanel>
@@ -1105,11 +1149,6 @@ export default function InterSiteSettlementPage() {
       {/* Dialogs */}
       {selectedSite?.id && (
         <>
-          <AddHistoricalPurchaseDialog
-            open={historicalPurchaseOpen}
-            onClose={() => setHistoricalPurchaseOpen(false)}
-            siteId={selectedSite.id}
-          />
           <WeeklyUsageReportDialog
             open={usageReportOpen}
             onClose={() => setUsageReportOpen(false)}
@@ -1160,6 +1199,36 @@ export default function InterSiteSettlementPage() {
           setDeleteTransaction(null)
         }}
       />
+
+      {/* Batch Usage Dialog */}
+      {selectedSite?.id && (
+        <RecordBatchUsageDialog
+          open={recordUsageOpen}
+          onClose={() => {
+            setRecordUsageOpen(false)
+            setSelectedBatchForUsage(undefined)
+          }}
+          siteId={selectedSite.id}
+          preselectedBatchRefCode={selectedBatchForUsage}
+        />
+      )}
+
+      {/* Batch Settlement Dialog */}
+      {settlementData && (
+        <InitiateBatchSettlementDialog
+          open={settlementDialogOpen}
+          onClose={() => {
+            setSettlementDialogOpen(false)
+            setSettlementData(null)
+          }}
+          batchRefCode={settlementData.batchRefCode}
+          debtorSiteId={settlementData.debtorSiteId}
+          debtorSiteName={settlementData.debtorSiteName}
+          creditorSiteId={settlementData.creditorSiteId}
+          creditorSiteName={settlementData.creditorSiteName}
+          amount={settlementData.amount}
+        />
+      )}
 
       {/* Mobile FAB */}
       <Box
