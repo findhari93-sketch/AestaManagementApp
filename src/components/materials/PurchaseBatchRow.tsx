@@ -57,6 +57,43 @@ export default function PurchaseBatchRow({
   // Get usage transactions for this batch
   const usageTransactions = transactions.filter(tx => tx.transaction_type === 'usage')
 
+  // Create a fallback transaction object from batch data for actions
+  // This allows actions to work even when there's no matching transaction in group_stock_transactions
+  // We add _isBatchFallback flag to identify this is a batch, not a real transaction
+  const fallbackTransaction: (GroupStockTransaction & { _isBatchFallback?: boolean; _batchRefCode?: string }) | null = !purchaseTransaction && batch ? ({
+    id: batch.id || '',
+    transaction_type: 'purchase',
+    transaction_date: batch.purchase_date,
+    quantity: batch.original_quantity || 0,
+    unit_cost: batch.total_amount && batch.original_quantity
+      ? batch.total_amount / batch.original_quantity
+      : 0,
+    total_cost: batch.total_amount || 0,
+    notes: batch.notes,
+    batch_ref_code: batch.ref_code,
+    material_id: batch.items?.[0]?.material_id || '',
+    material: batch.material,
+    brand_id: batch.items?.[0]?.brand_id,
+    brand: batch.brand,
+    payment_source_site_id: batch.payment_source_site_id || batch.paying_site?.id,
+    payment_source_site: batch.paying_site || (batch.payment_source_site_name ? { id: batch.payment_source_site_id, name: batch.payment_source_site_name } : undefined),
+    usage_site_id: undefined,
+    usage_site: undefined,
+    site_group_id: batch.site_group_id || '',
+    inventory_id: undefined,
+    reference_type: 'batch',
+    reference_id: batch.id,
+    recorded_by: undefined,
+    settlement_id: undefined,
+    created_at: new Date().toISOString(),
+    // Flag to identify this is a batch fallback, not a real transaction
+    _isBatchFallback: true,
+    _batchRefCode: batch.ref_code,
+  } as unknown as GroupStockTransaction & { _isBatchFallback: boolean; _batchRefCode: string }) : null
+
+  // Use purchase transaction if available, otherwise use fallback
+  const actionTransaction = purchaseTransaction || fallbackTransaction
+
   // Calculate usage percentage
   const usedQuantity = batch.original_quantity - batch.remaining_quantity
   const usagePercentage = batch.original_quantity > 0
@@ -109,7 +146,7 @@ export default function PurchaseBatchRow({
         {/* Date */}
         <TableCell>
           <Typography variant="body2">
-            {formatDate(purchaseTransaction?.transaction_date || batch.purchase_date)}
+            {formatDate(actionTransaction?.transaction_date || batch.purchase_date)}
           </Typography>
         </TableCell>
 
@@ -159,7 +196,7 @@ export default function PurchaseBatchRow({
 
         {/* Unit Cost */}
         <TableCell align="right">
-          {formatCurrency(purchaseTransaction?.unit_cost || 0)}
+          {formatCurrency(actionTransaction?.unit_cost || 0)}
         </TableCell>
 
         {/* Total Cost */}
@@ -195,29 +232,29 @@ export default function PurchaseBatchRow({
               whiteSpace: 'nowrap',
             }}
           >
-            {purchaseTransaction?.notes || batch.notes || '-'}
+            {actionTransaction?.notes || batch.notes || '-'}
           </Typography>
         </TableCell>
 
         {/* Actions */}
         <TableCell>
           <Box sx={{ display: 'flex', gap: 0.5 }}>
-            {purchaseTransaction && (
+            {actionTransaction && (
               <>
                 <Tooltip title="View Details">
-                  <IconButton size="small" onClick={() => onViewTransaction(purchaseTransaction)}>
+                  <IconButton size="small" onClick={() => onViewTransaction(actionTransaction)}>
                     <ViewIcon fontSize="small" />
                   </IconButton>
                 </Tooltip>
                 {canEdit && (
                   <>
                     <Tooltip title="Edit">
-                      <IconButton size="small" onClick={() => onEditTransaction(purchaseTransaction)}>
+                      <IconButton size="small" onClick={() => onEditTransaction(actionTransaction)}>
                         <EditIcon fontSize="small" />
                       </IconButton>
                     </Tooltip>
                     <Tooltip title="Delete">
-                      <IconButton size="small" color="error" onClick={() => onDeleteTransaction(purchaseTransaction)}>
+                      <IconButton size="small" color="error" onClick={() => onDeleteTransaction(actionTransaction)}>
                         <DeleteIcon fontSize="small" />
                       </IconButton>
                     </Tooltip>
@@ -285,7 +322,7 @@ export default function PurchaseBatchRow({
                               </Typography>
                             </TableCell>
                             <TableCell align="right">
-                              {formatCurrency(purchaseTransaction?.unit_cost || 0)}
+                              {formatCurrency(actionTransaction?.unit_cost || 0)}
                             </TableCell>
                             <TableCell align="right">
                               <Typography variant="body2" fontWeight={500}>

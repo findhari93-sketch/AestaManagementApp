@@ -21,6 +21,16 @@ import {
   Grid,
   ToggleButton,
   ToggleButtonGroup,
+  Menu,
+  MenuItem,
+  ListItemIcon,
+  ListItemText,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Button,
+  Divider,
 } from "@mui/material";
 import {
   Receipt as ExpenseIcon,
@@ -29,6 +39,10 @@ import {
   Person as SelfUseIcon,
   Receipt as BillIcon,
   TrendingUp as TotalIcon,
+  Visibility as ViewIcon,
+  Edit as EditIcon,
+  Delete as DeleteIcon,
+  MoreVert as MoreIcon,
 } from "@mui/icons-material";
 import PageHeader from "@/components/layout/PageHeader";
 import Breadcrumbs from "@/components/layout/Breadcrumbs";
@@ -36,8 +50,10 @@ import { useSite } from "@/contexts/SiteContext";
 import { formatCurrency, formatDate } from "@/lib/formatters";
 import {
   useSiteLevelMaterialExpenses,
+  useDeleteMaterialPurchase,
   type SiteMaterialExpense,
 } from "@/hooks/queries/useMaterialPurchases";
+import { useRouter } from "next/navigation";
 
 // Type config for display
 const typeConfig: Record<
@@ -63,10 +79,21 @@ const typeConfig: Record<
 
 export default function MaterialExpensesPage() {
   const { selectedSite } = useSite();
+  const router = useRouter();
   const [typeFilter, setTypeFilter] = useState<"all" | SiteMaterialExpense["type"]>("all");
+
+  // Menu and dialog state
+  const [menuAnchorEl, setMenuAnchorEl] = useState<null | HTMLElement>(null);
+  const [selectedExpense, setSelectedExpense] = useState<SiteMaterialExpense | null>(null);
+  const [viewDialogOpen, setViewDialogOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [navigationDialogOpen, setNavigationDialogOpen] = useState(false);
 
   // Fetch site-level material expenses
   const { data: expensesData, isLoading } = useSiteLevelMaterialExpenses(selectedSite?.id);
+
+  // Delete mutation
+  const deleteMutation = useDeleteMaterialPurchase();
 
   // Extract data
   const allExpenses = expensesData?.expenses || [];
@@ -103,6 +130,78 @@ export default function MaterialExpensesPage() {
       },
     };
   }, [allExpenses, totalAmount]);
+
+  // Menu handlers
+  const handleMenuOpen = (event: React.MouseEvent<HTMLElement>, expense: SiteMaterialExpense) => {
+    setMenuAnchorEl(event.currentTarget);
+    setSelectedExpense(expense);
+  };
+
+  const handleMenuClose = () => {
+    setMenuAnchorEl(null);
+  };
+
+  const handleView = () => {
+    setViewDialogOpen(true);
+    handleMenuClose();
+  };
+
+  const handleViewClose = () => {
+    setViewDialogOpen(false);
+    setSelectedExpense(null);
+  };
+
+  const handleEdit = () => {
+    handleMenuClose();
+    if (selectedExpense?.type === "allocated") {
+      // For allocated expenses, show navigation dialog
+      setNavigationDialogOpen(true);
+    } else {
+      // For own_site and self_use, navigate to edit page (if exists)
+      // For now, just close - can be extended later
+    }
+  };
+
+  const handleDelete = () => {
+    handleMenuClose();
+    if (selectedExpense?.type === "allocated") {
+      // For allocated expenses, show navigation dialog
+      setNavigationDialogOpen(true);
+    } else {
+      // For own_site and self_use, show delete confirmation
+      setDeleteDialogOpen(true);
+    }
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!selectedExpense?.purchase_expense_id) return;
+
+    try {
+      await deleteMutation.mutateAsync(selectedExpense.purchase_expense_id);
+      setDeleteDialogOpen(false);
+      setSelectedExpense(null);
+    } catch (error) {
+      console.error("Failed to delete expense:", error);
+    }
+  };
+
+  const handleDeleteCancel = () => {
+    setDeleteDialogOpen(false);
+    setSelectedExpense(null);
+  };
+
+  const handleNavigateToSettlement = () => {
+    setNavigationDialogOpen(false);
+    // Navigate to Inter-Site Settlement page with the settlement reference
+    const settlementRef = selectedExpense?.settlement_reference || selectedExpense?.batch_ref_code;
+    router.push(`/site/inter-site-settlement${settlementRef ? `?highlight=${encodeURIComponent(settlementRef)}` : ""}`);
+    setSelectedExpense(null);
+  };
+
+  const handleNavigationCancel = () => {
+    setNavigationDialogOpen(false);
+    setSelectedExpense(null);
+  };
 
   return (
     <Box>
@@ -334,17 +433,27 @@ export default function MaterialExpensesPage() {
                         )}
                       </TableCell>
                       <TableCell>
-                        {expense.bill_url && (
-                          <Tooltip title="View Bill">
+                        <Box sx={{ display: "flex", gap: 0.5 }}>
+                          {expense.bill_url && (
+                            <Tooltip title="View Bill">
+                              <IconButton
+                                size="small"
+                                color="primary"
+                                onClick={() => window.open(expense.bill_url!, "_blank")}
+                              >
+                                <BillIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                          )}
+                          <Tooltip title="Actions">
                             <IconButton
                               size="small"
-                              color="primary"
-                              onClick={() => window.open(expense.bill_url!, "_blank")}
+                              onClick={(e) => handleMenuOpen(e, expense)}
                             >
-                              <BillIcon fontSize="small" />
+                              <MoreIcon fontSize="small" />
                             </IconButton>
                           </Tooltip>
-                        )}
+                        </Box>
                       </TableCell>
                     </TableRow>
                   );
@@ -395,6 +504,262 @@ export default function MaterialExpensesPage() {
           </li>
         </Box>
       </Alert>
+
+      {/* Actions Menu */}
+      <Menu
+        anchorEl={menuAnchorEl}
+        open={Boolean(menuAnchorEl)}
+        onClose={handleMenuClose}
+      >
+        <MenuItem onClick={handleView}>
+          <ListItemIcon>
+            <ViewIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>View Details</ListItemText>
+        </MenuItem>
+        {selectedExpense?.type === "allocated" ? (
+          // For allocated expenses, show "Go to Settlement" option
+          <MenuItem onClick={handleNavigateToSettlement}>
+            <ListItemIcon>
+              <GroupIcon fontSize="small" color="info" />
+            </ListItemIcon>
+            <ListItemText>Go to Settlement</ListItemText>
+          </MenuItem>
+        ) : (
+          // For own_site and self_use, show Edit/Delete options
+          <>
+            <MenuItem onClick={handleEdit} disabled>
+              <ListItemIcon>
+                <EditIcon fontSize="small" />
+              </ListItemIcon>
+              <ListItemText>Edit</ListItemText>
+            </MenuItem>
+            <Divider />
+            <MenuItem
+              onClick={handleDelete}
+              sx={{ color: "error.main" }}
+              disabled={deleteMutation.isPending}
+            >
+              <ListItemIcon>
+                <DeleteIcon fontSize="small" color="error" />
+              </ListItemIcon>
+              <ListItemText>Delete</ListItemText>
+            </MenuItem>
+          </>
+        )}
+      </Menu>
+
+      {/* View Details Dialog */}
+      <Dialog
+        open={viewDialogOpen}
+        onClose={handleViewClose}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>
+          Material Expense Details
+          {selectedExpense && (
+            <Chip
+              label={typeConfig[selectedExpense.type].label}
+              size="small"
+              color={typeConfig[selectedExpense.type].color}
+              sx={{ ml: 2 }}
+            />
+          )}
+        </DialogTitle>
+        <DialogContent dividers>
+          {selectedExpense && (
+            <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              <Box>
+                <Typography variant="caption" color="text.secondary">
+                  Reference Code
+                </Typography>
+                <Typography variant="body1" fontFamily="monospace">
+                  {selectedExpense.ref_code}
+                </Typography>
+              </Box>
+
+              <Divider />
+
+              <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 2 }}>
+                <Box>
+                  <Typography variant="caption" color="text.secondary">
+                    Purchase Date
+                  </Typography>
+                  <Typography variant="body1">
+                    {formatDate(selectedExpense.purchase_date)}
+                  </Typography>
+                </Box>
+                <Box>
+                  <Typography variant="caption" color="text.secondary">
+                    Amount
+                  </Typography>
+                  <Typography variant="body1" fontWeight={600} color="primary.main">
+                    {formatCurrency(selectedExpense.amount)}
+                  </Typography>
+                </Box>
+              </Box>
+
+              <Divider />
+
+              <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 2 }}>
+                <Box>
+                  <Typography variant="caption" color="text.secondary">
+                    Material
+                  </Typography>
+                  <Typography variant="body1">
+                    {selectedExpense.material_name}
+                  </Typography>
+                  {selectedExpense.brand_name && (
+                    <Typography variant="body2" color="text.secondary">
+                      {selectedExpense.brand_name}
+                    </Typography>
+                  )}
+                </Box>
+                <Box>
+                  <Typography variant="caption" color="text.secondary">
+                    Quantity
+                  </Typography>
+                  <Typography variant="body1">
+                    {selectedExpense.quantity
+                      ? `${selectedExpense.quantity} ${selectedExpense.unit || ""}`
+                      : "-"}
+                  </Typography>
+                </Box>
+              </Box>
+
+              {selectedExpense.vendor_name && (
+                <>
+                  <Divider />
+                  <Box>
+                    <Typography variant="caption" color="text.secondary">
+                      Vendor
+                    </Typography>
+                    <Typography variant="body1">
+                      {selectedExpense.vendor_name}
+                    </Typography>
+                  </Box>
+                </>
+              )}
+
+              {(selectedExpense.type === "allocated" || selectedExpense.type === "self_use") && selectedExpense.settlement_reference && (
+                <>
+                  <Divider />
+                  <Box>
+                    <Typography variant="caption" color="text.secondary">
+                      Settlement Reference
+                    </Typography>
+                    <Typography variant="body1" fontFamily="monospace">
+                      {selectedExpense.settlement_reference}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                      {selectedExpense.type === "allocated"
+                        ? "This expense is from an inter-site settlement where you paid for materials used from a group purchase."
+                        : "This expense represents your self-use portion from a group purchase you paid for."}
+                    </Typography>
+                  </Box>
+                </>
+              )}
+
+              <Divider />
+
+              <Box>
+                <Typography variant="caption" color="text.secondary">
+                  Source
+                </Typography>
+                <Typography variant="body1" fontFamily="monospace">
+                  {selectedExpense.source_ref}
+                </Typography>
+              </Box>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleViewClose}>Close</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog
+        open={deleteDialogOpen}
+        onClose={handleDeleteCancel}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>Delete Expense</DialogTitle>
+        <DialogContent>
+          <Typography variant="body1">
+            Are you sure you want to delete this expense?
+          </Typography>
+          {selectedExpense && (
+            <Box sx={{ mt: 2, p: 2, bgcolor: "grey.100", borderRadius: 1 }}>
+              <Typography variant="body2" color="text.secondary">
+                {selectedExpense.ref_code}
+              </Typography>
+              <Typography variant="body1" fontWeight={500}>
+                {selectedExpense.material_name}
+              </Typography>
+              <Typography variant="body2" color="primary.main" fontWeight={600}>
+                {formatCurrency(selectedExpense.amount)}
+              </Typography>
+            </Box>
+          )}
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
+            This action cannot be undone.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleDeleteCancel} disabled={deleteMutation.isPending}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleDeleteConfirm}
+            color="error"
+            variant="contained"
+            disabled={deleteMutation.isPending}
+          >
+            {deleteMutation.isPending ? "Deleting..." : "Delete"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Navigation Dialog for Allocated Expenses */}
+      <Dialog
+        open={navigationDialogOpen}
+        onClose={handleNavigationCancel}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Linked to Inter-Site Settlement</DialogTitle>
+        <DialogContent>
+          <Typography variant="body1" sx={{ mb: 2 }}>
+            This expense was created from an Inter-Site Settlement. To modify or delete it, you need to update the source record.
+          </Typography>
+          {selectedExpense && (
+            <Box sx={{ p: 2, bgcolor: "info.lighter", borderRadius: 1, border: "1px solid", borderColor: "info.light" }}>
+              <Typography variant="caption" color="text.secondary">
+                Settlement Reference
+              </Typography>
+              <Typography variant="body1" fontFamily="monospace" fontWeight={500}>
+                {selectedExpense.settlement_reference || selectedExpense.batch_ref_code}
+              </Typography>
+              <Typography variant="body2" sx={{ mt: 1 }}>
+                Amount: {formatCurrency(selectedExpense.amount)}
+              </Typography>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleNavigationCancel}>Cancel</Button>
+          <Button
+            onClick={handleNavigateToSettlement}
+            variant="contained"
+            color="info"
+          >
+            Go to Inter-Site Settlement
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }

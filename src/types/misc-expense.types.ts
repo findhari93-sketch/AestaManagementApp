@@ -105,3 +105,26 @@ export interface SiteEngineerOption {
   name: string;
   wallet_balance?: number;
 }
+
+/**
+ * Category breakdown for summary display
+ */
+export interface CategoryBreakdown {
+  categoryId: string | null;
+  categoryName: string;
+  count: number;
+  totalAmount: number;
+}
+
+/**
+ * Enhanced statistics for miscellaneous expenses including category breakdown
+ */
+export interface MiscExpenseStatsWithBreakdown {
+  total: number;
+  cleared: number;
+  pending: number;
+  totalCount: number;
+  clearedCount: number;
+  pendingCount: number;
+  categoryBreakdown: CategoryBreakdown[];
+}

@@ -287,10 +287,13 @@ export interface SiteSettlementSummary {
   site_name: string;
   group_id: string;
   group_name: string;
-  total_owed_to_you: number; // Sum of what other sites owe this site
-  total_you_owe: number; // Sum of what this site owes others
+  total_owed_to_you: number; // Sum of what other sites owe this site (unsettled only)
+  total_you_owe: number; // Sum of what this site owes others (unsettled only)
   net_balance: number; // total_owed_to_you - total_you_owe
-  pending_settlements_count: number;
+  pending_settlements_count: number; // Number of pending settlement records
+  unsettled_count: number; // Number of unsettled usage records (not yet in a settlement)
+  owed_to_you_count: number; // Number of unsettled records where others owe this site
+  you_owe_count: number; // Number of unsettled records where this site owes others
 }
 
 // ============================================
@@ -1836,7 +1839,7 @@ export const MATERIAL_PAYMENT_MODE_LABELS: Record<MaterialPaymentMode, string> =
 // BATCH USAGE & SETTLEMENT TYPES
 // ============================================
 
-export type BatchUsageSettlementStatus = "pending" | "settled" | "self_use";
+export type BatchUsageSettlementStatus = "pending" | "in_settlement" | "settled" | "self_use";
 
 export interface BatchUsageRecord {
   id: string;
@@ -1929,12 +1932,14 @@ export interface BatchSettlementResult {
 // Labels for batch usage settlement status
 export const BATCH_USAGE_SETTLEMENT_STATUS_LABELS: Record<BatchUsageSettlementStatus, string> = {
   pending: "Pending Settlement",
+  in_settlement: "Settlement Pending",
   settled: "Settled",
   self_use: "Self Use",
 };
 
-export const BATCH_USAGE_SETTLEMENT_STATUS_COLORS: Record<BatchUsageSettlementStatus, "warning" | "success" | "info"> = {
+export const BATCH_USAGE_SETTLEMENT_STATUS_COLORS: Record<BatchUsageSettlementStatus, "warning" | "success" | "info" | "primary"> = {
   pending: "warning",
+  in_settlement: "primary",
   settled: "success",
   self_use: "info",
 };

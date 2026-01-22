@@ -1769,3 +1769,486 @@ export function usePendingDeliveriesCount(siteId: string | undefined) {
     enabled: !!siteId,
   });
 }
+
+// ============================================
+// INTER-SITE SETTLEMENT SYNC
+// ============================================
+
+/**
+ * Batch check sync status for multiple Group Stock POs
+ * Returns a map of poId -> sync status
+ */
+export function useGroupStockPOsSyncStatus(poIds: string[]) {
+  const supabase = createClient();
+
+  return useQuery({
+    queryKey: ["group-stock-pos-sync-status", poIds.sort().join(",")],
+    queryFn: async () => {
+      if (poIds.length === 0) return new Map<string, boolean>();
+
+      // Get all group stock expenses for these POs
+      const { data: expenses } = await (supabase as any)
+        .from("material_purchase_expenses")
+        .select("id, ref_code, purchase_order_id")
+        .in("purchase_order_id", poIds)
+        .eq("purchase_type", "group_stock");
+
+      if (!expenses || expenses.length === 0) {
+        return new Map<string, boolean>();
+      }
+
+      // Get all batch ref codes
+      const batchRefCodes = expenses.map((e: any) => e.ref_code).filter(Boolean);
+
+      if (batchRefCodes.length === 0) {
+        return new Map<string, boolean>();
+      }
+
+      // Check which batches have transactions
+      const { data: transactions } = await (supabase as any)
+        .from("group_stock_transactions")
+        .select("batch_ref_code")
+        .in("batch_ref_code", batchRefCodes);
+
+      const syncedBatchCodes = new Set(transactions?.map((t: any) => t.batch_ref_code) || []);
+
+      // Build map of poId -> isSynced
+      const syncStatusMap = new Map<string, boolean>();
+      for (const expense of expenses) {
+        const isSynced = syncedBatchCodes.has(expense.ref_code);
+        syncStatusMap.set(expense.purchase_order_id, isSynced);
+      }
+
+      return syncStatusMap;
+    },
+    enabled: poIds.length > 0,
+    staleTime: 30000,
+  });
+}
+
+/**
+ * Check if a PO's batch is synced to Inter-Site Settlement
+ * Returns sync status and batch details
+ */
+export function usePOBatchSyncStatus(poId: string | undefined) {
+  const supabase = createClient();
+
+  return useQuery({
+    queryKey: ["po-batch-sync-status", poId],
+    queryFn: async () => {
+      if (!poId) return { isSynced: false, batchRefCode: null, hasGroupStockBatch: false };
+
+      // Get the group stock material expense linked to this PO
+      const { data: expenses } = await (supabase as any)
+        .from("material_purchase_expenses")
+        .select("id, ref_code, purchase_type, site_group_id, total_amount")
+        .eq("purchase_order_id", poId)
+        .eq("purchase_type", "group_stock");
+
+      const groupStockExpense = expenses?.[0];
+      if (!groupStockExpense) {
+        return { isSynced: false, batchRefCode: null, hasGroupStockBatch: false };
+      }
+
+      const batchRefCode = groupStockExpense.ref_code;
+
+      // Check if there are any transactions with this batch_ref_code
+      const { count, error } = await (supabase as any)
+        .from("group_stock_transactions")
+        .select("id", { count: "exact", head: true })
+        .eq("batch_ref_code", batchRefCode);
+
+      if (error) {
+        console.error("Error checking sync status:", error);
+        return {
+          isSynced: false,
+          batchRefCode,
+          hasGroupStockBatch: true,
+          expenseId: groupStockExpense.id,
+          siteGroupId: groupStockExpense.site_group_id,
+        };
+      }
+
+      return {
+        isSynced: (count || 0) > 0,
+        batchRefCode,
+        hasGroupStockBatch: true,
+        expenseId: groupStockExpense.id,
+        siteGroupId: groupStockExpense.site_group_id,
+        totalAmount: groupStockExpense.total_amount,
+      };
+    },
+    enabled: !!poId,
+    staleTime: 30000, // 30 seconds
+  });
+}
+
+/**
+ * Push a PO's batch to Inter-Site Settlement
+ * Creates purchase transaction in group_stock_transactions
+ * If the expense record was deleted, recreates it from PO data
+ */
+export function usePushBatchToSettlement() {
+  const queryClient = useQueryClient();
+  const supabase = createClient();
+
+  return useMutation({
+    mutationFn: async ({ poId }: { poId: string }) => {
+      await ensureFreshSession();
+
+      // Get the PO details with items
+      const { data: po, error: poError } = await supabase
+        .from("purchase_orders")
+        .select(`
+          *,
+          vendor:vendors(id, name),
+          items:purchase_order_items(
+            id, material_id, brand_id, quantity, unit_price, tax_rate
+          )
+        `)
+        .eq("id", poId)
+        .single();
+
+      if (poError || !po) throw new Error("Failed to fetch PO details");
+
+      // Check if this is a Group Stock PO by looking at internal_notes
+      let parsedNotes: { is_group_stock?: boolean; site_group_id?: string; group_id?: string } | null = null;
+      if (po.internal_notes) {
+        try {
+          parsedNotes = typeof po.internal_notes === "string"
+            ? JSON.parse(po.internal_notes)
+            : po.internal_notes;
+        } catch {
+          // Ignore parse errors
+        }
+      }
+
+      const isGroupStock = parsedNotes?.is_group_stock === true;
+      const siteGroupIdFromNotes = parsedNotes?.site_group_id || parsedNotes?.group_id;
+
+      if (!isGroupStock) {
+        throw new Error("This PO is not marked as a Group Stock purchase. Only Group Stock POs can be pushed to Inter-Site Settlement.");
+      }
+
+      if (!siteGroupIdFromNotes) {
+        throw new Error("This PO does not have a site group associated. Cannot push to Inter-Site Settlement.");
+      }
+
+      // Get the group stock material expense (simple query first)
+      const { data: expenses, error: expenseError } = await (supabase as any)
+        .from("material_purchase_expenses")
+        .select("id, ref_code, purchase_type, site_group_id, paying_site_id, total_amount")
+        .eq("purchase_order_id", poId)
+        .eq("purchase_type", "group_stock");
+
+      if (expenseError) {
+        console.error("Expense fetch error:", expenseError);
+        throw new Error("Failed to fetch expense details");
+      }
+
+      let groupStockExpense = expenses?.[0];
+      let expenseItems: any[] = [];
+
+      // Get PO items - if not included in the main query, fetch separately
+      let poItems = po.items || [];
+      if (!poItems || poItems.length === 0) {
+        console.log("PO items not found in main query, fetching separately...");
+        const { data: fetchedPoItems } = await supabase
+          .from("purchase_order_items")
+          .select("id, material_id, brand_id, quantity, unit_price, tax_rate")
+          .eq("po_id", poId);
+        poItems = fetchedPoItems || [];
+        console.log("Fetched PO items separately:", poItems.length, "items");
+      }
+
+      if (!poItems || poItems.length === 0) {
+        throw new Error(`This PO (${po.po_number}) has no items. Cannot push to Inter-Site Settlement.`);
+      }
+
+      // If no expense record exists, recreate it from PO data
+      if (!groupStockExpense) {
+        console.log("No expense record found, recreating from PO data...");
+
+        // Generate a new ref_code
+        const { data: refCode } = await (supabase as any).rpc(
+          "generate_material_purchase_reference"
+        );
+
+        // Calculate totals from PO items
+        const itemsTotal = poItems.reduce(
+          (sum: number, item: any) => sum + (item.quantity * item.unit_price),
+          0
+        );
+        const totalAmount = itemsTotal + (po.transport_cost || 0);
+        const totalQuantity = poItems.reduce(
+          (sum: number, item: any) => sum + Number(item.quantity),
+          0
+        );
+
+        // Get current user
+        const { data: { user } } = await supabase.auth.getUser();
+
+        // Create the expense record
+        const expensePayload = {
+          site_id: po.site_id,
+          ref_code: refCode || `MAT-${Date.now()}`,
+          purchase_type: "group_stock",
+          purchase_order_id: po.id,
+          vendor_id: po.vendor_id,
+          vendor_name: (po.vendor as any)?.name || null,
+          purchase_date: po.order_date || new Date().toISOString().split("T")[0],
+          total_amount: totalAmount,
+          transport_cost: po.transport_cost || 0,
+          status: "recorded",
+          is_paid: false,
+          created_by: user?.id,
+          notes: `Recreated for Push to Settlement from PO ${po.po_number}`,
+          paying_site_id: po.site_id,
+          site_group_id: siteGroupIdFromNotes,
+          original_qty: totalQuantity,
+          remaining_qty: totalQuantity,
+        };
+
+        const { data: newExpense, error: createExpenseError } = await (supabase as any)
+          .from("material_purchase_expenses")
+          .insert(expensePayload)
+          .select("id, ref_code, purchase_type, site_group_id, paying_site_id, total_amount")
+          .single();
+
+        if (createExpenseError) {
+          console.error("Failed to create expense:", createExpenseError);
+          throw new Error("Failed to recreate expense record for this PO");
+        }
+
+        // Create expense items from PO items
+        const expenseItemsPayload = poItems.map((item: any) => ({
+          purchase_expense_id: newExpense.id,
+          material_id: item.material_id,
+          brand_id: item.brand_id || null,
+          quantity: item.quantity,
+          unit_price: item.unit_price,
+        }));
+
+        const { data: insertedItems, error: itemsInsertError } = await (supabase as any)
+          .from("material_purchase_expense_items")
+          .insert(expenseItemsPayload)
+          .select("id, material_id, brand_id, quantity, unit_price");
+
+        if (itemsInsertError) {
+          console.warn("Failed to create expense items:", itemsInsertError);
+          // Use PO items as fallback for transaction creation
+          expenseItems = poItems.map((item: any) => ({
+            material_id: item.material_id,
+            brand_id: item.brand_id || null,
+            quantity: item.quantity,
+            unit_price: item.unit_price,
+          }));
+        } else {
+          expenseItems = insertedItems || [];
+        }
+
+        groupStockExpense = newExpense;
+        console.log("Expense record recreated:", newExpense.ref_code);
+        console.log("DEBUG: Expense items after creation:", expenseItems.length, expenseItems);
+      } else {
+        // Expense exists, fetch items normally
+        console.log("DEBUG: Expense already exists, fetching items for expense ID:", groupStockExpense.id);
+        const { data: fetchedItems, error: itemsError } = await (supabase as any)
+          .from("material_purchase_expense_items")
+          .select("id, material_id, brand_id, quantity, unit_price")
+          .eq("purchase_expense_id", groupStockExpense.id);
+
+        console.log("DEBUG: Fetched expense items:", fetchedItems?.length || 0, "Error:", itemsError);
+
+        if (itemsError) {
+          console.error("Items fetch error:", itemsError);
+        }
+
+        expenseItems = fetchedItems || [];
+
+        // If expense exists but has no items, create them from PO items
+        if (expenseItems.length === 0 && poItems.length > 0) {
+          console.log("DEBUG: Expense exists but has no items, creating from PO items...");
+          const expenseItemsPayload = poItems.map((item: any) => ({
+            purchase_expense_id: groupStockExpense.id,
+            material_id: item.material_id,
+            brand_id: item.brand_id || null,
+            quantity: item.quantity,
+            unit_price: item.unit_price,
+          }));
+
+          const { data: newItems, error: createItemsError } = await (supabase as any)
+            .from("material_purchase_expense_items")
+            .insert(expenseItemsPayload)
+            .select("id, material_id, brand_id, quantity, unit_price");
+
+          if (createItemsError) {
+            console.warn("DEBUG: Failed to create expense items:", createItemsError);
+          } else {
+            expenseItems = newItems || [];
+            console.log("DEBUG: Created expense items:", expenseItems.length);
+          }
+        }
+      }
+
+      const batchRefCode = groupStockExpense.ref_code;
+      const siteGroupId = groupStockExpense.site_group_id || siteGroupIdFromNotes;
+      const payingSiteId = groupStockExpense.paying_site_id || po.site_id;
+
+      console.log("DEBUG: Final state - batchRefCode:", batchRefCode, "siteGroupId:", siteGroupId, "expenseItems:", expenseItems.length);
+
+      if (!siteGroupId) {
+        throw new Error("This batch is not associated with a site group");
+      }
+
+      // Check if already synced
+      const { count: existingCount } = await (supabase as any)
+        .from("group_stock_transactions")
+        .select("id", { count: "exact", head: true })
+        .eq("batch_ref_code", batchRefCode);
+
+      if (existingCount && existingCount > 0) {
+        throw new Error("This batch is already synced to Inter-Site Settlement");
+      }
+
+      // FINAL FALLBACK: If we still have no expense items, use PO items directly
+      if (!expenseItems || expenseItems.length === 0) {
+        console.log("DEBUG: Using PO items as final fallback for transactions");
+        if (poItems.length > 0) {
+          expenseItems = poItems.map((item: any) => ({
+            material_id: item.material_id,
+            brand_id: item.brand_id || null,
+            quantity: item.quantity,
+            unit_price: item.unit_price,
+          }));
+        } else {
+          throw new Error("No items found in this expense batch and no PO items available as fallback");
+        }
+      }
+
+      console.log("DEBUG: Proceeding with", expenseItems.length, "items for transaction creation");
+
+      // Create purchase transaction for each item in the expense
+      // Note: expense_items has unit_price, transactions table has unit_cost
+      // IMPORTANT: group_stock_transactions requires inventory_id (NOT NULL)
+      // So we need to find or create inventory records first
+      const transactionsToInsert = [];
+
+      for (const item of expenseItems) {
+        const unitCost = item.unit_price || item.unit_cost || 0;
+        const totalCost = (item.quantity || 0) * unitCost;
+
+        // Try to find existing inventory record for this material/brand/site_group
+        let inventoryId: string | null = null;
+
+        const { data: existingInventory } = await (supabase as any)
+          .from("group_stock_inventory")
+          .select("id")
+          .eq("site_group_id", siteGroupId)
+          .eq("material_id", item.material_id)
+          .eq("brand_id", item.brand_id || null)
+          .eq("batch_code", batchRefCode)
+          .maybeSingle();
+
+        if (existingInventory?.id) {
+          inventoryId = existingInventory.id;
+          console.log("DEBUG: Found existing inventory record:", inventoryId);
+        } else {
+          // Try to find inventory without batch_code filter (general inventory for this material)
+          const { data: generalInventory } = await (supabase as any)
+            .from("group_stock_inventory")
+            .select("id")
+            .eq("site_group_id", siteGroupId)
+            .eq("material_id", item.material_id)
+            .eq("brand_id", item.brand_id || null)
+            .is("batch_code", null)
+            .maybeSingle();
+
+          if (generalInventory?.id) {
+            inventoryId = generalInventory.id;
+            console.log("DEBUG: Found general inventory record:", inventoryId);
+          } else {
+            // Create a new inventory record for this batch
+            console.log("DEBUG: Creating new inventory record for material:", item.material_id);
+            const { data: newInventory, error: invError } = await (supabase as any)
+              .from("group_stock_inventory")
+              .insert({
+                site_group_id: siteGroupId,
+                material_id: item.material_id,
+                brand_id: item.brand_id || null,
+                batch_code: batchRefCode,
+                current_qty: item.quantity || 0,
+                avg_unit_cost: unitCost,
+                last_received_date: po.order_date || new Date().toISOString().split("T")[0],
+              })
+              .select("id")
+              .single();
+
+            if (invError) {
+              console.error("DEBUG: Failed to create inventory record:", invError);
+              throw new Error(`Failed to create inventory record: ${invError.message}`);
+            }
+
+            inventoryId = newInventory.id;
+            console.log("DEBUG: Created new inventory record:", inventoryId);
+          }
+        }
+
+        transactionsToInsert.push({
+          site_group_id: siteGroupId,
+          inventory_id: inventoryId,
+          transaction_type: "purchase",
+          transaction_date: po.order_date || new Date().toISOString().split("T")[0],
+          material_id: item.material_id,
+          brand_id: item.brand_id,
+          quantity: item.quantity,
+          unit_cost: unitCost,
+          total_cost: totalCost,
+          payment_source_site_id: payingSiteId,
+          batch_ref_code: batchRefCode,
+          reference_id: groupStockExpense.id,
+          notes: `Pushed from PO ${po.po_number}`,
+        });
+      }
+
+      console.log("DEBUG: Inserting", transactionsToInsert.length, "transactions");
+
+      const { data: insertedTx, error: insertError } = await (supabase as any)
+        .from("group_stock_transactions")
+        .insert(transactionsToInsert)
+        .select();
+
+      if (insertError) {
+        console.error("DEBUG: Transaction insert error:", insertError);
+        throw insertError;
+      }
+
+      return {
+        success: true,
+        transactionsCreated: insertedTx?.length || 0,
+        batchRefCode,
+      };
+    },
+    onSuccess: (result, variables) => {
+      // Invalidate related queries
+      queryClient.invalidateQueries({
+        queryKey: ["po-batch-sync-status", variables.poId],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["group-stock-pos-sync-status"],
+      });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.interSiteSettlements.all,
+      });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.groupStock.all,
+      });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.materialPurchases.all,
+      });
+    },
+    onError: (error) => {
+      console.error("Push to settlement error:", error);
+    },
+  });
+}

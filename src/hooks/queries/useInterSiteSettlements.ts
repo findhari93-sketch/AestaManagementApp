@@ -153,7 +153,11 @@ export function useInterSiteSettlement(settlementId: string | undefined) {
 
 /**
  * Calculate pending balances between sites in a group
- * This aggregates unsettled transactions to show who owes whom
+ * This aggregates unsettled batch_usage_records to show who owes whom
+ *
+ * NOTE: We only use batch_usage_records as the source of truth.
+ * group_stock_transactions was the old approach and is NOT included here
+ * to avoid double-counting (each usage creates both records).
  */
 export function useInterSiteBalances(groupId: string | undefined) {
   const supabase = createClient();
@@ -166,30 +170,23 @@ export function useInterSiteBalances(groupId: string | undefined) {
       if (!groupId) return [] as InterSiteBalance[];
 
       try {
-        // Get all usage transactions that haven't been settled (old approach)
-        const { data: usageTransactions, error: txError } = await (supabase as any)
-          .from("group_stock_transactions")
-          .select(`
-            *,
-            material:materials(id, name, code, unit),
-            usage_site:sites!group_stock_transactions_usage_site_id_fkey(id, name),
-            payment_source_site:sites!group_stock_transactions_payment_source_site_id_fkey(id, name)
-          `)
-          .eq("site_group_id", groupId)
-          .eq("transaction_type", "usage")
-          .is("settlement_id", null) // Not yet settled
-          .not("usage_site_id", "is", null)
-          .order("transaction_date", { ascending: false });
+        // Get group info
+        const { data: group, error: groupError } = await (supabase as any)
+          .from("site_groups")
+          .select("id, name")
+          .eq("id", groupId)
+          .single();
 
-        if (txError) {
-          if (isQueryError(txError)) {
-            console.warn("Group stock transactions query failed:", txError.message);
-          } else {
-            throw txError;
+        if (groupError) {
+          if (isQueryError(groupError)) {
+            console.warn("Site group query failed:", groupError.message);
+            return [] as InterSiteBalance[];
           }
+          throw groupError;
         }
 
-        // ALSO get pending batch usage records (new approach)
+        // Get pending batch usage records - this is the ONLY source of truth for balances
+        // Do NOT also query group_stock_transactions as that causes double-counting
         const { data: batchUsageRecords, error: batchError } = await (supabase as any)
           .from("batch_usage_records")
           .select(`
@@ -212,85 +209,16 @@ export function useInterSiteBalances(groupId: string | undefined) {
         if (batchError) {
           if (isQueryError(batchError)) {
             console.warn("Batch usage records query failed:", batchError.message);
-          } else {
-            throw batchError;
-          }
-        }
-
-        // Get related purchase transactions to identify payment source
-        const { data: purchaseTransactions, error: purchaseError } = await (supabase as any)
-          .from("group_stock_transactions")
-          .select(`
-            *,
-            payment_source_site:sites!group_stock_transactions_payment_source_site_id_fkey(id, name)
-          `)
-          .eq("site_group_id", groupId)
-          .eq("transaction_type", "purchase")
-          .not("payment_source_site_id", "is", null);
-
-        if (purchaseError) {
-          if (isQueryError(purchaseError)) {
-            console.warn("Purchase transactions query failed:", purchaseError.message);
             return [] as InterSiteBalance[];
           }
-          throw purchaseError;
-        }
-
-        // Get group info
-        const { data: group, error: groupError } = await (supabase as any)
-          .from("site_groups")
-          .select("id, name")
-          .eq("id", groupId)
-          .single();
-
-        if (groupError) {
-          if (isQueryError(groupError)) {
-            console.warn("Site group query failed:", groupError.message);
-            return [] as InterSiteBalance[];
-          }
-          throw groupError;
+          throw batchError;
         }
 
         // Aggregate balances: for each usage by site X of material paid by site Y
         // Site X owes Site Y the usage cost
         const balanceMap = new Map<string, InterSiteBalance>();
 
-        for (const tx of usageTransactions || []) {
-          if (!tx.usage_site_id || !tx.payment_source_site_id) continue;
-
-          // Skip if the using site is the same as the paying site
-          if (tx.usage_site_id === tx.payment_source_site_id) continue;
-
-          const key = `${tx.payment_source_site_id}-${tx.usage_site_id}`;
-          const amount = Math.abs(tx.total_cost || 0);
-
-          if (balanceMap.has(key)) {
-            const existing = balanceMap.get(key)!;
-            existing.total_amount_owed += amount;
-            existing.transaction_count += 1;
-            existing.total_quantity += Math.abs(tx.quantity || 0);
-          } else {
-            balanceMap.set(key, {
-              site_group_id: groupId,
-              group_name: group.name,
-              creditor_site_id: tx.payment_source_site_id,
-              creditor_site_name: tx.payment_source_site?.name || "Unknown",
-              debtor_site_id: tx.usage_site_id,
-              debtor_site_name: tx.usage_site?.name || "Unknown",
-              year: new Date().getFullYear(),
-              week_number: getWeekNumber(new Date()),
-              week_start: getWeekStart(new Date()).toISOString().split("T")[0],
-              week_end: getWeekEnd(new Date()).toISOString().split("T")[0],
-              transaction_count: 1,
-              material_count: 1,
-              total_quantity: Math.abs(tx.quantity || 0),
-              total_amount_owed: amount,
-              is_settled: false,
-            });
-          }
-        }
-
-        // Process batch usage records (new approach)
+        // Process batch usage records (source of truth)
         for (const record of batchUsageRecords || []) {
           const paymentSourceSiteId = record.batch?.paying_site_id || record.batch?.site_id;
 
@@ -357,6 +285,9 @@ export function useSiteSettlementSummary(siteId: string | undefined) {
     total_you_owe: 0,
     net_balance: 0,
     pending_settlements_count: 0,
+    unsettled_count: 0,
+    owed_to_you_count: 0,
+    you_owe_count: 0,
   } as SiteSettlementSummary;
 
   return useQuery({
@@ -414,13 +345,21 @@ export function useSiteSettlementSummary(siteId: string | undefined) {
           throw debtorError;
         }
 
-        // Also check for unsettled transactions (not yet converted to settlements)
+        // Get unsettled batch usage records (source of truth for inter-site balances)
+        // Do NOT use group_stock_transactions to avoid double-counting
         const { data: unsettledUsage, error: usageError } = await (supabase as any)
-          .from("group_stock_transactions")
-          .select("total_cost, usage_site_id, payment_source_site_id")
+          .from("batch_usage_records")
+          .select(`
+            total_cost,
+            usage_site_id,
+            batch:material_purchase_expenses!batch_usage_records_batch_ref_code_fkey(
+              paying_site_id,
+              site_id
+            )
+          `)
           .eq("site_group_id", site.site_group_id)
-          .eq("transaction_type", "usage")
-          .is("settlement_id", null);
+          .eq("settlement_status", "pending")
+          .eq("is_self_use", false);
 
         if (usageError) {
           if (isQueryError(usageError)) {
@@ -430,46 +369,45 @@ export function useSiteSettlementSummary(siteId: string | undefined) {
           throw usageError;
         }
 
-        // Calculate totals from formal settlements
-        const owedToYou = (asCreditor || []).reduce(
-          (sum: number, s: { total_amount: number; paid_amount: number }) =>
-            sum + (s.total_amount - s.paid_amount),
-          0
-        );
+        // Count pending settlements (already generated, awaiting payment)
+        const pendingSettlementsCount = (asCreditor?.length || 0) + (asDebtor?.length || 0);
 
-        const youOwe = (asDebtor || []).reduce(
-          (sum: number, s: { total_amount: number; paid_amount: number }) =>
-            sum + (s.total_amount - s.paid_amount),
-          0
-        );
-
-        // Add unsettled transaction amounts
+        // Calculate amounts from UNSETTLED batch_usage_records ONLY
+        // Do NOT add pending settlements - those were already generated from batch records
+        // which are now marked as 'in_settlement' (not 'pending')
         let unsettledOwedToYou = 0;
         let unsettledYouOwe = 0;
+        let owedToYouCount = 0;
+        let youOweCount = 0;
 
-        for (const tx of unsettledUsage || []) {
-          const amount = Math.abs(tx.total_cost || 0);
-          if (tx.payment_source_site_id === siteId && tx.usage_site_id !== siteId) {
+        for (const record of unsettledUsage || []) {
+          const paymentSourceSiteId = record.batch?.paying_site_id || record.batch?.site_id;
+          const amount = record.total_cost || 0;
+
+          if (paymentSourceSiteId === siteId && record.usage_site_id !== siteId) {
             // This site paid, another site used = they owe us
             unsettledOwedToYou += amount;
-          } else if (tx.usage_site_id === siteId && tx.payment_source_site_id !== siteId) {
+            owedToYouCount += 1;
+          } else if (record.usage_site_id === siteId && paymentSourceSiteId !== siteId) {
             // This site used, another site paid = we owe them
             unsettledYouOwe += amount;
+            youOweCount += 1;
           }
         }
 
-        const totalOwedToYou = owedToYou + unsettledOwedToYou;
-        const totalYouOwe = youOwe + unsettledYouOwe;
-
+        // Summary shows ONLY unsettled amounts (to avoid double-counting with pending settlements)
         return {
           site_id: siteId,
           site_name: site.name,
           group_id: site.site_group_id,
           group_name: site.site_group?.name || "",
-          total_owed_to_you: totalOwedToYou,
-          total_you_owe: totalYouOwe,
-          net_balance: totalOwedToYou - totalYouOwe,
-          pending_settlements_count: (asCreditor?.length || 0) + (asDebtor?.length || 0),
+          total_owed_to_you: unsettledOwedToYou,
+          total_you_owe: unsettledYouOwe,
+          net_balance: unsettledOwedToYou - unsettledYouOwe,
+          pending_settlements_count: pendingSettlementsCount,
+          unsettled_count: owedToYouCount + youOweCount,
+          owed_to_you_count: owedToYouCount,
+          you_owe_count: youOweCount,
         } as SiteSettlementSummary;
       } catch (err) {
         if (isQueryError(err)) {
@@ -489,6 +427,7 @@ export function useSiteSettlementSummary(siteId: string | undefined) {
 
 /**
  * Generate a settlement from pending transactions
+ * Uses batch_usage_records as the source of truth (matches useInterSiteBalances)
  */
 export function useGenerateSettlement() {
   const queryClient = useQueryClient();
@@ -508,98 +447,160 @@ export function useGenerateSettlement() {
       const year = data.year || new Date().getFullYear();
       const weekNumber = data.weekNumber || getWeekNumber(new Date());
 
-      // Get all unsettled usage transactions where:
-      // - payment_source_site_id = fromSiteId (creditor paid)
-      // - usage_site_id = toSiteId (debtor used)
-      const { data: transactions, error: txError } = await (supabase as any)
-        .from("group_stock_transactions")
-        .select("*")
-        .eq("site_group_id", data.siteGroupId)
-        .eq("transaction_type", "usage")
-        .eq("payment_source_site_id", data.fromSiteId)
-        .eq("usage_site_id", data.toSiteId)
-        .is("settlement_id", null);
-
-      if (txError) throw txError;
-
-      if (!transactions || transactions.length === 0) {
-        throw new Error("No unsettled transactions found between these sites");
-      }
-
-      // Find batch_ref_code from batch_usage_records
-      // Query batch_usage_records for the debtor site to find which batch they used
-      const { data: batchUsageRecords, error: batchError } = await (supabase as any)
+      // Get unsettled batch_usage_records - this is the SOURCE OF TRUTH
+      // Must match the query in useInterSiteBalances to ensure consistency
+      const { data: batchRecords, error: batchError } = await (supabase as any)
         .from("batch_usage_records")
-        .select("batch_ref_code")
+        .select(`
+          *,
+          batch:material_purchase_expenses!batch_usage_records_batch_ref_code_fkey(
+            paying_site_id,
+            site_id
+          )
+        `)
         .eq("site_group_id", data.siteGroupId)
         .eq("usage_site_id", data.toSiteId)
         .eq("settlement_status", "pending")
-        .limit(1);
+        .eq("is_self_use", false);
 
-      if (batchError) {
-        console.warn("Failed to find batch_ref_code:", batchError);
+      if (batchError) throw batchError;
+
+      // Filter to only records where creditor (paying site) matches fromSiteId
+      const matchingRecords = (batchRecords || []).filter((record: any) => {
+        const payingSiteId = record.batch?.paying_site_id || record.batch?.site_id;
+        return payingSiteId === data.fromSiteId;
+      });
+
+      if (matchingRecords.length === 0) {
+        throw new Error("No unsettled transactions found between these sites");
       }
 
-      // Get the batch_ref_code (should be the same for all records in this settlement)
-      const batchRefCode = batchUsageRecords?.[0]?.batch_ref_code || null;
+      // Get the corresponding group_stock_transactions for these records
+      const txIds = matchingRecords
+        .map((r: any) => r.group_stock_transaction_id)
+        .filter(Boolean);
 
-      // Calculate total amount
-      const totalAmount = transactions.reduce(
-        (sum: number, tx: { total_cost: number }) => sum + Math.abs(tx.total_cost || 0),
+      let transactions: any[] = [];
+      if (txIds.length > 0) {
+        const { data: txData, error: txError } = await (supabase as any)
+          .from("group_stock_transactions")
+          .select("*")
+          .in("id", txIds);
+
+        if (txError) {
+          console.error("Error fetching transactions:", txError);
+        } else {
+          transactions = txData || [];
+        }
+      }
+
+      // Calculate total amount from batch_usage_records (source of truth)
+      const newAmount = matchingRecords.reduce(
+        (sum: number, record: { total_cost: number }) => sum + Math.abs(record.total_cost || 0),
         0
       );
 
-      // Generate settlement code
-      const settlementCode = `SET-${year}-W${weekNumber}-${generateShortId()}`;
+      // Get batch_ref_code from the matching records we already have
+      const batchRefCode = matchingRecords[0]?.batch_ref_code || null;
 
-      // Create settlement record
-      const { data: settlement, error: settlementError } = await (supabase as any)
+      // Check if there's an existing PENDING settlement for this site pair
+      // If yes, ADD to it instead of creating new (to avoid unique constraint violation)
+      const { data: existingSettlements, error: existingError } = await (supabase as any)
         .from("inter_site_material_settlements")
-        .insert({
-          settlement_code: settlementCode,
-          site_group_id: data.siteGroupId,
-          from_site_id: data.fromSiteId,
-          to_site_id: data.toSiteId,
-          batch_ref_code: batchRefCode, // NEW: Store batch reference for settlement dialog
-          year,
-          week_number: weekNumber,
-          period_start: getWeekStart(new Date(year, 0, 1 + (weekNumber - 1) * 7))
-            .toISOString()
-            .split("T")[0],
-          period_end: getWeekEnd(new Date(year, 0, 1 + (weekNumber - 1) * 7))
-            .toISOString()
-            .split("T")[0],
-          total_amount: totalAmount,
-          paid_amount: 0,
-          // pending_amount is a generated column (total_amount - paid_amount)
-          status: "pending",
-          created_by: data.userId || null,
-        })
-        .select()
-        .single();
+        .select("*")
+        .eq("site_group_id", data.siteGroupId)
+        .eq("from_site_id", data.fromSiteId)
+        .eq("to_site_id", data.toSiteId)
+        .eq("status", "pending")
+        .order("created_at", { ascending: false })
+        .limit(1);
 
-      if (settlementError) throw settlementError;
+      if (existingError) {
+        console.error("Error checking for existing settlement:", existingError);
+      }
 
-      // Create settlement items from transactions
-      const itemsToInsert = transactions.map((tx: {
+      const existingSettlement = existingSettlements?.[0] || null;
+      let settlement: InterSiteSettlement;
+
+      if (existingSettlement) {
+        // ADD to existing pending settlement
+        const newTotalAmount = (existingSettlement.total_amount || 0) + newAmount;
+
+        const { data: updatedSettlement, error: updateError } = await (supabase as any)
+          .from("inter_site_material_settlements")
+          .update({
+            total_amount: newTotalAmount,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", existingSettlement.id)
+          .select()
+          .single();
+
+        if (updateError) throw updateError;
+        settlement = updatedSettlement;
+      } else {
+        // Create NEW settlement (no existing pending one)
+        const timestamp = Date.now().toString(36);
+        const settlementCode = `SET-${year}-W${weekNumber}-${timestamp}-${generateShortId()}`;
+
+        const { data: newSettlement, error: settlementError } = await (supabase as any)
+          .from("inter_site_material_settlements")
+          .insert({
+            settlement_code: settlementCode,
+            site_group_id: data.siteGroupId,
+            from_site_id: data.fromSiteId,
+            to_site_id: data.toSiteId,
+            batch_ref_code: batchRefCode,
+            year,
+            week_number: weekNumber,
+            period_start: getWeekStart(new Date(year, 0, 1 + (weekNumber - 1) * 7))
+              .toISOString()
+              .split("T")[0],
+            period_end: getWeekEnd(new Date(year, 0, 1 + (weekNumber - 1) * 7))
+              .toISOString()
+              .split("T")[0],
+            total_amount: newAmount,
+            paid_amount: 0,
+            status: "pending",
+            created_by: data.userId || null,
+          })
+          .select()
+          .single();
+
+        if (settlementError) throw settlementError;
+        settlement = newSettlement;
+      }
+
+      // Create settlement items from batch_usage_records (source of truth)
+      // Fall back to transaction data when available for additional fields
+      const txMap = new Map(transactions.map((tx: any) => [tx.id, tx]));
+
+      const itemsToInsert = matchingRecords.map((record: {
         id: string;
         material_id: string;
         brand_id: string | null;
         quantity: number;
         unit_cost: number;
         total_cost: number;
-        transaction_date: string;
-      }) => ({
-        settlement_id: settlement.id,
-        material_id: tx.material_id,
-        brand_id: tx.brand_id,
-        quantity_used: Math.abs(tx.quantity),
-        unit: "nos", // Will be updated from material
-        unit_cost: tx.unit_cost || 0,
-        total_cost: Math.abs(tx.total_cost || 0),
-        transaction_id: tx.id,
-        usage_date: tx.transaction_date,
-      }));
+        usage_date: string;
+        group_stock_transaction_id: string | null;
+      }) => {
+        const tx = record.group_stock_transaction_id
+          ? txMap.get(record.group_stock_transaction_id)
+          : null;
+
+        return {
+          settlement_id: settlement.id,
+          material_id: record.material_id,
+          brand_id: record.brand_id,
+          quantity_used: Math.abs(record.quantity),
+          unit: "nos",
+          unit_cost: record.unit_cost || 0,
+          total_cost: Math.abs(record.total_cost || 0),
+          transaction_id: record.group_stock_transaction_id,
+          usage_date: record.usage_date,
+        };
+      });
 
       const { error: itemsError } = await (supabase as any)
         .from("inter_site_settlement_items")
@@ -607,12 +608,30 @@ export function useGenerateSettlement() {
 
       if (itemsError) throw itemsError;
 
-      // Mark transactions as settled
-      const txIds = transactions.map((tx: { id: string }) => tx.id);
-      await (supabase as any)
-        .from("group_stock_transactions")
-        .update({ settlement_id: settlement.id })
-        .in("id", txIds);
+      // Mark group_stock_transactions as settled (if any exist)
+      if (txIds.length > 0) {
+        await (supabase as any)
+          .from("group_stock_transactions")
+          .update({ settlement_id: settlement.id })
+          .in("id", txIds);
+      }
+
+      // CRITICAL: Update batch_usage_records using their IDs directly
+      // Mark them as 'in_settlement' so they don't appear in unsettled balances but show as pending
+      // Note: The table has an auto-update trigger for updated_at, so we don't set it manually
+      const batchRecordIds = matchingRecords.map((r: { id: string }) => r.id);
+      const { error: batchUpdateError } = await (supabase as any)
+        .from("batch_usage_records")
+        .update({
+          settlement_id: settlement.id,
+          settlement_status: 'in_settlement',
+        })
+        .in("id", batchRecordIds);
+
+      if (batchUpdateError) {
+        console.error("Error updating batch_usage_records:", batchUpdateError);
+        throw batchUpdateError;
+      }
 
       return settlement as InterSiteSettlement;
     },
@@ -766,6 +785,7 @@ export function useDeleteSettlement() {
 
 /**
  * Record a payment against a settlement
+ * This also creates a material expense for the debtor site when settlement is completed
  */
 export function useRecordSettlementPayment() {
   const queryClient = useQueryClient();
@@ -775,14 +795,31 @@ export function useRecordSettlementPayment() {
     mutationFn: async (data: SettlementPaymentFormData & { userId?: string }) => {
       await ensureFreshSession();
 
-      // Get current settlement
+      console.log("[RecordSettlementPayment] Starting payment recording for settlement:", data.settlement_id);
+
+      // Get current settlement with related site info
       const { data: settlement, error: getError } = await (supabase as any)
         .from("inter_site_material_settlements")
-        .select("*")
+        .select(`
+          *,
+          from_site:sites!inter_site_material_settlements_from_site_id_fkey(id, name),
+          to_site:sites!inter_site_material_settlements_to_site_id_fkey(id, name)
+        `)
         .eq("id", data.settlement_id)
         .single();
 
-      if (getError) throw getError;
+      if (getError) {
+        console.error("[RecordSettlementPayment] Error fetching settlement:", getError);
+        throw getError;
+      }
+
+      console.log("[RecordSettlementPayment] Settlement fetched:", {
+        id: settlement.id,
+        from_site_id: settlement.from_site_id,
+        to_site_id: settlement.to_site_id,
+        total_amount: settlement.total_amount,
+        current_status: settlement.status
+      });
 
       // Create payment record
       const { data: payment, error: paymentError } = await (supabase as any)
@@ -799,18 +836,29 @@ export function useRecordSettlementPayment() {
         .select()
         .single();
 
-      if (paymentError) throw paymentError;
+      if (paymentError) {
+        console.error("[RecordSettlementPayment] Error creating payment:", paymentError);
+        throw paymentError;
+      }
+
+      console.log("[RecordSettlementPayment] Payment created:", payment.id);
 
       // Update settlement amounts
       const newPaidAmount = (settlement.paid_amount || 0) + data.amount;
       const newPendingAmount = settlement.total_amount - newPaidAmount;
       const newStatus = newPendingAmount <= 0 ? "settled" : settlement.status;
 
+      console.log("[RecordSettlementPayment] Calculating new status:", {
+        newPaidAmount,
+        newPendingAmount,
+        newStatus
+      });
+
+      // Note: pending_amount is a generated column (computed as total_amount - paid_amount)
+      // So we only update paid_amount and status - pending_amount will be auto-calculated
       const updateData: Record<string, unknown> = {
         paid_amount: newPaidAmount,
-        pending_amount: Math.max(0, newPendingAmount),
         status: newStatus,
-        updated_at: new Date().toISOString(),
       };
 
       if (newStatus === "settled") {
@@ -818,19 +866,397 @@ export function useRecordSettlementPayment() {
         updateData.settled_at = new Date().toISOString();
       }
 
-      await (supabase as any)
+      console.log("[RecordSettlementPayment] Updating settlement with:", updateData);
+
+      const { error: updateError } = await (supabase as any)
         .from("inter_site_material_settlements")
         .update(updateData)
         .eq("id", data.settlement_id);
 
-      return payment;
+      if (updateError) {
+        console.error("[RecordSettlementPayment] Error updating settlement:", updateError);
+        throw updateError;
+      }
+
+      console.log("[RecordSettlementPayment] Settlement updated successfully");
+
+      // If settlement is now complete, create material expense for debtor site and update batch_usage_records
+      if (newStatus === "settled") {
+        console.log("[RecordSettlementPayment] Settlement completed, creating material expense for debtor site");
+
+        // Create material expense for the debtor site (from_site)
+        // This expense represents the debtor's payment for materials used from group purchases
+        try {
+          // Generate a reference code for the expense
+          let refCode: string;
+          try {
+            const { data: rpcRefCode } = await (supabase as any).rpc(
+              "generate_material_purchase_reference"
+            );
+            refCode = rpcRefCode || `ISET-${Date.now()}`;
+          } catch {
+            refCode = `ISET-${Date.now()}`;
+          }
+
+          // Use the settlement code as the batch reference to link this expense to the settlement
+          const settlementCode = settlement.settlement_code || `SET-${settlement.id.slice(0, 8)}`;
+
+          // Build expense payload without created_by to avoid FK constraint issues
+          // The FK constraint on created_by expects the user to be in public.users table
+          // but auth.users IDs may not always sync to public.users
+          // NOTE: to_site_id is the DEBTOR (site that used materials and needs to pay)
+          // from_site_id is the CREDITOR (site that paid for the original purchase)
+          const expensePayload: Record<string, unknown> = {
+            site_id: settlement.to_site_id, // Debtor site - the site that used the materials
+            ref_code: refCode,
+            purchase_type: "own_site", // Still own_site as the debtor is paying for materials
+            purchase_date: data.payment_date,
+            total_amount: settlement.total_amount,
+            transport_cost: 0,
+            status: "completed",
+            is_paid: true,
+            paid_date: data.payment_date,
+            payment_mode: data.payment_mode,
+            payment_reference: data.reference_number || null,
+            // Set original_batch_code and settlement_reference to make it appear as "allocated" type
+            // in Material Expenses page (From Group category)
+            original_batch_code: settlementCode,
+            settlement_reference: settlementCode,
+            // Additional settlement tracking fields
+            settlement_date: data.payment_date,
+            settlement_payer_source: "own", // The debtor site is paying
+            site_group_id: settlement.site_group_id,
+            notes: `Inter-site settlement payment from ${settlement.to_site?.name || 'debtor site'} to ${settlement.from_site?.name || 'creditor site'} for materials used. Settlement: ${settlementCode}`,
+          };
+
+          console.log("[RecordSettlementPayment] Creating expense for debtor site:", {
+            site_id: expensePayload.site_id,
+            ref_code: expensePayload.ref_code,
+            total_amount: expensePayload.total_amount,
+            original_batch_code: expensePayload.original_batch_code,
+            settlement_reference: expensePayload.settlement_reference,
+          });
+
+          const { data: expense, error: expenseError } = await (supabase as any)
+            .from("material_purchase_expenses")
+            .insert(expensePayload)
+            .select()
+            .single();
+
+          if (expenseError) {
+            console.error("[RecordSettlementPayment] Error creating material expense:", expenseError);
+            // Log detailed error info for debugging
+            console.error("[RecordSettlementPayment] Expense payload was:", JSON.stringify(expensePayload, null, 2));
+            // Don't throw - payment was already recorded successfully
+          } else {
+            console.log("[RecordSettlementPayment] Material expense created successfully:", expense?.id, expense?.ref_code);
+
+            // Fetch settlement items and create expense items for material details
+            try {
+              const { data: settlementItems, error: itemsError } = await (supabase as any)
+                .from("inter_site_settlement_items")
+                .select("material_id, brand_id, quantity_used, unit_cost, notes")
+                .eq("settlement_id", data.settlement_id);
+
+              if (itemsError) {
+                console.warn("[RecordSettlementPayment] Could not fetch settlement items:", itemsError.message);
+              } else if (settlementItems && settlementItems.length > 0) {
+                // Create material_purchase_expense_items from settlement items
+                const expenseItems = settlementItems.map((item: any) => ({
+                  purchase_expense_id: expense.id,
+                  material_id: item.material_id,
+                  brand_id: item.brand_id || null,
+                  quantity: Number(item.quantity_used || 0),
+                  unit_price: Number(item.unit_cost || 0),
+                  notes: item.notes || `From settlement ${settlementCode}`,
+                }));
+
+                const { error: expenseItemsError } = await (supabase as any)
+                  .from("material_purchase_expense_items")
+                  .insert(expenseItems);
+
+                if (expenseItemsError) {
+                  console.warn("[RecordSettlementPayment] Could not create expense items:", expenseItemsError.message);
+                } else {
+                  console.log("[RecordSettlementPayment] Created", expenseItems.length, "expense items");
+                }
+              }
+            } catch (itemErr) {
+              console.warn("[RecordSettlementPayment] Non-critical: Failed to create expense items:", itemErr);
+            }
+          }
+        } catch (err) {
+          console.error("[RecordSettlementPayment] Failed to create material expense:", err);
+          // Don't throw - payment was already recorded successfully
+        }
+
+        // Update batch_usage_records to 'settled'
+        try {
+          const { error: batchUpdateError } = await (supabase as any)
+            .from("batch_usage_records")
+            .update({
+              settlement_status: 'settled',
+            })
+            .eq("settlement_id", data.settlement_id)
+            .eq("settlement_status", 'in_settlement');
+
+          if (batchUpdateError) {
+            console.warn("[RecordSettlementPayment] Non-critical: Error updating batch_usage_records:", batchUpdateError);
+          } else {
+            console.log("[RecordSettlementPayment] batch_usage_records updated to settled");
+          }
+        } catch (err) {
+          console.warn("[RecordSettlementPayment] Non-critical: Failed to update batch_usage_records:", err);
+        }
+
+        // Create self-use expense for the creditor site (to_site)
+        // This represents the materials the paying site used for themselves
+        try {
+          // Get the batch_ref_codes from the settlement items
+          const { data: settledUsage, error: settledUsageError } = await (supabase as any)
+            .from("batch_usage_records")
+            .select("batch_ref_code")
+            .eq("settlement_id", data.settlement_id);
+
+          if (settledUsageError) {
+            console.warn("[RecordSettlementPayment] Could not fetch settled usage:", settledUsageError);
+          }
+
+          const batchRefCodes = [...new Set((settledUsage || []).map((u: any) => u.batch_ref_code).filter(Boolean))];
+
+          if (batchRefCodes.length > 0) {
+            console.log("[RecordSettlementPayment] Checking self-use for creditor site. Batches:", batchRefCodes);
+
+            // Get creditor's (from_site) usage for these batches - fetch all and filter client-side
+            // to avoid issues with null filtering in the query
+            // NOTE: from_site_id is the CREDITOR (site that paid for the original purchase)
+            const { data: creditorUsageRecords, error: creditorUsageError } = await (supabase as any)
+              .from("batch_usage_records")
+              .select("id, batch_ref_code, quantity, total_cost, settlement_status, settlement_id")
+              .eq("usage_site_id", settlement.from_site_id)
+              .in("batch_ref_code", batchRefCodes);
+
+            if (creditorUsageError) {
+              console.warn("[RecordSettlementPayment] Could not fetch creditor usage:", creditorUsageError);
+            }
+
+            // Filter for self-use: records without settlement_id (self-use doesn't need settlement)
+            const selfUseRecords = (creditorUsageRecords || []).filter(
+              (r: any) => !r.settlement_id && r.settlement_status !== 'settled'
+            );
+
+            if (selfUseRecords.length > 0) {
+              // Check if self-use expense already exists for this batch
+              // NOTE: from_site_id is the CREDITOR (site that paid for original purchase)
+              const { data: existingSelfUse } = await (supabase as any)
+                .from("material_purchase_expenses")
+                .select("id")
+                .eq("site_id", settlement.from_site_id)
+                .eq("settlement_reference", "SELF-USE")
+                .in("original_batch_code", batchRefCodes)
+                .limit(1);
+
+              if (!existingSelfUse || existingSelfUse.length === 0) {
+                // Calculate total self-use amount
+                const selfUseAmount = selfUseRecords.reduce(
+                  (sum: number, r: any) => sum + Number(r.total_cost || 0), 0
+                );
+
+                if (selfUseAmount > 0) {
+                  console.log("[RecordSettlementPayment] Creating self-use expense for creditor:", {
+                    site_id: settlement.from_site_id,
+                    amount: selfUseAmount,
+                    batches: batchRefCodes,
+                    recordCount: selfUseRecords.length,
+                  });
+
+                  // Generate a reference code for the self-use expense
+                  let selfUseRefCode: string;
+                  try {
+                    const { data: rpcRefCode } = await (supabase as any).rpc(
+                      "generate_material_purchase_reference"
+                    );
+                    selfUseRefCode = rpcRefCode || `SELF-${Date.now()}`;
+                  } catch {
+                    selfUseRefCode = `SELF-${Date.now()}`;
+                  }
+
+                  // Build payload without created_by to avoid FK constraint issues
+                  // NOTE: from_site_id is the CREDITOR - the site that paid for original purchase and uses self-use
+                  const selfUsePayload: Record<string, unknown> = {
+                    site_id: settlement.from_site_id, // Creditor site - the site that paid for and used their own materials
+                    ref_code: selfUseRefCode,
+                    purchase_type: "own_site",
+                    purchase_date: data.payment_date,
+                    total_amount: selfUseAmount,
+                    transport_cost: 0,
+                    status: "completed",
+                    is_paid: true, // Self-use is already paid (original purchase)
+                    paid_date: data.payment_date,
+                    // Mark as self-use for proper categorization
+                    original_batch_code: batchRefCodes[0], // Use first batch code
+                    settlement_reference: "SELF-USE",
+                    settlement_date: data.payment_date,
+                    site_group_id: settlement.site_group_id,
+                    notes: `Self-use portion from group purchase. Materials used by ${settlement.from_site?.name || 'creditor site'} from batches: ${batchRefCodes.join(', ')}`,
+                  };
+
+                  const { data: selfUseExpense, error: selfUseError } = await (supabase as any)
+                    .from("material_purchase_expenses")
+                    .insert(selfUsePayload)
+                    .select()
+                    .single();
+
+                  if (selfUseError) {
+                    console.error("[RecordSettlementPayment] Error creating self-use expense:", selfUseError);
+                  } else {
+                    console.log("[RecordSettlementPayment] Self-use expense created:", selfUseExpense?.id, selfUseExpense?.ref_code);
+
+                    // Fetch full self-use records with material details
+                    try {
+                      const selfUseRecordIds = selfUseRecords.map((r: any) => r.id);
+                      const { data: fullSelfUseRecords, error: fullRecordsError } = await (supabase as any)
+                        .from("batch_usage_records")
+                        .select("id, material_id, brand_id, quantity, unit_cost")
+                        .in("id", selfUseRecordIds);
+
+                      if (fullRecordsError) {
+                        console.warn("[RecordSettlementPayment] Could not fetch self-use material details:", fullRecordsError.message);
+                      } else if (fullSelfUseRecords && fullSelfUseRecords.length > 0) {
+                        // Create expense items from self-use records
+                        const selfUseItems = fullSelfUseRecords.map((r: any) => ({
+                          purchase_expense_id: selfUseExpense.id,
+                          material_id: r.material_id,
+                          brand_id: r.brand_id || null,
+                          quantity: Number(r.quantity || 0),
+                          unit_price: Number(r.unit_cost || 0),
+                          notes: `Self-use from batch ${batchRefCodes.join(', ')}`,
+                        }));
+
+                        const { error: selfUseItemsError } = await (supabase as any)
+                          .from("material_purchase_expense_items")
+                          .insert(selfUseItems);
+
+                        if (selfUseItemsError) {
+                          console.warn("[RecordSettlementPayment] Could not create self-use expense items:", selfUseItemsError.message);
+                        } else {
+                          console.log("[RecordSettlementPayment] Created", selfUseItems.length, "self-use expense items");
+                        }
+                      }
+
+                      // Update the self-use records to mark them as accounted
+                      if (selfUseRecordIds.length > 0) {
+                        await (supabase as any)
+                          .from("batch_usage_records")
+                          .update({ settlement_status: 'settled' })
+                          .in("id", selfUseRecordIds);
+                      }
+                    } catch (itemErr) {
+                      console.warn("[RecordSettlementPayment] Non-critical: Failed to create self-use expense items:", itemErr);
+                      // Still try to mark records as settled
+                      const selfUseRecordIds = selfUseRecords.map((r: any) => r.id);
+                      if (selfUseRecordIds.length > 0) {
+                        await (supabase as any)
+                          .from("batch_usage_records")
+                          .update({ settlement_status: 'settled' })
+                          .in("id", selfUseRecordIds);
+                      }
+                    }
+                  }
+                } else {
+                  console.log("[RecordSettlementPayment] No self-use amount to record for creditor");
+                }
+              } else {
+                console.log("[RecordSettlementPayment] Self-use expense already exists for this batch");
+              }
+            } else {
+              console.log("[RecordSettlementPayment] No self-use records found for creditor site");
+            }
+          }
+        } catch (err) {
+          console.error("[RecordSettlementPayment] Non-critical: Failed to create self-use expense:", err);
+          // Don't throw - payment was already recorded successfully
+        }
+      }
+
+      console.log("[RecordSettlementPayment] Payment recording completed successfully");
+      // Return both payment and settlement for proper cache invalidation
+      return { payment, settlement, newStatus };
     },
-    onSuccess: (_, variables) => {
+    onSuccess: (result) => {
+      const { settlement, newStatus } = result;
+
+      // Invalidate settlement-specific queries
       queryClient.invalidateQueries({
-        queryKey: queryKeys.interSiteSettlements.byId(variables.settlement_id),
+        queryKey: queryKeys.interSiteSettlements.byId(settlement.id),
       });
       queryClient.invalidateQueries({
         queryKey: queryKeys.interSiteSettlements.all,
+      });
+
+      // Invalidate site-specific queries
+      if (settlement.from_site_id) {
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.interSiteSettlements.bySite(settlement.from_site_id),
+        });
+      }
+      if (settlement.to_site_id) {
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.interSiteSettlements.bySite(settlement.to_site_id),
+        });
+      }
+
+      // Invalidate group-specific queries
+      if (settlement.site_group_id) {
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.interSiteSettlements.byGroup(settlement.site_group_id),
+        });
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.interSiteSettlements.balances(settlement.site_group_id),
+        });
+      }
+
+      // Also invalidate batch usage queries to reflect the updated status
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.batchUsage.all,
+      });
+
+      // Invalidate material purchases to show the new expense (if settlement completed)
+      if (newStatus === "settled") {
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.materialPurchases.all,
+        });
+        // Invalidate for creditor site (from_site) - for self-use expense
+        if (settlement.from_site_id) {
+          queryClient.invalidateQueries({
+            queryKey: queryKeys.materialPurchases.bySite(settlement.from_site_id),
+          });
+        }
+        // Invalidate for debtor site (to_site) - for allocated expense
+        if (settlement.to_site_id) {
+          queryClient.invalidateQueries({
+            queryKey: queryKeys.materialPurchases.bySite(settlement.to_site_id),
+          });
+        }
+        // Invalidate expenses queries to refresh All Site Expenses page
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.expenses.all,
+        });
+        if (settlement.from_site_id) {
+          queryClient.invalidateQueries({
+            queryKey: queryKeys.expenses.bySite(settlement.from_site_id),
+          });
+        }
+        if (settlement.to_site_id) {
+          queryClient.invalidateQueries({
+            queryKey: queryKeys.expenses.bySite(settlement.to_site_id),
+          });
+        }
+      }
+
+      // Invalidate group stock queries
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.groupStock.all,
       });
     },
   });
@@ -899,6 +1325,310 @@ export function useCancelSettlement() {
       });
       queryClient.invalidateQueries({
         queryKey: queryKeys.interSiteSettlements.balances(settlement.site_group_id),
+      });
+    },
+  });
+}
+
+/**
+ * Cancel a completed settlement - moves it back to pending status
+ * Deletes all payment records as per user preference
+ */
+export function useCancelCompletedSettlement() {
+  const queryClient = useQueryClient();
+  const supabase = createClient();
+
+  return useMutation({
+    mutationFn: async (data: {
+      settlementId: string;
+      reason?: string;
+      userId?: string;
+    }) => {
+      await ensureFreshSession();
+
+      // Get settlement details
+      const { data: settlement, error: getError } = await (supabase as any)
+        .from("inter_site_material_settlements")
+        .select("*")
+        .eq("id", data.settlementId)
+        .single();
+
+      if (getError) throw getError;
+
+      if (settlement.status !== 'settled' && settlement.status !== 'completed') {
+        throw new Error("Can only cancel settlements that are completed/settled");
+      }
+
+      // Delete payment records
+      const { error: paymentsError } = await (supabase as any)
+        .from("inter_site_settlement_payments")
+        .delete()
+        .eq("settlement_id", data.settlementId);
+
+      if (paymentsError) {
+        console.error("Error deleting payment records:", paymentsError);
+        // Continue anyway - might not have payments
+      }
+
+      // Reset settlement to pending status
+      const { data: updated, error: updateError } = await (supabase as any)
+        .from("inter_site_material_settlements")
+        .update({
+          status: "pending",
+          paid_amount: 0,
+          settled_at: null,
+          settled_by: null,
+          cancellation_reason: data.reason || "Cancelled from completed state",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", data.settlementId)
+        .select()
+        .single();
+
+      if (updateError) throw updateError;
+      return updated as InterSiteSettlement;
+    },
+    onSuccess: (settlement) => {
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.interSiteSettlements.all,
+      });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.interSiteSettlements.byId(settlement.id),
+      });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.interSiteSettlements.bySite(settlement.from_site_id),
+      });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.interSiteSettlements.bySite(settlement.to_site_id),
+      });
+    },
+  });
+}
+
+/**
+ * Cancel a pending settlement - moves usage records back to unsettled
+ * Deletes settlement items and the settlement itself
+ */
+export function useCancelPendingSettlement() {
+  const queryClient = useQueryClient();
+  const supabase = createClient();
+
+  return useMutation({
+    mutationFn: async (data: {
+      settlementId: string;
+      reason?: string;
+      userId?: string;
+    }) => {
+      await ensureFreshSession();
+
+      // Get settlement details
+      const { data: settlement, error: getError } = await (supabase as any)
+        .from("inter_site_material_settlements")
+        .select("*")
+        .eq("id", data.settlementId)
+        .single();
+
+      if (getError) throw getError;
+
+      if (settlement.status !== 'pending' && settlement.status !== 'approved') {
+        throw new Error("Can only cancel settlements that are pending");
+      }
+
+      // Reset batch_usage_records back to pending state
+      const { error: resetBatchError } = await (supabase as any)
+        .from("batch_usage_records")
+        .update({
+          settlement_id: null,
+          settlement_status: 'pending',
+          updated_at: new Date().toISOString(),
+        })
+        .eq("settlement_id", data.settlementId);
+
+      if (resetBatchError) {
+        console.error("Error resetting batch usage records:", resetBatchError);
+      }
+
+      // Reset group_stock_transactions
+      const { error: resetTxError } = await (supabase as any)
+        .from("group_stock_transactions")
+        .update({
+          settlement_id: null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("settlement_id", data.settlementId);
+
+      if (resetTxError) {
+        console.error("Error resetting group stock transactions:", resetTxError);
+      }
+
+      // Delete payment records if any
+      await (supabase as any)
+        .from("inter_site_settlement_payments")
+        .delete()
+        .eq("settlement_id", data.settlementId);
+
+      // Delete settlement items
+      const { error: itemsError } = await (supabase as any)
+        .from("inter_site_settlement_items")
+        .delete()
+        .eq("settlement_id", data.settlementId);
+
+      if (itemsError) {
+        console.error("Error deleting settlement items:", itemsError);
+      }
+
+      // Delete the settlement
+      const { error: deleteError } = await (supabase as any)
+        .from("inter_site_material_settlements")
+        .delete()
+        .eq("id", data.settlementId);
+
+      if (deleteError) throw deleteError;
+
+      return settlement;
+    },
+    onSuccess: (settlement) => {
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.interSiteSettlements.all,
+      });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.interSiteSettlements.byGroup(settlement.site_group_id),
+      });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.interSiteSettlements.balances(settlement.site_group_id),
+      });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.interSiteSettlements.bySite(settlement.from_site_id),
+      });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.interSiteSettlements.bySite(settlement.to_site_id),
+      });
+    },
+  });
+}
+
+/**
+ * Delete unsettled usage records between two sites
+ * Completely removes the usage records and restores inventory
+ */
+export function useDeleteUnsettledUsage() {
+  const queryClient = useQueryClient();
+  const supabase = createClient();
+
+  return useMutation({
+    mutationFn: async (data: {
+      groupId: string;
+      creditorSiteId: string;
+      debtorSiteId: string;
+    }) => {
+      await ensureFreshSession();
+
+      // Find all pending batch_usage_records for this site pair
+      const { data: usageRecords, error: fetchError } = await (supabase as any)
+        .from("batch_usage_records")
+        .select(`
+          *,
+          batch:material_purchase_expenses!batch_usage_records_batch_ref_code_fkey(
+            paying_site_id,
+            site_id
+          )
+        `)
+        .eq("site_group_id", data.groupId)
+        .eq("usage_site_id", data.debtorSiteId)
+        .eq("settlement_status", "pending");
+
+      if (fetchError) throw fetchError;
+
+      // Filter to only records where creditor matches
+      const matchingRecords = (usageRecords || []).filter((record: any) => {
+        const payingSiteId = record.batch?.paying_site_id || record.batch?.site_id;
+        return payingSiteId === data.creditorSiteId;
+      });
+
+      if (matchingRecords.length === 0) {
+        throw new Error("No unsettled usage records found for this site pair");
+      }
+
+      // Collect transaction IDs for later deletion
+      const transactionIds: string[] = [];
+
+      // For each usage record, restore inventory
+      for (const record of matchingRecords) {
+        if (record.group_stock_transaction_id) {
+          transactionIds.push(record.group_stock_transaction_id);
+
+          // Get the transaction to find inventory_id
+          const { data: tx } = await (supabase as any)
+            .from("group_stock_transactions")
+            .select("inventory_id, quantity")
+            .eq("id", record.group_stock_transaction_id)
+            .single();
+
+          if (tx?.inventory_id) {
+            // Restore the quantity to inventory
+            const { data: inventory } = await (supabase as any)
+              .from("group_stock_inventory")
+              .select("current_qty")
+              .eq("id", tx.inventory_id)
+              .single();
+
+            if (inventory) {
+              await (supabase as any)
+                .from("group_stock_inventory")
+                .update({
+                  current_qty: inventory.current_qty + Math.abs(tx.quantity),
+                })
+                .eq("id", tx.inventory_id);
+            }
+          }
+        }
+      }
+
+      // Delete batch_usage_records FIRST (they reference group_stock_transactions)
+      const recordIds = matchingRecords.map((r: { id: string }) => r.id);
+      if (recordIds.length > 0) {
+        const { error: deleteUsageError } = await (supabase as any)
+          .from("batch_usage_records")
+          .delete()
+          .in("id", recordIds);
+
+        if (deleteUsageError) {
+          console.error("Error deleting batch_usage_records:", deleteUsageError);
+          throw deleteUsageError;
+        }
+      }
+
+      // Delete group_stock_transactions AFTER (now safe to delete)
+      if (transactionIds.length > 0) {
+        const { error: deleteTxError } = await (supabase as any)
+          .from("group_stock_transactions")
+          .delete()
+          .in("id", transactionIds);
+
+        if (deleteTxError) {
+          console.error("Error deleting group_stock_transactions:", deleteTxError);
+          // Don't throw - batch records already deleted
+        }
+      }
+
+      return { deletedCount: matchingRecords.length };
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.interSiteSettlements.balances(variables.groupId),
+      });
+      // Invalidate ALL inter-site settlement queries (including summary) to ensure UI is in sync
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.interSiteSettlements.all,
+      });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.groupStock.byGroup(variables.groupId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.groupStock.transactions(variables.groupId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.batchUsage.all,
       });
     },
   });

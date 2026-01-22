@@ -171,15 +171,20 @@ export default function GroupStockBatchCard({
               Materials
             </Typography>
             <Box display="flex" flexWrap="wrap" gap={0.5}>
-              {displayItems.map((item, idx) => (
-                <Chip
-                  key={idx}
-                  label={`${item.material_name}${item.brand_name ? ` - ${item.brand_name}` : ""}`}
-                  size="small"
-                  variant="outlined"
-                  sx={{ maxWidth: 200 }}
-                />
-              ))}
+              {displayItems.map((item: any, idx) => {
+                // Handle both transformed data (material_name) and raw query data (material.name)
+                const materialLabel = item.material_name || item.material?.name || 'Unknown Material';
+                const brandLabel = item.brand_name || item.brand?.brand_name ? ` - ${item.brand_name || item.brand?.brand_name}` : '';
+                return (
+                  <Chip
+                    key={idx}
+                    label={`${materialLabel}${brandLabel}`}
+                    size="small"
+                    variant="outlined"
+                    sx={{ maxWidth: 200 }}
+                  />
+                );
+              })}
               {hasMoreItems && (
                 <Chip
                   label={`+${(batch.items || []).length - 2} more`}

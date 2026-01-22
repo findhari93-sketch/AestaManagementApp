@@ -9,7 +9,6 @@ import {
   Typography,
   Chip,
   Alert,
-  Grid,
   Card,
   CardContent,
   IconButton,
@@ -40,7 +39,7 @@ import MiscExpenseDialog from "@/components/expenses/MiscExpenseDialog";
 import MiscExpenseViewDialog from "@/components/expenses/MiscExpenseViewDialog";
 import { getMiscExpenses, getMiscExpenseStats, cancelMiscExpense } from "@/lib/services/miscExpenseService";
 import { getPayerSourceLabel } from "@/components/settlement/PayerSourceSelector";
-import type { MiscExpenseWithDetails } from "@/types/misc-expense.types";
+import type { MiscExpenseWithDetails, MiscExpenseStatsWithBreakdown } from "@/types/misc-expense.types";
 import type { PayerSource } from "@/types/settlement.types";
 import dayjs from "dayjs";
 
@@ -60,13 +59,14 @@ export default function MiscellaneousExpensesPage() {
   const [viewingExpense, setViewingExpense] = useState<MiscExpenseWithDetails | null>(null);
 
   // Stats
-  const [stats, setStats] = useState({
+  const [stats, setStats] = useState<MiscExpenseStatsWithBreakdown>({
     total: 0,
     cleared: 0,
     pending: 0,
     totalCount: 0,
     clearedCount: 0,
     pendingCount: 0,
+    categoryBreakdown: [],
   });
 
   // Cancel dialog state
@@ -104,7 +104,7 @@ export default function MiscellaneousExpensesPage() {
 
   const fetchStats = useCallback(async () => {
     if (!selectedSite?.id) {
-      setStats({ total: 0, cleared: 0, pending: 0, totalCount: 0, clearedCount: 0, pendingCount: 0 });
+      setStats({ total: 0, cleared: 0, pending: 0, totalCount: 0, clearedCount: 0, pendingCount: 0, categoryBreakdown: [] });
       return;
     }
 
@@ -382,71 +382,124 @@ export default function MiscellaneousExpensesPage() {
         }
       />
 
-      {/* Summary Cards */}
-      <Grid container spacing={2} sx={{ mb: 3 }}>
-        <Grid size={{ xs: 12, sm: 4 }}>
-          <Card>
-            <CardContent sx={{ py: 2 }}>
-              <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                <AttachMoney color="primary" />
-                <Box>
-                  <Typography variant="caption" color="text.secondary">
-                    Total Expenses
-                  </Typography>
-                  <Typography variant="h6" fontWeight={700}>
-                    ₹{stats.total.toLocaleString("en-IN")}
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    {stats.totalCount} records
-                  </Typography>
-                </Box>
+      {/* Summary Card with Category Breakdown */}
+      <Card sx={{ mb: 3 }}>
+        <CardContent sx={{ p: { xs: 2, md: 2.5 } }}>
+          <Box
+            sx={{
+              display: "flex",
+              flexDirection: { xs: "column", md: "row" },
+              gap: { xs: 2.5, md: 3 },
+              alignItems: "stretch",
+            }}
+          >
+            {/* Left: Total Expenses */}
+            <Box
+              sx={{
+                minWidth: { xs: "auto", md: 140 },
+                borderRight: { xs: 0, md: 1 },
+                borderBottom: { xs: 1, md: 0 },
+                borderColor: "divider",
+                pr: { xs: 0, md: 3 },
+                pb: { xs: 2, md: 0 },
+              }}
+            >
+              <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.5 }}>
+                <AttachMoney sx={{ fontSize: 18, color: "primary.main" }} />
+                <Typography variant="caption" color="text.secondary" sx={{ textTransform: "uppercase", fontWeight: 500 }}>
+                  Total Expenses
+                </Typography>
               </Box>
-            </CardContent>
-          </Card>
-        </Grid>
+              <Typography variant="h5" fontWeight={700}>
+                ₹{stats.total.toLocaleString("en-IN")}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                {stats.totalCount} records
+              </Typography>
+            </Box>
 
-        <Grid size={{ xs: 12, sm: 4 }}>
-          <Card>
-            <CardContent sx={{ py: 2 }}>
-              <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                <TrendingUp color="success" />
-                <Box>
-                  <Typography variant="caption" color="text.secondary">
-                    Cleared
-                  </Typography>
-                  <Typography variant="h6" fontWeight={700} color="success.main">
-                    ₹{stats.cleared.toLocaleString("en-IN")}
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    {stats.clearedCount} records
-                  </Typography>
+            {/* Middle: Cleared & Pending */}
+            <Box
+              sx={{
+                display: "flex",
+                gap: 3,
+                flexWrap: "wrap",
+                borderRight: { xs: 0, md: 1 },
+                borderBottom: { xs: 1, md: 0 },
+                borderColor: "divider",
+                pr: { xs: 0, md: 3 },
+                pb: { xs: 2, md: 0 },
+              }}
+            >
+              <Box>
+                <Box sx={{ display: "flex", alignItems: "center", gap: 0.5, mb: 0.5 }}>
+                  <TrendingUp sx={{ fontSize: 16, color: "success.main" }} />
+                  <Typography variant="caption" color="text.secondary">Cleared</Typography>
                 </Box>
+                <Typography variant="h6" fontWeight={600} color="success.main">
+                  ₹{stats.cleared.toLocaleString("en-IN")}
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  {stats.clearedCount} rec
+                </Typography>
               </Box>
-            </CardContent>
-          </Card>
-        </Grid>
+              <Box>
+                <Box sx={{ display: "flex", alignItems: "center", gap: 0.5, mb: 0.5 }}>
+                  <Receipt sx={{ fontSize: 16, color: "warning.main" }} />
+                  <Typography variant="caption" color="text.secondary">Pending</Typography>
+                </Box>
+                <Typography variant="h6" fontWeight={600} color="warning.main">
+                  ₹{stats.pending.toLocaleString("en-IN")}
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  {stats.pendingCount} rec
+                </Typography>
+              </Box>
+            </Box>
 
-        <Grid size={{ xs: 12, sm: 4 }}>
-          <Card>
-            <CardContent sx={{ py: 2 }}>
-              <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                <Receipt color="warning" />
-                <Box>
-                  <Typography variant="caption" color="text.secondary">
-                    Pending
-                  </Typography>
-                  <Typography variant="h6" fontWeight={700} color="warning.main">
-                    ₹{stats.pending.toLocaleString("en-IN")}
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    {stats.pendingCount} records
-                  </Typography>
+            {/* Right: Category Breakdown */}
+            {stats.categoryBreakdown.length > 0 && (
+              <Box sx={{ flex: 1, pt: { xs: 1, md: 0 } }}>
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  sx={{ mb: 1.5, display: "block", textTransform: "uppercase", fontWeight: 500 }}
+                >
+                  By Category
+                </Typography>
+                <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
+                  {stats.categoryBreakdown.map((cat) => (
+                    <Box
+                      key={cat.categoryId || "uncategorized"}
+                      onClick={() => setCategoryFilter(cat.categoryId || "uncategorized")}
+                      sx={{
+                        px: 1.5,
+                        py: 1,
+                        bgcolor: categoryFilter === (cat.categoryId || "uncategorized") ? "primary.light" : "action.hover",
+                        borderRadius: 1,
+                        cursor: "pointer",
+                        minWidth: 80,
+                        transition: "background-color 0.2s",
+                        "&:hover": { bgcolor: "action.selected" },
+                      }}
+                    >
+                      <Typography variant="caption" color="text.secondary" noWrap sx={{ display: "block" }}>
+                        {cat.categoryName}
+                      </Typography>
+                      <Typography variant="body2" fontWeight={600}>
+                        ₹{cat.totalAmount.toLocaleString("en-IN")}
+                      </Typography>
+                      <Typography variant="caption" color="text.disabled">
+                        {cat.count} rec
+                      </Typography>
+                    </Box>
+                  ))}
                 </Box>
               </Box>
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
+            )}
+          </Box>
+        </CardContent>
+      </Card>
 
       {/* Category Filter */}
       {categories.length > 0 && (

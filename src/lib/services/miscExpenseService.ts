@@ -5,6 +5,8 @@ import type {
   MiscExpenseWithDetails,
   MiscExpenseResult,
   CreateMiscExpenseConfig,
+  MiscExpenseStatsWithBreakdown,
+  CategoryBreakdown,
 } from "@/types/misc-expense.types";
 import type { PayerSource } from "@/types/settlement.types";
 import { recordWalletSpending } from "./walletService";
@@ -342,7 +344,7 @@ export async function getMiscExpenses(
 }
 
 /**
- * Get statistics for miscellaneous expenses.
+ * Get statistics for miscellaneous expenses with category breakdown.
  */
 export async function getMiscExpenseStats(
   supabase: SupabaseClient,
@@ -351,18 +353,16 @@ export async function getMiscExpenseStats(
     dateFrom?: string;
     dateTo?: string;
   }
-): Promise<{
-  total: number;
-  cleared: number;
-  pending: number;
-  totalCount: number;
-  clearedCount: number;
-  pendingCount: number;
-}> {
+): Promise<MiscExpenseStatsWithBreakdown> {
   try {
     let query = (supabase
       .from("misc_expenses") as any)
-      .select("amount, is_cleared")
+      .select(`
+        amount,
+        is_cleared,
+        category_id,
+        expense_categories(id, name)
+      `)
       .eq("site_id", siteId)
       .eq("is_cancelled", false);
 
@@ -381,11 +381,39 @@ export async function getMiscExpenseStats(
     }
 
     const expenses = data || [];
+
+    // Calculate totals
     const total = expenses.reduce((sum: number, e: any) => sum + (e.amount || 0), 0);
     const cleared = expenses.filter((e: any) => e.is_cleared).reduce((sum: number, e: any) => sum + (e.amount || 0), 0);
     const pending = total - cleared;
     const clearedCount = expenses.filter((e: any) => e.is_cleared).length;
     const pendingCount = expenses.length - clearedCount;
+
+    // Build category breakdown
+    const breakdownMap = new Map<string, CategoryBreakdown>();
+
+    for (const expense of expenses) {
+      const catId = expense.category_id;
+      const catName = expense.expense_categories?.name || "Uncategorized";
+      const key = catId || "uncategorized";
+
+      if (!breakdownMap.has(key)) {
+        breakdownMap.set(key, {
+          categoryId: catId,
+          categoryName: catName,
+          count: 0,
+          totalAmount: 0,
+        });
+      }
+
+      const breakdown = breakdownMap.get(key)!;
+      breakdown.count += 1;
+      breakdown.totalAmount += expense.amount || 0;
+    }
+
+    // Convert to array and sort by amount (descending)
+    const categoryBreakdown = Array.from(breakdownMap.values())
+      .sort((a, b) => b.totalAmount - a.totalAmount);
 
     return {
       total,
@@ -394,6 +422,7 @@ export async function getMiscExpenseStats(
       totalCount: expenses.length,
       clearedCount,
       pendingCount,
+      categoryBreakdown,
     };
   } catch (error) {
     console.error("Error fetching misc expense stats:", error);
@@ -404,6 +433,7 @@ export async function getMiscExpenseStats(
       totalCount: 0,
       clearedCount: 0,
       pendingCount: 0,
+      categoryBreakdown: [],
     };
   }
 }

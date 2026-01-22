@@ -291,6 +291,8 @@ export function useRemoveSiteFromGroup() {
 
 /**
  * Fetch group stock inventory for a site group
+ * Calculates available quantity from source of truth (batches - usage records)
+ * instead of relying on potentially corrupted current_qty field
  */
 export function useGroupStockInventory(groupId: string | undefined) {
   const supabase = createClient();
@@ -304,28 +306,114 @@ export function useGroupStockInventory(groupId: string | undefined) {
 
       console.log("[useGroupStockInventory] Fetching inventory for groupId:", groupId);
 
-      const { data, error } = await (supabase as any)
-        .from("group_stock_inventory")
-        .select(
-          `
-          *,
-          material:materials(id, name, code, unit, category_id),
-          brand:material_brands(id, brand_name),
-          site_group:site_groups(id, name)
-        `
-        )
+      // Step 1: Get all group stock batches with their items
+      const { data: batches, error: batchError } = await (supabase as any)
+        .from("material_purchase_expenses")
+        .select(`
+          id,
+          ref_code,
+          site_group_id,
+          items:material_purchase_expense_items(
+            material_id,
+            brand_id,
+            quantity,
+            unit_price,
+            material:materials(id, name, code, unit, category_id),
+            brand:material_brands(id, brand_name)
+          )
+        `)
         .eq("site_group_id", groupId)
-        .gt("current_qty", 0)
-        .order("material_id");
+        .eq("purchase_type", "group_stock")
+        .in("status", ["in_stock", "partial_used", "recorded"]);
 
-      if (error) {
-        console.error("[useGroupStockInventory] Query error:", error);
-        throw error;
+      if (batchError) {
+        console.error("[useGroupStockInventory] Batch query error:", batchError);
+        throw batchError;
       }
 
-      console.log("[useGroupStockInventory] Fetched inventory:", data);
+      if (!batches || batches.length === 0) {
+        return [] as GroupStockInventoryWithDetails[];
+      }
 
-      return (data || []) as GroupStockInventoryWithDetails[];
+      // Step 2: Get all usage records for these batches
+      const batchRefCodes = batches.map((b: any) => b.ref_code).filter(Boolean);
+      const { data: usageRecords, error: usageError } = await (supabase as any)
+        .from("batch_usage_records")
+        .select("batch_ref_code, material_id, brand_id, quantity")
+        .in("batch_ref_code", batchRefCodes);
+
+      if (usageError) {
+        console.error("[useGroupStockInventory] Usage query error:", usageError);
+        // Continue without usage data - will show full quantities
+      }
+
+      // Step 3: Calculate usage per material/brand combination
+      const usageMap = new Map<string, number>();
+      (usageRecords || []).forEach((u: any) => {
+        const key = `${u.material_id}-${u.brand_id || 'no-brand'}`;
+        const current = usageMap.get(key) || 0;
+        usageMap.set(key, current + Number(u.quantity || 0));
+      });
+
+      // Step 4: Aggregate inventory by material/brand, calculating remaining quantity
+      const inventoryMap = new Map<string, GroupStockInventoryWithDetails>();
+
+      for (const batch of batches) {
+        for (const item of (batch.items || [])) {
+          const key = `${item.material_id}-${item.brand_id || 'no-brand'}`;
+          const originalQty = Number(item.quantity || 0);
+          const usedQty = usageMap.get(key) || 0;
+
+          if (inventoryMap.has(key)) {
+            // Add to existing inventory
+            const existing = inventoryMap.get(key)!;
+            existing.current_qty += originalQty;
+            existing.available_qty = existing.current_qty; // Will subtract usage later
+            existing.total_value = existing.current_qty * existing.avg_unit_cost;
+          } else {
+            // Create new inventory entry with all required fields
+            const unitCost = item.unit_price || 0;
+            inventoryMap.set(key, {
+              id: `${groupId}-${item.material_id}-${item.brand_id || 'none'}`,
+              site_group_id: groupId,
+              material_id: item.material_id,
+              brand_id: item.brand_id || null,
+              location_id: null,
+              current_qty: originalQty,
+              reserved_qty: 0,
+              available_qty: originalQty,
+              avg_unit_cost: unitCost,
+              total_value: originalQty * unitCost,
+              last_received_date: null,
+              last_used_date: null,
+              reorder_level: null,
+              reorder_qty: null,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+              material: item.material,
+              brand: item.brand,
+              site_group: undefined,
+            } as GroupStockInventoryWithDetails);
+          }
+        }
+      }
+
+      // Step 5: Subtract used quantities and update computed fields
+      inventoryMap.forEach((inv, key) => {
+        const usedQty = usageMap.get(key) || 0;
+        inv.current_qty = Math.max(0, inv.current_qty - usedQty);
+        inv.available_qty = inv.current_qty - inv.reserved_qty;
+        inv.total_value = inv.current_qty * inv.avg_unit_cost;
+      });
+
+      // Step 6: Filter out zero quantity items and return
+      const result = Array.from(inventoryMap.values())
+        .filter(inv => inv.current_qty > 0)
+        .sort((a, b) => (a.material?.name || '').localeCompare(b.material?.name || ''));
+
+      console.log("[useGroupStockInventory] Calculated inventory:", result);
+
+      return result;
     },
     enabled: !!groupId,
   });
@@ -389,8 +477,8 @@ export function useGroupStockTransactions(
           material:materials(id, name, code, unit),
           brand:material_brands(id, brand_name),
           site_group:site_groups(id, name),
-          usage_site:sites(id, name),
-          payment_source_site:sites(id, name)
+          usage_site:sites!group_stock_transactions_usage_site_id_fkey(id, name),
+          payment_source_site:sites!group_stock_transactions_payment_source_site_id_fkey(id, name)
         `
         )
         .eq("site_group_id", groupId)
@@ -435,7 +523,7 @@ export function useGroupUsageBySite(groupId: string | undefined) {
         .from("group_stock_transactions")
         .select(`
           *,
-          usage_site:sites(id, name)
+          usage_site:sites!group_stock_transactions_usage_site_id_fkey(id, name)
         `)
         .eq("site_group_id", groupId)
         .eq("transaction_type", "usage")
@@ -763,11 +851,15 @@ export function useBatchRecordGroupStockUsage() {
           console.log("[useBatchRecordGroupStockUsage] Processing entry", { entry });
 
           // Get current inventory to calculate cost
+          // Note: There may be multiple inventory records for the same material (batch-specific and general)
+          // We fetch all and select the best one (prefer batch with stock, FIFO order)
           let query = (supabase as any)
             .from("group_stock_inventory")
             .select("*")
             .eq("site_group_id", data.groupId)
-            .eq("material_id", entry.materialId);
+            .eq("material_id", entry.materialId)
+            .gt("current_qty", 0) // Only get inventory with stock
+            .order("created_at", { ascending: true }); // FIFO - oldest first
 
         // Handle null brand_id correctly - use .is() for null values
         if (entry.brandId) {
@@ -783,22 +875,62 @@ export function useBatchRecordGroupStockUsage() {
         });
 
         console.log("[useBatchRecordGroupStockUsage] Executing query...");
-        const { data: inventory, error: invError } = await query.single();
-        console.log("[useBatchRecordGroupStockUsage] Query completed", { inventory, invError });
+        const { data: inventoryRecords, error: invError } = await query;
+        console.log("[useBatchRecordGroupStockUsage] Query completed", {
+          inventoryCount: inventoryRecords?.length || 0,
+          inventoryRecords,
+          invError
+        });
 
         if (invError) {
           console.error("[useBatchRecordGroupStockUsage] Inventory query error", invError);
           throw new Error(`Material ${entry.materialId} not found in group stock: ${invError.message}`);
         }
 
-        console.log("[useBatchRecordGroupStockUsage] Inventory found", {
-          inventory,
+        if (!inventoryRecords || inventoryRecords.length === 0) {
+          throw new Error(`Material ${entry.materialId} not found in group stock or has no available quantity`);
+        }
+
+        // Select the best inventory record:
+        // 1. Prefer one with batch_code (specific batch) over general inventory
+        // 2. If multiple, pick the one with sufficient stock (FIFO)
+        let inventory = inventoryRecords[0]; // Default to first (oldest by FIFO)
+
+        // Check if there's one with batch_code that has sufficient stock
+        const batchInventory = inventoryRecords.find(
+          (inv: any) => inv.batch_code && inv.current_qty >= entry.quantity
+        );
+        if (batchInventory) {
+          inventory = batchInventory;
+        } else {
+          // Find any inventory with sufficient stock
+          const sufficientInventory = inventoryRecords.find(
+            (inv: any) => inv.current_qty >= entry.quantity
+          );
+          if (sufficientInventory) {
+            inventory = sufficientInventory;
+          }
+        }
+
+        // Calculate total available across all inventory records
+        const totalAvailable = inventoryRecords.reduce(
+          (sum: number, inv: any) => sum + (inv.current_qty || 0), 0
+        );
+
+        console.log("[useBatchRecordGroupStockUsage] Inventory selected", {
+          selectedInventoryId: inventory.id,
+          selectedBatchCode: inventory.batch_code,
           requestedQty: entry.quantity,
-          availableQty: inventory.current_qty
+          selectedInventoryQty: inventory.current_qty,
+          totalAvailableAcrossAll: totalAvailable
         });
 
         if (inventory.current_qty < entry.quantity) {
-          throw new Error(`Insufficient stock for material ${entry.materialId}`);
+          // Check if total across all inventory would be sufficient
+          if (totalAvailable >= entry.quantity) {
+            throw new Error(`Insufficient stock in single batch. Available: ${inventory.current_qty}, Requested: ${entry.quantity}. Total across all batches: ${totalAvailable}. Please record usage in smaller quantities matching batch sizes.`);
+          }
+          throw new Error(`Insufficient stock for material ${entry.materialId}. Available: ${totalAvailable}, Requested: ${entry.quantity}`);
         }
 
         const unitCost = inventory.avg_unit_cost || 0;
@@ -962,6 +1094,7 @@ export function useBatchRecordGroupStockUsage() {
       }
     },
     onSuccess: (_, variables) => {
+      // Invalidate all relevant queries to ensure UI updates immediately
       queryClient.invalidateQueries({
         queryKey: queryKeys.groupStock.byGroup(variables.groupId),
       });
@@ -973,6 +1106,18 @@ export function useBatchRecordGroupStockUsage() {
       });
       queryClient.invalidateQueries({
         queryKey: queryKeys.interSiteSettlements.byGroup(variables.groupId),
+      });
+      // Invalidate ALL inter-site settlement queries (including summary) to ensure UI is in sync
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.interSiteSettlements.all,
+      });
+      // Invalidate balances for unsettled balances tab
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.interSiteSettlements.balances(variables.groupId),
+      });
+      // Invalidate batch usage records
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.batchUsage.all,
       });
     },
   });
@@ -1251,19 +1396,18 @@ export function useDeleteGroupStockTransaction() {
         }
       }
 
-      // ALSO delete corresponding batch_usage_record if this is a usage transaction
-      if (tx.transaction_type === 'usage' && tx.batch_ref_code) {
+      // MUST delete corresponding batch_usage_record FIRST (FK constraint)
+      // Use group_stock_transaction_id for accurate matching
+      if (tx.transaction_type === 'usage') {
         const { error: batchDeleteError } = await (supabase as any)
           .from("batch_usage_records")
           .delete()
-          .eq("batch_ref_code", tx.batch_ref_code)
-          .eq("usage_site_id", tx.usage_site_id)
-          .eq("material_id", tx.material_id)
-          .eq("quantity", Math.abs(tx.quantity)); // batch_usage_records stores positive quantity
+          .eq("group_stock_transaction_id", data.transactionId);
 
         if (batchDeleteError) {
           console.error("Error deleting batch usage record:", batchDeleteError);
-          // Don't throw - the transaction should still be deleted even if batch record doesn't exist
+          // If batch_usage_record exists and can't be deleted, throw to prevent orphaned FK
+          throw new Error(`Cannot delete transaction: ${batchDeleteError.message}`);
         }
       }
 
@@ -1286,6 +1430,10 @@ export function useDeleteGroupStockTransaction() {
       });
       queryClient.invalidateQueries({
         queryKey: queryKeys.interSiteSettlements.balances(variables.groupId),
+      });
+      // Invalidate ALL inter-site settlement queries (including summary) to ensure UI is in sync
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.interSiteSettlements.all,
       });
       // Also invalidate batch queries since we might have deleted a batch usage record
       queryClient.invalidateQueries({

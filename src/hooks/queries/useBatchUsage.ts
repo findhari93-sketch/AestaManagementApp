@@ -566,8 +566,9 @@ export function useBatchesWithUsage(groupId: string | undefined) {
 // ============================================
 
 /**
- * Complete a batch by settling with all debtor sites
+ * Complete a batch by settling with all debtor sites and creating self-use expense
  * Calls process_batch_settlement for each site with pending usage
+ * Also creates self-use expense for the paying site (creditor) for remaining materials
  */
 export function useCompleteBatch() {
   const supabase = createClient();
@@ -580,21 +581,19 @@ export function useCompleteBatch() {
       paymentDate?: string;
       paymentMode?: string;
       paymentReference?: string;
+      createSelfUse?: boolean; // Option to create self-use expense for remaining materials
     }) => {
+      const paymentDate = data.paymentDate || new Date().toISOString().split("T")[0];
+      const paymentMode = data.paymentMode || "upi";
+
       // Filter only sites that have pending usage (not self-use)
       const debtorSites = data.allocations.filter(
         (alloc) => !alloc.is_payer && alloc.settlement_status === "pending"
       );
 
-      if (debtorSites.length === 0) {
-        throw new Error("No debtor sites to settle");
-      }
-
-      const paymentDate = data.paymentDate || new Date().toISOString().split("T")[0];
-      const paymentMode = data.paymentMode || "upi";
+      const results: any[] = [];
 
       // Process settlement for each debtor site sequentially
-      const results = [];
       for (const debtor of debtorSites) {
         const { data: result, error } = await (supabase as any).rpc("process_batch_settlement", {
           p_batch_ref_code: data.batchRefCode,
@@ -610,6 +609,143 @@ export function useCompleteBatch() {
         }
 
         results.push(result);
+      }
+
+      // Create self-use expense for the paying site if requested
+      if (data.createSelfUse !== false) {
+        // Get batch details to find the paying site and calculate remaining
+        const { data: batch, error: batchError } = await (supabase as any)
+          .from("material_purchase_expenses")
+          .select(`
+            id, site_id, paying_site_id, total_amount, site_group_id,
+            paying_site:sites!material_purchase_expenses_paying_site_id_fkey(id, name),
+            items:material_purchase_expense_items(
+              id, material_id, brand_id, quantity, unit_price,
+              material:materials(id, name, unit)
+            )
+          `)
+          .eq("ref_code", data.batchRefCode)
+          .single();
+
+        if (batchError) {
+          console.warn("[useCompleteBatch] Could not fetch batch for self-use:", batchError.message);
+        } else if (batch) {
+          const payingSiteId = batch.paying_site_id || batch.site_id;
+
+          // Calculate total original quantity and used quantity
+          const originalQty = batch.items?.reduce(
+            (sum: number, item: any) => sum + Number(item.quantity || 0), 0
+          ) || 0;
+
+          // Get all usage records for this batch
+          const { data: usageRecords, error: usageError } = await (supabase as any)
+            .from("batch_usage_records")
+            .select("quantity, total_cost, is_self_use")
+            .eq("batch_ref_code", data.batchRefCode);
+
+          if (usageError) {
+            console.warn("[useCompleteBatch] Could not fetch usage records:", usageError.message);
+          }
+
+          const usedQty = (usageRecords || [])
+            .filter((r: any) => !r.is_self_use)
+            .reduce((sum: number, r: any) => sum + Number(r.quantity || 0), 0);
+
+          const remainingQty = originalQty - usedQty;
+          const selfUseAmount = originalQty > 0 ? (remainingQty / originalQty) * batch.total_amount : 0;
+
+          // Check if self-use expense already exists
+          const { data: existingSelfUse } = await (supabase as any)
+            .from("material_purchase_expenses")
+            .select("id")
+            .eq("site_id", payingSiteId)
+            .eq("settlement_reference", "SELF-USE")
+            .eq("original_batch_code", data.batchRefCode)
+            .limit(1);
+
+          if (remainingQty > 0 && selfUseAmount > 0 && (!existingSelfUse || existingSelfUse.length === 0)) {
+            console.log("[useCompleteBatch] Creating self-use expense:", {
+              site_id: payingSiteId,
+              amount: selfUseAmount,
+              remaining_qty: remainingQty,
+            });
+
+            // Generate reference code
+            let selfUseRefCode: string;
+            try {
+              const { data: rpcRefCode } = await (supabase as any).rpc("generate_material_purchase_reference");
+              selfUseRefCode = rpcRefCode || `SELF-${Date.now()}`;
+            } catch {
+              selfUseRefCode = `SELF-${Date.now()}`;
+            }
+
+            // Create self-use expense
+            const selfUsePayload: Record<string, unknown> = {
+              site_id: payingSiteId,
+              ref_code: selfUseRefCode,
+              purchase_type: "own_site",
+              purchase_date: paymentDate,
+              total_amount: selfUseAmount,
+              transport_cost: 0,
+              status: "completed",
+              is_paid: true,
+              paid_date: paymentDate,
+              original_batch_code: data.batchRefCode,
+              settlement_reference: "SELF-USE",
+              settlement_date: paymentDate,
+              site_group_id: batch.site_group_id,
+              notes: `Self-use portion from group purchase. Materials used by ${batch.paying_site?.name || 'paying site'} from batch: ${data.batchRefCode}`,
+            };
+
+            const { data: selfUseExpense, error: selfUseError } = await (supabase as any)
+              .from("material_purchase_expenses")
+              .insert(selfUsePayload)
+              .select()
+              .single();
+
+            if (selfUseError) {
+              console.error("[useCompleteBatch] Error creating self-use expense:", selfUseError);
+            } else {
+              console.log("[useCompleteBatch] Self-use expense created:", selfUseExpense?.id);
+
+              // Create expense items for self-use
+              if (batch.items && batch.items.length > 0) {
+                const selfUseItems = batch.items.map((item: any) => {
+                  const itemQty = Number(item.quantity || 0);
+                  const selfUseItemQty = originalQty > 0 ? (remainingQty / originalQty) * itemQty : 0;
+                  return {
+                    purchase_expense_id: selfUseExpense.id,
+                    material_id: item.material_id,
+                    brand_id: item.brand_id || null,
+                    quantity: selfUseItemQty,
+                    unit_price: Number(item.unit_price || 0),
+                    notes: `Self-use from batch ${data.batchRefCode}`,
+                  };
+                });
+
+                const { error: itemsError } = await (supabase as any)
+                  .from("material_purchase_expense_items")
+                  .insert(selfUseItems);
+
+                if (itemsError) {
+                  console.warn("[useCompleteBatch] Could not create self-use expense items:", itemsError.message);
+                }
+              }
+
+              results.push({ type: 'self_use', expense_id: selfUseExpense.id });
+            }
+          }
+
+          // Update batch status to completed
+          await (supabase as any)
+            .from("material_purchase_expenses")
+            .update({ status: "completed" })
+            .eq("ref_code", data.batchRefCode);
+        }
+      }
+
+      if (results.length === 0 && debtorSites.length === 0) {
+        throw new Error("No debtor sites to settle and no self-use to create");
       }
 
       return results;

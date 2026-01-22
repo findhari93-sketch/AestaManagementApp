@@ -62,8 +62,11 @@ import {
   useApproveSettlement,
   useDeleteSettlement,
   useGroupStockTransactions,
+  useCancelCompletedSettlement,
+  useCancelPendingSettlement,
+  useDeleteUnsettledUsage,
 } from '@/hooks/queries/useInterSiteSettlements'
-import { useGroupStockBatches } from '@/hooks/queries/useMaterialPurchases'
+import { useGroupStockBatches, useDeleteBatchCascade } from '@/hooks/queries/useMaterialPurchases'
 import { useBatchesWithUsage, useCompleteBatch } from '@/hooks/queries/useBatchUsage'
 import WeeklyUsageReportDialog from '@/components/materials/WeeklyUsageReportDialog'
 import GroupStockBatchCard from '@/components/materials/GroupStockBatchCard'
@@ -73,6 +76,7 @@ import GroupStockTransactionDrawer from '@/components/materials/GroupStockTransa
 import EditGroupStockTransactionDialog from '@/components/materials/EditGroupStockTransactionDialog'
 import RecordBatchUsageDialog from '@/components/materials/RecordBatchUsageDialog'
 import InitiateBatchSettlementDialog from '@/components/materials/InitiateBatchSettlementDialog'
+import RecordInterSitePaymentDialog from '@/components/materials/RecordInterSitePaymentDialog'
 import BatchCompletionDialog from '@/components/materials/BatchCompletionDialog'
 import PurchaseBatchRow from '@/components/materials/PurchaseBatchRow'
 import ConfirmDialog from '@/components/common/ConfirmDialog'
@@ -134,11 +138,21 @@ export default function InterSiteSettlementPage() {
     creditorSiteId: string
     creditorSiteName: string
     amount: number
+    settlementId?: string  // For settling existing pending settlements
   } | null>(null)
 
   // Settlement delete states
   const [deleteSettlementId, setDeleteSettlementId] = useState<string | null>(null)
   const [deleteSettlementConfirmOpen, setDeleteSettlementConfirmOpen] = useState(false)
+
+  // Cancel settlement states
+  const [cancelSettlementId, setCancelSettlementId] = useState<string | null>(null)
+  const [cancelSettlementType, setCancelSettlementType] = useState<'completed' | 'pending' | null>(null)
+  const [cancelSettlementConfirmOpen, setCancelSettlementConfirmOpen] = useState(false)
+
+  // Delete unsettled balance states
+  const [deleteUnsettledBalance, setDeleteUnsettledBalance] = useState<InterSiteBalance | null>(null)
+  const [deleteUnsettledConfirmOpen, setDeleteUnsettledConfirmOpen] = useState(false)
 
   // Hooks
   const { data: groupMembership, isLoading: membershipLoading } = useSiteGroupMembership(
@@ -169,7 +183,11 @@ export default function InterSiteSettlementPage() {
   const approveSettlement = useApproveSettlement()
   const deleteSettlement = useDeleteSettlement()
   const deleteTransactionMutation = useDeleteGroupStockTransaction()
+  const deleteBatchMutation = useDeleteBatchCascade()
   const completeBatchMutation = useCompleteBatch()
+  const cancelCompletedSettlement = useCancelCompletedSettlement()
+  const cancelPendingSettlement = useCancelPendingSettlement()
+  const deleteUnsettledUsage = useDeleteUnsettledUsage()
 
   // Auth and permissions
   const { userProfile } = useAuth()
@@ -326,26 +344,45 @@ export default function InterSiteSettlementPage() {
   const handleConfirmDelete = async () => {
     if (!deleteTransaction || !groupMembership?.groupId) return
     try {
-      await deleteTransactionMutation.mutateAsync({
-        transactionId: deleteTransaction.id,
-        groupId: groupMembership.groupId,
-      })
+      // Check if this is a batch fallback (not a real transaction)
+      const isBatchFallback = (deleteTransaction as any)._isBatchFallback
+      const batchRefCode = (deleteTransaction as any)._batchRefCode || deleteTransaction.batch_ref_code
+
+      if (isBatchFallback && batchRefCode) {
+        // Delete the batch using cascade delete
+        await deleteBatchMutation.mutateAsync(batchRefCode)
+      } else {
+        // Delete the transaction
+        await deleteTransactionMutation.mutateAsync({
+          transactionId: deleteTransaction.id,
+          groupId: groupMembership.groupId,
+        })
+      }
       setDeleteConfirmOpen(false)
       setDeleteTransaction(null)
     } catch (error) {
-      console.error('Failed to delete transaction:', error)
+      console.error('Failed to delete:', error)
     }
   }
 
-  // Calculate per-site summaries from transactions
+  // Calculate per-site summaries from transactions and settlements
   const siteSummaries = useMemo(() => {
     const summaryMap = new Map<string, {
       siteId: string
       siteName: string
       totalPaid: number
       totalUsed: number
+      settlementPaid: number
+      settlementReceived: number
       purchaseCount: number
       usageCount: number
+      materialBreakdown: Array<{
+        materialId: string
+        materialName: string
+        quantityUsed: number
+        unit: string
+        batchTotal: number
+      }>
     }>()
 
     // Initialize with all sites from group membership
@@ -355,12 +392,24 @@ export default function InterSiteSettlementPage() {
         siteName: site.name,
         totalPaid: 0,
         totalUsed: 0,
+        settlementPaid: 0,
+        settlementReceived: 0,
         purchaseCount: 0,
         usageCount: 0,
+        materialBreakdown: [],
       })
     })
 
-    // Calculate totals from transactions
+    // Track material usage per site
+    const materialUsageMap = new Map<string, Map<string, {
+      materialId: string
+      materialName: string
+      quantityUsed: number
+      unit: string
+      batchTotal: number
+    }>>()
+
+    // Calculate totals from transactions (vendor payments and material usage)
     transactions.forEach((tx) => {
       if (tx.transaction_type === 'purchase' && tx.payment_source_site_id) {
         const existing = summaryMap.get(tx.payment_source_site_id)
@@ -373,12 +422,71 @@ export default function InterSiteSettlementPage() {
         if (existing) {
           existing.totalUsed += Math.abs(tx.total_cost || 0)
           existing.usageCount += 1
+
+          // Track material breakdown
+          const siteKey = tx.usage_site_id
+          if (!materialUsageMap.has(siteKey)) {
+            materialUsageMap.set(siteKey, new Map())
+          }
+          const siteMaterials = materialUsageMap.get(siteKey)!
+          const materialKey = tx.material_id
+
+          if (siteMaterials.has(materialKey)) {
+            const mat = siteMaterials.get(materialKey)!
+            mat.quantityUsed += Math.abs(tx.quantity || 0)
+          } else {
+            // Find the batch total for this material
+            const matchingBatch = batches.find(b =>
+              b.ref_code === tx.batch_ref_code ||
+              (b.items && b.items.some(item => item.material_id === tx.material_id))
+            )
+            const batchItem = matchingBatch?.items?.find(item => item.material_id === tx.material_id)
+
+            siteMaterials.set(materialKey, {
+              materialId: tx.material_id,
+              materialName: tx.material?.name || 'Unknown Material',
+              quantityUsed: Math.abs(tx.quantity || 0),
+              unit: tx.material?.unit || 'nos',
+              batchTotal: batchItem?.quantity || matchingBatch?.original_quantity || 0,
+            })
+          }
         }
       }
     })
 
+    // Include completed settlement payments
+    // - Debtor (to_site_id) paid the settlement amount
+    // - Creditor (from_site_id) received the settlement amount
+    settlements.forEach((settlement) => {
+      if (settlement.status === 'settled') {
+        const amount = Number(settlement.paid_amount || settlement.total_amount || 0)
+
+        // Debtor paid this amount
+        const debtorSummary = summaryMap.get(settlement.to_site_id)
+        if (debtorSummary) {
+          debtorSummary.settlementPaid += amount
+          // Also add to totalPaid since this is money the site spent
+          debtorSummary.totalPaid += amount
+        }
+
+        // Creditor received this amount
+        const creditorSummary = summaryMap.get(settlement.from_site_id)
+        if (creditorSummary) {
+          creditorSummary.settlementReceived += amount
+        }
+      }
+    })
+
+    // Merge material breakdown into summaries
+    summaryMap.forEach((summary, siteId) => {
+      const siteMaterials = materialUsageMap.get(siteId)
+      if (siteMaterials) {
+        summary.materialBreakdown = Array.from(siteMaterials.values())
+      }
+    })
+
     return Array.from(summaryMap.values())
-  }, [transactions, groupMembership?.allSites])
+  }, [transactions, settlements, groupMembership?.allSites, batches])
 
   // Handle generate settlement from balance
   const handleGenerateSettlement = async (balance: InterSiteBalance) => {
@@ -413,13 +521,23 @@ export default function InterSiteSettlementPage() {
       return
     }
 
-    // Get batch ref code from settlement (added via migration)
-    const batchRefCode = settlement.batch_ref_code
+    // Get batch ref code from settlement - try settlement.batch_ref_code first,
+    // then try to find from items if available
+    let batchRefCode = settlement.batch_ref_code
 
+    // If no batch_ref_code on settlement, try to find from items
+    if (!batchRefCode && settlement.items && settlement.items.length > 0) {
+      // Items might have transaction_id that links to a batch
+      // For now, we'll use a fallback approach
+      console.log('Settlement has items but no batch_ref_code, items:', settlement.items)
+    }
+
+    // If still no batch_ref_code, we can still settle using just settlement data
+    // The dialog will work with limited info
     if (!batchRefCode) {
-      console.error('Settlement missing batch_ref_code - cannot open settlement dialog')
-      alert('Cannot settle: batch information missing. Please regenerate this settlement.')
-      return
+      // Use settlement ID as a fallback reference
+      batchRefCode = `SETTLEMENT-${settlement.id.slice(0, 8)}`
+      console.log('Using fallback batch ref code:', batchRefCode)
     }
 
     setSettlementData({
@@ -429,6 +547,7 @@ export default function InterSiteSettlementPage() {
       creditorSiteId: settlement.from_site_id,
       creditorSiteName: settlement.from_site.name,
       amount: Number(settlement.total_amount),
+      settlementId: settlement.id, // Pass settlement ID for direct settlement
     })
     setSettlementDialogOpen(true)
   }
@@ -476,6 +595,47 @@ export default function InterSiteSettlementPage() {
       setDeleteSettlementId(null)
     } catch (error) {
       console.error('Failed to delete settlement:', error)
+    }
+  }
+
+  // Handle cancel settlement (from completed or pending)
+  const handleCancelSettlement = async () => {
+    if (!cancelSettlementId || !cancelSettlementType) return
+
+    try {
+      if (cancelSettlementType === 'completed') {
+        await cancelCompletedSettlement.mutateAsync({
+          settlementId: cancelSettlementId,
+          reason: 'Cancelled by user',
+        })
+      } else {
+        await cancelPendingSettlement.mutateAsync({
+          settlementId: cancelSettlementId,
+          reason: 'Cancelled by user',
+        })
+      }
+      setCancelSettlementConfirmOpen(false)
+      setCancelSettlementId(null)
+      setCancelSettlementType(null)
+    } catch (error) {
+      console.error('Failed to cancel settlement:', error)
+    }
+  }
+
+  // Handle delete unsettled balance (permanently removes usage records)
+  const handleDeleteUnsettledBalance = async () => {
+    if (!deleteUnsettledBalance || !groupMembership?.groupId) return
+
+    try {
+      await deleteUnsettledUsage.mutateAsync({
+        groupId: groupMembership.groupId,
+        creditorSiteId: deleteUnsettledBalance.creditor_site_id,
+        debtorSiteId: deleteUnsettledBalance.debtor_site_id,
+      })
+      setDeleteUnsettledConfirmOpen(false)
+      setDeleteUnsettledBalance(null)
+    } catch (error) {
+      console.error('Failed to delete unsettled balance:', error)
     }
   }
 
@@ -547,6 +707,11 @@ export default function InterSiteSettlementPage() {
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
                     From other sites using your materials
+                    {(summary?.owed_to_you_count || 0) > 0 && (
+                      <Typography component="span" variant="caption" sx={{ ml: 0.5, fontWeight: 600 }}>
+                        ({summary?.owed_to_you_count} transactions)
+                      </Typography>
+                    )}
                   </Typography>
                 </>
               )}
@@ -571,6 +736,11 @@ export default function InterSiteSettlementPage() {
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
                     For using materials paid by others
+                    {(summary?.you_owe_count || 0) > 0 && (
+                      <Typography component="span" variant="caption" sx={{ ml: 0.5, fontWeight: 600 }}>
+                        ({summary?.you_owe_count} transactions)
+                      </Typography>
+                    )}
                   </Typography>
                 </>
               )}
@@ -618,12 +788,24 @@ export default function InterSiteSettlementPage() {
                 <Skeleton variant="text" width={60} height={40} />
               ) : (
                 <>
-                  <Typography variant="h4" fontWeight={600} color="warning.main">
-                    {summary?.pending_settlements_count || 0}
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    Settlements awaiting action
-                  </Typography>
+                  <Box sx={{ display: 'flex', gap: 2, alignItems: 'baseline' }}>
+                    <Box>
+                      <Typography variant="h4" fontWeight={600} color="warning.main">
+                        {summary?.unsettled_count || 0}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        Unsettled
+                      </Typography>
+                    </Box>
+                    <Box>
+                      <Typography variant="h4" fontWeight={600} color="info.main">
+                        {summary?.pending_settlements_count || 0}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        Settlements
+                      </Typography>
+                    </Box>
+                  </Box>
                 </>
               )}
             </CardContent>
@@ -682,6 +864,25 @@ export default function InterSiteSettlementPage() {
                         </Typography>
                       </Grid>
                     </Grid>
+                    {/* Material Breakdown */}
+                    {site.materialBreakdown.length > 0 && (
+                      <Box sx={{ mt: 1.5, pt: 1, borderTop: '1px dashed', borderColor: 'divider' }}>
+                        <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: 'block' }}>
+                          Materials Used:
+                        </Typography>
+                        {site.materialBreakdown.slice(0, 3).map((mat) => (
+                          <Typography key={mat.materialId} variant="caption" display="block" color="text.secondary">
+                            {mat.materialName} - {mat.quantityUsed} {mat.unit}
+                            {mat.batchTotal > 0 && ` (from ${mat.batchTotal})`}
+                          </Typography>
+                        ))}
+                        {site.materialBreakdown.length > 3 && (
+                          <Typography variant="caption" color="primary.main">
+                            +{site.materialBreakdown.length - 3} more materials
+                          </Typography>
+                        )}
+                      </Box>
+                    )}
                   </CardContent>
                 </Card>
               </Grid>
@@ -755,7 +956,7 @@ export default function InterSiteSettlementPage() {
             )}
 
             <Typography variant="body2" color="text.secondary" sx={{ ml: 'auto' }}>
-              {typeFilter === 'all'
+              {typeFilter === 'all' || typeFilter === 'purchase'
                 ? `Showing ${filteredGroupedTransactions.length} purchases`
                 : `Showing ${filteredTransactions.length} of ${transactions.length} transactions`}
             </Typography>
@@ -793,8 +994,9 @@ export default function InterSiteSettlementPage() {
                       <TableCell><Skeleton /></TableCell>
                     </TableRow>
                   ))
-                ) : typeFilter === 'all' ? (
-                  // Grouped collapsible view for "All" filter
+                ) : typeFilter === 'all' || typeFilter === 'purchase' ? (
+                  // Grouped collapsible view for "All" and "Purchases" filter
+                  // For "Purchases", we show batches (which are purchases) - same as "All" but focuses on the purchase row
                   filteredGroupedTransactions.length > 0 ? (
                     filteredGroupedTransactions.map((group: any) => (
                       <PurchaseBatchRow
@@ -835,7 +1037,7 @@ export default function InterSiteSettlementPage() {
                           {groupMembership?.groupId && (
                             <Alert severity="info" sx={{ maxWidth: 500 }}>
                               <Typography variant="body2">
-                                You're in the group <strong>{groupMembership.groupName}</strong>.
+                                You&apos;re in the group <strong>{groupMembership.groupName}</strong>.
                                 {batches.length === 0 ? (
                                   <> Go to the <strong>Batches</strong> tab to create your first group stock purchase.</>
                                 ) : (
@@ -849,7 +1051,7 @@ export default function InterSiteSettlementPage() {
                     </TableRow>
                   )
                 ) : filteredTransactions.length > 0 ? (
-                  // Flat view for "Purchases" or "Usage" filters
+                  // Flat view for "Usage" filter only
                   filteredTransactions.map((tx) => (
                     <TableRow key={tx.id} hover>
                       <TableCell>
@@ -963,7 +1165,7 @@ export default function InterSiteSettlementPage() {
                         {groupMembership?.groupId && (
                           <Alert severity="info" sx={{ maxWidth: 500 }}>
                             <Typography variant="body2">
-                              You're in the group <strong>{groupMembership.groupName}</strong>.
+                              You&apos;re in the group <strong>{groupMembership.groupName}</strong>.
                               {batches.length === 0 ? (
                                 <> Go to the <strong>Batches</strong> tab to create your first group stock purchase.</>
                               ) : (
@@ -1118,16 +1320,31 @@ export default function InterSiteSettlementPage() {
                         {balance.transaction_count}
                       </TableCell>
                       <TableCell align="center">
-                        <Tooltip title="Generate Settlement">
-                          <Button
-                            size="small"
-                            variant="outlined"
-                            onClick={() => handleGenerateSettlement(balance)}
-                            disabled={generateSettlement.isPending}
-                          >
-                            Generate
-                          </Button>
-                        </Tooltip>
+                        <Box sx={{ display: 'flex', gap: 1, justifyContent: 'center' }}>
+                          <Tooltip title="Generate Settlement">
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              onClick={() => handleGenerateSettlement(balance)}
+                              disabled={generateSettlement.isPending}
+                            >
+                              Generate
+                            </Button>
+                          </Tooltip>
+                          <Tooltip title="Delete Usage Records">
+                            <IconButton
+                              size="small"
+                              color="error"
+                              onClick={() => {
+                                setDeleteUnsettledBalance(balance)
+                                setDeleteUnsettledConfirmOpen(true)
+                              }}
+                              disabled={deleteUnsettledUsage.isPending}
+                            >
+                              <DeleteIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        </Box>
                       </TableCell>
                     </TableRow>
                   ))
@@ -1228,8 +1445,8 @@ export default function InterSiteSettlementPage() {
                             </IconButton>
                           </Tooltip>
                           {(settlement.status === 'pending' || settlement.status === 'approved') &&
-                            settlement.to_site_id === selectedSite?.id && (
-                              <Tooltip title="Settle Payment with Proof">
+                            (settlement.to_site_id === selectedSite?.id || settlement.from_site_id === selectedSite?.id) && (
+                              <Tooltip title={settlement.to_site_id === selectedSite?.id ? "Record Payment (You Owe)" : "Record Payment Received"}>
                                 <Button
                                   size="small"
                                   variant="contained"
@@ -1241,17 +1458,20 @@ export default function InterSiteSettlementPage() {
                               </Tooltip>
                             )}
                           {canEdit && (
-                            <Tooltip title="Delete Settlement">
-                              <IconButton
+                            <Tooltip title="Cancel Settlement (Return to Unsettled)">
+                              <Button
                                 size="small"
-                                color="error"
+                                variant="outlined"
+                                color="warning"
                                 onClick={() => {
-                                  setDeleteSettlementId(settlement.id)
-                                  setDeleteSettlementConfirmOpen(true)
+                                  setCancelSettlementId(settlement.id)
+                                  setCancelSettlementType('pending')
+                                  setCancelSettlementConfirmOpen(true)
                                 }}
+                                disabled={cancelPendingSettlement.isPending}
                               >
-                                <DeleteIcon fontSize="small" />
-                              </IconButton>
+                                Cancel
+                              </Button>
                             </Tooltip>
                           )}
                         </Box>
@@ -1292,6 +1512,7 @@ export default function InterSiteSettlementPage() {
                   <TableCell align="right">Amount</TableCell>
                   <TableCell>Status</TableCell>
                   <TableCell>Settled Date</TableCell>
+                  <TableCell align="center">Actions</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -1336,11 +1557,30 @@ export default function InterSiteSettlementPage() {
                           ? formatDate(settlement.cancelled_at)
                           : '-'}
                       </TableCell>
+                      <TableCell align="center">
+                        {settlement.status === 'settled' && canEdit && (
+                          <Tooltip title="Cancel Settlement (Return to Pending)">
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              color="warning"
+                              onClick={() => {
+                                setCancelSettlementId(settlement.id)
+                                setCancelSettlementType('completed')
+                                setCancelSettlementConfirmOpen(true)
+                              }}
+                              disabled={cancelCompletedSettlement.isPending}
+                            >
+                              Cancel
+                            </Button>
+                          </Tooltip>
+                        )}
+                      </TableCell>
                     </TableRow>
                   ))
                 ) : (
                   <TableRow>
-                    <TableCell colSpan={8} align="center" sx={{ py: 4 }}>
+                    <TableCell colSpan={9} align="center" sx={{ py: 4 }}>
                       <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
                         <DoneIcon sx={{ fontSize: 48, color: 'text.disabled' }} />
                         <Typography color="text.secondary">
@@ -1425,11 +1665,14 @@ export default function InterSiteSettlementPage() {
 
       <ConfirmDialog
         open={deleteConfirmOpen}
-        title="Delete Transaction"
-        message="Are you sure you want to delete this transaction? This will also update the inventory balance."
+        title={(deleteTransaction as any)?._isBatchFallback ? "Delete Purchase Batch" : "Delete Transaction"}
+        message={(deleteTransaction as any)?._isBatchFallback
+          ? "Are you sure you want to delete this purchase batch? This will also delete all related usage records, settlements, and transactions."
+          : "Are you sure you want to delete this transaction? This will also update the inventory balance."
+        }
         confirmText="Delete"
         confirmColor="error"
-        isLoading={deleteTransactionMutation.isPending}
+        isLoading={deleteTransactionMutation.isPending || deleteBatchMutation.isPending}
         onConfirm={handleConfirmDelete}
         onCancel={() => {
           setDeleteConfirmOpen(false)
@@ -1452,6 +1695,41 @@ export default function InterSiteSettlementPage() {
         }}
       />
 
+      {/* Settlement Cancel Confirmation Dialog */}
+      <ConfirmDialog
+        open={cancelSettlementConfirmOpen}
+        title={cancelSettlementType === 'completed' ? 'Cancel Completed Settlement' : 'Cancel Pending Settlement'}
+        message={
+          cancelSettlementType === 'completed'
+            ? 'Are you sure you want to cancel this completed settlement? It will be moved back to Pending status and payment records will be deleted.'
+            : 'Are you sure you want to cancel this pending settlement? The usage records will be returned to Unsettled Balances.'
+        }
+        confirmText="Cancel Settlement"
+        confirmColor="warning"
+        isLoading={cancelCompletedSettlement.isPending || cancelPendingSettlement.isPending}
+        onConfirm={handleCancelSettlement}
+        onCancel={() => {
+          setCancelSettlementConfirmOpen(false)
+          setCancelSettlementId(null)
+          setCancelSettlementType(null)
+        }}
+      />
+
+      {/* Delete Unsettled Balance Confirmation Dialog */}
+      <ConfirmDialog
+        open={deleteUnsettledConfirmOpen}
+        title="Delete Usage Records"
+        message={`Are you sure you want to permanently delete the usage records between ${deleteUnsettledBalance?.creditor_site_name || 'Creditor'} and ${deleteUnsettledBalance?.debtor_site_name || 'Debtor'}? This will restore the inventory and remove all usage history. This action cannot be undone.`}
+        confirmText="Delete Permanently"
+        confirmColor="error"
+        isLoading={deleteUnsettledUsage.isPending}
+        onConfirm={handleDeleteUnsettledBalance}
+        onCancel={() => {
+          setDeleteUnsettledConfirmOpen(false)
+          setDeleteUnsettledBalance(null)
+        }}
+      />
+
       {/* Batch Usage Dialog */}
       {selectedSite?.id && (
         <RecordBatchUsageDialog
@@ -1465,8 +1743,8 @@ export default function InterSiteSettlementPage() {
         />
       )}
 
-      {/* Batch Settlement Dialog */}
-      {settlementData && (
+      {/* Batch Settlement Dialog - for direct batch settlements */}
+      {settlementData && !settlementData.settlementId && (
         <InitiateBatchSettlementDialog
           open={settlementDialogOpen}
           onClose={() => {
@@ -1474,6 +1752,23 @@ export default function InterSiteSettlementPage() {
             setSettlementData(null)
           }}
           batchRefCode={settlementData.batchRefCode}
+          debtorSiteId={settlementData.debtorSiteId}
+          debtorSiteName={settlementData.debtorSiteName}
+          creditorSiteId={settlementData.creditorSiteId}
+          creditorSiteName={settlementData.creditorSiteName}
+          amount={settlementData.amount}
+        />
+      )}
+
+      {/* Inter-Site Payment Dialog - for pending settlement payments */}
+      {settlementData && settlementData.settlementId && (
+        <RecordInterSitePaymentDialog
+          open={settlementDialogOpen}
+          onClose={() => {
+            setSettlementDialogOpen(false)
+            setSettlementData(null)
+          }}
+          settlementId={settlementData.settlementId}
           debtorSiteId={settlementData.debtorSiteId}
           debtorSiteName={settlementData.debtorSiteName}
           creditorSiteId={settlementData.creditorSiteId}

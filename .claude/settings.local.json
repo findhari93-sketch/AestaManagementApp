@@ -218,7 +218,9 @@
       "Bash(node fix_inventory.js:*)",
       "Bash(move:*)",
       "Bash(tee:*)",
-      "Bash(1)"
+      "Bash(1)",
+      "Bash(ls -la \"c:\\\\Users\\\\Haribabu\\\\Documents\\\\AppsCopilot\\\\AestaManagementApp\\\\src\\\\app\\\\\\(main\\\\\\)\\\\site\\\\payments\"\" 2>/dev/null || echo \"Directory not found \")",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nAdd inter-site payment recording, material category merging, and settlement fixes\n\n- Add RecordInterSitePaymentDialog component for inter-site payments\n- Add migrations to merge material categories and update mappings\n- Add in_settlement status for tracking settlement progress\n- Fix daily salary individual settlements\n- Update expense pages with improved data handling\n- Enhance inter-site settlement and purchase order pages\n- Update hooks for batch usage, settlements, and site groups\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")"
     ],
     "deny": [],
     "ask": []

@@ -63,6 +63,7 @@ import {
   getSiteSubcontractTotals,
   type SubcontractTotals,
 } from "@/lib/services/subcontractService";
+import { cancelMiscExpense } from "@/lib/services/miscExpenseService";
 // Material expenses hook removed - will be handled by Material Settlements page after settlement
 
 interface SitePayer {
@@ -114,6 +115,13 @@ export default function ExpensesPage() {
     open: boolean;
     expense: ExpenseWithCategory | null;
   }>({ open: false, expense: null });
+
+  // Delete confirmation dialog state
+  const [deleteDialog, setDeleteDialog] = useState<{
+    open: boolean;
+    expense: ExpenseWithCategory | null;
+    reason: string;
+  }>({ open: false, expense: null, reason: "" });
 
   const [form, setForm] = useState({
     module: "general" as ExpenseModule,
@@ -366,14 +374,49 @@ export default function ExpensesPage() {
       return;
     }
 
-    // Regular delete for non-salary expenses
-    if (!confirm("Delete this expense?")) return;
+    // Show delete confirmation dialog instead of browser confirm
+    setDeleteDialog({ open: true, expense, reason: "" });
+  };
+
+  const handleConfirmDelete = async () => {
+    const expense = deleteDialog.expense;
+    if (!expense) return;
+
     setLoading(true);
     try {
-      await supabase.from("expenses").delete().eq("id", expense.id);
+      // Handle different source types
+      if (expense.source_type === "misc_expense") {
+        // Cancel miscellaneous expense (soft delete)
+        const result = await cancelMiscExpense(
+          supabase,
+          expense.source_id || expense.id,
+          deleteDialog.reason || "Deleted from All Site Expenses",
+          userProfile?.id || "",
+          userProfile?.name || ""
+        );
+        if (!result.success) {
+          throw new Error(result.error || "Failed to delete miscellaneous expense");
+        }
+      } else if (expense.source_type === "tea_shop_settlement") {
+        // Tea shop settlements - soft delete by setting is_cancelled
+        const { error } = await supabase
+          .from("tea_shop_settlements")
+          .update({ is_cancelled: true })
+          .eq("id", expense.source_id || expense.id);
+        if (error) throw error;
+      } else {
+        // Regular expense - hard delete from expenses table
+        const { error } = await supabase
+          .from("expenses")
+          .delete()
+          .eq("id", expense.id);
+        if (error) throw error;
+      }
+
+      setDeleteDialog({ open: false, expense: null, reason: "" });
       await fetchExpenses();
     } catch (error: any) {
-      alert("Failed: " + error.message);
+      alert("Failed to delete: " + error.message);
     } finally {
       setLoading(false);
     }
@@ -1041,6 +1084,75 @@ export default function ExpensesPage() {
           transactionId: redirectDialog.expense?.engineer_transaction_id || undefined,
         }}
       />
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog
+        open={deleteDialog.open}
+        onClose={() => setDeleteDialog({ open: false, expense: null, reason: "" })}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle sx={{ pb: 1 }}>Delete Expense</DialogTitle>
+        <DialogContent>
+          {deleteDialog.expense && (
+            <Box sx={{ mb: 2 }}>
+              <Alert severity="warning" sx={{ mb: 2 }}>
+                Are you sure you want to delete this expense? This action cannot be undone.
+              </Alert>
+              <Box sx={{ p: 2, bgcolor: "action.hover", borderRadius: 1 }}>
+                <Typography variant="body2" color="text.secondary" gutterBottom>
+                  <strong>Reference:</strong> {deleteDialog.expense.settlement_reference || "-"}
+                </Typography>
+                <Typography variant="body2" color="text.secondary" gutterBottom>
+                  <strong>Type:</strong> {deleteDialog.expense.expense_type || deleteDialog.expense.source_type || "-"}
+                </Typography>
+                <Typography variant="body2" color="text.secondary" gutterBottom>
+                  <strong>Category:</strong> {deleteDialog.expense.category_name || "-"}
+                </Typography>
+                <Typography variant="body2" color="text.secondary" gutterBottom>
+                  <strong>Amount:</strong> ₹{deleteDialog.expense.amount.toLocaleString("en-IN")}
+                </Typography>
+                <Typography variant="body2" color="text.secondary" gutterBottom>
+                  <strong>Date:</strong> {dayjs(deleteDialog.expense.date).format("DD MMM YYYY")}
+                </Typography>
+                {deleteDialog.expense.vendor_name && (
+                  <Typography variant="body2" color="text.secondary">
+                    <strong>Vendor:</strong> {deleteDialog.expense.vendor_name}
+                  </Typography>
+                )}
+              </Box>
+              {deleteDialog.expense.source_type === "misc_expense" && (
+                <TextField
+                  fullWidth
+                  label="Reason for deletion (optional)"
+                  value={deleteDialog.reason}
+                  onChange={(e) => setDeleteDialog((prev) => ({ ...prev, reason: e.target.value }))}
+                  multiline
+                  rows={2}
+                  sx={{ mt: 2 }}
+                  placeholder="Enter reason for deleting this expense..."
+                />
+              )}
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button
+            onClick={() => setDeleteDialog({ open: false, expense: null, reason: "" })}
+            disabled={loading}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            color="error"
+            onClick={handleConfirmDelete}
+            disabled={loading}
+          >
+            {loading ? "Deleting..." : "Delete"}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Subcontracts Summary Drawer */}
       <Drawer

@@ -347,12 +347,12 @@ export function useGroupStockBatches(
             notes: p.notes,
             items: (p.items || []).map((item: any) => ({
               material_id: item.material_id,
-              material_name: item.material?.name || "",
-              material_code: item.material?.code,
+              material_name: item.material?.name || "Unknown Material",
+              material_code: item.material?.code || "",
               brand_id: item.brand_id,
-              brand_name: item.brand?.brand_name,
+              brand_name: item.brand?.brand_name || "",
               quantity: item.quantity,
-              unit: item.material?.unit || "piece",
+              unit: item.material?.unit || "nos",
               unit_price: item.unit_price,
             })),
             allocations: [], // Calculated by useBatchesWithUsage hook
@@ -984,6 +984,7 @@ export function useSiteLevelMaterialExpenses(siteId: string | undefined) {
         const expenses: SiteMaterialExpense[] = [];
 
         // 1. Fetch own site purchases that are paid/settled
+        // Exclude records with original_batch_code set - those are allocated expenses from inter-site settlements
         const { data: ownSitePurchases, error: ownSiteError } = await (supabase as any)
           .from("material_purchase_expenses")
           .select(`
@@ -1005,6 +1006,7 @@ export function useSiteLevelMaterialExpenses(siteId: string | undefined) {
           .eq("site_id", siteId)
           .eq("purchase_type", "own_site")
           .eq("is_paid", true)
+          .is("original_batch_code", null) // Exclude allocated expenses
           .order("purchase_date", { ascending: false });
 
         if (ownSiteError) {
@@ -1161,6 +1163,7 @@ export function useSiteLevelMaterialExpenses(siteId: string | undefined) {
 /**
  * Delete a batch and all related records (settlements, usage records, transactions, items)
  * Uses the delete_batch_cascade database function which handles all cascading deletes
+ * Also manually deletes group_stock_transactions that reference the batch
  */
 export function useDeleteBatchCascade() {
   const queryClient = useQueryClient();
@@ -1178,6 +1181,68 @@ export function useDeleteBatchCascade() {
         .single();
 
       if (fetchError) throw fetchError;
+
+      // Find inventory records linked to this batch (by batch_code)
+      // Usage transactions might have batch_ref_code = NULL but share the same inventory_id
+      const { data: inventoryRecords } = await (supabase as any)
+        .from("group_stock_inventory")
+        .select("id")
+        .eq("batch_code", batchRefCode);
+
+      const inventoryIds = (inventoryRecords || []).map((inv: { id: string }) => inv.id);
+      console.log("Found inventory records for batch:", inventoryIds.length);
+
+      // Delete batch_usage_records that reference this batch first
+      // These might not be covered by the RPC function
+      const { error: usageRecordsError } = await (supabase as any)
+        .from("batch_usage_records")
+        .delete()
+        .eq("batch_ref_code", batchRefCode);
+
+      if (usageRecordsError) {
+        console.warn("Warning: Could not delete batch_usage_records:", usageRecordsError);
+        // Don't throw - continue with deletion
+      }
+
+      // Delete group_stock_transactions that reference this batch by batch_ref_code
+      // This ensures both purchase and usage transactions are deleted
+      const { error: txDeleteError } = await (supabase as any)
+        .from("group_stock_transactions")
+        .delete()
+        .eq("batch_ref_code", batchRefCode);
+
+      if (txDeleteError) {
+        console.warn("Warning: Could not delete group_stock_transactions by batch_ref_code:", txDeleteError);
+        // Don't throw - continue with deletion
+      }
+
+      // Also delete transactions by inventory_id (catches usage transactions without batch_ref_code)
+      if (inventoryIds.length > 0) {
+        const { error: txByInvError } = await (supabase as any)
+          .from("group_stock_transactions")
+          .delete()
+          .in("inventory_id", inventoryIds);
+
+        if (txByInvError) {
+          console.warn("Warning: Could not delete group_stock_transactions by inventory_id:", txByInvError);
+        } else {
+          console.log("Deleted transactions by inventory_id for", inventoryIds.length, "inventory records");
+        }
+      }
+
+      // Delete inventory records linked to this batch
+      if (inventoryIds.length > 0) {
+        const { error: invDeleteError } = await (supabase as any)
+          .from("group_stock_inventory")
+          .delete()
+          .in("id", inventoryIds);
+
+        if (invDeleteError) {
+          console.warn("Warning: Could not delete group_stock_inventory:", invDeleteError);
+        } else {
+          console.log("Deleted inventory records:", inventoryIds.length);
+        }
+      }
 
       // Call the database function to delete batch and all related records
       const { data, error } = await (supabase as any).rpc("delete_batch_cascade", {
@@ -1223,10 +1288,17 @@ export function useDeleteBatchCascade() {
         queryKey: queryKeys.batchUsage.all,
       });
 
-      // Settlement queries
+      // Settlement queries - invalidate all to ensure transactions are refreshed
       queryClient.invalidateQueries({
         queryKey: queryKeys.interSiteSettlements.all,
       });
+
+      // Also invalidate the balances query which is used as base for transactions
+      if (batch.site_group_id) {
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.interSiteSettlements.balances(batch.site_group_id),
+        });
+      }
     },
     onError: (error) => {
       console.error("Delete batch cascade error:", error);

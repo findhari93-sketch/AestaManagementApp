@@ -34,6 +34,7 @@ import {
   Send as SendIcon,
   Cancel as CancelIcon,
   Groups as GroupStockIcon,
+  Sync as SyncIcon,
 } from "@mui/icons-material";
 import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
 import PageHeader from "@/components/layout/PageHeader";
@@ -48,6 +49,8 @@ import {
   usePOSummary,
   useMarkPOAsOrdered,
   useCancelPurchaseOrder,
+  useGroupStockPOsSyncStatus,
+  usePushBatchToSettlement,
 } from "@/hooks/queries/usePurchaseOrders";
 import PurchaseOrderDialog from "@/components/materials/PurchaseOrderDialog";
 import DeliveryDialog from "@/components/materials/DeliveryDialog";
@@ -113,6 +116,11 @@ export default function PurchaseOrdersPage() {
   const [cancelReason, setCancelReason] = useState("");
   const [cancelError, setCancelError] = useState("");
 
+  // Push to Settlement state
+  const [pushDialogOpen, setPushDialogOpen] = useState(false);
+  const [pushingPO, setPushingPO] = useState<PurchaseOrderWithDetails | null>(null);
+  const [pushError, setPushError] = useState("");
+
   const searchParams = useSearchParams();
   const router = useRouter();
   const { userProfile, user } = useAuth();
@@ -161,6 +169,31 @@ export default function PurchaseOrdersPage() {
 
   const markAsOrdered = useMarkPOAsOrdered();
   const cancelPO = useCancelPurchaseOrder();
+  const pushToSettlement = usePushBatchToSettlement();
+
+  // Get delivered Group Stock PO IDs for sync status check
+  const deliveredGroupStockPOIds = useMemo(() => {
+    return allPOs
+      .filter((po) => {
+        if (po.status !== "delivered") return false;
+        // Check if it's a Group Stock PO
+        let parsedNotes: { is_group_stock?: boolean } | null = null;
+        if (po.internal_notes) {
+          try {
+            parsedNotes = typeof po.internal_notes === "string"
+              ? JSON.parse(po.internal_notes)
+              : po.internal_notes;
+          } catch {
+            // Ignore parse errors
+          }
+        }
+        return parsedNotes?.is_group_stock === true;
+      })
+      .map((po) => po.id);
+  }, [allPOs]);
+
+  // Fetch sync status for all delivered Group Stock POs
+  const { data: syncStatusMap = new Map() } = useGroupStockPOsSyncStatus(deliveredGroupStockPOIds);
 
   // Filter POs based on tab and search
   const filteredPOs = useMemo(() => {
@@ -272,6 +305,26 @@ export default function PurchaseOrdersPage() {
       setCancelError(error?.message || "Failed to cancel purchase order. Please try again.");
     }
   }, [cancelPO, cancellingPO, cancelReason, user?.id]);
+
+  // Push to Settlement handlers
+  const handlePushToSettlement = useCallback((po: PurchaseOrderWithDetails) => {
+    setPushingPO(po);
+    setPushError("");
+    setPushDialogOpen(true);
+  }, []);
+
+  const handleConfirmPush = useCallback(async () => {
+    if (!pushingPO) return;
+    setPushError("");
+    try {
+      await pushToSettlement.mutateAsync({ poId: pushingPO.id });
+      setPushDialogOpen(false);
+      setPushingPO(null);
+    } catch (error: any) {
+      console.error("Failed to push to settlement:", error);
+      setPushError(error?.message || "Failed to push to Inter-Site Settlement. Please try again.");
+    }
+  }, [pushToSettlement, pushingPO]);
 
   // Table columns
   const columns = useMemo<MRT_ColumnDef<PurchaseOrderWithDetails>[]>(
@@ -438,9 +491,39 @@ export default function PurchaseOrdersPage() {
             </Tooltip>
           )}
 
-          {/* Delivered - can edit and delete */}
+          {/* Delivered - can edit, delete, and push to settlement if Group Stock */}
           {po.status === "delivered" && canEdit && (
             <>
+              {/* Push to Settlement - only for Group Stock POs that aren't synced */}
+              {(() => {
+                let parsedNotes: { is_group_stock?: boolean } | null = null;
+                if (po.internal_notes) {
+                  try {
+                    parsedNotes = typeof po.internal_notes === "string"
+                      ? JSON.parse(po.internal_notes)
+                      : po.internal_notes;
+                  } catch {
+                    // Ignore parse errors
+                  }
+                }
+                const isGroupStock = parsedNotes?.is_group_stock === true;
+                const isSynced = syncStatusMap.get(po.id) === true;
+
+                if (isGroupStock && !isSynced) {
+                  return (
+                    <Tooltip title="Push to Inter-Site Settlement">
+                      <IconButton
+                        size="small"
+                        color="primary"
+                        onClick={() => handlePushToSettlement(po)}
+                      >
+                        <SyncIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                  );
+                }
+                return null;
+              })()}
               <Tooltip title="Edit">
                 <IconButton size="small" onClick={() => handleOpenDialog(po)}>
                   <EditIcon fontSize="small" />
@@ -467,6 +550,8 @@ export default function PurchaseOrdersPage() {
       handlePlaceOrder,
       handleDelete,
       handleOpenDeliveryDialog,
+      handlePushToSettlement,
+      syncStatusMap,
     ]
   );
 
@@ -752,6 +837,64 @@ export default function PurchaseOrdersPage() {
             startIcon={markAsOrdered.isPending ? <CircularProgress size={16} color="inherit" /> : null}
           >
             {markAsOrdered.isPending ? "Placing Order..." : "Place Order"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Push to Settlement Confirmation Dialog */}
+      <Dialog
+        open={pushDialogOpen}
+        onClose={() => {
+          setPushDialogOpen(false);
+          setPushingPO(null);
+          setPushError("");
+        }}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+          <SyncIcon color="primary" />
+          Push to Inter-Site Settlement
+        </DialogTitle>
+        <DialogContent>
+          {pushError && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {pushError}
+            </Alert>
+          )}
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Push <strong>{pushingPO?.po_number}</strong> to Inter-Site Settlement?
+          </Typography>
+          <Alert severity="info" sx={{ mb: 1 }}>
+            This will create a purchase transaction in the Inter-Site Settlement module, allowing you to:
+            <ul style={{ margin: "8px 0 0 0", paddingLeft: "20px" }}>
+              <li>Track material usage by different sites</li>
+              <li>Generate settlements between sites</li>
+              <li>Record inter-site payments</li>
+            </ul>
+          </Alert>
+          <Typography variant="caption" color="text.secondary">
+            Note: This action can be reversed by deleting the transaction from the Inter-Site Settlement page.
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button
+            onClick={() => {
+              setPushDialogOpen(false);
+              setPushingPO(null);
+              setPushError("");
+            }}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            color="primary"
+            onClick={handleConfirmPush}
+            disabled={pushToSettlement.isPending}
+            startIcon={pushToSettlement.isPending ? <CircularProgress size={16} color="inherit" /> : <SyncIcon />}
+          >
+            {pushToSettlement.isPending ? "Pushing..." : "Push to Settlement"}
           </Button>
         </DialogActions>
       </Dialog>
