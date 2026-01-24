@@ -51,6 +51,7 @@ import { formatCurrency, formatDate } from "@/lib/formatters";
 import {
   useSiteLevelMaterialExpenses,
   useDeleteMaterialPurchase,
+  useDeleteAllocatedExpense,
   type SiteMaterialExpense,
 } from "@/hooks/queries/useMaterialPurchases";
 import { useRouter } from "next/navigation";
@@ -92,8 +93,9 @@ export default function MaterialExpensesPage() {
   // Fetch site-level material expenses
   const { data: expensesData, isLoading } = useSiteLevelMaterialExpenses(selectedSite?.id);
 
-  // Delete mutation
+  // Delete mutations
   const deleteMutation = useDeleteMaterialPurchase();
+  const deleteAllocatedMutation = useDeleteAllocatedExpense();
 
   // Extract data
   const allExpenses = expensesData?.expenses || [];
@@ -164,26 +166,33 @@ export default function MaterialExpensesPage() {
 
   const handleDelete = () => {
     handleMenuClose();
-    if (selectedExpense?.type === "allocated") {
-      // For allocated expenses, show navigation dialog
-      setNavigationDialogOpen(true);
-    } else {
-      // For own_site and self_use, show delete confirmation
-      setDeleteDialogOpen(true);
-    }
+    // Show delete confirmation for all expense types
+    setDeleteDialogOpen(true);
   };
 
   const handleDeleteConfirm = async () => {
     if (!selectedExpense?.purchase_expense_id) return;
 
     try {
-      await deleteMutation.mutateAsync(selectedExpense.purchase_expense_id);
+      if (selectedExpense.type === "allocated" && selectedExpense.settlement_reference) {
+        // For allocated expenses, use the special hook that cancels the settlement
+        await deleteAllocatedMutation.mutateAsync({
+          expenseId: selectedExpense.purchase_expense_id,
+          settlementReference: selectedExpense.settlement_reference,
+        });
+      } else {
+        // For own_site and self_use, use the regular delete
+        await deleteMutation.mutateAsync(selectedExpense.purchase_expense_id);
+      }
       setDeleteDialogOpen(false);
       setSelectedExpense(null);
     } catch (error) {
       console.error("Failed to delete expense:", error);
     }
   };
+
+  // Check if any delete mutation is pending
+  const isDeletePending = deleteMutation.isPending || deleteAllocatedMutation.isPending;
 
   const handleDeleteCancel = () => {
     setDeleteDialogOpen(false);
@@ -517,36 +526,48 @@ export default function MaterialExpensesPage() {
           </ListItemIcon>
           <ListItemText>View Details</ListItemText>
         </MenuItem>
-        {selectedExpense?.type === "allocated" ? (
-          // For allocated expenses, show "Go to Settlement" option
-          <MenuItem onClick={handleNavigateToSettlement}>
+        {selectedExpense?.type === "allocated" && [
+          // For allocated expenses, show "Go to Settlement" and "Delete & Cancel" options
+          <MenuItem key="go-to-settlement" onClick={handleNavigateToSettlement}>
             <ListItemIcon>
               <GroupIcon fontSize="small" color="info" />
             </ListItemIcon>
             <ListItemText>Go to Settlement</ListItemText>
-          </MenuItem>
-        ) : (
+          </MenuItem>,
+          <Divider key="divider-allocated" />,
+          <MenuItem
+            key="delete-allocated"
+            onClick={handleDelete}
+            sx={{ color: "error.main" }}
+            disabled={isDeletePending}
+          >
+            <ListItemIcon>
+              <DeleteIcon fontSize="small" color="error" />
+            </ListItemIcon>
+            <ListItemText>Delete & Cancel Settlement</ListItemText>
+          </MenuItem>,
+        ]}
+        {selectedExpense?.type !== "allocated" && [
           // For own_site and self_use, show Edit/Delete options
-          <>
-            <MenuItem onClick={handleEdit} disabled>
-              <ListItemIcon>
-                <EditIcon fontSize="small" />
-              </ListItemIcon>
-              <ListItemText>Edit</ListItemText>
-            </MenuItem>
-            <Divider />
-            <MenuItem
-              onClick={handleDelete}
-              sx={{ color: "error.main" }}
-              disabled={deleteMutation.isPending}
-            >
-              <ListItemIcon>
-                <DeleteIcon fontSize="small" color="error" />
-              </ListItemIcon>
-              <ListItemText>Delete</ListItemText>
-            </MenuItem>
-          </>
-        )}
+          <MenuItem key="edit" onClick={handleEdit} disabled>
+            <ListItemIcon>
+              <EditIcon fontSize="small" />
+            </ListItemIcon>
+            <ListItemText>Edit</ListItemText>
+          </MenuItem>,
+          <Divider key="divider-other" />,
+          <MenuItem
+            key="delete"
+            onClick={handleDelete}
+            sx={{ color: "error.main" }}
+            disabled={isDeletePending}
+          >
+            <ListItemIcon>
+              <DeleteIcon fontSize="small" color="error" />
+            </ListItemIcon>
+            <ListItemText>Delete</ListItemText>
+          </MenuItem>,
+        ]}
       </Menu>
 
       {/* View Details Dialog */}
@@ -683,16 +704,48 @@ export default function MaterialExpensesPage() {
       <Dialog
         open={deleteDialogOpen}
         onClose={handleDeleteCancel}
-        maxWidth="xs"
+        maxWidth="sm"
         fullWidth
       >
-        <DialogTitle>Delete Expense</DialogTitle>
+        <DialogTitle>
+          {selectedExpense?.type === "allocated" ? "Delete Expense & Cancel Settlement" : "Delete Expense"}
+        </DialogTitle>
         <DialogContent>
-          <Typography variant="body1">
-            Are you sure you want to delete this expense?
-          </Typography>
+          {selectedExpense?.type === "allocated" ? (
+            <>
+              <Alert severity="warning" sx={{ mb: 2 }}>
+                <Typography variant="body2" fontWeight={600}>
+                  Warning: This will cancel the inter-site settlement
+                </Typography>
+              </Alert>
+              <Typography variant="body1" sx={{ mb: 2 }}>
+                Deleting this allocated expense will:
+              </Typography>
+              <Box component="ul" sx={{ pl: 2, mb: 2 }}>
+                <li>
+                  <Typography variant="body2">
+                    Cancel the settlement made in Inter-Site Settlement
+                  </Typography>
+                </li>
+                <li>
+                  <Typography variant="body2">
+                    Reset usage records back to &quot;pending&quot; status
+                  </Typography>
+                </li>
+                <li>
+                  <Typography variant="body2">
+                    Remove this expense from your records
+                  </Typography>
+                </li>
+              </Box>
+            </>
+          ) : (
+            <Typography variant="body1">
+              Are you sure you want to delete this expense?
+            </Typography>
+          )}
           {selectedExpense && (
-            <Box sx={{ mt: 2, p: 2, bgcolor: "grey.100", borderRadius: 1 }}>
+            <Box sx={{ mt: 2, p: 2, bgcolor: selectedExpense.type === "allocated" ? "warning.lighter" : "grey.100", borderRadius: 1 }}>
               <Typography variant="body2" color="text.secondary">
                 {selectedExpense.ref_code}
               </Typography>
@@ -702,6 +755,11 @@ export default function MaterialExpensesPage() {
               <Typography variant="body2" color="primary.main" fontWeight={600}>
                 {formatCurrency(selectedExpense.amount)}
               </Typography>
+              {selectedExpense.type === "allocated" && selectedExpense.settlement_reference && (
+                <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: "block" }}>
+                  Settlement: {selectedExpense.settlement_reference}
+                </Typography>
+              )}
             </Box>
           )}
           <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
@@ -709,16 +767,16 @@ export default function MaterialExpensesPage() {
           </Typography>
         </DialogContent>
         <DialogActions>
-          <Button onClick={handleDeleteCancel} disabled={deleteMutation.isPending}>
+          <Button onClick={handleDeleteCancel} disabled={isDeletePending}>
             Cancel
           </Button>
           <Button
             onClick={handleDeleteConfirm}
             color="error"
             variant="contained"
-            disabled={deleteMutation.isPending}
+            disabled={isDeletePending}
           >
-            {deleteMutation.isPending ? "Deleting..." : "Delete"}
+            {isDeletePending ? "Deleting..." : selectedExpense?.type === "allocated" ? "Delete & Cancel Settlement" : "Delete"}
           </Button>
         </DialogActions>
       </Dialog>

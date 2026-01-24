@@ -753,6 +753,28 @@ export function useDeleteSettlement() {
 
       if (itemsError) throw itemsError;
 
+      // Delete settlement payments
+      const { error: paymentsError } = await (supabase as any)
+        .from("inter_site_settlement_payments")
+        .delete()
+        .eq("settlement_id", settlementId);
+
+      if (paymentsError) {
+        console.warn("Error deleting settlement payments:", paymentsError);
+        // Don't throw - payments might not exist
+      }
+
+      // Delete settlement expense allocations
+      const { error: allocationsError } = await (supabase as any)
+        .from("settlement_expense_allocations")
+        .delete()
+        .eq("settlement_id", settlementId);
+
+      if (allocationsError) {
+        console.warn("Error deleting settlement allocations:", allocationsError);
+        // Don't throw - allocations might not exist
+      }
+
       // Delete the settlement itself
       const { error } = await (supabase as any)
         .from("inter_site_material_settlements")
@@ -1370,6 +1392,40 @@ export function useCancelCompletedSettlement() {
         // Continue anyway - might not have payments
       }
 
+      // Delete allocated expense records from material_purchase_expenses
+      // These are created when settlement is completed and linked via settlement_reference
+      if (settlement.settlement_code) {
+        // First get the IDs of expenses to delete (for cascading items)
+        const { data: expensesToDelete } = await (supabase as any)
+          .from("material_purchase_expenses")
+          .select("id")
+          .eq("settlement_reference", settlement.settlement_code);
+
+        if (expensesToDelete && expensesToDelete.length > 0) {
+          const expenseIds = expensesToDelete.map((e: any) => e.id);
+
+          // Delete the expense items first (if not cascading)
+          const { error: itemsError } = await (supabase as any)
+            .from("material_purchase_expense_items")
+            .delete()
+            .in("purchase_expense_id", expenseIds);
+
+          if (itemsError) {
+            console.error("Error deleting allocated expense items:", itemsError);
+          }
+
+          // Delete the expenses
+          const { error: expenseError } = await (supabase as any)
+            .from("material_purchase_expenses")
+            .delete()
+            .eq("settlement_reference", settlement.settlement_code);
+
+          if (expenseError) {
+            console.error("Error deleting allocated expenses:", expenseError);
+          }
+        }
+      }
+
       // Reset settlement to pending status
       const { data: updated, error: updateError } = await (supabase as any)
         .from("inter_site_material_settlements")
@@ -1400,6 +1456,10 @@ export function useCancelCompletedSettlement() {
       });
       queryClient.invalidateQueries({
         queryKey: queryKeys.interSiteSettlements.bySite(settlement.to_site_id),
+      });
+      // Invalidate material purchases to refresh site-level expenses
+      queryClient.invalidateQueries({
+        queryKey: ["material-purchases"],
       });
     },
   });
@@ -1467,6 +1527,31 @@ export function useCancelPendingSettlement() {
         .delete()
         .eq("settlement_id", data.settlementId);
 
+      // Delete allocated expense records from material_purchase_expenses
+      // These may exist if settlement was previously completed then cancelled
+      if (settlement.settlement_code) {
+        const { data: expensesToDelete } = await (supabase as any)
+          .from("material_purchase_expenses")
+          .select("id")
+          .eq("settlement_reference", settlement.settlement_code);
+
+        if (expensesToDelete && expensesToDelete.length > 0) {
+          const expenseIds = expensesToDelete.map((e: any) => e.id);
+
+          // Delete the expense items first
+          await (supabase as any)
+            .from("material_purchase_expense_items")
+            .delete()
+            .in("purchase_expense_id", expenseIds);
+
+          // Delete the expenses
+          await (supabase as any)
+            .from("material_purchase_expenses")
+            .delete()
+            .eq("settlement_reference", settlement.settlement_code);
+        }
+      }
+
       // Delete settlement items
       const { error: itemsError } = await (supabase as any)
         .from("inter_site_settlement_items")
@@ -1502,6 +1587,10 @@ export function useCancelPendingSettlement() {
       });
       queryClient.invalidateQueries({
         queryKey: queryKeys.interSiteSettlements.bySite(settlement.to_site_id),
+      });
+      // Invalidate material purchases to refresh site-level expenses
+      queryClient.invalidateQueries({
+        queryKey: ["material-purchases"],
       });
     },
   });

@@ -60,12 +60,20 @@ export default function BatchCompletionDialog({
   });
 
   // Self-use calculation (remaining quantity for paying site)
+  // Use amount_paid (bargained amount) if available, otherwise use total_amount
+  const effectiveTotalAmount = batch.amount_paid ?? batch.total_amount ?? 0;
   const selfUseQty = remainingQty;
   const selfUsePercentage = originalQty > 0 ? (selfUseQty / originalQty) * 100 : 0;
-  const selfUseAmount = originalQty > 0 ? (selfUseQty / originalQty) * batch.total_amount : 0;
 
+  // Calculate total allocated to other sites from actual amounts (uses adjusted unit cost)
   const totalAllocatedAmount = allocations.reduce((sum, a) => sum + a.amount, 0);
-  const totalAmount = totalAllocatedAmount + selfUseAmount;
+
+  // Self-use amount = Total paid - Amount used by others
+  // This ensures the total matches exactly (no rounding issues from percentage calculation)
+  const selfUseAmount = effectiveTotalAmount - totalAllocatedAmount;
+
+  // Total should equal the effective amount paid
+  const totalAmount = effectiveTotalAmount;
 
   const handleComplete = async () => {
     try {
@@ -123,9 +131,23 @@ export default function BatchCompletionDialog({
           <Typography variant="body2" color="text.secondary">
             Paid by: {batch.payment_source_site_name || "Unknown Site"}
           </Typography>
-          <Typography variant="h5" color="primary" fontWeight={700} sx={{ mt: 1 }}>
-            {formatCurrency(batch.total_amount)}
-          </Typography>
+          {batch.amount_paid && batch.amount_paid !== batch.total_amount ? (
+            <Box sx={{ mt: 1 }}>
+              <Typography
+                variant="body2"
+                sx={{ textDecoration: 'line-through', color: 'text.disabled' }}
+              >
+                {formatCurrency(batch.total_amount)}
+              </Typography>
+              <Typography variant="h5" color="success.main" fontWeight={700}>
+                {formatCurrency(batch.amount_paid)}
+              </Typography>
+            </Box>
+          ) : (
+            <Typography variant="h5" color="primary" fontWeight={700} sx={{ mt: 1 }}>
+              {formatCurrency(batch.total_amount)}
+            </Typography>
+          )}
         </Box>
 
         {error && (
@@ -240,7 +262,7 @@ export default function BatchCompletionDialog({
           <Typography variant="body2" component="ul" sx={{ m: 0, pl: 2 }}>
             <li>Debtor expenses created for sites that used materials</li>
             <li>Self-use expense created for the paying site ({batch.payment_source_site_name})</li>
-            <li>Amounts will appear in each site's Material Expenses</li>
+            <li>Amounts will appear in each site&apos;s Material Expenses</li>
             <li>All amounts will flow to All Site Expenses</li>
           </Typography>
         </Alert>

@@ -329,10 +329,9 @@ export default function MaterialSettlementsPage() {
                   const purchase = isPO ? null : (item as MaterialPurchaseExpenseWithDetails);
                   const po = isPO ? (item as PurchaseOrderWithDetails) : null;
 
-                  // Check if this is from a group settlement (has original_batch_code)
-                  const isFromGroupSettlement = purchase ? !!purchase.original_batch_code : false;
                   // Check if this is a group stock parent purchase (paying site's batch)
-                  const isGroupStockParent = purchase ? (purchase.purchase_type === "group_stock" && !isFromGroupSettlement) : false;
+                  // Note: Allocated expenses (inter-site) are no longer shown here - they go to Material Expenses page
+                  const isGroupStockParent = purchase ? purchase.purchase_type === "group_stock" : false;
 
                   // Extract common display fields
                   const refCode = purchase?.ref_code || po?.po_number || '';
@@ -358,17 +357,6 @@ export default function MaterialSettlementsPage() {
                             label="Advance PO"
                             size="small"
                             color="warning"
-                            variant="outlined"
-                            sx={{ fontSize: "0.75rem" }}
-                          />
-                        </Tooltip>
-                      ) : isFromGroupSettlement ? (
-                        <Tooltip title={`From batch ${purchase!.original_batch_code}`}>
-                          <Chip
-                            icon={<GroupIcon sx={{ fontSize: 16 }} />}
-                            label="Allocated"
-                            size="small"
-                            color="info"
                             variant="outlined"
                             sx={{ fontSize: "0.75rem" }}
                           />
@@ -404,10 +392,6 @@ export default function MaterialSettlementsPage() {
                         <Typography variant="body2" fontWeight={500} sx={{ fontFamily: "monospace" }}>
                           {purchase.purchase_order.po_number}
                         </Typography>
-                      ) : isFromGroupSettlement ? (
-                        <Typography variant="body2" color="text.secondary" sx={{ fontFamily: "monospace" }}>
-                          {purchase!.original_batch_code}
-                        </Typography>
                       ) : (
                         <Typography variant="body2" color="text.secondary">
                           -
@@ -435,12 +419,25 @@ export default function MaterialSettlementsPage() {
                       </Typography>
                     </TableCell>
                     <TableCell align="right">
-                      <Typography variant="body2" fontWeight={600}>
-                        {formatCurrency(amount)}
-                      </Typography>
-                      {isFromGroupSettlement && (
-                        <Typography variant="caption" color="success.main" display="block">
-                          Usage settled
+                      {/* Show both original and paid amounts when bargained */}
+                      {purchase?.amount_paid && purchase.amount_paid !== purchase.total_amount ? (
+                        <>
+                          <Typography
+                            variant="body2"
+                            sx={{ textDecoration: 'line-through', color: 'text.disabled' }}
+                          >
+                            {formatCurrency(amount)}
+                          </Typography>
+                          <Typography variant="body2" fontWeight={600} color="success.main">
+                            {formatCurrency(purchase.amount_paid)}
+                          </Typography>
+                          <Typography variant="caption" color="success.main" display="block">
+                            ({formatCurrency(amount - purchase.amount_paid)} saved)
+                          </Typography>
+                        </>
+                      ) : (
+                        <Typography variant="body2" fontWeight={600}>
+                          {formatCurrency(amount)}
                         </Typography>
                       )}
                       {isPO && (
@@ -488,15 +485,6 @@ export default function MaterialSettlementsPage() {
                             variant="outlined"
                           />
                         )
-                      ) : isFromGroupSettlement ? (
-                        // Allocated from group: always show as settled
-                        <Chip
-                          icon={<SettledIcon />}
-                          label="Allocated"
-                          size="small"
-                          color="info"
-                          variant="outlined"
-                        />
                       ) : purchase!.settlement_reference ? (
                         <Chip
                           icon={<SettledIcon />}
@@ -558,7 +546,7 @@ export default function MaterialSettlementsPage() {
                           </Tooltip>
                         )}
                         {/* Settle button for own site purchases */}
-                        {!isPO && !isGroupStockParent && !purchase!.settlement_reference && canEdit && !isFromGroupSettlement && (
+                        {!isPO && !isGroupStockParent && !purchase!.settlement_reference && canEdit && (
                           <Tooltip title="Settle">
                             <Button
                               size="small"
@@ -598,7 +586,7 @@ export default function MaterialSettlementsPage() {
                             </IconButton>
                           </Tooltip>
                         )}
-                        {canEdit && purchase && !purchase.settlement_reference && !isFromGroupSettlement && !isGroupStockParent && (
+                        {canEdit && purchase && !purchase.settlement_reference && !isGroupStockParent && (
                           <Tooltip title="Delete">
                             <IconButton
                               size="small"

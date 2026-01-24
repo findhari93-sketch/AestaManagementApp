@@ -22,7 +22,6 @@ import {
   Grid,
   Tabs,
   Tab,
-  Fab,
   TextField,
   MenuItem,
   ToggleButton,
@@ -37,8 +36,6 @@ import {
   Done as DoneIcon,
   TrendingUp as TrendingUpIcon,
   TrendingDown as TrendingDownIcon,
-  Add as AddIcon,
-  Assessment as ReportIcon,
   Receipt as TransactionsIcon,
   ShoppingCart as PurchaseIcon,
   LocalShipping as UsageIcon,
@@ -68,7 +65,6 @@ import {
 } from '@/hooks/queries/useInterSiteSettlements'
 import { useGroupStockBatches, useDeleteBatchCascade } from '@/hooks/queries/useMaterialPurchases'
 import { useBatchesWithUsage, useCompleteBatch } from '@/hooks/queries/useBatchUsage'
-import WeeklyUsageReportDialog from '@/components/materials/WeeklyUsageReportDialog'
 import GroupStockBatchCard from '@/components/materials/GroupStockBatchCard'
 import EditMaterialPurchaseDialog from '@/components/materials/EditMaterialPurchaseDialog'
 import ConvertToOwnSiteDialog from '@/components/materials/ConvertToOwnSiteDialog'
@@ -102,7 +98,6 @@ function TabPanel(props: TabPanelProps) {
 export default function InterSiteSettlementPage() {
   const { selectedSite } = useSite()
   const [tabValue, setTabValue] = useState(0)
-  const [usageReportOpen, setUsageReportOpen] = useState(false)
 
   // Dialog states for batch management
   const [editPurchaseOpen, setEditPurchaseOpen] = useState(false)
@@ -223,10 +218,26 @@ export default function InterSiteSettlementPage() {
   }, [transactions, siteFilter, typeFilter])
 
   // Filter batches based on status - prefer batchesWithUsage for enhanced display
+  // Note: "recorded" status batches are shown based on their actual usage:
+  // - If no usage: show under "In Stock"
+  // - If some usage: show under "Partial Used"
   const filteredBatches = useMemo(() => {
     const sourceBatches = batchesWithUsage.length > 0 ? batchesWithUsage : batches
     if (batchStatusFilter === 'all') return sourceBatches
-    return sourceBatches.filter((batch: any) => batch.status === batchStatusFilter)
+
+    return sourceBatches.filter((batch: any) => {
+      const hasUsage = (batch.site_allocations?.length || 0) > 0 ||
+        (batch.original_quantity !== batch.remaining_quantity)
+
+      // For "recorded" batches, determine effective status based on usage
+      if (batch.status === 'recorded') {
+        if (batchStatusFilter === 'in_stock' && !hasUsage) return true
+        if (batchStatusFilter === 'partial_used' && hasUsage) return true
+        return false
+      }
+
+      return batch.status === batchStatusFilter
+    })
   }, [batches, batchesWithUsage, batchStatusFilter])
 
   // Group transactions by batch for collapsible view (only used when typeFilter === 'all')
@@ -266,7 +277,7 @@ export default function InterSiteSettlementPage() {
       if (siteFilter !== 'all') {
         const hasMatchingSite =
           batch.payment_source_site_id === siteFilter ||
-          batch.paying_site_id === siteFilter ||
+          batch.payment_source_site_id === siteFilter ||
           (batch.site_allocations && batch.site_allocations.some((alloc: any) =>
             alloc.site_id === siteFilter
           ))
@@ -410,11 +421,15 @@ export default function InterSiteSettlementPage() {
     }>>()
 
     // Calculate totals from transactions (vendor payments and material usage)
+    // First, process usage transactions to track what each site used
     transactions.forEach((tx) => {
       if (tx.transaction_type === 'purchase' && tx.payment_source_site_id) {
         const existing = summaryMap.get(tx.payment_source_site_id)
         if (existing) {
-          existing.totalPaid += Math.abs(tx.total_cost || 0)
+          // Use amount_paid from batch if available (bargained amount), otherwise use total_cost
+          const matchingBatch = batches.find(b => b.ref_code === tx.batch_ref_code)
+          const paidAmount = matchingBatch?.amount_paid ?? matchingBatch?.total_amount ?? tx.total_cost ?? 0
+          existing.totalPaid += Math.abs(paidAmount)
           existing.purchaseCount += 1
         }
       } else if (tx.transaction_type === 'usage' && tx.usage_site_id) {
@@ -436,18 +451,92 @@ export default function InterSiteSettlementPage() {
             mat.quantityUsed += Math.abs(tx.quantity || 0)
           } else {
             // Find the batch total for this material
-            const matchingBatch = batches.find(b =>
+            const batchForMaterial = batches.find(b =>
               b.ref_code === tx.batch_ref_code ||
               (b.items && b.items.some(item => item.material_id === tx.material_id))
             )
-            const batchItem = matchingBatch?.items?.find(item => item.material_id === tx.material_id)
+            const batchItem = batchForMaterial?.items?.find(item => item.material_id === tx.material_id)
 
             siteMaterials.set(materialKey, {
               materialId: tx.material_id,
               materialName: tx.material?.name || 'Unknown Material',
               quantityUsed: Math.abs(tx.quantity || 0),
               unit: tx.material?.unit || 'nos',
-              batchTotal: batchItem?.quantity || matchingBatch?.original_quantity || 0,
+              batchTotal: batchItem?.quantity || batchForMaterial?.original_quantity || 0,
+            })
+          }
+        }
+      }
+    })
+
+    // Auto-allocate remaining materials to paying sites
+    // Use batchesWithUsage which has site_allocations from batch_usage_records
+    // Note: batchesWithUsage uses paying_site_id (raw field from DB)
+    batchesWithUsage.forEach((batch: any) => {
+      const payingSiteId = batch.paying_site_id
+      if (payingSiteId) {
+        const payerSummary = summaryMap.get(payingSiteId)
+        if (payerSummary) {
+          const totalPaid = batch.amount_paid ?? batch.total_amount ?? 0
+
+          // Calculate usage by OTHER sites from site_allocations
+          // site_allocations is populated from batch_usage_records which has correct amounts
+          const usedByOthers = (batch.site_allocations || [])
+            .filter((alloc: any) =>
+              alloc.site_id !== payingSiteId && !alloc.is_payer
+            )
+            .reduce((sum: number, alloc: any) => sum + Math.abs(alloc.amount || 0), 0)
+
+          // Debug logging
+          if (process.env.NODE_ENV === 'development') {
+            console.log('SiteSummaries Debug:', {
+              batchRefCode: batch.ref_code,
+              payingSiteId,
+              totalPaid,
+              siteAllocations: batch.site_allocations,
+              usedByOthersAmount: usedByOthers,
+            })
+          }
+
+          const remaining = totalPaid - usedByOthers
+
+          // Add remaining as "used" by the paying site (their allocation)
+          if (remaining > 0) {
+            payerSummary.totalUsed += remaining
+          }
+
+          // Add material breakdown for paying site's remaining allocation
+          if (remaining > 0 && batch.items && batch.items.length > 0) {
+            const siteKey = payingSiteId
+            if (!materialUsageMap.has(siteKey)) {
+              materialUsageMap.set(siteKey, new Map())
+            }
+            const siteMaterials = materialUsageMap.get(siteKey)!
+
+            // Calculate remaining quantity directly: total - used by others
+            // Get quantity used by other sites from site_allocations
+            const quantityUsedByOthers = (batch.site_allocations || [])
+              .filter((alloc: any) => alloc.site_id !== payingSiteId && !alloc.is_payer)
+              .reduce((sum: number, alloc: any) => sum + (alloc.quantity_used || 0), 0)
+
+            batch.items.forEach((item: any) => {
+              const materialKey = item.material_id
+              const totalQty = item.quantity || 0
+              // Remaining = total - used by others
+              const remainingQty = totalQty - quantityUsedByOthers
+
+              if (siteMaterials.has(materialKey)) {
+                const mat = siteMaterials.get(materialKey)!
+                mat.quantityUsed += remainingQty
+              } else {
+                siteMaterials.set(materialKey, {
+                  materialId: item.material_id,
+                  materialName: item.material_name || item.material?.name || 'Unknown Material',
+                  quantityUsed: remainingQty > 0 ? remainingQty : 0,
+                  unit: item.unit || item.material?.unit || 'nos',
+                  batchTotal: totalQty,
+                })
+              }
             })
           }
         }
@@ -461,12 +550,10 @@ export default function InterSiteSettlementPage() {
       if (settlement.status === 'settled') {
         const amount = Number(settlement.paid_amount || settlement.total_amount || 0)
 
-        // Debtor paid this amount
+        // Debtor paid this amount (track separately, don't mix with vendor purchases)
         const debtorSummary = summaryMap.get(settlement.to_site_id)
         if (debtorSummary) {
           debtorSummary.settlementPaid += amount
-          // Also add to totalPaid since this is money the site spent
-          debtorSummary.totalPaid += amount
         }
 
         // Creditor received this amount
@@ -486,7 +573,7 @@ export default function InterSiteSettlementPage() {
     })
 
     return Array.from(summaryMap.values())
-  }, [transactions, settlements, groupMembership?.allSites, batches])
+  }, [transactions, settlements, groupMembership?.allSites, batches, batchesWithUsage])
 
   // Handle generate settlement from balance
   const handleGenerateSettlement = async (balance: InterSiteBalance) => {
@@ -675,17 +762,6 @@ export default function InterSiteSettlementPage() {
       />
 
       <RelatedPages />
-
-      {/* Action Buttons */}
-      <Box sx={{ display: 'flex', gap: 2, mb: 3 }}>
-        <Button
-          variant="contained"
-          startIcon={<ReportIcon />}
-          onClick={() => setUsageReportOpen(true)}
-        >
-          Record Weekly Usage
-        </Button>
-      </Box>
 
       {/* Balance Summary Cards */}
       <Grid container spacing={2} sx={{ mb: 3 }}>
@@ -1227,7 +1303,7 @@ export default function InterSiteSettlementPage() {
                     onSettleUsage={(siteId, siteName, amount) =>
                       handleSettleUsage(
                         batch.ref_code,
-                        batch.paying_site_id || batch.payment_source_site_id,
+                        batch.payment_source_site_id || batch.payment_source_site_id,
                         batch.paying_site?.name || batch.payment_source_site_name || 'Paying Site',
                         siteId,
                         siteName,
@@ -1575,6 +1651,21 @@ export default function InterSiteSettlementPage() {
                             </Button>
                           </Tooltip>
                         )}
+                        {settlement.status === 'cancelled' && canEdit && (
+                          <Tooltip title="Delete Cancelled Settlement">
+                            <IconButton
+                              size="small"
+                              color="error"
+                              onClick={() => {
+                                setDeleteSettlementId(settlement.id)
+                                setDeleteSettlementConfirmOpen(true)
+                              }}
+                              disabled={deleteSettlement.isPending}
+                            >
+                              <DeleteIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        )}
                       </TableCell>
                     </TableRow>
                   ))
@@ -1625,22 +1716,15 @@ export default function InterSiteSettlementPage() {
 
       {/* Dialogs */}
       {selectedSite?.id && (
-        <>
-          <WeeklyUsageReportDialog
-            open={usageReportOpen}
-            onClose={() => setUsageReportOpen(false)}
-            siteId={selectedSite.id}
-          />
-          <ConvertToOwnSiteDialog
-            open={convertDialogOpen}
-            onClose={() => {
-              setConvertDialogOpen(false)
-              setSelectedBatch(null)
-            }}
-            batch={selectedBatch}
-            siteId={selectedSite.id}
-          />
-        </>
+        <ConvertToOwnSiteDialog
+          open={convertDialogOpen}
+          onClose={() => {
+            setConvertDialogOpen(false)
+            setSelectedBatch(null)
+          }}
+          batch={selectedBatch}
+          siteId={selectedSite.id}
+        />
       )}
 
       {/* Transaction Action Dialogs */}
@@ -1788,22 +1872,6 @@ export default function InterSiteSettlementPage() {
         onComplete={handleConfirmBatchCompletion}
       />
 
-      {/* Mobile FAB */}
-      <Box
-        sx={{
-          display: { xs: 'block', md: 'none' },
-          position: 'fixed',
-          bottom: 16,
-          right: 16,
-        }}
-      >
-        <Fab
-          color="primary"
-          onClick={() => setUsageReportOpen(true)}
-        >
-          <AddIcon />
-        </Fab>
-      </Box>
     </Box>
   )
 }

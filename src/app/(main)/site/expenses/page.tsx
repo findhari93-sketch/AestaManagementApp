@@ -77,7 +77,7 @@ interface ExpenseWithCategory extends Expense {
   payer_name?: string;
   subcontract_title?: string;
   settlement_reference?: string | null;
-  source_type?: "expense" | "settlement" | "misc_expense" | "tea_shop_settlement" | "subcontract_payment";
+  source_type?: "expense" | "settlement" | "misc_expense" | "tea_shop_settlement" | "subcontract_payment" | "material_purchase";
   source_id?: string;
   expense_type?: string;
   recorded_date?: string;
@@ -404,6 +404,37 @@ export default function ExpensesPage() {
           .update({ is_cancelled: true })
           .eq("id", expense.source_id || expense.id);
         if (error) throw error;
+      } else if (expense.source_type === "material_purchase") {
+        // Material purchase - check if it's allocated (from inter-site settlement)
+        const materialExpenseId = expense.source_id || expense.id;
+
+        // Fetch the material expense to check if it's allocated
+        const { data: materialExpense, error: fetchError } = await supabase
+          .from("material_purchase_expenses")
+          .select("id, original_batch_code, settlement_reference")
+          .eq("id", materialExpenseId)
+          .single();
+
+        if (fetchError) throw fetchError;
+
+        if (materialExpense?.original_batch_code && materialExpense?.settlement_reference) {
+          // This is an allocated expense from inter-site settlement
+          // Use the RPC function to cancel the settlement and delete the expense
+          const { data: result, error: rpcError } = await (supabase as any).rpc("cancel_allocated_expense", {
+            p_expense_id: materialExpenseId,
+            p_settlement_reference: materialExpense.settlement_reference,
+          });
+
+          if (rpcError) throw rpcError;
+        } else {
+          // Regular material purchase - just delete it
+          const { error: deleteError } = await supabase
+            .from("material_purchase_expenses")
+            .delete()
+            .eq("id", materialExpenseId);
+
+          if (deleteError) throw deleteError;
+        }
       } else {
         // Regular expense - hard delete from expenses table
         const { error } = await supabase

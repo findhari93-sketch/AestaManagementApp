@@ -617,7 +617,7 @@ export function useCompleteBatch() {
         const { data: batch, error: batchError } = await (supabase as any)
           .from("material_purchase_expenses")
           .select(`
-            id, site_id, paying_site_id, total_amount, site_group_id,
+            id, site_id, paying_site_id, total_amount, amount_paid, site_group_id,
             paying_site:sites!material_purchase_expenses_paying_site_id_fkey(id, name),
             items:material_purchase_expense_items(
               id, material_id, brand_id, quantity, unit_price,
@@ -651,8 +651,17 @@ export function useCompleteBatch() {
             .filter((r: any) => !r.is_self_use)
             .reduce((sum: number, r: any) => sum + Number(r.quantity || 0), 0);
 
+          // Calculate total amount used by other sites
+          const totalUsedByOthers = (usageRecords || [])
+            .filter((r: any) => !r.is_self_use)
+            .reduce((sum: number, r: any) => sum + Number(r.total_cost || 0), 0);
+
           const remainingQty = originalQty - usedQty;
-          const selfUseAmount = originalQty > 0 ? (remainingQty / originalQty) * batch.total_amount : 0;
+
+          // Use bargained amount (amount_paid) if available, otherwise use total_amount
+          // Self-use = Total paid - Amount used by others (not percentage-based)
+          const effectiveTotalAmount = Number(batch.amount_paid ?? batch.total_amount);
+          const selfUseAmount = effectiveTotalAmount - totalUsedByOthers;
 
           // Check if self-use expense already exists
           const { data: existingSelfUse } = await (supabase as any)
@@ -668,6 +677,10 @@ export function useCompleteBatch() {
               site_id: payingSiteId,
               amount: selfUseAmount,
               remaining_qty: remainingQty,
+              total_amount: batch.total_amount,
+              amount_paid: batch.amount_paid,
+              effectiveTotalAmount,
+              totalUsedByOthers,
             });
 
             // Generate reference code
@@ -732,14 +745,45 @@ export function useCompleteBatch() {
                 }
               }
 
+              // Also create a batch_usage_record for self-use so it shows in site_allocations
+              const unitCost = remainingQty > 0 ? selfUseAmount / remainingQty : 0;
+              const { error: usageRecordError } = await (supabase as any)
+                .from("batch_usage_records")
+                .insert({
+                  batch_ref_code: data.batchRefCode,
+                  usage_site_id: payingSiteId,
+                  site_group_id: batch.site_group_id,
+                  material_id: batch.items?.[0]?.material_id || null,
+                  brand_id: batch.items?.[0]?.brand_id || null,
+                  quantity: remainingQty,
+                  unit_cost: unitCost,
+                  total_cost: selfUseAmount,
+                  usage_date: paymentDate,
+                  work_description: 'Self-use (batch completion)',
+                  is_self_use: true,
+                  settlement_status: 'self_use',
+                });
+
+              if (usageRecordError) {
+                console.warn("[useCompleteBatch] Could not create self-use batch_usage_record:", usageRecordError.message);
+              } else {
+                console.log("[useCompleteBatch] Self-use batch_usage_record created");
+              }
+
               results.push({ type: 'self_use', expense_id: selfUseExpense.id });
             }
           }
 
-          // Update batch status to completed
+          // Update batch status to completed and set self-use quantities
           await (supabase as any)
             .from("material_purchase_expenses")
-            .update({ status: "completed" })
+            .update({
+              status: "completed",
+              self_used_qty: remainingQty,
+              self_used_amount: selfUseAmount,
+              remaining_qty: 0, // All materials are now allocated
+              used_qty: originalQty, // All materials are used
+            })
             .eq("ref_code", data.batchRefCode);
         }
       }

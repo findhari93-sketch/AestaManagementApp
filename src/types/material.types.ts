@@ -1689,6 +1689,8 @@ export interface GroupStockBatch {
   payment_source_site_id: string | null;
   payment_source_site_name: string | null;
   total_amount: number;
+  amount_paid: number | null; // Actual amount paid after bargaining
+  is_paid: boolean;
   original_quantity: number;
   remaining_quantity: number;
   status: MaterialBatchStatus;

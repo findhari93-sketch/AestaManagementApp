@@ -2141,12 +2141,19 @@ export function usePushBatchToSettlement() {
         // Try to find existing inventory record for this material/brand/site_group
         let inventoryId: string | null = null;
 
-        const { data: existingInventory } = await (supabase as any)
+        let existingInventoryQuery = (supabase as any)
           .from("group_stock_inventory")
           .select("id")
           .eq("site_group_id", siteGroupId)
-          .eq("material_id", item.material_id)
-          .eq("brand_id", item.brand_id || null)
+          .eq("material_id", item.material_id);
+
+        if (item.brand_id) {
+          existingInventoryQuery = existingInventoryQuery.eq("brand_id", item.brand_id);
+        } else {
+          existingInventoryQuery = existingInventoryQuery.is("brand_id", null);
+        }
+
+        const { data: existingInventory } = await existingInventoryQuery
           .eq("batch_code", batchRefCode)
           .maybeSingle();
 
@@ -2155,12 +2162,19 @@ export function usePushBatchToSettlement() {
           console.log("DEBUG: Found existing inventory record:", inventoryId);
         } else {
           // Try to find inventory without batch_code filter (general inventory for this material)
-          const { data: generalInventory } = await (supabase as any)
+          let generalInventoryQuery = (supabase as any)
             .from("group_stock_inventory")
             .select("id")
             .eq("site_group_id", siteGroupId)
-            .eq("material_id", item.material_id)
-            .eq("brand_id", item.brand_id || null)
+            .eq("material_id", item.material_id);
+
+          if (item.brand_id) {
+            generalInventoryQuery = generalInventoryQuery.eq("brand_id", item.brand_id);
+          } else {
+            generalInventoryQuery = generalInventoryQuery.is("brand_id", null);
+          }
+
+          const { data: generalInventory } = await generalInventoryQuery
             .is("batch_code", null)
             .maybeSingle();
 

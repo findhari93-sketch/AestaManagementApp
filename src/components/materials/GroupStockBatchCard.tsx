@@ -80,9 +80,9 @@ export default function GroupStockBatchCard({
       ? ((originalQty - remainingQty) / originalQty) * 100
       : 0;
 
-  const isEditable = batch.status === "in_stock" || batch.status === "partial_used";
-  const canConvert = batch.status === "in_stock" || batch.status === "partial_used";
-  const canComplete = batch.status === "in_stock" || batch.status === "partial_used";
+  const isEditable = batch.status === "in_stock" || batch.status === "partial_used" || batch.status === "recorded";
+  const canConvert = batch.status === "in_stock" || batch.status === "partial_used" || batch.status === "recorded";
+  const canComplete = batch.status === "in_stock" || batch.status === "partial_used" || batch.status === "recorded";
 
   // Get first 2 materials for display
   const displayItems = (batch.items || []).slice(0, 2);
@@ -122,9 +122,24 @@ export default function GroupStockBatchCard({
             >
               {batch.ref_code}
             </Typography>
-            <Typography variant="subtitle1" fontWeight={600}>
-              {formatCurrency(batch.total_amount)}
-            </Typography>
+            {/* Show both original and paid amounts when bargained */}
+            {batch.amount_paid && batch.amount_paid !== batch.total_amount ? (
+              <Box>
+                <Typography
+                  variant="body2"
+                  sx={{ textDecoration: 'line-through', color: 'text.disabled' }}
+                >
+                  {formatCurrency(batch.total_amount)}
+                </Typography>
+                <Typography variant="subtitle1" fontWeight={600} color="success.main">
+                  {formatCurrency(batch.amount_paid)}
+                </Typography>
+              </Box>
+            ) : (
+              <Typography variant="subtitle1" fontWeight={600}>
+                {formatCurrency(batch.total_amount)}
+              </Typography>
+            )}
           </Box>
           <Chip
             label={MATERIAL_BATCH_STATUS_LABELS[batch.status]}
@@ -210,12 +225,12 @@ export default function GroupStockBatchCard({
                 Stock Usage
               </Typography>
               <Typography variant="caption" fontWeight={500}>
-                {usagePercent.toFixed(0)}% used
+                {batch.status === "completed" ? "100% allocated" : `${usagePercent.toFixed(0)}% used`}
               </Typography>
             </Box>
             <LinearProgress
               variant="determinate"
-              value={usagePercent}
+              value={batch.status === "completed" ? 100 : usagePercent}
               sx={{
                 height: 8,
                 borderRadius: 1,
@@ -223,7 +238,7 @@ export default function GroupStockBatchCard({
                 "& .MuiLinearProgress-bar": {
                   borderRadius: 1,
                   bgcolor:
-                    usagePercent >= 100
+                    batch.status === "completed" || usagePercent >= 100
                       ? "success.main"
                       : usagePercent >= 50
                       ? "warning.main"
@@ -232,12 +247,20 @@ export default function GroupStockBatchCard({
               }}
             />
             <Box display="flex" justifyContent="space-between" mt={0.5}>
-              <Typography variant="caption" color="text.secondary">
-                Remaining: {(batch.remaining_quantity ?? 0).toFixed(2)}
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                Original: {(batch.original_quantity ?? 0).toFixed(2)}
-              </Typography>
+              {batch.status === "completed" ? (
+                <Typography variant="caption" color="success.main" fontWeight={500}>
+                  ✓ All materials allocated (including self-use)
+                </Typography>
+              ) : (
+                <>
+                  <Typography variant="caption" color="text.secondary">
+                    Remaining: {(batch.remaining_quantity ?? 0).toFixed(2)}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Original: {(batch.original_quantity ?? 0).toFixed(2)}
+                  </Typography>
+                </>
+              )}
             </Box>
           </Box>
         )}

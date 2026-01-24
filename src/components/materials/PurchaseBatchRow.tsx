@@ -199,11 +199,25 @@ export default function PurchaseBatchRow({
           {formatCurrency(actionTransaction?.unit_cost || 0)}
         </TableCell>
 
-        {/* Total Cost */}
+        {/* Total Cost - show both original and paid amounts when bargained */}
         <TableCell align="right">
-          <Typography fontWeight={500}>
-            {formatCurrency(batch.total_amount || 0)}
-          </Typography>
+          {batch.amount_paid && batch.amount_paid !== batch.total_amount ? (
+            <Box>
+              <Typography
+                variant="body2"
+                sx={{ textDecoration: 'line-through', color: 'text.disabled' }}
+              >
+                {formatCurrency(batch.total_amount || 0)}
+              </Typography>
+              <Typography fontWeight={500} color="success.main">
+                {formatCurrency(batch.amount_paid)}
+              </Typography>
+            </Box>
+          ) : (
+            <Typography fontWeight={500}>
+              {formatCurrency(batch.total_amount || 0)}
+            </Typography>
+          )}
         </TableCell>
 
         {/* Paid By */}
