@@ -381,30 +381,52 @@ export async function processSettlement(
       .filter((r) => r.sourceType === "market")
       .map((r) => r.sourceId);
 
-    // Update daily_attendance records
-    if (dailyIds.length > 0) {
-      const { error: dailyError } = await supabase
-        .from("daily_attendance")
+    // Wrap attendance updates with rollback on failure to prevent orphaned settlements
+    try {
+      // Update daily_attendance records
+      if (dailyIds.length > 0) {
+        const { error: dailyError } = await supabase
+          .from("daily_attendance")
+          .update({
+            ...updateData,
+            subcontract_id: effectiveSubcontractId || null,
+          })
+          .in("id", dailyIds);
+
+        if (dailyError) throw dailyError;
+      }
+
+      // Update market_laborer_attendance records
+      if (marketIds.length > 0) {
+        const { error: marketError } = await supabase
+          .from("market_laborer_attendance")
+          .update({
+            ...updateData,
+            subcontract_id: effectiveSubcontractId || null,
+          })
+          .in("id", marketIds);
+
+        if (marketError) throw marketError;
+      }
+
+      // Verify at least one attendance record was linked (prevents orphaned settlements)
+      if (dailyIds.length === 0 && marketIds.length === 0) {
+        throw new Error("No attendance records to settle. Settlement requires at least one daily or market attendance record.");
+      }
+    } catch (attendanceError: any) {
+      // Rollback: cancel the settlement group since attendance update failed
+      console.error("Attendance update failed, rolling back settlement group:", attendanceError);
+      await supabase
+        .from("settlement_groups")
         .update({
-          ...updateData,
-          subcontract_id: effectiveSubcontractId || null,
+          is_cancelled: true,
+          cancelled_at: new Date().toISOString(),
+          cancelled_by: config.userName,
+          cancelled_by_user_id: config.userId,
+          cancellation_reason: `Attendance update failed: ${attendanceError.message || 'Unknown error'}`,
         })
-        .in("id", dailyIds);
-
-      if (dailyError) throw dailyError;
-    }
-
-    // Update market_laborer_attendance records
-    if (marketIds.length > 0) {
-      const { error: marketError } = await supabase
-        .from("market_laborer_attendance")
-        .update({
-          ...updateData,
-          subcontract_id: effectiveSubcontractId || null,
-        })
-        .in("id", marketIds);
-
-      if (marketError) throw marketError;
+        .eq("id", settlementGroupId);
+      throw attendanceError;
     }
 
     // NOTE: We no longer create salary expenses here!
@@ -602,42 +624,69 @@ export async function processWeeklySettlement(
       settlement_group_id: settlementGroupId,
     };
 
-    if (config.settlementType === "daily" || config.settlementType === "all") {
-      const { error: dailyError } = await supabase
-        .from("daily_attendance")
-        .update(updateData)
-        .eq("site_id", config.siteId)
-        .gte("date", config.dateFrom)
-        .lte("date", config.dateTo)
-        .eq("is_paid", false)
-        .neq("laborer_type", "contract");
+    // Wrap attendance updates with rollback on failure to prevent orphaned settlements
+    try {
+      let recordsUpdated = 0;
 
-      if (dailyError) throw dailyError;
-    }
+      if (config.settlementType === "daily" || config.settlementType === "all") {
+        const { error: dailyError, count } = await supabase
+          .from("daily_attendance")
+          .update(updateData)
+          .eq("site_id", config.siteId)
+          .gte("date", config.dateFrom)
+          .lte("date", config.dateTo)
+          .eq("is_paid", false)
+          .neq("laborer_type", "contract");
 
-    if (config.settlementType === "contract" || config.settlementType === "all") {
-      const { error: contractError } = await supabase
-        .from("daily_attendance")
-        .update(updateData)
-        .eq("site_id", config.siteId)
-        .gte("date", config.dateFrom)
-        .lte("date", config.dateTo)
-        .eq("is_paid", false)
-        .eq("laborer_type", "contract");
+        if (dailyError) throw dailyError;
+        recordsUpdated += count || 0;
+      }
 
-      if (contractError) throw contractError;
-    }
+      if (config.settlementType === "contract" || config.settlementType === "all") {
+        const { error: contractError, count } = await supabase
+          .from("daily_attendance")
+          .update(updateData)
+          .eq("site_id", config.siteId)
+          .gte("date", config.dateFrom)
+          .lte("date", config.dateTo)
+          .eq("is_paid", false)
+          .eq("laborer_type", "contract");
 
-    if (config.settlementType === "market" || config.settlementType === "all") {
-      const { error: marketError } = await supabase
-        .from("market_laborer_attendance")
-        .update(updateData)
-        .eq("site_id", config.siteId)
-        .gte("date", config.dateFrom)
-        .lte("date", config.dateTo)
-        .eq("is_paid", false);
+        if (contractError) throw contractError;
+        recordsUpdated += count || 0;
+      }
 
-      if (marketError) throw marketError;
+      if (config.settlementType === "market" || config.settlementType === "all") {
+        const { error: marketError, count } = await supabase
+          .from("market_laborer_attendance")
+          .update(updateData)
+          .eq("site_id", config.siteId)
+          .gte("date", config.dateFrom)
+          .lte("date", config.dateTo)
+          .eq("is_paid", false);
+
+        if (marketError) throw marketError;
+        recordsUpdated += count || 0;
+      }
+
+      // Verify at least one attendance record was linked (prevents orphaned settlements)
+      if (laborerCount === 0) {
+        throw new Error("No attendance records to settle. Settlement requires at least one daily, contract, or market attendance record.");
+      }
+    } catch (attendanceError: any) {
+      // Rollback: cancel the settlement group since attendance update failed
+      console.error("Weekly settlement attendance update failed, rolling back settlement group:", attendanceError);
+      await supabase
+        .from("settlement_groups")
+        .update({
+          is_cancelled: true,
+          cancelled_at: new Date().toISOString(),
+          cancelled_by: config.userName,
+          cancelled_by_user_id: config.userId,
+          cancellation_reason: `Attendance update failed: ${attendanceError.message || 'Unknown error'}`,
+        })
+        .eq("id", settlementGroupId);
+      throw attendanceError;
     }
 
     // NOTE: We no longer create salary expenses here!
