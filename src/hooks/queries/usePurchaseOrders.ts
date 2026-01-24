@@ -741,38 +741,113 @@ export function useDeletePurchaseOrderCascade() {
       );
       const batchRefCode = groupStockExpense?.ref_code || null;
 
-      // If this is a group stock batch, clean up related records
+      // If this is a group stock batch, clean up ALL related records
       if (batchRefCode) {
-        // 1. Delete settlement expense allocations
+        console.log("[useDeletePurchaseOrderCascade] Deleting batch cascade:", batchRefCode);
+
+        // Step 1: Get settlement IDs and transaction IDs for proper FK deletion order
         const { data: settlements } = await (supabase as any)
           .from("inter_site_material_settlements")
           .select("id")
           .eq("batch_ref_code", batchRefCode);
 
-        if (settlements && settlements.length > 0) {
-          const settlementIds = settlements.map((s: { id: string }) => s.id);
+        const settlementIds = (settlements || []).map((s: { id: string }) => s.id);
 
-          // Delete settlement expense allocations
-          await (supabase as any)
+        const { data: transactions } = await (supabase as any)
+          .from("group_stock_transactions")
+          .select("id")
+          .eq("batch_ref_code", batchRefCode);
+
+        const transactionIds = (transactions || []).map((t: { id: string }) => t.id);
+
+        // Step 2: Delete inter_site_settlement_items FIRST (FK to transactions and settlements)
+        if (settlementIds.length > 0) {
+          const { error: itemsBySettlementError } = await (supabase as any)
+            .from("inter_site_settlement_items")
+            .delete()
+            .in("settlement_id", settlementIds);
+
+          if (itemsBySettlementError) {
+            console.warn("Warning: Could not delete inter_site_settlement_items by settlement_id:", itemsBySettlementError);
+          }
+        }
+
+        if (transactionIds.length > 0) {
+          const { error: itemsByTxError } = await (supabase as any)
+            .from("inter_site_settlement_items")
+            .delete()
+            .in("transaction_id", transactionIds);
+
+          if (itemsByTxError) {
+            console.warn("Warning: Could not delete inter_site_settlement_items by transaction_id:", itemsByTxError);
+          }
+        }
+
+        // Step 3: Delete inter_site_settlement_payments
+        if (settlementIds.length > 0) {
+          const { error: paymentsError } = await (supabase as any)
+            .from("inter_site_settlement_payments")
+            .delete()
+            .in("settlement_id", settlementIds);
+
+          if (paymentsError) {
+            console.warn("Warning: Could not delete inter_site_settlement_payments:", paymentsError);
+          }
+        }
+
+        // Step 4: Delete settlement_expense_allocations
+        if (settlementIds.length > 0) {
+          const { error: allocationsError } = await (supabase as any)
             .from("settlement_expense_allocations")
             .delete()
             .in("settlement_id", settlementIds);
+
+          if (allocationsError) {
+            console.warn("Warning: Could not delete settlement_expense_allocations:", allocationsError);
+          }
         }
 
-        // 2. Delete inter-site settlements for this batch
-        await (supabase as any)
+        // Step 5: Delete inter_site_material_settlements
+        const { error: settlementsError } = await (supabase as any)
           .from("inter_site_material_settlements")
           .delete()
           .eq("batch_ref_code", batchRefCode);
 
-        // 3. Delete batch usage records
-        await (supabase as any)
+        if (settlementsError) {
+          console.warn("Warning: Could not delete inter_site_material_settlements:", settlementsError);
+        }
+
+        // Step 6: Delete batch_usage_records
+        const { error: usageError } = await (supabase as any)
           .from("batch_usage_records")
           .delete()
           .eq("batch_ref_code", batchRefCode);
 
-        // 4. Delete derived expenses (debtor expenses and self-use expenses)
-        // First get the IDs to delete their items
+        if (usageError) {
+          console.warn("Warning: Could not delete batch_usage_records:", usageError);
+        }
+
+        // Step 7: Delete group_stock_transactions (now safe - FK references removed)
+        const { error: txError } = await (supabase as any)
+          .from("group_stock_transactions")
+          .delete()
+          .eq("batch_ref_code", batchRefCode);
+
+        if (txError) {
+          console.warn("Warning: Could not delete group_stock_transactions:", txError);
+        }
+
+        // Step 8: Delete group_stock_inventory for this batch
+        const { error: inventoryError } = await (supabase as any)
+          .from("group_stock_inventory")
+          .delete()
+          .eq("batch_code", batchRefCode);
+
+        if (inventoryError) {
+          console.warn("Warning: Could not delete group_stock_inventory:", inventoryError);
+        }
+
+        // Step 9: Delete derived expenses (debtor expenses and self-use expenses)
         const { data: derivedExpenses } = await (supabase as any)
           .from("material_purchase_expenses")
           .select("id")
@@ -785,7 +860,7 @@ export function useDeletePurchaseOrderCascade() {
           await (supabase as any)
             .from("material_purchase_expense_items")
             .delete()
-            .in("expense_id", derivedExpenseIds);
+            .in("purchase_expense_id", derivedExpenseIds);
 
           // Delete derived expenses
           await (supabase as any)
@@ -793,6 +868,8 @@ export function useDeletePurchaseOrderCascade() {
             .delete()
             .eq("original_batch_code", batchRefCode);
         }
+
+        console.log("[useDeletePurchaseOrderCascade] Batch cascade complete:", batchRefCode);
       }
 
       // Now proceed with the standard deletion flow
@@ -822,7 +899,7 @@ export function useDeletePurchaseOrderCascade() {
         await (supabase as any)
           .from("material_purchase_expense_items")
           .delete()
-          .in("expense_id", expenseIds);
+          .in("purchase_expense_id", expenseIds);
 
         // Delete material purchase expenses
         await (supabase as any)
@@ -844,7 +921,7 @@ export function useDeletePurchaseOrderCascade() {
       return { id, siteId };
     },
     onSuccess: (result) => {
-      // Invalidate all related caches
+      // Invalidate all related caches comprehensively
       queryClient.invalidateQueries({
         queryKey: queryKeys.purchaseOrders.bySite(result.siteId),
       });
@@ -855,13 +932,38 @@ export function useDeletePurchaseOrderCascade() {
         queryKey: queryKeys.materialPurchases.bySite(result.siteId),
       });
       queryClient.invalidateQueries({
+        queryKey: queryKeys.materialPurchases.all,
+      });
+      // Invalidate all settlement-related queries
+      queryClient.invalidateQueries({
         queryKey: ["inter-site-settlements"],
       });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.interSiteSettlements.all,
+      });
+      // Invalidate batch usage queries
       queryClient.invalidateQueries({
         queryKey: ["batch-usage-records"],
       });
       queryClient.invalidateQueries({
+        queryKey: queryKeys.batchUsage.all,
+      });
+      // Invalidate expense queries
+      queryClient.invalidateQueries({
         queryKey: ["site-material-expenses"],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["all-expenses"],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["expenses"],
+      });
+      // Invalidate material purchases batches
+      queryClient.invalidateQueries({
+        queryKey: ["material-purchases", "batches"],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["group-stock-transactions"],
       });
     },
   });
