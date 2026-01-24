@@ -745,6 +745,15 @@ export function useDeletePurchaseOrderCascade() {
       if (batchRefCode) {
         console.log("[useDeletePurchaseOrderCascade] Deleting batch cascade:", batchRefCode);
 
+        // Step 0: Get inventory IDs for this batch (usage transactions may link via inventory_id)
+        const { data: inventoryRecords } = await (supabase as any)
+          .from("group_stock_inventory")
+          .select("id")
+          .eq("batch_code", batchRefCode);
+
+        const inventoryIds = (inventoryRecords || []).map((inv: { id: string }) => inv.id);
+        console.log("[useDeletePurchaseOrderCascade] Found inventory records:", inventoryIds.length);
+
         // Step 1: Get settlement IDs and transaction IDs for proper FK deletion order
         const { data: settlements } = await (supabase as any)
           .from("inter_site_material_settlements")
@@ -753,12 +762,29 @@ export function useDeletePurchaseOrderCascade() {
 
         const settlementIds = (settlements || []).map((s: { id: string }) => s.id);
 
-        const { data: transactions } = await (supabase as any)
+        // Get transactions by batch_ref_code
+        const { data: txByBatch } = await (supabase as any)
           .from("group_stock_transactions")
           .select("id")
           .eq("batch_ref_code", batchRefCode);
 
-        const transactionIds = (transactions || []).map((t: { id: string }) => t.id);
+        // Also get transactions by inventory_id (usage transactions may not have batch_ref_code)
+        let txByInventory: { id: string }[] = [];
+        if (inventoryIds.length > 0) {
+          const { data: txByInv } = await (supabase as any)
+            .from("group_stock_transactions")
+            .select("id")
+            .in("inventory_id", inventoryIds);
+          txByInventory = txByInv || [];
+        }
+
+        // Combine all transaction IDs
+        const allTransactionIds = new Set([
+          ...(txByBatch || []).map((t: { id: string }) => t.id),
+          ...txByInventory.map((t: { id: string }) => t.id),
+        ]);
+        const transactionIds = Array.from(allTransactionIds);
+        console.log("[useDeletePurchaseOrderCascade] Found transactions:", transactionIds.length);
 
         // Step 2: Delete inter_site_settlement_items FIRST (FK to transactions and settlements)
         if (settlementIds.length > 0) {
@@ -827,14 +853,28 @@ export function useDeletePurchaseOrderCascade() {
           console.warn("Warning: Could not delete batch_usage_records:", usageError);
         }
 
-        // Step 7: Delete group_stock_transactions (now safe - FK references removed)
+        // Step 7: Delete group_stock_transactions by batch_ref_code
         const { error: txError } = await (supabase as any)
           .from("group_stock_transactions")
           .delete()
           .eq("batch_ref_code", batchRefCode);
 
         if (txError) {
-          console.warn("Warning: Could not delete group_stock_transactions:", txError);
+          console.warn("Warning: Could not delete group_stock_transactions by batch_ref_code:", txError);
+        }
+
+        // Step 7b: Delete group_stock_transactions by inventory_id (catches usage transactions without batch_ref_code)
+        if (inventoryIds.length > 0) {
+          const { error: txByInvError } = await (supabase as any)
+            .from("group_stock_transactions")
+            .delete()
+            .in("inventory_id", inventoryIds);
+
+          if (txByInvError) {
+            console.warn("Warning: Could not delete group_stock_transactions by inventory_id:", txByInvError);
+          } else {
+            console.log("[useDeletePurchaseOrderCascade] Deleted transactions by inventory_id");
+          }
         }
 
         // Step 8: Delete group_stock_inventory for this batch
