@@ -203,6 +203,7 @@ export function useStockAdjustment() {
   const supabase = createClient();
 
   return useMutation({
+    retry: false, // Not idempotent - modifies stock quantity
     mutationFn: async (data: StockAdjustmentFormData) => {
       // Ensure fresh session before mutation
       await ensureFreshSession();

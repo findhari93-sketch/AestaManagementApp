@@ -140,7 +140,9 @@ export function useVendorsByVariants(variantIds: string[]) {
           id,
           vendor_id,
           material_id,
+          brand_id,
           current_price,
+          pricing_mode,
           price_includes_gst,
           gst_rate,
           price_includes_transport,
@@ -149,7 +151,8 @@ export function useVendorsByVariants(variantIds: string[]) {
           unit,
           lead_time_days,
           vendor:vendors(id, name, vendor_type, shop_name, phone, whatsapp_number, city, accepts_credit, provides_transport),
-          material:materials(id, name, code, unit)
+          material:materials(id, name, code, unit, weight_per_unit, length_per_piece, length_unit, rods_per_bundle),
+          brand:material_brands(id, brand_name, variant_name)
         `
         )
         .in("material_id", variantIds)
@@ -160,7 +163,9 @@ export function useVendorsByVariants(variantIds: string[]) {
         id: string;
         vendor_id: string;
         material_id: string;
+        brand_id: string | null;
         current_price: number | null;
+        pricing_mode: 'per_piece' | 'per_kg' | null;
         price_includes_gst: boolean;
         gst_rate: number;
         price_includes_transport: boolean;
@@ -184,6 +189,15 @@ export function useVendorsByVariants(variantIds: string[]) {
           name: string;
           code: string | null;
           unit: string;
+          weight_per_unit: number | null;
+          length_per_piece: number | null;
+          length_unit: string | null;
+          rods_per_bundle: number | null;
+        } | null;
+        brand: {
+          id: string;
+          brand_name: string;
+          variant_name: string | null;
         } | null;
       }>;
     },
@@ -424,6 +438,11 @@ export function useUpsertVendorInventory() {
       }
     },
     onSuccess: (_, variables) => {
+      // Invalidate ALL vendor-inventory queries to ensure VendorDrawer updates
+      // This is necessary because variants query uses a different key structure
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.vendorInventory.all,
+      });
       queryClient.invalidateQueries({
         queryKey: queryKeys.vendorInventory.byVendor(variables.vendor_id),
       });
@@ -1118,6 +1137,7 @@ export function useVendorMaterialPrice(
           `
           id,
           current_price,
+          pricing_mode,
           price_includes_gst,
           gst_rate,
           price_includes_transport,
@@ -1149,6 +1169,7 @@ export function useVendorMaterialPrice(
       const item = data[0];
       return {
         price: item.current_price,
+        pricing_mode: item.pricing_mode || 'per_piece',
         price_includes_gst: item.price_includes_gst,
         gst_rate: item.gst_rate,
         transport_cost: item.price_includes_transport ? 0 : item.transport_cost,
@@ -1161,6 +1182,63 @@ export function useVendorMaterialPrice(
           (item.unloading_cost || 0),
         recorded_date: item.updated_at,
       };
+    },
+    enabled: !!vendorId && !!materialId,
+  });
+}
+
+/**
+ * Get brands that a specific vendor supplies for a specific material
+ * Used for filtering brand dropdown in PO creation
+ */
+export function useVendorMaterialBrands(
+  vendorId: string | undefined,
+  materialId: string | undefined
+) {
+  const supabase = createClient();
+
+  return useQuery({
+    queryKey: ["vendor-material-brands", vendorId, materialId],
+    queryFn: async () => {
+      if (!vendorId || !materialId) return [];
+
+      const { data, error } = await (supabase as any)
+        .from("vendor_inventory")
+        .select(
+          `
+          brand_id,
+          brand:material_brands(id, material_id, brand_name, variant_name, is_preferred, quality_rating, notes, is_active, created_at)
+        `
+        )
+        .eq("vendor_id", vendorId)
+        .eq("material_id", materialId)
+        .eq("is_available", true);
+
+      if (error) throw error;
+
+      // Extract unique brands with their full details (matching MaterialBrand type)
+      const brandMap = new Map<string, {
+        id: string;
+        material_id: string;
+        brand_name: string;
+        variant_name: string | null;
+        is_preferred: boolean;
+        quality_rating: number | null;
+        notes: string | null;
+        is_active: boolean;
+        created_at: string;
+      }>();
+
+      for (const item of data || []) {
+        if (item.brand && item.brand.is_active) {
+          // Use brand_id as key to avoid duplicates
+          if (!brandMap.has(item.brand.id)) {
+            brandMap.set(item.brand.id, item.brand);
+          }
+        }
+      }
+
+      return Array.from(brandMap.values());
     },
     enabled: !!vendorId && !!materialId,
   });

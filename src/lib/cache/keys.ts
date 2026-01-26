@@ -252,6 +252,7 @@ export const queryKeys = {
     all: ['vendor-inventory'] as const,
     byVendor: (vendorId: string) => ['vendor-inventory', 'vendor', vendorId] as const,
     byMaterial: (materialId: string) => ['vendor-inventory', 'material', materialId] as const,
+    byVariants: (variantIds: string[]) => ['vendor-inventory', 'variants', variantIds] as const,
     search: (query: string) => ['vendor-inventory', 'search', query] as const,
   },
 
@@ -261,16 +262,6 @@ export const queryKeys = {
       ['price-history', 'vendor', vendorId, 'material', materialId] as const,
     byMaterial: (materialId: string) => ['price-history', 'material', materialId] as const,
     byVendor: (vendorId: string) => ['price-history', 'vendor', vendorId] as const,
-  },
-
-  // ==================== LOCAL PURCHASES ====================
-
-  localPurchases: {
-    all: ['local-purchases'] as const,
-    bySite: (siteId: string) => ['local-purchases', 'site', siteId] as const,
-    byEngineer: (engineerId: string) => ['local-purchases', 'engineer', engineerId] as const,
-    byGroup: (groupId: string) => ['local-purchases', 'group', groupId] as const,
-    pendingReimbursement: () => ['local-purchases', 'pending-reimbursement'] as const,
   },
 
   // ==================== DELIVERIES & VERIFICATION ====================

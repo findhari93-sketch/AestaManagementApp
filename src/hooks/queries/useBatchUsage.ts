@@ -228,6 +228,7 @@ export function useRecordBatchUsage() {
   const supabase = createClient();
 
   return useMutation({
+    retry: false, // Not idempotent - modifies stock and usage records
     mutationFn: async (data: RecordBatchUsageFormData & { created_by?: string }) => {
       // Call the database function
       const { data: result, error } = await (supabase as any).rpc("record_batch_usage", {

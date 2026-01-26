@@ -24,6 +24,7 @@ import {
 import { useMaterialVariants } from "@/hooks/queries/useMaterials";
 import { useVendorsByVariants } from "@/hooks/queries/useVendorInventory";
 import { formatCurrency } from "@/lib/formatters";
+import { calculatePieceWeight } from "@/lib/weightCalculation";
 import { useAuth } from "@/contexts/AuthContext";
 import { hasEditPermission } from "@/lib/permissions";
 import VendorDrawer from "./VendorDrawer";
@@ -31,6 +32,7 @@ import type { MaterialWithDetails } from "@/types/material.types";
 
 interface VariantSubTableProps {
   parentMaterial: MaterialWithDetails;
+  onEditVariant?: (variant: MaterialWithDetails) => void;
 }
 
 const UNIT_LABELS: Record<string, string> = {
@@ -53,15 +55,26 @@ const UNIT_LABELS: Record<string, string> = {
 };
 
 // Format variant specs for display (size/dimensions info)
+// Note: weight_per_unit is stored as weight per meter (industry standard)
+// We calculate actual piece weight = weight_per_meter × length_per_piece
 function formatVariantSpecs(variant: MaterialWithDetails): string {
   const specs: string[] = [];
 
-  if (variant.weight_per_unit) {
-    specs.push(`${variant.weight_per_unit} ${variant.weight_unit || "kg"}/pc`);
+  // Calculate actual piece weight from weight per meter and length
+  if (variant.weight_per_unit && variant.length_per_piece) {
+    const actualPieceWeight = calculatePieceWeight(
+      variant.weight_per_unit,
+      variant.length_per_piece,
+      variant.length_unit || "ft"
+    );
+    if (actualPieceWeight) {
+      // Add ~ to indicate approximate weight (actual may vary by brand/batch)
+      specs.push(`~${actualPieceWeight.toFixed(2)} kg/pc`);
+    }
   }
 
   if (variant.length_per_piece) {
-    specs.push(`${variant.length_per_piece} ${variant.length_unit || "m"}`);
+    specs.push(`${variant.length_per_piece} ${variant.length_unit || "ft"}`);
   }
 
   if (variant.rods_per_bundle) {
@@ -71,7 +84,7 @@ function formatVariantSpecs(variant: MaterialWithDetails): string {
   return specs.join(" | ");
 }
 
-export default function VariantSubTable({ parentMaterial }: VariantSubTableProps) {
+export default function VariantSubTable({ parentMaterial, onEditVariant }: VariantSubTableProps) {
   const router = useRouter();
   const { userProfile } = useAuth();
   const canEdit = hasEditPermission(userProfile?.role);
@@ -348,6 +361,7 @@ export default function VariantSubTable({ parentMaterial }: VariantSubTableProps
                       <IconButton
                         size="small"
                         disabled={!canEdit}
+                        onClick={() => onEditVariant?.(variant)}
                       >
                         <EditIcon fontSize="small" />
                       </IconButton>

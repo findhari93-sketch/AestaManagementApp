@@ -77,6 +77,7 @@ export default function DeliveryDialog({
   const [driverName, setDriverName] = useState("");
   const [driverPhone, setDriverPhone] = useState("");
   const [deliveryPhotos, setDeliveryPhotos] = useState<string[]>([]);
+  const [challanUrl, setChallanUrl] = useState<string | null>(null);
   const [notes, setNotes] = useState("");
   const [items, setItems] = useState<DeliveryItemRow[]>([]);
 
@@ -113,6 +114,7 @@ export default function DeliveryDialog({
     setShowAdditionalDetails(false);
     setChallanNumber("");
     setChallanDate("");
+    setChallanUrl(null);
     setVehicleNumber("");
     setDriverName("");
     setDriverPhone("");
@@ -191,6 +193,7 @@ export default function DeliveryDialog({
         delivery_date: deliveryDate,
         challan_number: challanNumber || undefined,
         challan_date: challanDate || undefined,
+        challan_url: challanUrl || undefined,
         vehicle_number: vehicleNumber || undefined,
         driver_name: driverName || undefined,
         driver_phone: driverPhone || undefined,
@@ -394,6 +397,27 @@ export default function DeliveryDialog({
                 );
               })}
             </Box>
+          </Grid>
+
+          {/* Challan/Invoice Upload - Optional */}
+          <Grid size={12}>
+            <Typography variant="subtitle2" fontWeight={600} sx={{ mb: 1 }}>
+              Challan/Invoice (Optional)
+            </Typography>
+            <FileUploader
+              supabase={supabase}
+              bucketName="documents"
+              folderPath={`deliveries/${siteId}/${purchaseOrder?.po_number || "direct"}`}
+              fileNamePrefix="challan"
+              accept="all"
+              label="Challan/Invoice"
+              helperText="Upload challan or invoice document (PDF or image)"
+              uploadOnSelect
+              value={challanUrl ? { name: "challan", size: 0, url: challanUrl } : null}
+              onUpload={(file: UploadedFile) => setChallanUrl(file.url)}
+              onRemove={() => setChallanUrl(null)}
+              compact
+            />
           </Grid>
 
           {/* Items Table */}

@@ -43,6 +43,7 @@ import {
 import CategoryAutocomplete from "@/components/common/CategoryAutocomplete";
 import FileUploader from "@/components/common/FileUploader";
 import { createClient } from "@/lib/supabase/client";
+import { calculatePieceWeight } from "@/lib/weightCalculation";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useFormDraft } from "@/hooks/useFormDraft";
 import {
@@ -97,6 +98,7 @@ interface MaterialDialogProps {
   onClose: () => void;
   material: MaterialWithDetails | null;
   categories: MaterialCategory[];
+  onEditVariant?: (variant: MaterialWithDetails) => void;
 }
 
 export default function MaterialDialog({
@@ -104,6 +106,7 @@ export default function MaterialDialog({
   onClose,
   material,
   categories,
+  onEditVariant,
 }: MaterialDialogProps) {
   const isMobile = useIsMobile();
   const isEdit = !!material;
@@ -139,6 +142,7 @@ export default function MaterialDialog({
   const [showDescription, setShowDescription] = useState(false);
   const [showImageUpload, setShowImageUpload] = useState(false);
   const [categoryDialogOpen, setCategoryDialogOpen] = useState(false);
+  const [brandsExpanded, setBrandsExpanded] = useState(false);
   const supabase = createClient();
 
   // Memoize initial form data based on material prop
@@ -202,6 +206,9 @@ export default function MaterialDialog({
       setVariants([]);
       setError("");
       setNewBrandName("");
+      // Initialize brands accordion expansion based on whether there are brands
+      const hasBrands = (material?.brands?.filter(b => b.is_active)?.length || 0) > 0;
+      setBrandsExpanded(hasBrands);
     }
   }, [material, open]);
 
@@ -869,7 +876,7 @@ export default function MaterialDialog({
                       e.target.value ? parseFloat(e.target.value) : null
                     )
                   }
-                  helperText="For parent material (optional)"
+                  helperText="Standard weight - actual may vary ±5%"
                   slotProps={{
                     input: {
                       inputProps: { min: 0, step: 0.001 },
@@ -934,7 +941,7 @@ export default function MaterialDialog({
                           borderRadius: 1,
                         }}
                       >
-                        <Typography variant="body2" fontWeight={500}>
+                        <Typography variant="body2" fontWeight={500} sx={{ flex: 1 }}>
                           {variant.name}
                         </Typography>
                         {variant.code && (
@@ -942,9 +949,9 @@ export default function MaterialDialog({
                             ({variant.code})
                           </Typography>
                         )}
-                        {variant.weight_per_unit && (
+                        {variant.weight_per_unit && variant.length_per_piece && (
                           <Chip
-                            label={`${variant.weight_per_unit} ${variant.weight_unit || "kg"}/pc`}
+                            label={`~${calculatePieceWeight(variant.weight_per_unit, variant.length_per_piece, variant.length_unit || "ft")?.toFixed(2) || variant.weight_per_unit} kg/pc`}
                             size="small"
                             variant="outlined"
                           />
@@ -956,10 +963,21 @@ export default function MaterialDialog({
                             variant="outlined"
                           />
                         )}
+                        <Tooltip title="Edit variant">
+                          <IconButton
+                            size="small"
+                            onClick={() => {
+                              onClose();
+                              onEditVariant?.(variant);
+                            }}
+                          >
+                            <EditIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
                       </Box>
                     ))}
                     <Typography variant="caption" color="text.secondary" sx={{ mt: 1 }}>
-                      Variants are managed separately. Edit individual variants from the table.
+                      Click the edit icon to modify individual variants.
                     </Typography>
                   </Box>
                 </AccordionDetails>
@@ -970,7 +988,10 @@ export default function MaterialDialog({
           {/* Brands Section - Only show for existing materials */}
           {isEdit && material && (
             <Grid size={12}>
-              <Accordion defaultExpanded={activeBrands.length > 0 || fieldVisibility.defaultShowBrands}>
+              <Accordion
+                expanded={brandsExpanded}
+                onChange={(_, isExpanded) => setBrandsExpanded(isExpanded)}
+              >
                 <AccordionSummary expandIcon={<ExpandMoreIcon />}>
                   <Typography>
                     Brands ({activeBrands.length})

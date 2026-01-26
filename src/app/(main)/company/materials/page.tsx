@@ -679,7 +679,12 @@ export default function MaterialsPage() {
           if (!row.original._canExpand) return null;
           // Show variant sub-table if has variants, otherwise show brand sub-table
           if ((row.original._variantCount ?? 0) > 0) {
-            return <VariantSubTable parentMaterial={row.original} />;
+            return (
+              <VariantSubTable
+                parentMaterial={row.original}
+                onEditVariant={(variant) => handleOpenDialog(variant)}
+              />
+            );
           }
           if ((row.original._brandCount ?? 0) > 0) {
             return <BrandSubTable material={row.original} onOpenVendorDrawer={handleOpenVendorDrawer} />;
@@ -711,6 +716,7 @@ export default function MaterialsPage() {
         onClose={handleCloseDialog}
         material={editingMaterial}
         categories={categories}
+        onEditVariant={handleOpenDialog}
       />
 
       {/* Vendor Drawer */}

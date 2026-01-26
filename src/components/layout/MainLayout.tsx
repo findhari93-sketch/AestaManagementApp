@@ -182,14 +182,9 @@ const siteNavCategories: NavCategory[] = [
     emoji: "📦",
     items: [
       {
-        text: "Stock Inventory",
+        text: "Inventory",
         icon: <InventoryIcon />,
-        path: "/site/stock",
-      },
-      {
-        text: "Daily Usage",
-        icon: <ConstructionIcon />,
-        path: "/site/material-usage",
+        path: "/site/inventory",
       },
       {
         text: "Material Requests",
@@ -205,11 +200,6 @@ const siteNavCategories: NavCategory[] = [
         text: "Delivery Verification",
         icon: <DeliveryIcon />,
         path: "/site/delivery-verification",
-      },
-      {
-        text: "Local Purchases",
-        icon: <StoreIcon />,
-        path: "/site/local-purchases",
       },
       {
         text: "Inter-Site Settlement",

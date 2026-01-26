@@ -61,15 +61,17 @@ export default function WeightCalculationDisplay({
     );
   }
 
-  // Default: inline
+  // Default: inline - with tooltip indicating weight is approximate
   return (
-    <Typography
-      component="span"
-      variant="caption"
-      color="text.secondary"
-      sx={{ ml: 0.5 }}
-    >
-      ({formatWeight(calculation.totalWeight)} {calculation.weightUnit})
-    </Typography>
+    <Tooltip title="Approximate - actual weight may vary by ±5% based on brand/batch">
+      <Typography
+        component="span"
+        variant="caption"
+        color="text.secondary"
+        sx={{ ml: 0.5, cursor: "help" }}
+      >
+        (~{formatWeight(calculation.totalWeight)} {calculation.weightUnit})
+      </Typography>
+    </Tooltip>
   );
 }

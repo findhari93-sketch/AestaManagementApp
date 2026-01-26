@@ -1,5 +1,6 @@
 "use client";
 
+import React from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { createClient, ensureFreshSession } from "@/lib/supabase/client";
 import { queryKeys } from "@/lib/cache/keys";
@@ -13,6 +14,7 @@ import type {
   MaterialBrandFormData,
   VariantFormData,
   CreateMaterialWithVariantsData,
+  MaterialSearchOption,
 } from "@/types/material.types";
 
 // ============================================
@@ -455,6 +457,213 @@ export function useMaterialsGrouped(categoryId?: string | null) {
 }
 
 /**
+ * Build searchable terms for a material
+ * Includes name, code, local_name, and brand names
+ */
+function buildSearchTerms(
+  material: MaterialWithDetails,
+  parent?: MaterialWithDetails
+): string[] {
+  const terms: string[] = [];
+
+  // Add material name and code
+  terms.push(material.name.toLowerCase());
+  if (material.code) {
+    terms.push(material.code.toLowerCase());
+  }
+  if (material.local_name) {
+    terms.push(material.local_name.toLowerCase());
+  }
+
+  // Add brand names as searchable terms
+  if (material.brands) {
+    for (const brand of material.brands) {
+      if (brand.is_active) {
+        terms.push(brand.brand_name.toLowerCase());
+        if (brand.variant_name) {
+          terms.push(`${brand.brand_name} ${brand.variant_name}`.toLowerCase());
+        }
+      }
+    }
+  }
+
+  // For variants, also include parent name for combined search
+  if (parent) {
+    terms.push(parent.name.toLowerCase());
+    terms.push(`${parent.name} ${material.name}`.toLowerCase());
+  }
+
+  return terms;
+}
+
+/**
+ * Fetch materials as flat search options for autocomplete
+ * Includes materials, variants, and brands as separate searchable entries
+ * Smart auto-fill: selecting a variant auto-fills material+variant,
+ * selecting a brand auto-fills material+brand
+ */
+export function useMaterialSearchOptions(categoryId?: string | null) {
+  const { data: groupedMaterials = [], ...rest } = useMaterialsGrouped(categoryId);
+
+  const searchOptions = React.useMemo(() => {
+    const options: MaterialSearchOption[] = [];
+
+    for (const material of groupedMaterials) {
+      const hasVariants = (material.variants?.length || 0) > 0;
+      const activeBrands = material.brands?.filter((b) => b.is_active) || [];
+
+      // Add the parent/standalone material as a searchable option
+      options.push({
+        id: `material_${material.id}`,
+        type: "material",
+        displayName: material.name,
+        searchTerms: buildSearchTerms(material),
+        material,
+        variant: null,
+        brand: null,
+        contextLabel: hasVariants
+          ? `${material.variants!.length} variants`
+          : activeBrands.length > 0
+          ? `${activeBrands.length} brands available`
+          : material.unit,
+        unit: material.unit,
+        brandCount: activeBrands.length,
+        variantCount: material.variants?.length || 0,
+      });
+
+      // For materials with variants, add each variant as a searchable option
+      if (material.variants) {
+        for (const variant of material.variants) {
+          if (variant.is_active === false) continue;
+
+          const variantBrands = variant.brands?.filter((b) => b.is_active) || [];
+
+          // Add the variant as a searchable option
+          options.push({
+            id: `variant_${variant.id}`,
+            type: "variant",
+            displayName: variant.name,
+            searchTerms: buildSearchTerms(variant, material),
+            material,
+            variant,
+            brand: null,
+            contextLabel: `Variant of ${material.name}`,
+            unit: variant.unit,
+            brandCount: variantBrands.length,
+            variantCount: 0,
+          });
+
+          // Add brands for this variant as searchable options
+          for (const brand of variantBrands) {
+            const brandDisplayName = brand.variant_name
+              ? `${brand.brand_name} ${brand.variant_name}`
+              : brand.brand_name;
+
+            options.push({
+              id: `brand_${brand.id}`,
+              type: "brand",
+              displayName: `${variant.name} - ${brandDisplayName}`,
+              searchTerms: [
+                brand.brand_name.toLowerCase(),
+                brandDisplayName.toLowerCase(),
+                `${variant.name} ${brand.brand_name}`.toLowerCase(),
+                `${material.name} ${brand.brand_name}`.toLowerCase(),
+                variant.name.toLowerCase(),
+              ],
+              material,
+              variant,
+              brand,
+              contextLabel: `${brandDisplayName} brand of ${variant.name}`,
+              unit: variant.unit,
+              brandCount: 0,
+              variantCount: 0,
+            });
+          }
+        }
+      }
+
+      // For materials without variants, add brands directly
+      if (!hasVariants) {
+        for (const brand of activeBrands) {
+          const brandDisplayName = brand.variant_name
+            ? `${brand.brand_name} ${brand.variant_name}`
+            : brand.brand_name;
+
+          options.push({
+            id: `brand_${brand.id}`,
+            type: "brand",
+            displayName: `${material.name} - ${brandDisplayName}`,
+            searchTerms: [
+              brand.brand_name.toLowerCase(),
+              brandDisplayName.toLowerCase(),
+              `${material.name} ${brand.brand_name}`.toLowerCase(),
+              material.name.toLowerCase(),
+            ],
+            material,
+            variant: null,
+            brand,
+            contextLabel: `${brandDisplayName} brand of ${material.name}`,
+            unit: material.unit,
+            brandCount: 0,
+            variantCount: 0,
+          });
+        }
+      }
+    }
+
+    return options;
+  }, [groupedMaterials]);
+
+  return { data: searchOptions, groupedMaterials, ...rest };
+}
+
+/**
+ * Custom filter function for material search options
+ * Supports multi-word search across all search terms
+ */
+export function filterMaterialSearchOptions(
+  options: MaterialSearchOption[],
+  inputValue: string
+): MaterialSearchOption[] {
+  const searchTerm = inputValue.toLowerCase().trim();
+  if (!searchTerm) {
+    // When no search, only show materials (not variants/brands) to reduce clutter
+    return options.filter((opt) => opt.type === "material");
+  }
+
+  // Split search into words for multi-word matching
+  const searchWords = searchTerm.split(/\s+/).filter((w) => w.length > 0);
+
+  const filtered = options.filter((option) => {
+    // Check if ALL search words match at least one search term
+    return searchWords.every((word) =>
+      option.searchTerms.some((term) => term.includes(word))
+    );
+  });
+
+  // Sort results: prioritize exact/starts-with matches, then by type
+  return filtered.sort((a, b) => {
+    // Prioritize exact name matches
+    const aExact = a.displayName.toLowerCase() === searchTerm;
+    const bExact = b.displayName.toLowerCase() === searchTerm;
+    if (aExact !== bExact) return aExact ? -1 : 1;
+
+    // Then prioritize starts-with matches
+    const aStarts = a.displayName.toLowerCase().startsWith(searchTerm);
+    const bStarts = b.displayName.toLowerCase().startsWith(searchTerm);
+    if (aStarts !== bStarts) return aStarts ? -1 : 1;
+
+    // Prioritize materials over variants over brands
+    const typeOrder = { material: 0, variant: 1, brand: 2 };
+    if (a.type !== b.type) {
+      return typeOrder[a.type] - typeOrder[b.type];
+    }
+
+    return a.displayName.localeCompare(b.displayName);
+  });
+}
+
+/**
  * Fetch parent materials (materials that can have variants)
  * Excludes materials that are already variants
  */
@@ -862,6 +1071,7 @@ export function useMaterialBrands(materialId: string | undefined) {
 
 /**
  * Create a new material brand
+ * If an inactive brand with the same name exists, reactivate it instead of inserting
  */
 export function useCreateMaterialBrand() {
   const queryClient = useQueryClient();
@@ -872,6 +1082,41 @@ export function useCreateMaterialBrand() {
       // Ensure fresh session before mutation
       await ensureFreshSession();
 
+      // Check for existing inactive brand with same material_id, brand_name, variant_name
+      // This handles the case where a brand was soft-deleted and user tries to re-add it
+      let query = supabase
+        .from("material_brands")
+        .select("id")
+        .eq("material_id", data.material_id)
+        .eq("brand_name", data.brand_name)
+        .eq("is_active", false);
+
+      // Handle null variant_name comparison correctly
+      if (data.variant_name === null || data.variant_name === undefined) {
+        query = query.is("variant_name", null);
+      } else {
+        query = query.eq("variant_name", data.variant_name);
+      }
+
+      const { data: existing } = await query.maybeSingle();
+
+      if (existing) {
+        // Reactivate existing brand instead of inserting
+        const { data: result, error } = await supabase
+          .from("material_brands")
+          .update({
+            is_active: true,
+            is_preferred: data.is_preferred || false,
+          })
+          .eq("id", existing.id)
+          .select()
+          .single();
+
+        if (error) throw error;
+        return result as MaterialBrand;
+      }
+
+      // Insert new brand
       const { data: result, error } = await supabase
         .from("material_brands")
         .insert(data)

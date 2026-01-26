@@ -465,17 +465,33 @@ export default function PurchaseOrdersPage() {
             </>
           )}
 
-          {/* Ordered or Partial - can record delivery */}
+          {/* Ordered or Partial - can record delivery, edit, or delete */}
           {["ordered", "partial_delivered"].includes(po.status) && canEdit && (
-            <Tooltip title="Record Delivery">
-              <IconButton
-                size="small"
-                color="success"
-                onClick={() => handleOpenDeliveryDialog(po)}
-              >
-                <DeliveryIcon fontSize="small" />
-              </IconButton>
-            </Tooltip>
+            <>
+              <Tooltip title="Edit">
+                <IconButton size="small" onClick={() => handleOpenDialog(po)}>
+                  <EditIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+              <Tooltip title="Record Delivery">
+                <IconButton
+                  size="small"
+                  color="success"
+                  onClick={() => handleOpenDeliveryDialog(po)}
+                >
+                  <DeliveryIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+              <Tooltip title="Delete">
+                <IconButton
+                  size="small"
+                  color="error"
+                  onClick={() => handleDelete(po)}
+                >
+                  <DeleteIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            </>
           )}
 
           {/* Cancelled - can delete */}

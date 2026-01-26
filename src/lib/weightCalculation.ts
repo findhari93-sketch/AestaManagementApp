@@ -99,10 +99,10 @@ export function formatQuantityWithWeight(
   return baseText;
 }
 
-// Common TMT bar weights per piece (40ft / ~12m standard length)
+// Standard TMT bar weights per METER (industry standard specification)
 // Note: 6mm removed as not available in local shops
-export const TMT_WEIGHTS: Record<string, number> = {
-  "8mm": 0.395, // kg per piece
+export const TMT_WEIGHTS_PER_METER: Record<string, number> = {
+  "8mm": 0.395, // kg per meter
   "10mm": 0.617,
   "12mm": 0.888,
   "16mm": 1.58,
@@ -110,6 +110,31 @@ export const TMT_WEIGHTS: Record<string, number> = {
   "25mm": 3.858,
   "32mm": 6.316,
 };
+
+// For backward compatibility
+export const TMT_WEIGHTS = TMT_WEIGHTS_PER_METER;
+
+/**
+ * Calculate actual piece weight from weight per meter and length
+ * @param weightPerMeter - Weight in kg per meter
+ * @param lengthPerPiece - Length of piece
+ * @param lengthUnit - Unit of length ('ft' or 'm')
+ * @returns Actual weight of one piece in kg
+ */
+export function calculatePieceWeight(
+  weightPerMeter: number | null | undefined,
+  lengthPerPiece: number | null | undefined,
+  lengthUnit: string = "ft"
+): number | null {
+  if (!weightPerMeter || !lengthPerPiece) return null;
+
+  // Convert length to meters
+  const lengthInMeters = lengthUnit === "ft"
+    ? lengthPerPiece * 0.3048  // 1 ft = 0.3048 m
+    : lengthPerPiece;
+
+  return weightPerMeter * lengthInMeters;
+}
 
 // Standard rods per bundle for different TMT sizes
 // Note: 6mm removed as not available in local shops

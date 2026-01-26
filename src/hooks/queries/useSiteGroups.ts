@@ -1004,11 +1004,14 @@ export function useBatchRecordGroupStockUsage() {
           purchaseDate: batch.purchase_date,
         });
 
-        // Update transaction with payment_source_site_id for balance tracking
-        console.log("[useBatchRecordGroupStockUsage] Updating transaction with payment_source_site_id");
+        // Update transaction with payment_source_site_id AND batch_ref_code for cascade delete
+        console.log("[useBatchRecordGroupStockUsage] Updating transaction with payment_source_site_id and batch_ref_code");
         const { error: txUpdateError } = await (supabase as any)
           .from("group_stock_transactions")
-          .update({ payment_source_site_id: paymentSourceSiteId })
+          .update({
+            payment_source_site_id: paymentSourceSiteId,
+            batch_ref_code: batchRefCode,  // Enables cascade delete when PO is deleted
+          })
           .eq("id", transaction.id);
 
         if (txUpdateError) {

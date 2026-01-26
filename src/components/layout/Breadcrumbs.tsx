@@ -35,12 +35,12 @@ const routeLabels: Record<string, string> = {
   'tea-shop': 'Tea Shop',
   'client-payments': 'Client Payments',
   'work-log': 'Daily Work Log',
+  'inventory': 'Inventory',
   'stock': 'Stock Inventory',
   'material-usage': 'Daily Usage',
   'material-requests': 'Material Requests',
   'purchase-orders': 'Purchase Orders',
   'delivery-verification': 'Delivery Verification',
-  'local-purchases': 'Local Purchases',
   'inter-site-settlement': 'Inter-Site Settlement',
   'subcontracts': 'Subcontracts',
 }
@@ -51,7 +51,6 @@ const getParentRoute = (path: string): string | null => {
     '/company/material-search': '/company/materials',
     '/site/purchase-orders': '/site/material-requests',
     '/site/delivery-verification': '/site/purchase-orders',
-    '/site/material-usage': '/site/stock',
   }
   return parentMap[path] || null
 }

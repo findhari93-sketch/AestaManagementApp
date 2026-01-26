@@ -45,6 +45,7 @@ import { useMaterialVariants } from "@/hooks/queries/useMaterials";
 import { useQuery } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase/client";
 import { formatCurrency, formatDate } from "@/lib/formatters";
+import { calculatePieceWeight } from "@/lib/weightCalculation";
 import AddVendorToMaterialDialog from "./AddVendorToMaterialDialog";
 import VendorVariantPrices from "./VendorVariantPrices";
 import type { MaterialWithDetails, Vendor, VendorInventory } from "@/types/material.types";
@@ -54,7 +55,14 @@ interface VariantPrice {
   variantName: string;
   price: number | null;
   priceIncludesGst: boolean;
+  pricingMode?: 'per_piece' | 'per_kg' | null;
   unit?: string;
+  // TMT-specific fields for price calculations
+  weightPerUnit?: number | null; // kg per meter
+  lengthPerPiece?: number | null;
+  lengthUnit?: string | null;
+  rodsPerBundle?: number | null;
+  pieceWeight?: number | null; // calculated kg per piece
 }
 
 interface VendorWithPricing extends Vendor {
@@ -80,6 +88,9 @@ interface VendorWithPricing extends Vendor {
     has_invoice: boolean;
     is_verified: boolean;
   }>;
+  // Brand info at vendor level (for grouping)
+  brandId?: string | null;
+  brandName?: string | null;
   // Variant prices when material has variants
   variantPrices?: VariantPrice[];
   lowestVariantPrice?: number | null;
@@ -126,6 +137,7 @@ export default function VendorDrawer({
   const { data: variantInventory = [], isLoading: isLoadingVariants } = useVendorsByVariants(variantIds);
 
   // Group variant inventory by vendor
+  // Group variant inventory by vendor + brand (same vendor can appear for different brands)
   const variantVendorsMap = useMemo(() => {
     if (!hasVariants || variantInventory.length === 0) return new Map<string, VendorWithPricing>();
 
@@ -134,15 +146,34 @@ export default function VendorDrawer({
     for (const inv of variantInventory) {
       if (!inv.vendor) continue;
 
-      const existingVendor = vendorMap.get(inv.vendor.id);
+      // Key by vendor + brand (so same vendor appears separately for each brand)
+      const brandId = inv.brand_id || "no-brand";
+      const mapKey = `${inv.vendor.id}-${brandId}`;
+      const existingVendor = vendorMap.get(mapKey);
       const variantInfo = inv.material;
+
+      // Calculate piece weight for TMT materials
+      const pieceWeight = variantInfo?.weight_per_unit && variantInfo?.length_per_piece
+        ? calculatePieceWeight(
+            variantInfo.weight_per_unit,
+            variantInfo.length_per_piece,
+            variantInfo.length_unit || "ft"
+          )
+        : null;
 
       const variantPrice: VariantPrice = {
         variantId: inv.material_id,
         variantName: variantInfo?.name || "Unknown",
         price: inv.current_price,
         priceIncludesGst: inv.price_includes_gst,
+        pricingMode: inv.pricing_mode,
         unit: inv.unit || variantInfo?.unit,
+        // TMT-specific data
+        weightPerUnit: variantInfo?.weight_per_unit,
+        lengthPerPiece: variantInfo?.length_per_piece,
+        lengthUnit: variantInfo?.length_unit,
+        rodsPerBundle: variantInfo?.rods_per_bundle,
+        pieceWeight,
       };
 
       if (existingVendor) {
@@ -159,9 +190,8 @@ export default function VendorDrawer({
           existingVendor.lowestVariantPrice = inv.current_price;
         }
       } else {
-        // Cast to unknown first since we're only using a subset of Vendor fields
-        // that are available from the variant inventory query
-        vendorMap.set(inv.vendor.id, {
+        // Create new vendor entry (with brand info)
+        vendorMap.set(mapKey, {
           id: inv.vendor.id,
           name: inv.vendor.name,
           vendor_type: inv.vendor.vendor_type,
@@ -171,7 +201,7 @@ export default function VendorDrawer({
           city: inv.vendor.city,
           accepts_credit: inv.vendor.accepts_credit,
           provides_transport: inv.vendor.provides_transport,
-          current_price: null, // Not applicable for parent with variants
+          current_price: null,
           price_includes_gst: false,
           min_order_qty: inv.min_order_qty,
           last_price_update: null,
@@ -181,6 +211,9 @@ export default function VendorDrawer({
           last_order_date: null,
           price_history: [],
           recent_orders: [],
+          // Brand info at vendor level
+          brandId: inv.brand_id,
+          brandName: inv.brand?.brand_name || null,
           variantPrices: [variantPrice],
           lowestVariantPrice: inv.current_price,
         } as unknown as VendorWithPricing);
@@ -543,6 +576,12 @@ export default function VendorDrawer({
                             />
                           )}
                         </Box>
+                        {/* Brand Name - prominent display */}
+                        {vendor.brandName && (
+                          <Typography variant="body2" color="primary.main" fontWeight={500} sx={{ mt: 0.25 }}>
+                            Brand: {vendor.brandName}
+                          </Typography>
+                        )}
                         <Box sx={{ display: "flex", alignItems: "center", gap: 1, mt: 0.5 }}>
                           {vendor.phone && (
                             <Link

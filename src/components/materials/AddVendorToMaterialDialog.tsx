@@ -130,6 +130,9 @@ export default function AddVendorToMaterialDialog({
   // Variant selection state - which variants this vendor supplies
   const [selectedVariants, setSelectedVariants] = useState<Set<string>>(new Set());
   const [variantPrices, setVariantPrices] = useState<Record<string, number>>({});
+  // For variants: selected brand and pricing mode
+  const [variantBrandId, setVariantBrandId] = useState<string | null>(null);
+  const [variantPricingMode, setVariantPricingMode] = useState<'per_piece' | 'per_kg'>('per_piece');
 
   // Brand selection state - which brands this vendor carries
   const [selectedBrands, setSelectedBrands] = useState<Set<string>>(new Set());
@@ -164,6 +167,8 @@ export default function AddVendorToMaterialDialog({
       setSelectedVendor(null);
       setSelectedVariants(new Set());
       setVariantPrices({});
+      setVariantBrandId(null);
+      setVariantPricingMode('per_piece');
       setHasAutoSelected(false); // Reset auto-selection flag
       // Pre-select brand if provided
       if (preSelectedBrandId) {
@@ -337,7 +342,9 @@ export default function AddVendorToMaterialDialog({
           const inventoryData: VendorInventoryFormData = {
             vendor_id: vendorId,
             material_id: variantId, // Use variant ID, not parent ID
+            brand_id: variantBrandId || undefined, // Include selected brand if any
             current_price: variantPrices[variantId] || 0,
+            pricing_mode: variantPricingMode, // Include pricing mode (per_piece or per_kg)
             price_includes_gst: pricingData.price_includes_gst,
             gst_rate: pricingData.gst_rate || material.gst_rate || 18,
             price_includes_transport: pricingData.price_includes_transport,
@@ -538,6 +545,10 @@ export default function AddVendorToMaterialDialog({
                         onVariantToggle={handleVariantToggle}
                         onPriceChange={handleVariantPriceChange}
                         disabled={isSubmitting}
+                        selectedBrandId={variantBrandId}
+                        onBrandChange={setVariantBrandId}
+                        pricingMode={variantPricingMode}
+                        onPricingModeChange={setVariantPricingMode}
                       />
                     </Box>
                   </Grid>
@@ -702,6 +713,10 @@ export default function AddVendorToMaterialDialog({
                     onVariantToggle={handleVariantToggle}
                     onPriceChange={handleVariantPriceChange}
                     disabled={isSubmitting}
+                    selectedBrandId={variantBrandId}
+                    onBrandChange={setVariantBrandId}
+                    pricingMode={variantPricingMode}
+                    onPricingModeChange={setVariantPricingMode}
                   />
                 </Box>
               </Grid>

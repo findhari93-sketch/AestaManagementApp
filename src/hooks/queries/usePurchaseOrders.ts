@@ -46,10 +46,9 @@ export function usePurchaseOrders(
           *,
           vendor:vendors(id, name, phone, email),
           items:purchase_order_items(
-            id, material_id, brand_id, quantity, unit_price,
-            tax_rate, tax_amount, total_amount, received_qty, pending_qty,
-            material:materials(id, name, code, unit),
-            brand:material_brands(id, brand_name)
+            *,
+            material:materials(id, name, code, unit, weight_per_unit, weight_unit, length_per_piece, length_unit),
+            brand:material_brands(id, brand_name, variant_name)
           )
         `
         )
@@ -89,8 +88,8 @@ export function usePurchaseOrder(id: string | undefined) {
           vendor:vendors(*),
           items:purchase_order_items(
             *,
-            material:materials(id, name, code, unit, gst_rate),
-            brand:material_brands(id, brand_name)
+            material:materials(id, name, code, unit, gst_rate, weight_per_unit, weight_unit, length_per_piece, length_unit),
+            brand:material_brands(id, brand_name, variant_name)
           ),
           deliveries(
             id, grn_number, delivery_date, delivery_status,
@@ -117,15 +116,34 @@ export function useCreatePurchaseOrder() {
 
   return useMutation({
     mutationFn: async (data: PurchaseOrderFormData) => {
-      // Ensure fresh session before mutation
-      await ensureFreshSession();
+      console.log("[useCreatePurchaseOrder] Starting mutation with data:", {
+        site_id: data.site_id,
+        vendor_id: data.vendor_id,
+        itemsCount: data.items?.length,
+        items: data.items,
+      });
 
-      // Calculate totals
+      // Ensure fresh session before mutation
+      console.log("[useCreatePurchaseOrder] Checking session...");
+      await ensureFreshSession();
+      console.log("[useCreatePurchaseOrder] Session check complete, proceeding...");
+
+      // Calculate totals - supports both per_piece and per_kg pricing
       let subtotal = 0;
       let taxAmount = 0;
 
       const itemsWithTotals = data.items.map((item) => {
-        const itemTotal = item.quantity * item.unit_price;
+        // Calculate item total based on pricing mode
+        let itemTotal: number;
+        if (item.pricing_mode === 'per_kg') {
+          // Per kg pricing: use actual_weight if available, fallback to calculated_weight
+          const weight = item.actual_weight ?? item.calculated_weight ?? 0;
+          itemTotal = weight * item.unit_price;
+        } else {
+          // Per piece pricing: quantity × unit_price (default)
+          itemTotal = item.quantity * item.unit_price;
+        }
+
         const discount = item.discount_percent
           ? (itemTotal * item.discount_percent) / 100
           : 0;
@@ -153,6 +171,7 @@ export function useCreatePurchaseOrder() {
       const poNumber = `PO-${timestamp}-${random}`;
 
       // Insert PO
+      console.log("[useCreatePurchaseOrder] Inserting PO...", { poNumber, subtotal, taxAmount, totalAmount });
       const { data: po, error: poError } = await (
         supabase.from("purchase_orders") as any
       )
@@ -166,6 +185,7 @@ export function useCreatePurchaseOrder() {
           delivery_address: data.delivery_address,
           delivery_location_id: data.delivery_location_id,
           payment_terms: data.payment_terms,
+          payment_timing: data.payment_timing || "on_delivery",
           notes: data.notes,
           internal_notes: data.internal_notes,
           transport_cost: data.transport_cost || null,
@@ -176,29 +196,54 @@ export function useCreatePurchaseOrder() {
         .select()
         .single();
 
-      if (poError) throw poError;
+      console.log("[useCreatePurchaseOrder] PO insert result:", { po, poError });
+
+      if (poError) {
+        console.error("[useCreatePurchaseOrder] PO insert error:", poError);
+        throw poError;
+      }
 
       // Insert PO items
-      const poItems = itemsWithTotals.map((item) => ({
-        po_id: po.id,
-        material_id: item.material_id,
-        brand_id: item.brand_id,
-        quantity: item.quantity,
-        unit_price: item.unit_price,
-        tax_rate: item.tax_rate,
-        tax_amount: item.tax_amount,
-        discount_percent: item.discount_percent,
-        discount_amount: item.discount_amount,
-        total_amount: item.total_amount,
-        notes: item.notes,
-        received_qty: 0,
-      }));
+      const poItems = itemsWithTotals.map((item) => {
+        // Calculate actual weight per piece for brand weight learning
+        const actualWeightPerPiece = item.actual_weight && item.quantity > 0
+          ? item.actual_weight / item.quantity
+          : null;
 
+        return {
+          po_id: po.id,
+          material_id: item.material_id,
+          brand_id: item.brand_id,
+          quantity: item.quantity,
+          unit_price: item.unit_price,
+          tax_rate: item.tax_rate,
+          tax_amount: item.tax_amount,
+          discount_percent: item.discount_percent,
+          discount_amount: item.discount_amount,
+          total_amount: item.total_amount,
+          notes: item.notes,
+          received_qty: 0,
+          // Pricing mode and weight tracking
+          pricing_mode: item.pricing_mode || 'per_piece',
+          calculated_weight: item.calculated_weight || null,
+          actual_weight: item.actual_weight || null,
+          actual_weight_per_piece: actualWeightPerPiece,
+        };
+      });
+
+      console.log("[useCreatePurchaseOrder] Inserting PO items...", { count: poItems.length });
       const { error: itemsError } = await supabase
         .from("purchase_order_items")
         .insert(poItems);
 
-      if (itemsError) throw itemsError;
+      console.log("[useCreatePurchaseOrder] PO items insert result:", { itemsError });
+
+      if (itemsError) {
+        console.error("[useCreatePurchaseOrder] PO items insert error:", itemsError);
+        throw itemsError;
+      }
+
+      console.log("[useCreatePurchaseOrder] PO created successfully:", po.po_number);
 
       // Auto-record prices to price_history for each item
       const priceRecords = itemsWithTotals.map((item) => ({
@@ -718,13 +763,16 @@ export function usePODeletionImpact(poId: string | undefined) {
 
 /**
  * Delete a purchase order with full cascade (includes group stock cleanup)
- * This enhanced version also cleans up batch usage records, settlements, and derived expenses
+ * This enhanced version also cleans up:
+ * - batch usage records, settlements, and derived expenses (for group stock)
+ * - stock_inventory and stock_transactions (for site stock)
  */
 export function useDeletePurchaseOrderCascade() {
   const queryClient = useQueryClient();
   const supabase = createClient();
 
   return useMutation({
+    retry: false, // Not idempotent - cascade deletes multiple records
     mutationFn: async ({ id, siteId }: { id: string; siteId: string }) => {
       // Ensure fresh session before mutation
       await ensureFreshSession();
@@ -734,6 +782,90 @@ export function useDeletePurchaseOrderCascade() {
         .from("material_purchase_expenses")
         .select("id, ref_code, purchase_type")
         .eq("purchase_order_id", id);
+
+      // Get all deliveries and their items for stock cleanup
+      const { data: stockDeliveries } = await supabase
+        .from("deliveries")
+        .select("id")
+        .eq("po_id", id);
+
+      // Clean up stock inventory records linked to this PO's deliveries
+      if (stockDeliveries && stockDeliveries.length > 0) {
+        const stockDeliveryIds = stockDeliveries.map((d) => d.id);
+
+        // Get delivery items to find materials that need stock cleanup
+        const { data: deliveryItems } = await supabase
+          .from("delivery_items")
+          .select("material_id, brand_id")
+          .in("delivery_id", stockDeliveryIds);
+
+        if (deliveryItems && deliveryItems.length > 0) {
+          // Get unique material/brand combinations
+          const materialBrandPairs = new Map<string, { material_id: string; brand_id: string | null }>();
+          for (const item of deliveryItems) {
+            const key = `${item.material_id}-${item.brand_id || "null"}`;
+            materialBrandPairs.set(key, {
+              material_id: item.material_id,
+              brand_id: item.brand_id,
+            });
+          }
+
+          // Delete stock inventory and transactions for each material
+          for (const { material_id, brand_id } of materialBrandPairs.values()) {
+            // Find stock inventory records
+            let stockQuery = supabase
+              .from("stock_inventory")
+              .select("id")
+              .eq("site_id", siteId)
+              .eq("material_id", material_id);
+
+            if (brand_id) {
+              stockQuery = stockQuery.eq("brand_id", brand_id);
+            } else {
+              stockQuery = stockQuery.is("brand_id", null);
+            }
+
+            const { data: stockRecords } = await stockQuery;
+
+            if (stockRecords && stockRecords.length > 0) {
+              const stockIds = stockRecords.map((s) => s.id);
+
+              // Delete stock transactions first (FK constraint)
+              const { error: txError } = await supabase
+                .from("stock_transactions")
+                .delete()
+                .in("inventory_id", stockIds);
+
+              if (txError) {
+                console.warn("Warning: Could not delete stock_transactions:", txError);
+              }
+
+              // Delete daily_material_usage records linked to this material/site
+              const { error: usageError } = await supabase
+                .from("daily_material_usage")
+                .delete()
+                .eq("site_id", siteId)
+                .eq("material_id", material_id);
+
+              if (usageError) {
+                console.warn("Warning: Could not delete daily_material_usage:", usageError);
+              }
+
+              // Delete stock inventory records
+              const { error: stockError } = await supabase
+                .from("stock_inventory")
+                .delete()
+                .in("id", stockIds);
+
+              if (stockError) {
+                console.warn("Warning: Could not delete stock_inventory:", stockError);
+              } else {
+                console.log(`[useDeletePurchaseOrderCascade] Cleaned up stock for material ${material_id}`);
+              }
+            }
+          }
+        }
+      }
 
       // Find group stock batch if exists
       const groupStockExpense = materialExpenses?.find(
@@ -843,6 +975,20 @@ export function useDeletePurchaseOrderCascade() {
           console.warn("Warning: Could not delete inter_site_material_settlements:", settlementsError);
         }
 
+        // Step 5b: Get transaction IDs from batch_usage_records BEFORE deleting them
+        // (In case transactions don't have batch_ref_code set - legacy data)
+        const { data: batchUsageWithTx } = await (supabase as any)
+          .from("batch_usage_records")
+          .select("group_stock_transaction_id")
+          .eq("batch_ref_code", batchRefCode)
+          .not("group_stock_transaction_id", "is", null);
+
+        const txIdsFromBatchUsage = (batchUsageWithTx || [])
+          .map((r: { group_stock_transaction_id: string }) => r.group_stock_transaction_id)
+          .filter(Boolean);
+
+        console.log("[useDeletePurchaseOrderCascade] Found transactions via batch_usage_records:", txIdsFromBatchUsage.length);
+
         // Step 6: Delete batch_usage_records
         const { error: usageError } = await (supabase as any)
           .from("batch_usage_records")
@@ -851,6 +997,20 @@ export function useDeletePurchaseOrderCascade() {
 
         if (usageError) {
           console.warn("Warning: Could not delete batch_usage_records:", usageError);
+        }
+
+        // Step 6b: Delete transactions found via batch_usage_records (may not have batch_ref_code)
+        if (txIdsFromBatchUsage.length > 0) {
+          const { error: txByBatchUsageError } = await (supabase as any)
+            .from("group_stock_transactions")
+            .delete()
+            .in("id", txIdsFromBatchUsage);
+
+          if (txByBatchUsageError) {
+            console.warn("Warning: Could not delete group_stock_transactions by batch_usage_records:", txByBatchUsageError);
+          } else {
+            console.log("[useDeletePurchaseOrderCascade] Deleted transactions via batch_usage_records:", txIdsFromBatchUsage.length);
+          }
         }
 
         // Step 7: Delete group_stock_transactions by batch_ref_code
@@ -1031,7 +1191,15 @@ export function useAddPOItem() {
       // Ensure fresh session before mutation
       await ensureFreshSession();
 
-      const itemTotal = item.quantity * item.unit_price;
+      // Calculate item total based on pricing mode (per_piece or per_kg)
+      let itemTotal: number;
+      if (item.pricing_mode === 'per_kg') {
+        // Use actual_weight if available, otherwise calculated_weight
+        const weight = item.actual_weight ?? item.calculated_weight ?? 0;
+        itemTotal = weight * item.unit_price;
+      } else {
+        itemTotal = item.quantity * item.unit_price;
+      }
       const discount = item.discount_percent
         ? (itemTotal * item.discount_percent) / 100
         : 0;
@@ -1053,6 +1221,10 @@ export function useAddPOItem() {
           total_amount: taxableAmount + itemTax,
           notes: item.notes,
           received_qty: 0,
+          // Pricing mode and weight tracking
+          pricing_mode: item.pricing_mode || 'per_piece',
+          calculated_weight: item.calculated_weight || null,
+          actual_weight: item.actual_weight || null,
         })
         .select()
         .single();
@@ -1095,7 +1267,15 @@ export function useUpdatePOItem() {
       let updateData: Record<string, unknown> = { ...item };
 
       if (item.quantity !== undefined && item.unit_price !== undefined) {
-        const itemTotal = item.quantity * item.unit_price;
+        // Calculate item total based on pricing mode (per_piece or per_kg)
+        let itemTotal: number;
+        if (item.pricing_mode === 'per_kg') {
+          // Use actual_weight if available, otherwise calculated_weight
+          const weight = item.actual_weight ?? item.calculated_weight ?? 0;
+          itemTotal = weight * item.unit_price;
+        } else {
+          itemTotal = item.quantity * item.unit_price;
+        }
         const discount = item.discount_percent
           ? (itemTotal * item.discount_percent) / 100
           : 0;
@@ -1109,6 +1289,10 @@ export function useUpdatePOItem() {
           discount_amount: discount,
           tax_amount: itemTax,
           total_amount: taxableAmount + itemTax,
+          // Update pricing mode and weight tracking
+          pricing_mode: item.pricing_mode || 'per_piece',
+          calculated_weight: item.calculated_weight || null,
+          actual_weight: item.actual_weight || null,
         };
       }
 
@@ -1335,6 +1519,7 @@ export function useRecordDelivery() {
   const supabase = createClient();
 
   return useMutation({
+    retry: false, // Not idempotent - creates stock and expenses
     mutationFn: async (data: DeliveryFormData) => {
       // Ensure fresh session before mutation
       await ensureFreshSession();
@@ -1507,6 +1692,17 @@ export function useRecordDelivery() {
                   .single();
 
                 if (po) {
+                  // Check if expense already exists for this PO (prevent duplicates)
+                  const { data: existingExpense } = await (supabase as any)
+                    .from("material_purchase_expenses")
+                    .select("id, ref_code")
+                    .eq("purchase_order_id", data.po_id)
+                    .maybeSingle();
+
+                  if (existingExpense) {
+                    console.log("[useRecordDelivery] Material expense already exists for PO:", existingExpense.ref_code);
+                    // Skip creation, expense already exists
+                  } else {
                   // Check if PO is a group stock purchase
                   // Parse internal_notes if it's a JSON string
                   let parsedNotes: { is_group_stock?: boolean; site_group_id?: string; group_id?: string } | null = null;
@@ -1533,9 +1729,16 @@ export function useRecordDelivery() {
                     "generate_material_purchase_reference"
                   );
 
-                  // Calculate total from ORDERED quantity (user choice)
+                  // Calculate total from ORDERED quantity - supports per_piece and per_kg pricing
                   const itemsTotal = (po.items || []).reduce(
-                    (sum: number, item: any) => sum + (item.quantity * item.unit_price),
+                    (sum: number, item: any) => {
+                      if (item.pricing_mode === 'per_kg') {
+                        // Use actual_weight if available, otherwise calculated_weight
+                        const weight = item.actual_weight ?? item.calculated_weight ?? 0;
+                        return sum + (weight * item.unit_price);
+                      }
+                      return sum + (item.quantity * item.unit_price);
+                    },
                     0
                   );
                   const totalAmount = itemsTotal + (po.transport_cost || 0);
@@ -1677,6 +1880,7 @@ export function useRecordDelivery() {
                   }
                 }
                 }
+                  } // end else (expense doesn't exist)
               } catch (autoCreateError) {
                 // Don't fail the delivery if material expense creation fails
                 console.warn("Failed to auto-create material expense:", autoCreateError);
@@ -2116,9 +2320,16 @@ export function usePushBatchToSettlement() {
           "generate_material_purchase_reference"
         );
 
-        // Calculate totals from PO items
+        // Calculate totals from PO items - supports per_piece and per_kg pricing
         const itemsTotal = poItems.reduce(
-          (sum: number, item: any) => sum + (item.quantity * item.unit_price),
+          (sum: number, item: any) => {
+            if (item.pricing_mode === 'per_kg') {
+              // Use actual_weight if available, otherwise calculated_weight
+              const weight = item.actual_weight ?? item.calculated_weight ?? 0;
+              return sum + (weight * item.unit_price);
+            }
+            return sum + (item.quantity * item.unit_price);
+          },
           0
         );
         const totalAmount = itemsTotal + (po.transport_cost || 0);
