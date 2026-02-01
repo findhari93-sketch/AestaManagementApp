@@ -836,7 +836,7 @@ export function useRequestItemsForConversion(requestId: string | undefined) {
         .select(
           `
           id, material_id, brand_id, requested_qty, approved_qty, fulfilled_qty, estimated_cost,
-          material:materials(id, name, code, unit, gst_rate, parent_material_id),
+          material:materials(id, name, code, unit, gst_rate, parent_id),
           brand:material_brands(id, brand_name)
         `
         )
