@@ -78,10 +78,31 @@ export function useCreateStockLocation() {
 // ============================================
 
 /**
- * Fetch site stock inventory with material details
+ * Extended stock type that includes shared/group stock information
  */
-export function useSiteStock(siteId: string | undefined, locationId?: string) {
+export type ExtendedStockInventory = StockInventoryWithDetails & {
+  is_shared: boolean;
+  is_dedicated?: boolean;
+  paid_by_site_id?: string | null;
+  paid_by_site_name?: string | null;
+  batch_code?: string | null;
+};
+
+/**
+ * Fetch site stock inventory with material details
+ * Determines is_shared based on batch_code:
+ * - Items WITH batch_code = from group purchase = is_shared: true
+ * - Items WITHOUT batch_code = own site purchase = is_shared: false
+ */
+export function useSiteStock(
+  siteId: string | undefined,
+  options?: {
+    locationId?: string;
+    siteGroupId?: string | null;
+  }
+) {
   const supabase = createClient();
+  const locationId = options?.locationId;
 
   return useQuery({
     queryKey: siteId
@@ -92,6 +113,8 @@ export function useSiteStock(siteId: string | undefined, locationId?: string) {
     queryFn: async () => {
       if (!siteId) return [];
 
+      // Query stock_inventory for this site
+      // is_shared is determined by whether batch_code exists (group purchase) or not (own site)
       let query = supabase
         .from("stock_inventory")
         .select(
@@ -109,9 +132,30 @@ export function useSiteStock(siteId: string | undefined, locationId?: string) {
         query = query.eq("location_id", locationId);
       }
 
-      const { data, error } = await query.order("material(name)");
+      const { data: stockData, error } = await query.order("material(name)");
       if (error) throw error;
-      return (data as unknown) as StockInventoryWithDetails[];
+
+      // Map stock items with is_shared based on batch_code
+      // batch_code indicates the item came from a group purchase
+      const stockWithFlags: ExtendedStockInventory[] = ((stockData || []) as any[]).map(
+        (item) => {
+          // Check for non-empty batch_code (handles null, undefined, empty string)
+          const hasBatchCode = item.batch_code && item.batch_code.trim().length > 0;
+
+          return {
+            ...item,
+            // Items with batch_code are from group purchases (shared)
+            // Items without batch_code are own site purchases (not shared)
+            is_shared: hasBatchCode,
+            is_dedicated: false,
+            paid_by_site_id: siteId,
+            paid_by_site_name: null,
+            batch_code: item.batch_code || null,
+          };
+        }
+      );
+
+      return stockWithFlags;
     },
     enabled: !!siteId,
   });
@@ -145,6 +189,87 @@ export function useSiteStockAll(siteId: string | undefined) {
 
       if (error) throw error;
       return (data as unknown) as StockInventoryWithDetails[];
+    },
+    enabled: !!siteId,
+  });
+}
+
+/**
+ * Completed stock type for historical view
+ */
+export interface CompletedStockItem {
+  id: string;
+  material_id: string;
+  material_name: string;
+  material_code?: string;
+  brand_name?: string;
+  original_qty: number;
+  unit: string;
+  total_value: number;
+  avg_unit_cost: number;
+  completion_date: string | null;
+  last_received_date: string | null;
+  is_shared: boolean;
+  batch_code?: string | null;
+  po_reference?: string | null;
+}
+
+/**
+ * Fetch completed/consumed stocks for a site (current_qty = 0)
+ * Shows historical view of materials that were fully used
+ */
+export function useCompletedStock(siteId: string | undefined) {
+  const supabase = createClient();
+
+  return useQuery({
+    queryKey: siteId
+      ? [...queryKeys.materialStock.bySite(siteId), "completed"]
+      : ["site-stock", "completed"],
+    queryFn: async () => {
+      if (!siteId) return [] as CompletedStockItem[];
+
+      // Get completed site stock (qty = 0 but has history)
+      const { data: completedStock, error } = await supabase
+        .from("stock_inventory")
+        .select(
+          `
+          id,
+          material_id,
+          brand_id,
+          current_qty,
+          avg_unit_cost,
+          last_received_date,
+          last_issued_date,
+          batch_code,
+          material:materials(id, name, code, unit),
+          brand:material_brands(brand_name)
+        `
+        )
+        .eq("site_id", siteId)
+        .eq("current_qty", 0)
+        .order("last_issued_date", { ascending: false });
+
+      if (error) throw error;
+
+      // Transform to CompletedStockItem format
+      const completedItems: CompletedStockItem[] = ((completedStock || []) as any[]).map((item) => ({
+        id: item.id,
+        material_id: item.material_id,
+        material_name: item.material?.name || "Unknown Material",
+        material_code: item.material?.code,
+        brand_name: item.brand?.brand_name,
+        original_qty: 0, // Will be calculated from transactions if needed
+        unit: item.material?.unit || "nos",
+        total_value: 0, // Will be calculated from transactions if needed
+        avg_unit_cost: item.avg_unit_cost || 0,
+        completion_date: item.last_issued_date,
+        last_received_date: item.last_received_date,
+        is_shared: false,
+        batch_code: item.batch_code,
+        po_reference: null, // Would need to join with PO data
+      }));
+
+      return completedItems;
     },
     enabled: !!siteId,
   });

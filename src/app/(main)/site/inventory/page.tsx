@@ -56,6 +56,9 @@ import {
   useLowStockAlerts,
   useStockAdjustment,
   useAddInitialStock,
+  useCompletedStock,
+  type ExtendedStockInventory,
+  type CompletedStockItem,
 } from "@/hooks/queries/useStockInventory";
 import {
   useMaterialUsage,
@@ -92,7 +95,7 @@ const UNIT_LABELS: Record<MaterialUnit, string> = {
 };
 
 type MainTabType = "stock" | "usage";
-type StockTabType = "site" | "shared" | "all";
+type StockTabType = "site" | "shared" | "all" | "completed";
 
 export default function InventoryPage() {
   const { selectedSite } = useSite();
@@ -145,7 +148,9 @@ export default function InventoryPage() {
   }, [dateFrom, dateTo, isAllTime]);
 
   // Data queries
+  // is_shared is determined by batch_code in useSiteStock (batch_code = group purchase = shared)
   const { data: stock = [], isLoading: stockLoading } = useSiteStock(selectedSite?.id);
+  const { data: completedStock = [], isLoading: completedLoading } = useCompletedStock(selectedSite?.id);
   const { data: lowStockAlerts = [] } = useLowStockAlerts(selectedSite?.id);
   const { data: materials = [] } = useMaterials();
   const { data: usage = [], isLoading: usageLoading } = useMaterialUsage(selectedSite?.id, dateRange);
@@ -157,12 +162,17 @@ export default function InventoryPage() {
 
   // Filter stock by search term and tab
   const filteredStock = useMemo(() => {
-    let filtered = stock;
+    // Completed tab uses different data source
+    if (stockTab === "completed") {
+      return [] as ExtendedStockInventory[];
+    }
+
+    let filtered = stock as ExtendedStockInventory[];
 
     if (stockTab === "site") {
-      filtered = filtered.filter((s) => !(s as StockInventoryWithDetails & { is_shared?: boolean }).is_shared);
+      filtered = filtered.filter((s) => !s.is_shared);
     } else if (stockTab === "shared") {
-      filtered = filtered.filter((s) => (s as StockInventoryWithDetails & { is_shared?: boolean }).is_shared);
+      filtered = filtered.filter((s) => s.is_shared);
     }
 
     if (searchTerm) {
@@ -172,29 +182,38 @@ export default function InventoryPage() {
           s.material?.name?.toLowerCase().includes(term) ||
           s.material?.code?.toLowerCase().includes(term) ||
           s.brand?.brand_name?.toLowerCase().includes(term) ||
-          (s as StockInventoryWithDetails & { batch_code?: string }).batch_code?.toLowerCase().includes(term)
+          s.batch_code?.toLowerCase().includes(term)
       );
     }
 
     return filtered;
   }, [stock, searchTerm, stockTab]);
 
+  // Filter completed stock by search term
+  const filteredCompletedStock = useMemo(() => {
+    if (!searchTerm) return completedStock;
+
+    const term = searchTerm.toLowerCase();
+    return completedStock.filter(
+      (s) =>
+        s.material_name?.toLowerCase().includes(term) ||
+        s.material_code?.toLowerCase().includes(term) ||
+        s.brand_name?.toLowerCase().includes(term) ||
+        s.batch_code?.toLowerCase().includes(term)
+    );
+  }, [completedStock, searchTerm]);
+
   // Calculate stats
   const sharedStockCount = useMemo(() => {
-    return stock.filter((s) => (s as StockInventoryWithDetails & { is_shared?: boolean }).is_shared).length;
+    return (stock as ExtendedStockInventory[]).filter((s) => s.is_shared).length;
   }, [stock]);
 
   const totalStockValue = useMemo(() => {
     return stock.reduce((sum, s) => sum + s.current_qty * (s.avg_unit_cost || 0), 0);
   }, [stock]);
 
-  // Extended stock type for batch/shared info
-  type ExtendedStock = StockInventoryWithDetails & {
-    batch_code?: string;
-    is_shared?: boolean;
-    is_dedicated?: boolean;
-    paid_by_site_name?: string;
-  };
+  // Use the extended stock type from the hook
+  type ExtendedStock = ExtendedStockInventory;
 
   // Handle opening usage drawer with pre-selected stock
   const handleRecordUsage = (stockItem?: StockInventoryWithDetails) => {
@@ -383,6 +402,82 @@ export default function InventoryPage() {
     [lowStockAlerts, selectedSite?.name]
   );
 
+  // Completed stock table columns
+  const completedStockColumns = useMemo<MRT_ColumnDef<CompletedStockItem>[]>(
+    () => [
+      {
+        accessorKey: "material_name",
+        header: "Material",
+        size: 200,
+        Cell: ({ row }) => (
+          <Box>
+            <Typography variant="body2" fontWeight={500}>
+              {row.original.material_name}
+            </Typography>
+            {row.original.material_code && (
+              <Typography variant="caption" color="text.secondary">
+                {row.original.material_code}
+              </Typography>
+            )}
+            {row.original.brand_name && (
+              <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>
+                {row.original.brand_name}
+              </Typography>
+            )}
+          </Box>
+        ),
+      },
+      {
+        accessorKey: "batch_code",
+        header: "Batch",
+        size: 100,
+        Cell: ({ row }) => row.original.batch_code || "-",
+      },
+      {
+        accessorKey: "avg_unit_cost",
+        header: "Avg Cost",
+        size: 100,
+        Cell: ({ row }) =>
+          row.original.avg_unit_cost
+            ? `₹${row.original.avg_unit_cost.toLocaleString("en-IN", {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              })}`
+            : "-",
+      },
+      {
+        accessorKey: "completion_date",
+        header: "Completed On",
+        size: 120,
+        Cell: ({ row }) =>
+          row.original.completion_date
+            ? dayjs(row.original.completion_date).format("DD MMM YYYY")
+            : "-",
+      },
+      {
+        accessorKey: "last_received_date",
+        header: "Received On",
+        size: 120,
+        Cell: ({ row }) =>
+          row.original.last_received_date
+            ? dayjs(row.original.last_received_date).format("DD MMM YYYY")
+            : "-",
+      },
+      {
+        id: "stock_type",
+        header: "Type",
+        size: 100,
+        Cell: ({ row }) =>
+          row.original.is_shared ? (
+            <Chip label="Group" size="small" color="info" variant="outlined" />
+          ) : (
+            <Chip label="Site" size="small" variant="outlined" />
+          ),
+      },
+    ],
+    []
+  );
+
   // Stock row actions - with Use button
   const renderStockRowActions = useCallback(
     ({ row }: { row: { original: StockInventoryWithDetails } }) => (
@@ -561,7 +656,7 @@ export default function InventoryPage() {
                   startIcon={<AddIcon />}
                   onClick={() => setAddStockDialog(true)}
                 >
-                  Add Stock
+                  Manual Adjustment
                 </Button>
               )}
             </Box>
@@ -700,6 +795,12 @@ export default function InventoryPage() {
                 icon={<GroupsIcon />}
                 iconPosition="start"
               />
+              <Tab
+                label={`Completed${completedStock.length > 0 ? ` (${completedStock.length})` : ""}`}
+                value="completed"
+                icon={<HistoryIcon />}
+                iconPosition="start"
+              />
             </Tabs>
           </Paper>
 
@@ -723,18 +824,39 @@ export default function InventoryPage() {
             />
           </Box>
 
-          {/* Stock Table */}
-          <DataTable
-            columns={stockColumns}
-            data={filteredStock}
-            isLoading={stockLoading}
-            enableRowActions={canEdit}
-            renderRowActions={renderStockRowActions}
-            mobileHiddenColumns={["batch_code", "avg_unit_cost", "value", "paid_by", "stock_type", "location.name"]}
-            initialState={{
-              sorting: [{ id: "material.name", desc: false }],
-            }}
-          />
+          {/* Stock Table - Active Stock */}
+          {stockTab !== "completed" && (
+            <DataTable
+              columns={stockColumns}
+              data={filteredStock}
+              isLoading={stockLoading}
+              enableRowActions={canEdit}
+              renderRowActions={renderStockRowActions}
+              mobileHiddenColumns={["batch_code", "avg_unit_cost", "value", "paid_by", "stock_type", "location.name"]}
+              initialState={{
+                sorting: [{ id: "material.name", desc: false }],
+              }}
+            />
+          )}
+
+          {/* Stock Table - Completed Stock */}
+          {stockTab === "completed" && (
+            <>
+              <Alert severity="info" sx={{ mb: 2 }}>
+                Showing materials that have been fully consumed (current quantity = 0). This helps track historical purchases and usage patterns.
+              </Alert>
+              <DataTable
+                columns={completedStockColumns}
+                data={filteredCompletedStock}
+                isLoading={completedLoading}
+                enableRowActions={false}
+                mobileHiddenColumns={["avg_unit_cost", "last_received_date"]}
+                initialState={{
+                  sorting: [{ id: "completion_date", desc: true }],
+                }}
+              />
+            </>
+          )}
         </>
       )}
 
@@ -906,7 +1028,16 @@ function StockAdjustmentDialog({
   );
 }
 
-// Add Initial Stock Dialog Component
+// Adjustment reasons for manual stock entry
+const ADJUSTMENT_REASONS = [
+  { value: "initial_setup", label: "Initial Setup", description: "Setting up inventory for the first time" },
+  { value: "count_correction", label: "Physical Count Correction", description: "Discrepancy found during physical count" },
+  { value: "transfer_in", label: "Transfer In", description: "Received from another site without PO" },
+  { value: "donation", label: "Donation/Gift", description: "Received without purchase" },
+  { value: "other", label: "Other", description: "Other reason (specify in notes)" },
+] as const;
+
+// Manual Stock Adjustment Dialog Component (renamed from Add Stock)
 function AddStockDialog({
   open,
   onClose,
@@ -930,6 +1061,7 @@ function AddStockDialog({
   const [materialId, setMaterialId] = useState("");
   const [qty, setQty] = useState("");
   const [unitCost, setUnitCost] = useState("");
+  const [reason, setReason] = useState<string>("initial_setup");
 
   const selectedMaterial = materials.find((m) => m.id === materialId);
   const unit = selectedMaterial?.unit || "piece";
@@ -950,13 +1082,33 @@ function AddStockDialog({
     setMaterialId("");
     setQty("");
     setUnitCost("");
+    setReason("initial_setup");
   };
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
-      <DialogTitle>Add Stock to Site</DialogTitle>
+      <DialogTitle>Manual Stock Adjustment</DialogTitle>
       <DialogContent>
         <Box sx={{ display: "flex", flexDirection: "column", gap: 2, mt: 1 }}>
+          <Alert severity="info" sx={{ mb: 1 }}>
+            Use this for stock not from purchases. For materials ordered through vendors, use Purchase Orders &rarr; Delivery &rarr; Verification flow.
+          </Alert>
+
+          <FormControl fullWidth>
+            <InputLabel>Reason for Adjustment</InputLabel>
+            <Select
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              label="Reason for Adjustment"
+            >
+              {ADJUSTMENT_REASONS.map((r) => (
+                <MenuItem key={r.value} value={r.value}>
+                  {r.label}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+
           <FormControl fullWidth>
             <InputLabel>Material</InputLabel>
             <Select
@@ -1017,7 +1169,7 @@ function AddStockDialog({
             !unitCost
           }
         >
-          {isSubmitting ? "Adding..." : "Add Stock"}
+          {isSubmitting ? "Adding..." : "Add Adjustment"}
         </Button>
       </DialogActions>
     </Dialog>

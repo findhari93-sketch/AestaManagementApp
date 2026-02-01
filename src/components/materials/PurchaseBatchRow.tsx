@@ -51,6 +51,22 @@ export default function PurchaseBatchRow({
 }: PurchaseBatchRowProps) {
   const [open, setOpen] = useState(false)
 
+  // Get material info from batch - handle different data structures
+  // From useGroupStockBatches: items[].material_name (transformed)
+  // From useBatchesWithUsage: items[].material.name (raw Supabase)
+  const firstItem = batch.items?.[0]
+  const materialName = batch.material?.name
+    || firstItem?.material_name
+    || (firstItem as any)?.material?.name
+    || 'Unknown'
+  const materialUnit = batch.material?.unit
+    || firstItem?.unit
+    || (firstItem as any)?.material?.unit
+    || 'nos'
+  const brandName = batch.brand?.brand_name
+    || firstItem?.brand_name
+    || (firstItem as any)?.brand?.brand_name
+
   // Get purchase transaction for this batch
   const purchaseTransaction = transactions.find(tx => tx.transaction_type === 'purchase')
 
@@ -164,11 +180,11 @@ export default function PurchaseBatchRow({
         {/* Material */}
         <TableCell>
           <Typography variant="body2" fontWeight={500}>
-            {batch.material?.name || 'Unknown'}
+            {materialName}
           </Typography>
-          {batch.brand?.brand_name && (
+          {brandName && (
             <Typography variant="caption" color="text.secondary">
-              {batch.brand.brand_name}
+              {brandName}
             </Typography>
           )}
           <Typography variant="caption" color="text.secondary" display="block">
@@ -180,7 +196,7 @@ export default function PurchaseBatchRow({
         <TableCell align="right">
           <Box>
             <Typography variant="body2" fontWeight={500}>
-              {batch.original_quantity} {batch.material?.unit || 'nos'}
+              {batch.original_quantity} {materialUnit}
             </Typography>
             <Typography variant="caption" color="text.secondary">
               Used: {usedQuantity} ({usagePercentage.toFixed(0)}%)
@@ -332,7 +348,7 @@ export default function PurchaseBatchRow({
                             </TableCell>
                             <TableCell align="right">
                               <Typography variant="body2" color="warning.main">
-                                {allocation.quantity_used} {batch.material?.unit || 'nos'}
+                                {allocation.quantity_used} {materialUnit}
                               </Typography>
                             </TableCell>
                             <TableCell align="right">
@@ -480,7 +496,7 @@ export default function PurchaseBatchRow({
                   <UsageIcon sx={{ fontSize: 32, mb: 1, opacity: 0.3 }} />
                   <Typography variant="body2">
                     {usedQuantity > 0
-                      ? `Usage detected (${usedQuantity} ${batch.material?.unit || 'nos'}) but detailed breakdown not available`
+                      ? `Usage detected (${usedQuantity} ${materialUnit}) but detailed breakdown not available`
                       : 'No usage recorded for this purchase yet'}
                   </Typography>
                   {usedQuantity > 0 && (

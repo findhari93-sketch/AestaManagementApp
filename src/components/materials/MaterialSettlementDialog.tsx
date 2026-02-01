@@ -18,13 +18,23 @@ import {
   Divider,
   Alert,
   CircularProgress,
+  Chip,
 } from "@mui/material";
-import { Payment as PaymentIcon } from "@mui/icons-material";
+import {
+  Payment as PaymentIcon,
+  CheckCircle as CheckCircleIcon,
+  Warning as WarningIcon,
+} from "@mui/icons-material";
 import { createClient } from "@/lib/supabase/client";
 import PayerSourceSelector from "@/components/settlement/PayerSourceSelector";
 import FileUploader, { UploadedFile } from "@/components/common/FileUploader";
+import { BillPreviewButton } from "@/components/common/BillViewerDialog";
+import BillVerificationDialog from "@/components/materials/BillVerificationDialog";
+import SettlementVerificationPrompt, { useSettlementVerification } from "@/components/materials/SettlementVerificationPrompt";
 import { useSettleMaterialPurchase } from "@/hooks/queries/useMaterialPurchases";
 import { useRecordAdvancePayment } from "@/hooks/queries/usePurchaseOrders";
+import { useVerifyBill } from "@/hooks/queries/useBillVerification";
+import { useAuth } from "@/contexts/AuthContext";
 import type { MaterialPurchaseExpenseWithDetails, MaterialPaymentMode, PurchaseOrderWithDetails } from "@/types/material.types";
 import type { PayerSource } from "@/types/settlement.types";
 import { formatCurrency, formatDate } from "@/lib/formatters";
@@ -52,11 +62,33 @@ export default function MaterialSettlementDialog({
   onSuccess,
 }: MaterialSettlementDialogProps) {
   const supabase = createClient();
+  const { user } = useAuth();
   const settleMutation = useSettleMaterialPurchase();
   const advancePaymentMutation = useRecordAdvancePayment();
+  const verifyBillMutation = useVerifyBill();
+
+  // Bill verification workflow
+  const {
+    showPrompt: showVerificationPrompt,
+    setShowPrompt: setShowVerificationPrompt,
+    verificationConfirmed,
+    showVerificationDialog,
+    setShowVerificationDialog,
+    checkVerification,
+    handleProceed: handleVerificationProceed,
+    handleVerify,
+    handleVerificationComplete,
+    handleSkip,
+    resetVerification,
+  } = useSettlementVerification();
 
   // Determine if this is a PO advance payment or expense settlement
   const isPOAdvancePayment = !!purchaseOrder && !purchase;
+
+  // Get the effective PO (either passed directly or from purchase)
+  const effectivePO = purchaseOrder || purchase?.purchase_order;
+  const hasBill = !!effectivePO?.vendor_bill_url;
+  const billVerified = !!effectivePO?.bill_verified;
 
   // Form state
   const [settlementDate, setSettlementDate] = useState(
@@ -88,8 +120,9 @@ export default function MaterialSettlementDialog({
       setNotes("");
       setError("");
       setAmountPaid(purchaseAmount.toString()); // Initialize with original amount
+      resetVerification(); // Reset bill verification state
     }
-  }, [open, purchase, purchaseOrder]);
+  }, [open, purchase, purchaseOrder, resetVerification]);
 
   const handleSubmit = async () => {
     // Validation
@@ -103,6 +136,14 @@ export default function MaterialSettlementDialog({
     if (!finalAmountPaid || finalAmountPaid <= 0) {
       setError("Please enter a valid amount paid");
       return;
+    }
+
+    // Check bill verification before proceeding (only for non-advance payments)
+    if (!isPOAdvancePayment && hasBill && !billVerified) {
+      const canProceed = checkVerification(hasBill, billVerified);
+      if (!canProceed) {
+        return; // Will show verification prompt
+      }
     }
 
     // Handle PO advance payment
@@ -163,6 +204,32 @@ export default function MaterialSettlementDialog({
       console.error("Settlement failed:", err);
       setError(isVendorPaymentOnly ? "Failed to record vendor payment. Please try again." : "Failed to settle purchase. Please try again.");
     }
+  };
+
+  // Handler for completing bill verification
+  const handleBillVerified = async (notes?: string) => {
+    if (!effectivePO?.id || !user?.id) return;
+
+    try {
+      await verifyBillMutation.mutateAsync({
+        poId: effectivePO.id,
+        userId: user.id,
+        notes,
+      });
+      handleVerificationComplete();
+    } catch (err) {
+      console.error("Bill verification failed:", err);
+      setError("Failed to verify bill. Please try again.");
+    }
+  };
+
+  // Handler for when user confirms verification through prompt
+  const handleVerificationProceedAndSubmit = () => {
+    handleVerificationProceed();
+    // Auto-submit after confirming verification
+    setTimeout(() => {
+      handleSubmit();
+    }, 100);
   };
 
   if (!purchase && !purchaseOrder) return null;
@@ -227,7 +294,7 @@ export default function MaterialSettlementDialog({
         {isPOAdvancePayment && (
           <Alert severity="warning" sx={{ mb: 2 }}>
             Recording <strong>advance payment</strong> for this purchase order.
-            Materials haven't been delivered yet.
+            Materials have not been delivered yet.
           </Alert>
         )}
 
@@ -237,6 +304,45 @@ export default function MaterialSettlementDialog({
             This is a <strong>Group Stock</strong> purchase. Recording vendor payment here.
             Inter-site settlements will be handled separately in the Batches tab.
           </Alert>
+        )}
+
+        {/* Bill Verification Status */}
+        {!isPOAdvancePayment && hasBill && (
+          <Box
+            sx={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              p: 1.5,
+              mb: 2,
+              bgcolor: billVerified ? "success.lighter" : "warning.lighter",
+              borderRadius: 1,
+              border: 1,
+              borderColor: billVerified ? "success.light" : "warning.light",
+            }}
+          >
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+              {billVerified ? (
+                <CheckCircleIcon color="success" fontSize="small" />
+              ) : (
+                <WarningIcon color="warning" fontSize="small" />
+              )}
+              <Typography variant="body2" component="span">
+                Vendor Bill:{" "}
+              </Typography>
+              <Chip
+                label={billVerified ? "Verified" : "Unverified"}
+                color={billVerified ? "success" : "warning"}
+                size="small"
+                variant="outlined"
+              />
+            </Box>
+            <BillPreviewButton
+              billUrl={effectivePO?.vendor_bill_url || null}
+              label="View"
+              size="small"
+            />
+          </Box>
         )}
 
         {/* Editable Amount Field for Bargaining */}
@@ -407,6 +513,35 @@ export default function MaterialSettlementDialog({
             : (isPOAdvancePayment ? "Confirm Advance Payment" : isGroupStockParent ? "Confirm Vendor Payment" : "Confirm Settlement")}
         </Button>
       </DialogActions>
+
+      {/* Verification Prompt - shown when settling with unverified bill */}
+      <SettlementVerificationPrompt
+        open={showVerificationPrompt}
+        onClose={() => setShowVerificationPrompt(false)}
+        purchaseOrder={effectivePO || null}
+        purchase={purchase}
+        onProceed={handleVerificationProceedAndSubmit}
+        onVerify={handleVerify}
+        onSkip={() => {
+          handleSkip();
+          // Auto-submit after skipping
+          setTimeout(() => {
+            handleSubmit();
+          }, 100);
+        }}
+        isSettling={settleMutation.isPending}
+      />
+
+      {/* Bill Verification Dialog - side-by-side comparison (only when full PO is available) */}
+      {purchaseOrder && (
+        <BillVerificationDialog
+          open={showVerificationDialog}
+          onClose={() => setShowVerificationDialog(false)}
+          purchaseOrder={purchaseOrder}
+          onVerified={handleBillVerified}
+          isVerifying={verifyBillMutation.isPending}
+        />
+      )}
     </Dialog>
   );
 }

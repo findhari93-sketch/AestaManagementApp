@@ -52,7 +52,7 @@ import {
   useGroupStockPOsSyncStatus,
   usePushBatchToSettlement,
 } from "@/hooks/queries/usePurchaseOrders";
-import PurchaseOrderDialog from "@/components/materials/PurchaseOrderDialog";
+import UnifiedPurchaseOrderDialog from "@/components/materials/UnifiedPurchaseOrderDialog";
 import DeliveryDialog from "@/components/materials/DeliveryDialog";
 import PODetailsDrawer from "@/components/materials/PODetailsDrawer";
 import PODeleteConfirmationDialog from "@/components/materials/PODeleteConfirmationDialog";
@@ -397,12 +397,45 @@ export default function PurchaseOrdersPage() {
       {
         accessorKey: "total_amount",
         header: "Amount",
-        size: 120,
+        size: 140,
         Cell: ({ row }) => {
           const itemsTotal = row.original.total_amount || 0;
           const transportCost = row.original.transport_cost || 0;
           const grandTotal = itemsTotal + transportCost;
-          return grandTotal > 0 ? formatCurrency(grandTotal) : "-";
+
+          // Check if this is a Group Stock PO with settlement info
+          let parsedNotes: { is_group_stock?: boolean } | null = null;
+          if (row.original.internal_notes) {
+            try {
+              parsedNotes = typeof row.original.internal_notes === "string"
+                ? JSON.parse(row.original.internal_notes)
+                : row.original.internal_notes;
+            } catch {
+              // Ignore parse errors
+            }
+          }
+          const isGroupStock = parsedNotes?.is_group_stock === true;
+          const settlementInfo = isGroupStock ? syncStatusMap.get(row.original.id) : null;
+
+          if (grandTotal <= 0) return "-";
+
+          return (
+            <Box>
+              <Typography variant="body2" fontWeight={500}>
+                {formatCurrency(grandTotal)}
+              </Typography>
+              {settlementInfo && settlementInfo.usedByOthersAmount > 0 && (
+                <Typography variant="caption" color="text.secondary" display="block">
+                  Used by others: {formatCurrency(settlementInfo.usedByOthersAmount)}
+                </Typography>
+              )}
+              {settlementInfo && settlementInfo.settledAmount > 0 && (
+                <Typography variant="caption" color="success.main" display="block">
+                  Settled: {formatCurrency(settlementInfo.settledAmount)}
+                </Typography>
+              )}
+            </Box>
+          );
         },
       },
       {
@@ -421,7 +454,7 @@ export default function PurchaseOrdersPage() {
             : "-",
       },
     ],
-    [handleViewDetails]
+    [handleViewDetails, syncStatusMap]
   );
 
   // Row actions
@@ -523,7 +556,8 @@ export default function PurchaseOrdersPage() {
                   }
                 }
                 const isGroupStock = parsedNotes?.is_group_stock === true;
-                const isSynced = syncStatusMap.get(po.id) === true;
+                const settlementInfo = syncStatusMap.get(po.id);
+                const isSynced = settlementInfo?.isSynced === true;
 
                 if (isGroupStock && !isSynced) {
                   return (
@@ -721,7 +755,7 @@ export default function PurchaseOrdersPage() {
       )}
 
       {/* Create/Edit PO Dialog */}
-      <PurchaseOrderDialog
+      <UnifiedPurchaseOrderDialog
         open={dialogOpen}
         onClose={handleCloseDialog}
         purchaseOrder={editingPO}

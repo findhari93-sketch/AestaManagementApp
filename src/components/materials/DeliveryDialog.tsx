@@ -52,6 +52,12 @@ interface DeliveryItemRow extends DeliveryItemFormData {
   unit?: string;
   orderedQty: number;
   pendingQty: number;
+  // Pricing mode and weight tracking
+  pricing_mode?: 'per_piece' | 'per_kg';
+  calculated_weight?: number | null;
+  actual_weight?: number | null;
+  // Tax tracking
+  tax_rate?: number | null;
 }
 
 export default function DeliveryDialog({
@@ -105,12 +111,19 @@ export default function DeliveryDialog({
           unit: item.material?.unit,
           orderedQty: item.quantity,
           pendingQty: item.quantity - (item.received_qty || 0),
+          // Pass pricing mode and weight for proper display
+          pricing_mode: item.pricing_mode,
+          calculated_weight: item.calculated_weight,
+          actual_weight: item.actual_weight,
+          // Pass tax rate for accurate value calculation
+          tax_rate: item.tax_rate,
         }));
       setItems(deliveryItems);
     } else {
       setItems([]);
     }
-    setDeliveryDate(new Date().toISOString().split("T")[0]);
+    // Auto-fill delivery date with PO order date (user can modify if needed)
+    setDeliveryDate(purchaseOrder?.order_date || new Date().toISOString().split("T")[0]);
     setShowAdditionalDetails(false);
     setChallanNumber("");
     setChallanDate("");
@@ -148,21 +161,63 @@ export default function DeliveryDialog({
     );
   };
 
-  // Calculate totals
+  // Calculate totals - separate piece count and kg weight
   const totals = useMemo(() => {
-    let totalReceived = 0;
-    let totalAccepted = 0;
-    let totalRejected = 0;
-    let totalValue = 0;
+    let totalReceivedPcs = 0;
+    let totalAcceptedPcs = 0;
+    let totalRejectedPcs = 0;
+    let totalReceivedKg = 0;
+    let totalAcceptedKg = 0;
+    let subtotal = 0;
+    let taxAmount = 0;
+    let hasPerKgItems = false;
+    let hasMixedUnits = false;
 
     items.forEach((item) => {
-      totalReceived += item.received_qty;
-      totalAccepted += item.accepted_qty || item.received_qty;
-      totalRejected += item.rejected_qty || 0;
-      totalValue += (item.accepted_qty || item.received_qty) * (item.unit_price || 0);
+      const receivedQty = item.received_qty;
+      const acceptedQty = item.accepted_qty || item.received_qty;
+      const rejectedQty = item.rejected_qty || 0;
+
+      totalReceivedPcs += receivedQty;
+      totalAcceptedPcs += acceptedQty;
+      totalRejectedPcs += rejectedQty;
+
+      let itemSubtotal = 0;
+      if (item.pricing_mode === 'per_kg') {
+        hasPerKgItems = true;
+        // Calculate weight based on received/accepted quantity ratio
+        const originalQty = item.orderedQty || 1;
+        const weightPerPiece = (item.actual_weight ?? item.calculated_weight ?? 0) / originalQty;
+        totalReceivedKg += receivedQty * weightPerPiece;
+        totalAcceptedKg += acceptedQty * weightPerPiece;
+        // For per_kg items, value is based on weight
+        itemSubtotal = acceptedQty * weightPerPiece * (item.unit_price || 0);
+      } else {
+        if (hasPerKgItems) hasMixedUnits = true;
+        // For per_piece items, value is based on quantity
+        itemSubtotal = acceptedQty * (item.unit_price || 0);
+      }
+
+      subtotal += itemSubtotal;
+      // Add tax if item has tax rate
+      if (item.tax_rate) {
+        taxAmount += (itemSubtotal * item.tax_rate) / 100;
+      }
     });
 
-    return { totalReceived, totalAccepted, totalRejected, totalValue };
+    // If all items are per_kg, show kg totals; otherwise show piece counts
+    const allPerKg = hasPerKgItems && !hasMixedUnits && items.every(i => i.pricing_mode === 'per_kg');
+
+    return {
+      totalReceived: allPerKg ? totalReceivedKg : totalReceivedPcs,
+      totalAccepted: allPerKg ? totalAcceptedKg : totalAcceptedPcs,
+      totalRejected: totalRejectedPcs,
+      subtotal,
+      taxAmount,
+      totalValue: subtotal + taxAmount,
+      unit: allPerKg ? 'kg' : 'pcs',
+      hasPerKgItems,
+    };
   }, [items]);
 
   const handleSubmit = async () => {
@@ -469,10 +524,17 @@ export default function DeliveryDialog({
                           </Typography>
                           <Typography variant="caption" color="text.secondary">
                             {item.unit}
-                            {item.unit_price && ` • ${formatCurrency(item.unit_price)}/unit`}
+                            {item.unit_price && ` • ${formatCurrency(item.unit_price)}/${item.pricing_mode === 'per_kg' ? 'kg' : 'unit'}`}
                           </Typography>
                         </TableCell>
-                        <TableCell align="right">{item.orderedQty}</TableCell>
+                        <TableCell align="right">
+                          {item.orderedQty}
+                          {item.pricing_mode === 'per_kg' && (item.actual_weight ?? item.calculated_weight) && (
+                            <Typography variant="caption" color="text.secondary" display="block">
+                              {((item.actual_weight ?? item.calculated_weight) || 0).toFixed(1)} kg
+                            </Typography>
+                          )}
+                        </TableCell>
                         <TableCell align="right">
                           <Chip
                             label={item.pendingQty}
@@ -593,14 +655,16 @@ export default function DeliveryDialog({
                   <Typography variant="caption" color="text.secondary">
                     Total Received
                   </Typography>
-                  <Typography variant="h6">{totals.totalReceived}</Typography>
+                  <Typography variant="h6">
+                    {totals.unit === 'kg' ? totals.totalReceived.toFixed(1) : totals.totalReceived} {totals.unit}
+                  </Typography>
                 </Box>
                 <Box sx={{ textAlign: "center" }}>
                   <Typography variant="caption" color="text.secondary">
                     Total Accepted
                   </Typography>
                   <Typography variant="h6" color="success.main">
-                    {totals.totalAccepted}
+                    {totals.unit === 'kg' ? totals.totalAccepted.toFixed(1) : totals.totalAccepted} {totals.unit}
                   </Typography>
                 </Box>
                 {totals.totalRejected > 0 && (
@@ -609,7 +673,7 @@ export default function DeliveryDialog({
                       Total Rejected
                     </Typography>
                     <Typography variant="h6" color="error.main">
-                      {totals.totalRejected}
+                      {totals.totalRejected} pcs
                     </Typography>
                   </Box>
                 )}

@@ -173,9 +173,10 @@ export function useCreateMaterialUsage() {
 
       // 1. Find the stock inventory record for this material
       // Build query to find matching inventory
+      // Also select batch_code to check if it came from group stock
       let inventoryQuery = supabase
         .from("stock_inventory")
-        .select("id, current_qty, avg_unit_cost, brand_id")
+        .select("id, current_qty, avg_unit_cost, brand_id, batch_code")
         .eq("site_id", data.site_id)
         .eq("material_id", data.material_id)
         .gt("current_qty", 0);
@@ -184,7 +185,7 @@ export function useCreateMaterialUsage() {
       if (data.inventory_id) {
         inventoryQuery = supabase
           .from("stock_inventory")
-          .select("id, current_qty, avg_unit_cost, brand_id")
+          .select("id, current_qty, avg_unit_cost, brand_id, batch_code")
           .eq("id", data.inventory_id);
       } else if (data.brand_id) {
         // If brand specified, find that specific brand's stock
@@ -286,6 +287,63 @@ export function useCreateMaterialUsage() {
         throw error;
       }
 
+      // 7. If inventory has batch_code (came from group stock), sync to batch_usage_records
+      // This enables inter-site settlement tracking
+      if (inventory.batch_code) {
+        console.log("[useCreateMaterialUsage] Syncing to batch_usage_records for batch:", inventory.batch_code);
+
+        try {
+          // Get batch info to determine paying_site and site_group
+          const { data: batchInfo } = await (supabase as any)
+            .from("material_purchase_expenses")
+            .select("paying_site_id, site_group_id")
+            .eq("ref_code", inventory.batch_code)
+            .eq("purchase_type", "group_stock")
+            .maybeSingle();
+
+          if (batchInfo?.site_group_id) {
+            // Get material unit for batch_usage_records
+            const { data: materialInfo } = await supabase
+              .from("materials")
+              .select("unit")
+              .eq("id", data.material_id)
+              .single();
+
+            const unit = materialInfo?.unit || "nos";
+            const isSelfUse = batchInfo.paying_site_id === data.site_id;
+
+            // Create batch_usage_record entry for inter-site settlement
+            const { error: batchUsageError } = await (supabase as any)
+              .from("batch_usage_records")
+              .insert({
+                batch_ref_code: inventory.batch_code,
+                site_group_id: batchInfo.site_group_id,
+                usage_site_id: data.site_id,
+                material_id: data.material_id,
+                brand_id: data.brand_id || inventory.brand_id || null,
+                quantity: data.quantity,
+                unit: unit,
+                unit_cost: unitCost,
+                usage_date: data.usage_date || new Date().toISOString().split("T")[0],
+                work_description: data.work_description || null,
+                is_self_use: isSelfUse,
+                settlement_status: isSelfUse ? "self_use" : "pending",
+                created_by: userId,
+              });
+
+            if (batchUsageError) {
+              // Log but don't fail - batch_usage is for inter-site settlement, not critical
+              console.warn("[useCreateMaterialUsage] Failed to create batch_usage_record:", batchUsageError);
+            } else {
+              console.log("[useCreateMaterialUsage] Created batch_usage_record for inter-site settlement");
+            }
+          }
+        } catch (batchSyncError) {
+          // Non-critical - log but don't fail
+          console.warn("[useCreateMaterialUsage] Error syncing to batch_usage_records:", batchSyncError);
+        }
+      }
+
       return result as DailyMaterialUsage;
     },
     onSuccess: (_, variables) => {
@@ -308,6 +366,17 @@ export function useCreateMaterialUsage() {
       // Also invalidate stock transactions
       queryClient.invalidateQueries({
         queryKey: [...queryKeys.materialStock.bySite(variables.site_id), "transactions"],
+      });
+      // Invalidate batch usage and inter-site settlement queries
+      // to reflect the new usage in inter-site settlement page
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.batchUsage.bySite(variables.site_id),
+      });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.batchUsage.all,
+      });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.interSiteSettlements.all,
       });
     },
   });
@@ -405,9 +474,10 @@ export function useDeleteMaterialUsage() {
       }
 
       // 2. Find the stock inventory record to restore quantity
+      // Also fetch batch_code to check if we need to delete batch_usage_record
       let inventoryQuery = supabase
         .from("stock_inventory")
-        .select("id, current_qty")
+        .select("id, current_qty, batch_code")
         .eq("site_id", siteId)
         .eq("material_id", usageRecord.material_id);
 
@@ -444,6 +514,26 @@ export function useDeleteMaterialUsage() {
             notes: `Restored from deleted usage record (${usageRecord.usage_date})`,
             created_by: userId,
           });
+
+        // 4.5 Delete corresponding batch_usage_record if inventory came from group stock
+        if (inventory.batch_code) {
+          try {
+            const { error: batchUsageDeleteError } = await (supabase as any)
+              .from("batch_usage_records")
+              .delete()
+              .eq("batch_ref_code", inventory.batch_code)
+              .eq("usage_site_id", siteId)
+              .eq("material_id", usageRecord.material_id)
+              .eq("quantity", usageRecord.quantity)
+              .eq("usage_date", usageRecord.usage_date);
+
+            if (batchUsageDeleteError) {
+              console.warn("Failed to delete batch_usage_record:", batchUsageDeleteError);
+            }
+          } catch (err) {
+            console.warn("Error deleting batch_usage_record:", err);
+          }
+        }
       }
 
       // 5. Delete the usage record
@@ -475,6 +565,16 @@ export function useDeleteMaterialUsage() {
       });
       queryClient.invalidateQueries({
         queryKey: [...queryKeys.materialStock.bySite(result.siteId), "transactions"],
+      });
+      // Invalidate batch usage and inter-site settlement queries
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.batchUsage.bySite(result.siteId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.batchUsage.all,
+      });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.interSiteSettlements.all,
       });
     },
   });

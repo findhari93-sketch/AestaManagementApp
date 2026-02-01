@@ -26,6 +26,7 @@ import {
   CheckCircle as ApproveIcon,
   Cancel as CancelIcon,
   ShoppingCart as ConvertIcon,
+  ShoppingCart as POIcon,
 } from "@mui/icons-material";
 import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
 import PageHeader from "@/components/layout/PageHeader";
@@ -43,6 +44,7 @@ import {
 import MaterialRequestDialog from "@/components/materials/MaterialRequestDialog";
 import RequestApprovalDialog from "@/components/materials/RequestApprovalDialog";
 import RequestDetailsDrawer from "@/components/materials/RequestDetailsDrawer";
+import UnifiedPurchaseOrderDialog from "@/components/materials/UnifiedPurchaseOrderDialog";
 import type {
   MaterialRequestWithDetails,
   MaterialRequestStatus,
@@ -85,8 +87,11 @@ export default function MaterialRequestsPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [approvalDialogOpen, setApprovalDialogOpen] = useState(false);
   const [detailsDrawerOpen, setDetailsDrawerOpen] = useState(false);
+  const [convertDialogOpen, setConvertDialogOpen] = useState(false);
+  const [directPODialogOpen, setDirectPODialogOpen] = useState(false);
   const [editingRequest, setEditingRequest] = useState<MaterialRequestWithDetails | null>(null);
   const [selectedRequest, setSelectedRequest] = useState<MaterialRequestWithDetails | null>(null);
+  const [requestToConvert, setRequestToConvert] = useState<MaterialRequestWithDetails | null>(null);
   const [currentTab, setCurrentTab] = useState<TabValue>("all");
   const [searchTerm, setSearchTerm] = useState("");
 
@@ -170,6 +175,21 @@ export default function MaterialRequestsPage() {
     setSelectedRequest(null);
   }, []);
 
+  const handleOpenConvertDialog = useCallback((request: MaterialRequestWithDetails) => {
+    setRequestToConvert(request);
+    setConvertDialogOpen(true);
+  }, []);
+
+  const handleCloseConvertDialog = useCallback(() => {
+    setConvertDialogOpen(false);
+    setRequestToConvert(null);
+  }, []);
+
+  const handleConvertSuccess = useCallback((poId: string) => {
+    // Optionally navigate to the PO or show a success message
+    handleCloseConvertDialog();
+  }, [handleCloseConvertDialog]);
+
   const handleCancel = useCallback(
     async (request: MaterialRequestWithDetails) => {
       if (!confirm("Are you sure you want to cancel this request?")) return;
@@ -188,7 +208,12 @@ export default function MaterialRequestsPage() {
       const reason = prompt("Enter rejection reason:");
       if (reason === null) return;
       try {
-        await rejectRequest.mutateAsync({ id: request.id, userId: user.id, reason });
+        await rejectRequest.mutateAsync({
+          id: request.id,
+          userId: user.id,
+          reason,
+          siteId: request.site_id, // Added for optimistic update
+        });
       } catch (error) {
         console.error("Failed to reject request:", error);
       }
@@ -277,6 +302,16 @@ export default function MaterialRequestsPage() {
     [handleViewDetails]
   );
 
+  // Memoized props for DataTable to prevent re-renders
+  const tableInitialState = useMemo(
+    () => ({
+      sorting: [{ id: "request_number", desc: true }],
+    }),
+    []
+  );
+
+  const mobileHiddenColumns = useMemo(() => ["items", "required_by_date"], []);
+
   // Row actions
   const renderRowActions = useCallback(
     ({ row }: { row: { original: MaterialRequestWithDetails } }) => {
@@ -334,9 +369,13 @@ export default function MaterialRequestsPage() {
             </>
           )}
 
-          {request.status === "approved" && isAdmin && (
+          {["approved", "ordered", "partial_fulfilled"].includes(request.status) && isAdmin && (
             <Tooltip title="Convert to PO">
-              <IconButton size="small" color="primary">
+              <IconButton
+                size="small"
+                color="primary"
+                onClick={() => handleOpenConvertDialog(request)}
+              >
                 <ConvertIcon fontSize="small" />
               </IconButton>
             </Tooltip>
@@ -350,6 +389,7 @@ export default function MaterialRequestsPage() {
       handleViewDetails,
       handleOpenDialog,
       handleOpenApprovalDialog,
+      handleOpenConvertDialog,
       handleCancel,
       handleReject,
     ]
@@ -371,13 +411,22 @@ export default function MaterialRequestsPage() {
         title="Material Requests"
         actions={
           !isMobile && canEdit ? (
-            <Button
-              variant="contained"
-              startIcon={<AddIcon />}
-              onClick={() => handleOpenDialog()}
-            >
-              New Request
-            </Button>
+            <Stack direction="row" spacing={1}>
+              <Button
+                variant="outlined"
+                startIcon={<POIcon />}
+                onClick={() => setDirectPODialogOpen(true)}
+              >
+                Create PO
+              </Button>
+              <Button
+                variant="contained"
+                startIcon={<AddIcon />}
+                onClick={() => handleOpenDialog()}
+              >
+                New Request
+              </Button>
+            </Stack>
           ) : null
         }
       />
@@ -475,10 +524,8 @@ export default function MaterialRequestsPage() {
         isLoading={isLoading}
         enableRowActions
         renderRowActions={renderRowActions}
-        mobileHiddenColumns={["items", "required_by_date"]}
-        initialState={{
-          sorting: [{ id: "request_number", desc: true }],
-        }}
+        mobileHiddenColumns={mobileHiddenColumns}
+        initialState={tableInitialState}
       />
 
       {/* Mobile FAB */}
@@ -514,8 +561,27 @@ export default function MaterialRequestsPage() {
         request={selectedRequest}
         onEdit={handleOpenDialog}
         onApprove={handleOpenApprovalDialog}
+        onConvertToPO={handleOpenConvertDialog}
         canEdit={canEdit}
         isAdmin={isAdmin}
+      />
+
+      {/* Convert to PO Dialog (from request) */}
+      {requestToConvert && (
+        <UnifiedPurchaseOrderDialog
+          open={convertDialogOpen}
+          onClose={handleCloseConvertDialog}
+          request={requestToConvert}
+          siteId={selectedSite.id}
+          onSuccess={handleConvertSuccess}
+        />
+      )}
+
+      {/* Direct PO Dialog (no request) */}
+      <UnifiedPurchaseOrderDialog
+        open={directPODialogOpen}
+        onClose={() => setDirectPODialogOpen(false)}
+        siteId={selectedSite.id}
       />
     </Box>
   );

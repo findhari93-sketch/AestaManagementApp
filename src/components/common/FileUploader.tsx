@@ -26,6 +26,7 @@ import {
   Visibility,
 } from "@mui/icons-material";
 import { SupabaseClient } from "@supabase/supabase-js";
+import { ensureFreshSession } from "@/lib/auth/sessionManager";
 
 export type FileType = "pdf" | "image" | "all";
 export type UploadedFile = {
@@ -381,8 +382,15 @@ export default function FileUploader({
         }, 60000);
       });
 
+      // ... existing imports
+
+      // Inside FileUploader component, uploadFile function:
+
       try {
         const uploadPromise = (async () => {
+          // Ensure fresh session before starting upload
+          await ensureFreshSession();
+
           // Compress image if enabled and file is an image
           let fileToUpload = file;
           const effectiveMime = getEffectiveMimeType(file);
@@ -597,10 +605,10 @@ export default function FileUploader({
     lastUploadedFile ||
     (pendingFile
       ? {
-          name: pendingFile.name,
-          size: pendingFile.size,
-          type: pendingFile.type,
-        }
+        name: pendingFile.name,
+        size: pendingFile.size,
+        type: pendingFile.type,
+      }
       : null);
 
   // Determine if the file is successfully uploaded (either value from parent or lastUploadedFile)
@@ -639,38 +647,38 @@ export default function FileUploader({
           borderColor: error
             ? "error.main"
             : isDragging
-            ? "primary.main"
-            : hasFile
-            ? "success.main"
-            : "divider",
+              ? "primary.main"
+              : hasFile
+                ? "success.main"
+                : "divider",
           borderRadius: 2,
           bgcolor: error
             ? alpha(theme.palette.error.main, 0.04)
             : isDragging
-            ? alpha(theme.palette.primary.main, 0.08)
-            : hasFile
-            ? alpha(theme.palette.success.main, 0.05)
-            : "background.default",
+              ? alpha(theme.palette.primary.main, 0.08)
+              : hasFile
+                ? alpha(theme.palette.success.main, 0.05)
+                : "background.default",
           cursor: disabled
             ? "not-allowed"
             : uploading
-            ? "wait"
-            : hasFile
-            ? "default"
-            : "pointer",
+              ? "wait"
+              : hasFile
+                ? "default"
+                : "pointer",
           opacity: disabled ? 0.6 : 1,
           transition: "all 0.2s ease-in-out",
           "&:hover": {
             borderColor: disabled
               ? "divider"
               : hasFile
-              ? "success.main"
-              : "primary.main",
+                ? "success.main"
+                : "primary.main",
             bgcolor: disabled
               ? "background.default"
               : hasFile
-              ? alpha(theme.palette.success.main, 0.08)
-              : alpha(theme.palette.primary.main, 0.04),
+                ? alpha(theme.palette.success.main, 0.08)
+                : alpha(theme.palette.primary.main, 0.04),
           },
         }}
       >

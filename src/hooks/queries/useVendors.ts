@@ -239,6 +239,183 @@ export function useVendor(id: string | undefined) {
 }
 
 /**
+ * Vendor with material supply info for conversion dialog
+ */
+export interface VendorForMaterials extends Vendor {
+  suppliedMaterialCount: number;
+  suppliedMaterials: string[];
+  isPreferred: boolean;
+  purchaseCount: number;
+}
+
+/**
+ * Fetch vendors that supply specific materials
+ * Used in Convert to PO dialog to show only relevant vendors
+ * Prioritized by: number of materials supplied > is_preferred > purchase frequency
+ */
+export function useVendorsForMaterials(materialIds: string[] | undefined, siteId?: string) {
+  const supabase = createClient();
+
+  return useQuery({
+    queryKey: ["vendors", "for-materials", materialIds, siteId],
+    queryFn: async (): Promise<VendorForMaterials[]> => {
+      if (!materialIds || materialIds.length === 0) {
+        return [];
+      }
+
+      // Get vendors that supply the requested materials from material_vendors table
+      const { data: materialVendors, error: mvError } = await supabase
+        .from("material_vendors")
+        .select(`
+          vendor_id,
+          material_id,
+          is_preferred,
+          vendor:vendors!inner(
+            id, name, code, contact_person, phone, alternate_phone,
+            whatsapp_number, email, address, city, state, gst_number,
+            vendor_type, is_active
+          )
+        `)
+        .in("material_id", materialIds)
+        .eq("is_active", true);
+
+      if (mvError) throw mvError;
+
+      // Also check vendor_inventory table for additional vendor-material links
+      const { data: vendorInventory, error: viError } = await supabase
+        .from("vendor_inventory")
+        .select(`
+          vendor_id,
+          material_id,
+          vendor:vendors!inner(
+            id, name, code, contact_person, phone, alternate_phone,
+            whatsapp_number, email, address, city, state, gst_number,
+            vendor_type, is_active
+          )
+        `)
+        .in("material_id", materialIds)
+        .eq("is_available", true);
+
+      if (viError) throw viError;
+
+      // Combine and deduplicate vendors, tracking which materials each supplies
+      const vendorMap = new Map<string, {
+        vendor: any;
+        suppliedMaterials: Set<string>;
+        isPreferred: boolean;
+      }>();
+
+      // Process material_vendors (filter out inactive vendors)
+      for (const mv of (materialVendors || [])) {
+        const vendor = mv.vendor as any;
+        if (!vendor?.is_active) continue; // Skip inactive vendors
+
+        const vendorId = mv.vendor_id;
+        if (!vendorMap.has(vendorId)) {
+          vendorMap.set(vendorId, {
+            vendor: vendor,
+            suppliedMaterials: new Set(),
+            isPreferred: false,
+          });
+        }
+        const entry = vendorMap.get(vendorId)!;
+        entry.suppliedMaterials.add(mv.material_id);
+        if (mv.is_preferred) {
+          entry.isPreferred = true;
+        }
+      }
+
+      // Process vendor_inventory (filter out inactive vendors)
+      for (const vi of (vendorInventory || [])) {
+        const vendor = vi.vendor as any;
+        if (!vendor?.is_active) continue; // Skip inactive vendors
+
+        const vendorId = vi.vendor_id;
+        if (!vendorMap.has(vendorId)) {
+          vendorMap.set(vendorId, {
+            vendor: vendor,
+            suppliedMaterials: new Set(),
+            isPreferred: false,
+          });
+        }
+        const entry = vendorMap.get(vendorId)!;
+        if (vi.material_id) {
+          entry.suppliedMaterials.add(vi.material_id);
+        }
+      }
+
+      // Get all vendor IDs for purchase count query
+      const vendorIds = Array.from(vendorMap.keys());
+
+      if (vendorIds.length === 0) {
+        return [];
+      }
+
+      // Get purchase order counts for these vendors (to prioritize frequently used)
+      let purchaseCountQuery = supabase
+        .from("purchase_orders")
+        .select("vendor_id")
+        .in("vendor_id", vendorIds);
+
+      // Optionally filter by site for more relevant results
+      if (siteId) {
+        purchaseCountQuery = purchaseCountQuery.eq("site_id", siteId);
+      }
+
+      const { data: purchaseOrders, error: poError } = await purchaseCountQuery;
+
+      if (poError) {
+        console.warn("Error fetching purchase counts:", poError);
+      }
+
+      // Count purchases per vendor
+      const purchaseCounts = new Map<string, number>();
+      for (const po of (purchaseOrders || [])) {
+        const count = purchaseCounts.get(po.vendor_id) || 0;
+        purchaseCounts.set(po.vendor_id, count + 1);
+      }
+
+      // Build final vendor list
+      const vendors: VendorForMaterials[] = [];
+      for (const [vendorId, entry] of vendorMap) {
+        vendors.push({
+          ...entry.vendor,
+          suppliedMaterialCount: entry.suppliedMaterials.size,
+          suppliedMaterials: Array.from(entry.suppliedMaterials),
+          isPreferred: entry.isPreferred,
+          purchaseCount: purchaseCounts.get(vendorId) || 0,
+        });
+      }
+
+      // Sort vendors:
+      // 1. By number of materials they supply (descending) - vendors supplying more materials first
+      // 2. By preferred status (preferred vendors first)
+      // 3. By purchase count (descending) - frequently used vendors first
+      // 4. By name (alphabetical)
+      vendors.sort((a, b) => {
+        // More materials supplied = higher priority
+        if (b.suppliedMaterialCount !== a.suppliedMaterialCount) {
+          return b.suppliedMaterialCount - a.suppliedMaterialCount;
+        }
+        // Preferred vendors first
+        if (a.isPreferred !== b.isPreferred) {
+          return a.isPreferred ? -1 : 1;
+        }
+        // More purchases = higher priority
+        if (b.purchaseCount !== a.purchaseCount) {
+          return b.purchaseCount - a.purchaseCount;
+        }
+        // Alphabetical by name
+        return a.name.localeCompare(b.name);
+      });
+
+      return vendors;
+    },
+    enabled: !!materialIds && materialIds.length > 0,
+  });
+}
+
+/**
  * Search vendors by name
  */
 export function useVendorSearch(searchTerm: string) {

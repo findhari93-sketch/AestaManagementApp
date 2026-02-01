@@ -613,6 +613,14 @@ export interface PurchaseOrder {
   created_at: string;
   updated_at: string;
   created_by: string | null;
+  // Bill verification fields
+  vendor_bill_url: string | null;
+  bill_verified: boolean;
+  bill_verified_by: string | null;
+  bill_verified_at: string | null;
+  bill_verification_notes: string | null;
+  // Source material request (if converted from a request)
+  source_request_id: string | null;
 }
 
 export interface PurchaseOrderItem {
@@ -842,6 +850,8 @@ export interface PurchaseOrderWithDetails extends PurchaseOrder {
   site?: { name: string };
   items?: PurchaseOrderItemWithMaterial[];
   deliveries?: Delivery[];
+  // Source material request (if created from a request)
+  source_request?: SourceRequestInfo | null;
 }
 
 export interface PurchaseOrderItemWithMaterial extends PurchaseOrderItem {
@@ -867,11 +877,109 @@ export interface MaterialRequestWithDetails extends MaterialRequest {
   requested_by_user?: { name: string; email: string };
   approved_by_user?: { name: string } | null;
   items?: MaterialRequestItemWithMaterial[];
+  // Linked purchase orders (from source_request_id on POs)
+  linked_purchase_orders?: LinkedPurchaseOrderSummary[];
 }
 
 export interface MaterialRequestItemWithMaterial extends MaterialRequestItem {
   material?: Material;
   brand?: MaterialBrand | null;
+}
+
+// ============================================
+// REQUEST-TO-PO LINKING TYPES
+// ============================================
+
+/**
+ * Junction record linking PO items to Request items
+ * Tracks which portion of a request item is allocated to which PO item
+ */
+export interface PurchaseOrderRequestItem {
+  id: string;
+  po_item_id: string;
+  request_item_id: string;
+  quantity_allocated: number;
+  created_at: string;
+}
+
+/**
+ * Linked PO summary for display in Request Details
+ */
+export interface LinkedPurchaseOrderSummary {
+  id: string;
+  po_number: string;
+  status: POStatus;
+  vendor_name: string;
+  total_amount: number | null;
+  order_date: string;
+  item_count: number;
+}
+
+/**
+ * Source request info for display in PO Details
+ */
+export interface SourceRequestInfo {
+  id: string;
+  request_number: string;
+  status: MaterialRequestStatus;
+  priority: RequestPriority;
+  required_by_date: string | null;
+  requested_by_user?: { name: string } | null;
+}
+
+/**
+ * View model for items in the Convert to PO dialog
+ * Includes calculated remaining quantities
+ */
+export interface RequestItemForConversion {
+  id: string;
+  material_id: string;
+  material_name: string;
+  material_code: string | null;
+  unit: string;
+  brand_id: string | null;
+  brand_name: string | null;
+  requested_qty: number;
+  approved_qty: number;
+  already_ordered_qty: number;
+  remaining_qty: number;
+  estimated_cost: number | null;
+  // Form state
+  selected: boolean;
+  quantity_to_order: number;
+  unit_price: number;
+  tax_rate: number;
+  // Enhanced fields for office staff to select variant/brand
+  // These allow office to decide on specific variant and brand when supervisors request parent material
+  has_variants?: boolean;
+  variants?: Array<{ id: string; name: string }>;
+  selected_variant_id?: string | null;
+  selected_variant_name?: string | null;
+  selected_brand_id?: string | null;
+  selected_brand_name?: string | null;
+}
+
+/**
+ * Form data for converting a material request to purchase order
+ */
+export interface ConvertRequestToPOFormData {
+  request_id: string;
+  vendor_id: string;
+  items: Array<{
+    request_item_id: string;
+    material_id: string;
+    brand_id?: string;
+    quantity: number;
+    unit_price: number;
+    tax_rate?: number;
+  }>;
+  expected_delivery_date?: string;
+  delivery_address?: string;
+  delivery_location_id?: string;
+  payment_terms?: string;
+  payment_timing?: "advance" | "on_delivery";
+  transport_cost?: number;
+  notes?: string;
 }
 
 export interface DailyMaterialUsageWithDetails extends DailyMaterialUsage {
@@ -1131,6 +1239,9 @@ export interface PurchaseOrderFormData {
   // For historical purchases - allow overriding defaults
   order_date?: string; // Override default (today's date)
   status?: string; // Override default ("draft")
+  vendor_bill_url?: string; // Vendor bill/invoice URL
+  // Source material request (if converted from a request)
+  source_request_id?: string;
 }
 
 export interface PurchaseOrderItemFormData {
@@ -1671,7 +1782,7 @@ export interface MaterialPurchaseExpenseWithDetails extends MaterialPurchaseExpe
   paying_site?: { id: string; name: string } | null;
   vendor?: Vendor | null;
   site_group?: SiteGroup | null;
-  purchase_order?: { id: string; po_number: string } | null;
+  purchase_order?: { id: string; po_number: string; vendor_bill_url?: string | null; bill_verified?: boolean } | null;
   items?: MaterialPurchaseExpenseItemWithDetails[];
   created_by_user?: { name: string } | null;
 }
@@ -1880,3 +1991,103 @@ export const BATCH_USAGE_SETTLEMENT_STATUS_COLORS: Record<BatchUsageSettlementSt
   settled: "success",
   self_use: "info",
 };
+
+// ============================================
+// WEIGHT PREDICTION TYPES
+// ============================================
+
+/**
+ * Weight prediction statistics for a vendor/material/brand combination
+ * Aggregated from historical TMT weight data
+ */
+export interface WeightPredictionStats {
+  vendorId: string;
+  materialId: string;
+  brandId: string | null;
+  avgWeightPerPiece: number;
+  sampleCount: number;
+  totalPiecesSampled: number;
+  weightStddev: number | null;
+  minWeight: number;
+  maxWeight: number;
+  avgDeviationPercent: number | null;
+  lastRecordedDate: string;
+}
+
+/**
+ * Result of weight prediction calculation
+ */
+export interface PredictedWeight {
+  /** Source of the prediction: 'historical' uses past data, 'standard' uses material specs */
+  source: 'historical' | 'standard';
+  /** Weight per piece in kg */
+  weightPerPiece: number;
+  /** Total weight in kg */
+  totalWeight: number;
+  /** Confidence level based on sample count and variance */
+  confidenceLevel: 'high' | 'medium' | 'low' | 'none';
+  /** Number of historical samples used for prediction */
+  sampleCount: number;
+  /** Deviation from standard weight as percentage (null if no standard) */
+  deviationFromStandard: number | null;
+  /** Human-readable display text */
+  displayText: string;
+}
+
+export type WeightConfidenceLevel = 'high' | 'medium' | 'low' | 'none';
+
+export const WEIGHT_CONFIDENCE_LABELS: Record<WeightConfidenceLevel, string> = {
+  high: 'High Confidence',
+  medium: 'Medium Confidence',
+  low: 'Low Confidence',
+  none: 'Standard Weight',
+};
+
+export const WEIGHT_CONFIDENCE_COLORS: Record<WeightConfidenceLevel, 'success' | 'info' | 'warning' | 'default'> = {
+  high: 'success',
+  medium: 'info',
+  low: 'warning',
+  none: 'default',
+};
+
+// ============================================
+// BILL VERIFICATION TYPES
+// ============================================
+
+/**
+ * Bill verification status for a purchase order
+ */
+export interface BillVerificationStatus {
+  hasVendorBill: boolean;
+  isVerified: boolean;
+  verifiedBy: string | null;
+  verifiedAt: string | null;
+  verificationNotes: string | null;
+}
+
+/**
+ * Form data for verifying a bill
+ */
+export interface BillVerificationFormData {
+  poId: string;
+  notes?: string;
+}
+
+/**
+ * TMT weight history record from database
+ */
+export interface TmtWeightHistory {
+  id: string;
+  vendor_id: string;
+  material_id: string;
+  brand_id: string | null;
+  actual_weight_per_piece: number;
+  standard_weight_per_piece: number | null;
+  deviation_percent: number | null;
+  source_po_id: string | null;
+  source_po_item_id: string | null;
+  quantity_in_sample: number;
+  total_weight: number;
+  recorded_date: string;
+  created_at: string;
+}

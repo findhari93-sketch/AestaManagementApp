@@ -38,3 +38,6 @@ next-env.d.ts
 
 .vercel
 nul
+
+# Supabase backups
+supabase/production_backup.sql

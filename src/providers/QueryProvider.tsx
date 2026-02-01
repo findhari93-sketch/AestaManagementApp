@@ -4,6 +4,7 @@ import { QueryClient } from "@tanstack/react-query";
 import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
 import { useState, useEffect, useRef } from "react";
 import { createIDBPersister } from "@/lib/cache/persistor";
+import { shouldPersistQuery } from "@/lib/cache/keys";
 import { initBackgroundSync, stopBackgroundSync } from "@/lib/cache/sync";
 import { useSite } from "@/contexts/SiteContext";
 import { useTab } from "@/providers/TabProvider";
@@ -89,7 +90,20 @@ export default function QueryProvider({
             networkMode: "online", // Online mode to prevent showing stale data from wrong site
           },
           mutations: {
-            retry: 1,
+            retry: (failureCount, error: any) => {
+              // Don't retry on client errors (4xx) - these won't succeed on retry
+              // 400 = Bad Request (invalid data)
+              // 401/403 = Auth issues
+              // 409 = Conflict (unique constraint violation, already exists)
+              // 422 = Validation error
+              const status = error?.status || error?.code;
+              if (status === 400 || status === 401 || status === 403 || status === 409 || status === 422) {
+                console.warn(`[QueryClient] Mutation failed with ${status} - not retrying`);
+                return false;
+              }
+              // Only retry server errors (5xx) and network errors once
+              return failureCount < 1;
+            },
             networkMode: "online",
             onError: (error) => {
               // Redirect to login on session/auth errors
@@ -111,7 +125,12 @@ export default function QueryProvider({
       persistOptions={{
         persister,
         maxAge: 24 * 60 * 60 * 1000, // 24 hours max age for persisted data
-        buster: "v1", // Change this to invalidate all persisted cache
+        buster: "v2", // Change this to invalidate all persisted cache
+        dehydrateOptions: {
+          shouldDehydrateQuery: (query) => {
+            return shouldPersistQuery(query.queryKey);
+          },
+        },
       }}
       onSuccess={() => {
         // After cache restoration, invalidate queries that are past the default staleTime

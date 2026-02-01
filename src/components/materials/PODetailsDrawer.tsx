@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import {
   Drawer,
   Box,
@@ -24,10 +25,12 @@ import {
   LocalShipping as DeliveryIcon,
   Phone as PhoneIcon,
   Email as EmailIcon,
+  Assignment as AssignmentIcon,
 } from "@mui/icons-material";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { usePurchaseOrder, useDeliveries } from "@/hooks/queries/usePurchaseOrders";
-import type { PurchaseOrderWithDetails, POStatus } from "@/types/material.types";
+import type { PurchaseOrderWithDetails, POStatus, SourceRequestInfo } from "@/types/material.types";
+import { PRIORITY_LABELS, PRIORITY_COLORS, REQUEST_STATUS_LABELS } from "@/types/material.types";
 import { formatCurrency, formatDate } from "@/lib/formatters";
 
 interface PODetailsDrawerProps {
@@ -80,12 +83,52 @@ export default function PODetailsDrawer({
 
   const po = fullPO || purchaseOrder;
 
-  if (!po) return null;
+  // Calculate fulfillment progress - separate piece count and kg weight
+  // Must be before the early return to maintain consistent hook order
+  const fulfillmentStats = useMemo(() => {
+    if (!po?.items || po.items.length === 0) {
+      return { totalOrdered: 0, totalReceived: 0, percent: 0, unit: 'pcs' };
+    }
 
-  // Calculate fulfillment progress
-  const totalOrdered = po.items?.reduce((sum, item) => sum + item.quantity, 0) || 0;
-  const totalReceived = po.items?.reduce((sum, item) => sum + item.received_qty, 0) || 0;
-  const fulfillmentPercent = totalOrdered > 0 ? (totalReceived / totalOrdered) * 100 : 0;
+    let totalOrderedPcs = 0;
+    let totalReceivedPcs = 0;
+    let totalOrderedKg = 0;
+    let totalReceivedKg = 0;
+    let hasPerKgItems = false;
+    let allPerKg = true;
+
+    po.items.forEach((item) => {
+      totalOrderedPcs += item.quantity;
+      totalReceivedPcs += item.received_qty || 0;
+
+      if (item.pricing_mode === 'per_kg') {
+        hasPerKgItems = true;
+        const weight = item.actual_weight ?? item.calculated_weight ?? 0;
+        const weightPerPiece = item.quantity > 0 ? weight / item.quantity : 0;
+        totalOrderedKg += weight;
+        totalReceivedKg += (item.received_qty || 0) * weightPerPiece;
+      } else {
+        allPerKg = false;
+      }
+    });
+
+    // If all items are per_kg, show kg; otherwise show pieces
+    const useKg = hasPerKgItems && allPerKg;
+    const ordered = useKg ? totalOrderedKg : totalOrderedPcs;
+    const received = useKg ? totalReceivedKg : totalReceivedPcs;
+    const percent = ordered > 0 ? (received / ordered) * 100 : 0;
+
+    return {
+      totalOrdered: useKg ? ordered.toFixed(1) : ordered,
+      totalReceived: useKg ? received.toFixed(1) : received,
+      percent,
+      unit: useKg ? 'kg' : 'items',
+    };
+  }, [po?.items]);
+
+  const fulfillmentPercent = fulfillmentStats.percent;
+
+  if (!po) return null;
 
   const canRecordDelivery = ["ordered", "partial_delivered"].includes(po.status);
   const canEditPO = po.status === "draft" && canEdit;
@@ -158,6 +201,51 @@ export default function PODetailsDrawer({
           </Stack>
         </Paper>
 
+        {/* Source Request - if this PO was converted from a material request */}
+        {po.source_request && (
+          <Paper
+            variant="outlined"
+            sx={{
+              p: 2,
+              mb: 2,
+              bgcolor: "info.50",
+              borderColor: "info.200",
+              cursor: "pointer",
+              "&:hover": { bgcolor: "info.100" },
+            }}
+            onClick={() => window.open(`/site/material-requests?request=${(po.source_request as SourceRequestInfo).id}`, "_blank")}
+          >
+            <Box sx={{ display: "flex", alignItems: "flex-start", gap: 1.5 }}>
+              <AssignmentIcon color="info" sx={{ mt: 0.5 }} />
+              <Box sx={{ flex: 1 }}>
+                <Typography variant="subtitle2" color="info.main" gutterBottom>
+                  Converted from Material Request
+                </Typography>
+                <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
+                  <Typography variant="body2" fontWeight={500}>
+                    {(po.source_request as SourceRequestInfo).request_number}
+                  </Typography>
+                  <Chip
+                    label={PRIORITY_LABELS[(po.source_request as SourceRequestInfo).priority]}
+                    size="small"
+                    color={PRIORITY_COLORS[(po.source_request as SourceRequestInfo).priority]}
+                  />
+                  <Chip
+                    label={REQUEST_STATUS_LABELS[(po.source_request as SourceRequestInfo).status]}
+                    size="small"
+                    variant="outlined"
+                  />
+                </Box>
+                {(po.source_request as SourceRequestInfo).required_by_date && (
+                  <Typography variant="caption" color="text.secondary">
+                    Required by: {formatDate((po.source_request as SourceRequestInfo).required_by_date!)}
+                  </Typography>
+                )}
+              </Box>
+            </Box>
+          </Paper>
+        )}
+
         {/* Order Details */}
         <Grid container spacing={2} sx={{ mb: 2 }}>
           <Grid size={6}>
@@ -209,7 +297,7 @@ export default function PODetailsDrawer({
                 Fulfillment Progress
               </Typography>
               <Typography variant="caption">
-                {totalReceived} / {totalOrdered} items ({fulfillmentPercent.toFixed(0)}%)
+                {fulfillmentStats.totalReceived} / {fulfillmentStats.totalOrdered} {fulfillmentStats.unit} ({fulfillmentPercent.toFixed(0)}%)
               </Typography>
             </Box>
             <LinearProgress
@@ -247,9 +335,16 @@ export default function PODetailsDrawer({
                       {item.material?.code} • {item.material?.unit}
                     </Typography>
                   </TableCell>
-                  <TableCell align="right">{item.quantity}</TableCell>
                   <TableCell align="right">
-                    {formatCurrency(item.unit_price)}
+                    {item.quantity} pcs
+                    {item.pricing_mode === 'per_kg' && (item.actual_weight ?? item.calculated_weight) && (
+                      <Typography variant="caption" color="text.secondary" display="block">
+                        {((item.actual_weight ?? item.calculated_weight) || 0).toFixed(1)} kg
+                      </Typography>
+                    )}
+                  </TableCell>
+                  <TableCell align="right">
+                    {formatCurrency(item.unit_price)}/{item.pricing_mode === 'per_kg' ? 'kg' : item.material?.unit}
                   </TableCell>
                   <TableCell align="right">
                     {formatCurrency(item.total_amount)}

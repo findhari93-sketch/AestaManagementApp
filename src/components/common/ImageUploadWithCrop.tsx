@@ -19,6 +19,7 @@ import {
   Image as ImageIcon,
 } from "@mui/icons-material";
 import { SupabaseClient } from "@supabase/supabase-js";
+import { ensureFreshSession } from "@/lib/auth/sessionManager";
 import ImageCropper from "@/components/profile/ImageCropper";
 
 interface ImageUploadWithCropProps {
@@ -108,7 +109,14 @@ export default function ImageUploadWithCrop({
     const uploadTimeout = 15000;
     let timeoutId: NodeJS.Timeout | null = null;
 
+    // ... existing imports
+
+    // Inside handleCropComplete:
+
     try {
+      // Ensure fresh session before starting upload
+      await ensureFreshSession();
+
       // Compress the cropped image if needed
       let finalBlob = croppedBlob;
       if (croppedBlob.size > maxSizeKB * 1024) {

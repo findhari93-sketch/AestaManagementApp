@@ -14,7 +14,7 @@ import { createClient } from "@/lib/supabase/client";
  * - Error recovery with user notification
  */
 
-const REFRESH_INTERVAL = 45 * 60 * 1000; // 45 minutes
+// const REFRESH_INTERVAL = 45 * 60 * 1000; // REMOVED: Conflicting with Supabase auto-refresh
 const IDLE_THRESHOLD = 15 * 60 * 1000; // 15 minutes
 const ACTIVITY_DEBOUNCE = 2000; // 2 seconds
 const SESSION_CHECK_DEBOUNCE = 5000; // 5 seconds - skip session check if done recently
@@ -24,7 +24,7 @@ type SessionManagerState = {
   isInitialized: boolean;
   lastActivity: number;
   lastSessionCheckTime: number;
-  refreshTimer: ReturnType<typeof setInterval> | null;
+  // refreshTimer: ReturnType<typeof setInterval> | null; // REMOVED
   activityTimer: ReturnType<typeof setTimeout> | null;
 };
 
@@ -33,7 +33,7 @@ class SessionManager {
     isInitialized: false,
     lastActivity: Date.now(),
     lastSessionCheckTime: 0,
-    refreshTimer: null,
+    // refreshTimer: null,
     activityTimer: null,
   };
 
@@ -51,13 +51,13 @@ class SessionManager {
     this.state.isInitialized = true;
     this.state.lastActivity = Date.now();
 
-    // Start refresh timer
-    this.startRefreshTimer();
+    // Start refresh timer - REMOVED to avoid race condition with Supabase auto-refresh
+    // this.startRefreshTimer();
 
     // Setup activity tracking
     this.setupActivityTracking();
 
-    console.log("[SessionManager] Initialized - will refresh every 45 minutes");
+    console.log("[SessionManager] Initialized - relying on Supabase auto-refresh");
   }
 
   /**
@@ -67,10 +67,10 @@ class SessionManager {
   stop(): void {
     console.log("[SessionManager] Stopping...");
 
-    if (this.state.refreshTimer) {
-      clearInterval(this.state.refreshTimer);
-      this.state.refreshTimer = null;
-    }
+    // if (this.state.refreshTimer) {
+    //   clearInterval(this.state.refreshTimer);
+    //   this.state.refreshTimer = null;
+    // }
 
     if (this.state.activityTimer) {
       clearTimeout(this.state.activityTimer);
@@ -195,11 +195,11 @@ class SessionManager {
 
   // ==================== PRIVATE METHODS ====================
 
-  private startRefreshTimer(): void {
-    this.state.refreshTimer = setInterval(async () => {
-      await this.refreshSession();
-    }, REFRESH_INTERVAL);
-  }
+  // private startRefreshTimer(): void {
+  //   this.state.refreshTimer = setInterval(async () => {
+  //     await this.refreshSession();
+  //   }, REFRESH_INTERVAL);
+  // }
 
   private setupActivityTracking(): void {
     if (typeof window === "undefined") return;

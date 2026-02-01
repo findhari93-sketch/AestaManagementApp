@@ -142,13 +142,27 @@ export default function TeaShopSettlementDialog({
   const [unsettledEntries, setUnsettledEntries] = useState<TeaShopEntry[]>([]);
   const [loadingEntries, setLoadingEntries] = useState(false);
 
+  // 1. Fetch dependencies (Engineers, Subcontracts) when dialog opens
   useEffect(() => {
     if (open) {
       // Fetch site engineers and subcontracts
       fetchEngineers();
       fetchSubcontracts();
-      fetchUnsettledEntries();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, selectedSite?.id]);
 
+  // 2. Fetch unsettled entries when dialog opens or filter changes
+  useEffect(() => {
+    if (open) {
+      fetchUnsettledEntries();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, siteGroupId, filterBySiteId, isInGroup, shop?.id]);
+
+  // 3. Initialize form state when dialog opens
+  useEffect(() => {
+    if (open) {
       if (isEditMode && settlement) {
         // Edit mode - populate from settlement
         setAmountPaying(settlement.amount_paid || 0);
@@ -164,6 +178,8 @@ export default function TeaShopSettlementDialog({
         setCustomPayerName((settlement as any).payer_name || "");
       } else {
         // New settlement - reset form
+        // OR rely on user input if not first open? No, we want to reset on open.
+        // We use pendingBalance for initial value, but don't track it for updates
         setAmountPaying(Math.round(pendingBalance));
         setPaymentDate(dayjs().format("YYYY-MM-DD"));
         setPaymentMode("cash");
@@ -179,7 +195,8 @@ export default function TeaShopSettlementDialog({
       }
       setError(null);
     }
-  }, [open, pendingBalance, settlement, isEditMode, filterBySiteId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, settlement]); // Exclude pendingBalance to allow user overrides and prevent loop
 
   const fetchEngineers = async () => {
     if (!selectedSite) return;

@@ -3,6 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { createClient, ensureFreshSession } from "@/lib/supabase/client";
 import { queryKeys } from "@/lib/cache/keys";
+import { generateOptimisticId } from "@/lib/optimistic";
 import type {
   PurchaseOrder,
   PurchaseOrderWithDetails,
@@ -94,6 +95,10 @@ export function usePurchaseOrder(id: string | undefined) {
           deliveries(
             id, grn_number, delivery_date, delivery_status,
             challan_number, invoice_amount
+          ),
+          source_request:material_requests!purchase_orders_source_request_id_fkey(
+            id, request_number, status, priority, required_by_date,
+            requested_by_user:users!material_requests_requested_by_fkey(name)
           )
         `
         )
@@ -101,7 +106,16 @@ export function usePurchaseOrder(id: string | undefined) {
         .single();
 
       if (error) throw error;
-      return data as PurchaseOrderWithDetails;
+
+      // Transform source_request from array to single object (FK returns array by default)
+      const transformed = {
+        ...data,
+        source_request: Array.isArray(data.source_request)
+          ? data.source_request[0] || null
+          : data.source_request,
+      };
+
+      return transformed as unknown as PurchaseOrderWithDetails;
     },
     enabled: !!id,
   });
@@ -157,13 +171,16 @@ export function useCreatePurchaseOrder() {
 
         return {
           ...item,
-          discount_amount: discount,
-          tax_amount: itemTax,
-          total_amount: taxableAmount + itemTax,
+          discount_amount: Math.round(discount),
+          tax_amount: Math.round(itemTax),
+          total_amount: Math.round(taxableAmount + itemTax),
         };
       });
 
-      const totalAmount = subtotal + taxAmount;
+      // Round final totals to whole numbers
+      const totalAmount = Math.round(subtotal + taxAmount);
+      subtotal = Math.round(subtotal);
+      taxAmount = Math.round(taxAmount);
 
       // Generate PO number
       const timestamp = Date.now().toString(36).toUpperCase();
@@ -189,6 +206,7 @@ export function useCreatePurchaseOrder() {
           notes: data.notes,
           internal_notes: data.internal_notes,
           transport_cost: data.transport_cost || null,
+          vendor_bill_url: data.vendor_bill_url || null,
           subtotal,
           tax_amount: taxAmount,
           total_amount: totalAmount,
@@ -275,6 +293,125 @@ export function useCreatePurchaseOrder() {
 
       return po as PurchaseOrder;
     },
+    // Optimistic update: Show new PO immediately
+    onMutate: async (variables) => {
+      const queryKey = queryKeys.purchaseOrders.bySite(variables.site_id);
+
+      // Cancel any outgoing refetches
+      await queryClient.cancelQueries({ queryKey });
+
+      // Snapshot the previous value
+      const previousData = queryClient.getQueryData<PurchaseOrderWithDetails[]>(queryKey);
+
+      // Generate optimistic ID
+      const optimisticId = generateOptimisticId();
+
+      // Calculate totals for display
+      let subtotal = 0;
+      let taxAmount = 0;
+      variables.items.forEach((item) => {
+        const itemTotal = item.quantity * item.unit_price;
+        const discount = item.discount_percent ? (itemTotal * item.discount_percent) / 100 : 0;
+        const taxableAmount = itemTotal - discount;
+        const itemTax = item.tax_rate ? (taxableAmount * item.tax_rate) / 100 : 0;
+        subtotal += taxableAmount;
+        taxAmount += itemTax;
+      });
+
+      // Optimistically add the new PO
+      const optimisticPO = {
+        id: optimisticId,
+        site_id: variables.site_id,
+        vendor_id: variables.vendor_id,
+        po_number: `PO-PENDING-${optimisticId.slice(-6).toUpperCase()}`,
+        status: variables.status || "draft",
+        order_date: variables.order_date || new Date().toISOString().split("T")[0],
+        expected_delivery_date: variables.expected_delivery_date || null,
+        delivery_address: variables.delivery_address || null,
+        delivery_location_id: variables.delivery_location_id || null,
+        payment_terms: variables.payment_terms || null,
+        payment_timing: variables.payment_timing || "on_delivery",
+        transport_cost: variables.transport_cost || null,
+        notes: variables.notes || null,
+        internal_notes: variables.internal_notes || null,
+        vendor_bill_url: variables.vendor_bill_url || null,
+        subtotal: Math.round(subtotal),
+        tax_amount: Math.round(taxAmount),
+        total_amount: Math.round(subtotal + taxAmount),
+        // Missing PurchaseOrder fields
+        discount_amount: null,
+        other_charges: null,
+        advance_paid: null,
+        quotation_url: null,
+        po_document_url: null,
+        approved_by: null,
+        approved_at: null,
+        cancelled_by: null,
+        cancelled_at: null,
+        cancellation_reason: null,
+        created_by: null,
+        bill_verified: false,
+        bill_verified_by: null,
+        bill_verified_at: null,
+        bill_verification_notes: null,
+        source_request_id: variables.source_request_id || null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        vendor: undefined,
+        site: undefined,
+        deliveries: undefined,
+        source_request: undefined,
+        items: variables.items.map((item, idx) => {
+          const itemTotal = item.quantity * item.unit_price;
+          const discountAmt = item.discount_percent ? (itemTotal * item.discount_percent) / 100 : 0;
+          const taxableAmount = itemTotal - discountAmt;
+          const itemTaxAmt = item.tax_rate ? (taxableAmount * item.tax_rate) / 100 : 0;
+          return {
+            id: `${optimisticId}-item-${idx}`,
+            po_id: optimisticId,
+            material_id: item.material_id,
+            brand_id: item.brand_id || null,
+            description: null,
+            quantity: item.quantity,
+            unit_price: item.unit_price,
+            tax_rate: item.tax_rate || null,
+            tax_amount: itemTaxAmt,
+            discount_percent: item.discount_percent || null,
+            discount_amount: discountAmt,
+            total_amount: taxableAmount + itemTaxAmt,
+            received_qty: 0,
+            pending_qty: item.quantity,
+            notes: null,
+            created_at: new Date().toISOString(),
+            pricing_mode: 'per_piece' as const,
+            calculated_weight: null,
+            actual_weight: null,
+            actual_weight_per_piece: null,
+            material: undefined,
+            brand: undefined,
+          };
+        }),
+        // Mark as pending optimistic update
+        isPending: true,
+        optimisticId,
+      } as unknown as PurchaseOrderWithDetails & { isPending: boolean; optimisticId: string };
+
+      queryClient.setQueryData<PurchaseOrderWithDetails[]>(queryKey, (old) => {
+        return [optimisticPO, ...(old || [])];
+      });
+
+      return { previousData, optimisticId, siteId: variables.site_id };
+    },
+    // Rollback on error
+    onError: (err, variables, context) => {
+      if (context?.previousData !== undefined) {
+        queryClient.setQueryData(
+          queryKeys.purchaseOrders.bySite(context.siteId),
+          context.previousData
+        );
+      }
+    },
+    // Refetch on success to reconcile
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({
         queryKey: queryKeys.purchaseOrders.bySite(variables.site_id),
@@ -284,11 +421,16 @@ export function useCreatePurchaseOrder() {
         queryKey: ["price-history"],
       });
     },
+    onSettled: (_, __, variables) => {
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.purchaseOrders.bySite(variables.site_id),
+      });
+    },
   });
 }
 
 /**
- * Update a purchase order
+ * Update a purchase order with optimistic update
  */
 export function useUpdatePurchaseOrder() {
   const queryClient = useQueryClient();
@@ -298,9 +440,11 @@ export function useUpdatePurchaseOrder() {
     mutationFn: async ({
       id,
       data,
+      siteId,
     }: {
       id: string;
       data: Partial<PurchaseOrderFormData>;
+      siteId: string; // Added for optimistic update
     }) => {
       // Ensure fresh session before mutation
       await ensureFreshSession();
@@ -315,6 +459,7 @@ export function useUpdatePurchaseOrder() {
           payment_terms: data.payment_terms,
           transport_cost: data.transport_cost ?? undefined,
           notes: data.notes,
+          vendor_bill_url: data.vendor_bill_url ?? undefined,
           updated_at: new Date().toISOString(),
         })
         .eq("id", id)
@@ -324,12 +469,57 @@ export function useUpdatePurchaseOrder() {
       if (error) throw error;
       return result as PurchaseOrder;
     },
-    onSuccess: (result) => {
+    // Optimistic update: Update PO fields immediately
+    onMutate: async (variables) => {
+      const queryKey = queryKeys.purchaseOrders.bySite(variables.siteId);
+
+      // Cancel any outgoing refetches
+      await queryClient.cancelQueries({ queryKey });
+
+      // Snapshot the previous value
+      const previousData = queryClient.getQueryData<PurchaseOrderWithDetails[]>(queryKey);
+
+      // Optimistically update the PO
+      // Exclude items from the spread since they have different types (form data vs full data)
+      const { items: _items, ...updateFields } = variables.data;
+      queryClient.setQueryData<PurchaseOrderWithDetails[]>(queryKey, (old) => {
+        if (!old) return [];
+        return old.map((po) => {
+          if (po.id === variables.id) {
+            return {
+              ...po,
+              ...updateFields,
+              updated_at: new Date().toISOString(),
+              isPending: true,
+            } as PurchaseOrderWithDetails;
+          }
+          return po;
+        });
+      });
+
+      return { previousData, siteId: variables.siteId };
+    },
+    // Rollback on error
+    onError: (err, variables, context) => {
+      if (context?.previousData !== undefined) {
+        queryClient.setQueryData(
+          queryKeys.purchaseOrders.bySite(context.siteId),
+          context.previousData
+        );
+      }
+    },
+    // Refetch on success to reconcile
+    onSuccess: (result, variables) => {
       queryClient.invalidateQueries({
-        queryKey: queryKeys.purchaseOrders.bySite(result.site_id),
+        queryKey: queryKeys.purchaseOrders.bySite(variables.siteId),
       });
       queryClient.invalidateQueries({
         queryKey: ["purchase-orders", "detail", result.id],
+      });
+    },
+    onSettled: (_, __, variables) => {
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.purchaseOrders.bySite(variables.siteId),
       });
     },
   });
@@ -1215,10 +1405,10 @@ export function useAddPOItem() {
           quantity: item.quantity,
           unit_price: item.unit_price,
           tax_rate: item.tax_rate,
-          tax_amount: itemTax,
+          tax_amount: Math.round(itemTax),
           discount_percent: item.discount_percent,
-          discount_amount: discount,
-          total_amount: taxableAmount + itemTax,
+          discount_amount: Math.round(discount),
+          total_amount: Math.round(taxableAmount + itemTax),
           notes: item.notes,
           received_qty: 0,
           // Pricing mode and weight tracking
@@ -1286,9 +1476,9 @@ export function useUpdatePOItem() {
 
         updateData = {
           ...updateData,
-          discount_amount: discount,
-          tax_amount: itemTax,
-          total_amount: taxableAmount + itemTax,
+          discount_amount: Math.round(discount),
+          tax_amount: Math.round(itemTax),
+          total_amount: Math.round(taxableAmount + itemTax),
           // Update pricing mode and weight tracking
           pricing_mode: item.pricing_mode || 'per_piece',
           calculated_weight: item.calculated_weight || null,
@@ -1361,15 +1551,15 @@ async function updatePOTotals(
     .eq("po_id", poId);
 
   if (items) {
-    const subtotal = items.reduce(
+    const subtotal = Math.round(items.reduce(
       (sum, item) => sum + (item.total_amount - (item.tax_amount || 0)),
       0
-    );
-    const taxAmount = items.reduce(
+    ));
+    const taxAmount = Math.round(items.reduce(
       (sum, item) => sum + (item.tax_amount || 0),
       0
-    );
-    const totalAmount = subtotal + taxAmount;
+    ));
+    const totalAmount = Math.round(subtotal + taxAmount);
 
     await supabase
       .from("purchase_orders")
@@ -1557,9 +1747,9 @@ export function useRecordDelivery() {
       const { data: { user } } = await supabase.auth.getUser();
 
       // Build the insert payload
-      // Set requires_verification=false and verification_status='verified' to:
-      // 1. Prevent the notification trigger from firing (it has a bug with site_id column)
-      // 2. Mark delivery as already verified since we're recording a completed delivery
+      // Set requires_verification=true and verification_status='pending' to:
+      // 1. Allow deliveries to appear in "Pending Verification" tab for engineer review
+      // 2. Enable the delivery verification workflow before stock is finalized
       const deliveryPayload = {
         po_id: data.po_id || null,
         site_id: data.site_id,
@@ -1568,8 +1758,8 @@ export function useRecordDelivery() {
         grn_number: grnNumber,
         delivery_date: data.delivery_date,
         delivery_status: "delivered",
-        verification_status: "verified",
-        requires_verification: false,
+        verification_status: "pending",
+        requires_verification: true,
         challan_number: data.challan_number || null,
         challan_date: data.challan_date || null,
         vehicle_number: data.vehicle_number || null,
@@ -1729,19 +1919,9 @@ export function useRecordDelivery() {
                     "generate_material_purchase_reference"
                   );
 
-                  // Calculate total from ORDERED quantity - supports per_piece and per_kg pricing
-                  const itemsTotal = (po.items || []).reduce(
-                    (sum: number, item: any) => {
-                      if (item.pricing_mode === 'per_kg') {
-                        // Use actual_weight if available, otherwise calculated_weight
-                        const weight = item.actual_weight ?? item.calculated_weight ?? 0;
-                        return sum + (weight * item.unit_price);
-                      }
-                      return sum + (item.quantity * item.unit_price);
-                    },
-                    0
-                  );
-                  const totalAmount = itemsTotal + (po.transport_cost || 0);
+                  // Use PO's total_amount directly (already includes subtotal + tax + transport)
+                  // This ensures the expense matches the PO amount exactly
+                  const totalAmount = po.total_amount || 0;
 
                   // Calculate total quantity for batch tracking (for group stock)
                   const totalQuantity = (po.items || []).reduce(
@@ -2121,51 +2301,84 @@ export function usePendingDeliveriesCount(siteId: string | undefined) {
 // ============================================
 
 /**
- * Batch check sync status for multiple Group Stock POs
- * Returns a map of poId -> sync status
+ * Settlement status info for a Group Stock PO
+ */
+export interface GroupStockSettlementInfo {
+  isSynced: boolean;
+  batchRefCode: string | null;
+  totalAmount: number;
+  settledAmount: number;
+  usedByOthersAmount: number;
+}
+
+/**
+ * Batch check sync status and settlement info for multiple Group Stock POs
+ * Returns a map of poId -> settlement info (sync status, settled amounts, etc.)
  */
 export function useGroupStockPOsSyncStatus(poIds: string[]) {
   const supabase = createClient();
 
   return useQuery({
     queryKey: ["group-stock-pos-sync-status", poIds.sort().join(",")],
-    queryFn: async () => {
-      if (poIds.length === 0) return new Map<string, boolean>();
+    queryFn: async (): Promise<Map<string, GroupStockSettlementInfo>> => {
+      if (poIds.length === 0) return new Map<string, GroupStockSettlementInfo>();
 
       // Get all group stock expenses for these POs
+      // If a material_purchase_expenses record exists with purchase_type='group_stock',
+      // the batch is already showing in Inter-Site Settlement, so consider it "synced"
       const { data: expenses } = await (supabase as any)
         .from("material_purchase_expenses")
-        .select("id, ref_code, purchase_order_id")
+        .select("id, ref_code, purchase_order_id, total_amount, paying_site_id")
         .in("purchase_order_id", poIds)
         .eq("purchase_type", "group_stock");
 
       if (!expenses || expenses.length === 0) {
-        return new Map<string, boolean>();
+        return new Map<string, GroupStockSettlementInfo>();
       }
 
-      // Get all batch ref codes
-      const batchRefCodes = expenses.map((e: any) => e.ref_code).filter(Boolean);
+      // Get ref codes for batch usage lookup
+      const refCodes = expenses.map((e: any) => e.ref_code).filter(Boolean);
 
-      if (batchRefCodes.length === 0) {
-        return new Map<string, boolean>();
+      // Get batch usage records to calculate "used by others" amount
+      let usageByBatch = new Map<string, { usedByOthersAmount: number; settledAmount: number }>();
+      if (refCodes.length > 0) {
+        const { data: usageRecords } = await (supabase as any)
+          .from("batch_usage_records")
+          .select("batch_ref_code, total_cost, is_self_use, settlement_status")
+          .in("batch_ref_code", refCodes);
+
+        if (usageRecords) {
+          for (const usage of usageRecords) {
+            const existing = usageByBatch.get(usage.batch_ref_code) || { usedByOthersAmount: 0, settledAmount: 0 };
+            const cost = Number(usage.total_cost || 0);
+            // "Used by others" = usage that is NOT self use
+            if (!usage.is_self_use) {
+              existing.usedByOthersAmount += cost;
+              // Settled = usage by others that has settlement_status = 'settled'
+              if (usage.settlement_status === "settled") {
+                existing.settledAmount += cost;
+              }
+            }
+            usageByBatch.set(usage.batch_ref_code, existing);
+          }
+        }
       }
 
-      // Check which batches have transactions
-      const { data: transactions } = await (supabase as any)
-        .from("group_stock_transactions")
-        .select("batch_ref_code")
-        .in("batch_ref_code", batchRefCodes);
+      // Build map of poId -> settlement info
+      const resultMap = new Map<string, GroupStockSettlementInfo>();
 
-      const syncedBatchCodes = new Set(transactions?.map((t: any) => t.batch_ref_code) || []);
-
-      // Build map of poId -> isSynced
-      const syncStatusMap = new Map<string, boolean>();
       for (const expense of expenses) {
-        const isSynced = syncedBatchCodes.has(expense.ref_code);
-        syncStatusMap.set(expense.purchase_order_id, isSynced);
+        const usageInfo = usageByBatch.get(expense.ref_code) || { usedByOthersAmount: 0, settledAmount: 0 };
+        resultMap.set(expense.purchase_order_id, {
+          isSynced: true,
+          batchRefCode: expense.ref_code,
+          totalAmount: Number(expense.total_amount || 0),
+          settledAmount: usageInfo.settledAmount,
+          usedByOthersAmount: usageInfo.usedByOthersAmount,
+        });
       }
 
-      return syncStatusMap;
+      return resultMap;
     },
     enabled: poIds.length > 0,
     staleTime: 30000,
@@ -2320,19 +2533,8 @@ export function usePushBatchToSettlement() {
           "generate_material_purchase_reference"
         );
 
-        // Calculate totals from PO items - supports per_piece and per_kg pricing
-        const itemsTotal = poItems.reduce(
-          (sum: number, item: any) => {
-            if (item.pricing_mode === 'per_kg') {
-              // Use actual_weight if available, otherwise calculated_weight
-              const weight = item.actual_weight ?? item.calculated_weight ?? 0;
-              return sum + (weight * item.unit_price);
-            }
-            return sum + (item.quantity * item.unit_price);
-          },
-          0
-        );
-        const totalAmount = itemsTotal + (po.transport_cost || 0);
+        // Use PO's total_amount directly (already includes subtotal + tax + transport)
+        const totalAmount = po.total_amount || 0;
         const totalQuantity = poItems.reduce(
           (sum: number, item: any) => sum + Number(item.quantity),
           0
@@ -2617,5 +2819,118 @@ export function usePushBatchToSettlement() {
     onError: (error) => {
       console.error("Push to settlement error:", error);
     },
+  });
+}
+
+// ============================================
+// PAGINATED QUERIES
+// ============================================
+
+/**
+ * Pagination parameters for server-side pagination
+ */
+export interface POPaginationParams {
+  pageIndex: number;
+  pageSize: number;
+}
+
+/**
+ * Paginated result with total count
+ */
+export interface PaginatedPOResult {
+  data: PurchaseOrderWithDetails[];
+  totalCount: number;
+  pageCount: number;
+}
+
+/**
+ * Fetch purchase orders with server-side pagination and filtering
+ * Use this for large datasets where client-side pagination is not efficient
+ */
+export function usePaginatedPurchaseOrders(
+  siteId: string | undefined,
+  options: {
+    pagination: POPaginationParams;
+    status?: POStatus | null;
+    vendorId?: string;
+    searchTerm?: string;
+  }
+) {
+  const supabase = createClient();
+  const { pagination, status, vendorId, searchTerm } = options;
+  const { pageIndex, pageSize } = pagination;
+  const offset = pageIndex * pageSize;
+
+  return useQuery({
+    queryKey: [
+      ...queryKeys.purchaseOrders.bySite(siteId || ""),
+      "paginated",
+      { pageIndex, pageSize, status, vendorId, searchTerm },
+    ],
+    queryFn: async (): Promise<PaginatedPOResult> => {
+      if (!siteId) return { data: [], totalCount: 0, pageCount: 0 };
+
+      // Build count query with filters
+      let countQuery = supabase
+        .from("purchase_orders")
+        .select("*", { count: "exact", head: true })
+        .eq("site_id", siteId);
+
+      if (status) {
+        countQuery = countQuery.eq("status", status);
+      }
+      if (vendorId) {
+        countQuery = countQuery.eq("vendor_id", vendorId);
+      }
+      if (searchTerm && searchTerm.length >= 2) {
+        countQuery = countQuery.or(
+          `po_number.ilike.%${searchTerm}%,notes.ilike.%${searchTerm}%`
+        );
+      }
+
+      const { count: totalCount, error: countError } = await countQuery;
+      if (countError) throw countError;
+
+      // Build data query with pagination
+      let dataQuery = supabase
+        .from("purchase_orders")
+        .select(
+          `
+          *,
+          vendor:vendors(id, name, phone, email),
+          items:purchase_order_items(
+            *,
+            material:materials(id, name, code, unit, weight_per_unit, weight_unit, length_per_piece, length_unit),
+            brand:material_brands(id, brand_name, variant_name)
+          )
+        `
+        )
+        .eq("site_id", siteId)
+        .range(offset, offset + pageSize - 1)
+        .order("created_at", { ascending: false });
+
+      if (status) {
+        dataQuery = dataQuery.eq("status", status);
+      }
+      if (vendorId) {
+        dataQuery = dataQuery.eq("vendor_id", vendorId);
+      }
+      if (searchTerm && searchTerm.length >= 2) {
+        dataQuery = dataQuery.or(
+          `po_number.ilike.%${searchTerm}%,notes.ilike.%${searchTerm}%`
+        );
+      }
+
+      const { data, error: dataError } = await dataQuery;
+      if (dataError) throw dataError;
+
+      return {
+        data: data as PurchaseOrderWithDetails[],
+        totalCount: totalCount || 0,
+        pageCount: Math.ceil((totalCount || 0) / pageSize),
+      };
+    },
+    enabled: !!siteId,
+    placeholderData: (previousData) => previousData, // Keep previous data while loading
   });
 }
