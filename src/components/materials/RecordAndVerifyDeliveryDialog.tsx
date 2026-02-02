@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import {
   Dialog,
   DialogTitle,
@@ -24,23 +24,29 @@ import {
   Collapse,
   FormControlLabel,
   Switch,
+  Checkbox,
+  Stack,
 } from "@mui/material";
 import {
   Close as CloseIcon,
-  ExpandMore as ExpandIcon,
+  Check as CheckIcon,
+  Warning as WarningIcon,
+  PhotoCamera as CameraIcon,
+  Delete as DeleteIcon,
+  Inventory as InventoryIcon,
 } from "@mui/icons-material";
 import { useIsMobile } from "@/hooks/useIsMobile";
-import { useRecordDelivery } from "@/hooks/queries/usePurchaseOrders";
-import { useStockLocations } from "@/hooks/queries/useStockInventory";
+import { useRecordAndVerifyDelivery } from "@/hooks/queries/usePurchaseOrders";
 import { createClient } from "@/lib/supabase/client";
 import FileUploader, { UploadedFile } from "@/components/common/FileUploader";
 import type {
   PurchaseOrderWithDetails,
   DeliveryItemFormData,
+  DeliveryDiscrepancy,
 } from "@/types/material.types";
 import { formatCurrency } from "@/lib/formatters";
 
-interface DeliveryDialogProps {
+interface RecordAndVerifyDeliveryDialogProps {
   open: boolean;
   onClose: () => void;
   purchaseOrder: PurchaseOrderWithDetails | null;
@@ -52,26 +58,34 @@ interface DeliveryItemRow extends DeliveryItemFormData {
   unit?: string;
   orderedQty: number;
   pendingQty: number;
-  // Pricing mode and weight tracking
-  pricing_mode?: 'per_piece' | 'per_kg';
+  pricing_mode?: "per_piece" | "per_kg";
   calculated_weight?: number | null;
   actual_weight?: number | null;
-  // Tax tracking
   tax_rate?: number | null;
+  // Issue tracking
+  hasIssue?: boolean;
+  issueType?: "damaged" | "missing" | "wrong_spec" | "short";
 }
 
-export default function DeliveryDialog({
+interface InspectionChecklist {
+  qualityOk: boolean;
+  quantityMatches: boolean;
+  noDamage: boolean;
+  specsCorrect: boolean;
+}
+
+export default function RecordAndVerifyDeliveryDialog({
   open,
   onClose,
   purchaseOrder,
   siteId,
-}: DeliveryDialogProps) {
+}: RecordAndVerifyDeliveryDialogProps) {
   const isMobile = useIsMobile();
   const supabase = createClient();
 
-  const { data: locations = [] } = useStockLocations(siteId);
-  const recordDelivery = useRecordDelivery();
+  const recordAndVerify = useRecordAndVerifyDelivery();
 
+  // Form state
   const [error, setError] = useState("");
   const [deliveryDate, setDeliveryDate] = useState(
     new Date().toISOString().split("T")[0]
@@ -82,14 +96,24 @@ export default function DeliveryDialog({
   const [vehicleNumber, setVehicleNumber] = useState("");
   const [driverName, setDriverName] = useState("");
   const [driverPhone, setDriverPhone] = useState("");
-  const [deliveryPhotos, setDeliveryPhotos] = useState<string[]>([]);
   const [challanUrl, setChallanUrl] = useState<string | null>(null);
   const [notes, setNotes] = useState("");
   const [items, setItems] = useState<DeliveryItemRow[]>([]);
 
-  // Reset form when PO changes (only when dialog is open)
+  // Photos (required for unified flow)
+  const [photos, setPhotos] = useState<UploadedFile[]>([]);
+
+  // Inspection checklist
+  const [inspectionChecklist, setInspectionChecklist] =
+    useState<InspectionChecklist>({
+      qualityOk: true,
+      quantityMatches: true,
+      noDamage: true,
+      specsCorrect: true,
+    });
+
+  // Reset form when PO changes
   useEffect(() => {
-    // Skip if dialog is closed to prevent unnecessary state updates
     if (!open) return;
 
     if (purchaseOrder?.items) {
@@ -103,7 +127,7 @@ export default function DeliveryDialog({
           material_id: item.material_id,
           brand_id: item.brand_id || undefined,
           ordered_qty: item.quantity,
-          received_qty: item.quantity - (item.received_qty || 0), // Default to pending qty
+          received_qty: item.quantity - (item.received_qty || 0),
           accepted_qty: item.quantity - (item.received_qty || 0),
           rejected_qty: 0,
           unit_price: item.unit_price,
@@ -111,19 +135,21 @@ export default function DeliveryDialog({
           unit: item.material?.unit,
           orderedQty: item.quantity,
           pendingQty: item.quantity - (item.received_qty || 0),
-          // Pass pricing mode and weight for proper display
           pricing_mode: item.pricing_mode,
           calculated_weight: item.calculated_weight,
           actual_weight: item.actual_weight,
-          // Pass tax rate for accurate value calculation
           tax_rate: item.tax_rate,
+          hasIssue: false,
+          issueType: undefined,
         }));
       setItems(deliveryItems);
     } else {
       setItems([]);
     }
-    // Auto-fill delivery date with PO order date (user can modify if needed)
-    setDeliveryDate(purchaseOrder?.order_date || new Date().toISOString().split("T")[0]);
+
+    setDeliveryDate(
+      purchaseOrder?.order_date || new Date().toISOString().split("T")[0]
+    );
     setShowAdditionalDetails(false);
     setChallanNumber("");
     setChallanDate("");
@@ -133,12 +159,25 @@ export default function DeliveryDialog({
     setDriverPhone("");
     setNotes("");
     setError("");
+    setPhotos([]);
+    setInspectionChecklist({
+      qualityOk: true,
+      quantityMatches: true,
+      noDamage: true,
+      specsCorrect: true,
+    });
   }, [purchaseOrder, open]);
 
   const handleItemChange = (
     index: number,
-    field: "received_qty" | "accepted_qty" | "rejected_qty" | "rejection_reason",
-    value: string | number
+    field:
+      | "received_qty"
+      | "accepted_qty"
+      | "rejected_qty"
+      | "rejection_reason"
+      | "hasIssue"
+      | "issueType",
+    value: string | number | boolean
   ) => {
     setItems((prev) =>
       prev.map((item, i) => {
@@ -154,6 +193,13 @@ export default function DeliveryDialog({
         // Auto-calculate accepted when rejected changes
         if (field === "rejected_qty") {
           updated.accepted_qty = updated.received_qty - Number(value);
+          updated.hasIssue = Number(value) > 0;
+        }
+        // Clear issue type if no issue
+        if (field === "hasIssue" && !value) {
+          updated.issueType = undefined;
+          updated.rejected_qty = 0;
+          updated.accepted_qty = updated.received_qty;
         }
 
         return updated;
@@ -161,7 +207,12 @@ export default function DeliveryDialog({
     );
   };
 
-  // Calculate totals - separate piece count and kg weight
+  // Check if any items have issues
+  const hasAnyIssues = useMemo(() => {
+    return items.some((item) => item.hasIssue && (item.rejected_qty ?? 0) > 0);
+  }, [items]);
+
+  // Calculate totals
   const totals = useMemo(() => {
     let totalReceivedPcs = 0;
     let totalAcceptedPcs = 0;
@@ -183,30 +234,29 @@ export default function DeliveryDialog({
       totalRejectedPcs += rejectedQty;
 
       let itemSubtotal = 0;
-      if (item.pricing_mode === 'per_kg') {
+      if (item.pricing_mode === "per_kg") {
         hasPerKgItems = true;
-        // Calculate weight based on received/accepted quantity ratio
         const originalQty = item.orderedQty || 1;
-        const weightPerPiece = (item.actual_weight ?? item.calculated_weight ?? 0) / originalQty;
+        const weightPerPiece =
+          (item.actual_weight ?? item.calculated_weight ?? 0) / originalQty;
         totalReceivedKg += receivedQty * weightPerPiece;
         totalAcceptedKg += acceptedQty * weightPerPiece;
-        // For per_kg items, value is based on weight
         itemSubtotal = acceptedQty * weightPerPiece * (item.unit_price || 0);
       } else {
         if (hasPerKgItems) hasMixedUnits = true;
-        // For per_piece items, value is based on quantity
         itemSubtotal = acceptedQty * (item.unit_price || 0);
       }
 
       subtotal += itemSubtotal;
-      // Add tax if item has tax rate
       if (item.tax_rate) {
         taxAmount += (itemSubtotal * item.tax_rate) / 100;
       }
     });
 
-    // If all items are per_kg, show kg totals; otherwise show piece counts
-    const allPerKg = hasPerKgItems && !hasMixedUnits && items.every(i => i.pricing_mode === 'per_kg');
+    const allPerKg =
+      hasPerKgItems &&
+      !hasMixedUnits &&
+      items.every((i) => i.pricing_mode === "per_kg");
 
     return {
       totalReceived: allPerKg ? totalReceivedKg : totalReceivedPcs,
@@ -215,15 +265,29 @@ export default function DeliveryDialog({
       subtotal,
       taxAmount,
       totalValue: subtotal + taxAmount,
-      unit: allPerKg ? 'kg' : 'pcs',
+      unit: allPerKg ? "kg" : "pcs",
       hasPerKgItems,
     };
   }, [items]);
 
-  const handleSubmit = async () => {
+  const handlePhotoUpload = useCallback((file: UploadedFile) => {
+    setPhotos((prev) => [...prev, file]);
+  }, []);
+
+  const handleRemovePhoto = useCallback((index: number) => {
+    setPhotos((prev) => prev.filter((_, i) => i !== index));
+  }, []);
+
+  const handleSubmit = async (flagIssues: boolean = false) => {
     if (!purchaseOrder) return;
 
-    // Validate
+    // Validate photos (required)
+    if (photos.length === 0) {
+      setError("Please upload at least one photo of the delivered materials");
+      return;
+    }
+
+    // Validate items
     const hasReceivedItems = items.some((item) => item.received_qty > 0);
     if (!hasReceivedItems) {
       setError("Please enter received quantity for at least one item");
@@ -240,6 +304,25 @@ export default function DeliveryDialog({
       }
     }
 
+    // If flagging issues, ensure at least one issue is marked
+    if (flagIssues && !hasAnyIssues) {
+      setError(
+        "Please mark at least one item with an issue before flagging for review"
+      );
+      return;
+    }
+
+    // Build discrepancies for items with issues
+    const discrepancies: DeliveryDiscrepancy[] = items
+      .filter((item) => item.hasIssue && item.issueType)
+      .map((item) => ({
+        item_id: item.po_item_id || item.material_id,
+        expected_qty: item.orderedQty,
+        received_qty: item.accepted_qty || 0,
+        issue: item.issueType!,
+        notes: item.rejection_reason,
+      }));
+
     try {
       const deliveryData = {
         po_id: purchaseOrder.id,
@@ -252,7 +335,7 @@ export default function DeliveryDialog({
         vehicle_number: vehicleNumber || undefined,
         driver_name: driverName || undefined,
         driver_phone: driverPhone || undefined,
-        delivery_photos: deliveryPhotos.length > 0 ? deliveryPhotos : undefined,
+        photos: photos.map((p) => p.url),
         notes: notes || undefined,
         items: items
           .filter((item) => item.received_qty > 0)
@@ -267,24 +350,28 @@ export default function DeliveryDialog({
             rejection_reason: item.rejection_reason,
             unit_price: item.unit_price,
           })),
+        inspectionChecklist,
+        issues: discrepancies.length > 0 ? discrepancies : undefined,
+        hasIssues: flagIssues || hasAnyIssues,
       };
 
-      // Debug logging
-      console.log("[DeliveryDialog] PurchaseOrder:", purchaseOrder);
-      console.log("[DeliveryDialog] PurchaseOrder.vendor_id:", purchaseOrder.vendor_id);
-      console.log("[DeliveryDialog] PurchaseOrder.vendor:", purchaseOrder.vendor);
-      console.log("[DeliveryDialog] Submitting delivery data:", deliveryData);
+      console.log(
+        "[RecordAndVerifyDeliveryDialog] Submitting:",
+        deliveryData
+      );
 
-      await recordDelivery.mutateAsync(deliveryData);
+      await recordAndVerify.mutateAsync(deliveryData);
       onClose();
     } catch (err: unknown) {
       const message =
-        err instanceof Error ? err.message : "Failed to record delivery";
+        err instanceof Error
+          ? err.message
+          : "Failed to record and verify delivery";
       setError(message);
     }
   };
 
-  const isSubmitting = recordDelivery.isPending;
+  const isSubmitting = recordAndVerify.isPending;
 
   if (!purchaseOrder) return null;
 
@@ -304,7 +391,9 @@ export default function DeliveryDialog({
         }}
       >
         <Box>
-          <Typography variant="h6" component="span">Record Delivery (GRN)</Typography>
+          <Typography variant="h6" component="span">
+            Record & Verify Delivery
+          </Typography>
           <Typography variant="body2" color="text.secondary">
             PO: {purchaseOrder.po_number} • {purchaseOrder.vendor?.name}
           </Typography>
@@ -322,7 +411,96 @@ export default function DeliveryDialog({
         )}
 
         <Grid container spacing={2}>
-          {/* Delivery Date - Required */}
+          {/* Photos Section - Required and Prominent */}
+          <Grid size={12}>
+            <Paper
+              variant="outlined"
+              sx={{ p: 2, bgcolor: "primary.50", borderColor: "primary.200" }}
+            >
+              <Typography
+                variant="subtitle1"
+                fontWeight={600}
+                sx={{ mb: 1, display: "flex", alignItems: "center", gap: 1 }}
+              >
+                <CameraIcon color="primary" />
+                Delivery Photos (Required)
+              </Typography>
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{ display: "block", mb: 2 }}
+              >
+                Upload photos of delivered materials for verification. At least
+                one photo is required.
+              </Typography>
+
+              <Box sx={{ mb: 2 }}>
+                <FileUploader
+                  supabase={supabase}
+                  bucketName="delivery-verifications"
+                  folderPath={`${siteId}/${purchaseOrder?.po_number || "direct"}`}
+                  fileNamePrefix="delivery"
+                  accept="image"
+                  maxSizeMB={10}
+                  label="Add Photo"
+                  helperText="Tap to add delivery photo"
+                  uploadOnSelect
+                  onUpload={handlePhotoUpload}
+                />
+              </Box>
+
+              {photos.length > 0 && (
+                <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}>
+                  {photos.map((photo, index) => (
+                    <Box
+                      key={index}
+                      sx={{
+                        position: "relative",
+                        width: 80,
+                        height: 80,
+                        borderRadius: 1,
+                        overflow: "hidden",
+                        border: "2px solid",
+                        borderColor: "primary.main",
+                      }}
+                    >
+                      <img
+                        src={photo.url}
+                        alt={`Photo ${index + 1}`}
+                        style={{
+                          width: "100%",
+                          height: "100%",
+                          objectFit: "cover",
+                        }}
+                      />
+                      <IconButton
+                        size="small"
+                        onClick={() => handleRemovePhoto(index)}
+                        sx={{
+                          position: "absolute",
+                          top: 2,
+                          right: 2,
+                          bgcolor: "rgba(0,0,0,0.5)",
+                          color: "white",
+                          "&:hover": { bgcolor: "rgba(0,0,0,0.7)" },
+                        }}
+                      >
+                        <DeleteIcon fontSize="small" />
+                      </IconButton>
+                    </Box>
+                  ))}
+                </Box>
+              )}
+
+              {photos.length === 0 && (
+                <Alert severity="info" sx={{ mt: 1 }}>
+                  Upload at least one photo to proceed
+                </Alert>
+              )}
+            </Paper>
+          </Grid>
+
+          {/* Delivery Date */}
           <Grid size={{ xs: 12, md: 4 }}>
             <TextField
               fullWidth
@@ -385,7 +563,9 @@ export default function DeliveryDialog({
                       size="small"
                       label="Vehicle Number"
                       value={vehicleNumber}
-                      onChange={(e) => setVehicleNumber(e.target.value.toUpperCase())}
+                      onChange={(e) =>
+                        setVehicleNumber(e.target.value.toUpperCase())
+                      }
                       placeholder="TN 00 AB 0000"
                     />
                   </Grid>
@@ -414,65 +594,75 @@ export default function DeliveryDialog({
             </Collapse>
           </Grid>
 
-          {/* Delivery Photos - Optional */}
+          {/* Inspection Checklist */}
           <Grid size={12}>
-            <Typography variant="subtitle2" fontWeight={600} sx={{ mb: 1.5 }}>
-              Delivery Photos (Optional)
-            </Typography>
-            <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1.5 }}>
-              Upload photos of delivered materials for documentation and verification
-            </Typography>
-            <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-              {[...Array(3)].map((_, index) => {
-                const existingPhoto = deliveryPhotos[index];
-                return (
-                  <FileUploader
-                    key={`photo-${index}`}
-                    supabase={supabase}
-                    bucketName="documents"
-                    folderPath={`deliveries/${siteId}/${purchaseOrder?.po_number || "direct"}`}
-                    fileNamePrefix={`delivery-photo-${index + 1}`}
-                    accept="image"
-                    label={`Photo ${index + 1}`}
-                    helperText={`Upload delivery photo ${index + 1}`}
-                    uploadOnSelect
-                    value={existingPhoto ? { name: `photo-${index + 1}`, size: 0, url: existingPhoto } : null}
-                    onUpload={(file: UploadedFile) => {
-                      const newPhotos = [...deliveryPhotos];
-                      newPhotos[index] = file.url;
-                      setDeliveryPhotos(newPhotos.filter(p => p)); // Remove empty slots
-                    }}
-                    onRemove={() => {
-                      const newPhotos = [...deliveryPhotos];
-                      newPhotos.splice(index, 1);
-                      setDeliveryPhotos(newPhotos);
-                    }}
-                    compact
-                  />
-                );
-              })}
-            </Box>
-          </Grid>
-
-          {/* Challan/Invoice Upload - Optional */}
-          <Grid size={12}>
-            <Typography variant="subtitle2" fontWeight={600} sx={{ mb: 1 }}>
-              Challan/Invoice (Optional)
-            </Typography>
-            <FileUploader
-              supabase={supabase}
-              bucketName="documents"
-              folderPath={`deliveries/${siteId}/${purchaseOrder?.po_number || "direct"}`}
-              fileNamePrefix="challan"
-              accept="all"
-              label="Challan/Invoice"
-              helperText="Upload challan or invoice document (PDF or image)"
-              uploadOnSelect
-              value={challanUrl ? { name: "challan", size: 0, url: challanUrl } : null}
-              onUpload={(file: UploadedFile) => setChallanUrl(file.url)}
-              onRemove={() => setChallanUrl(null)}
-              compact
-            />
+            <Paper variant="outlined" sx={{ p: 2 }}>
+              <Typography variant="subtitle2" fontWeight={600} sx={{ mb: 1 }}>
+                Quick Inspection Checklist
+              </Typography>
+              <Box sx={{ display: "flex", flexWrap: "wrap", gap: 2 }}>
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={inspectionChecklist.qualityOk}
+                      onChange={(e) =>
+                        setInspectionChecklist((prev) => ({
+                          ...prev,
+                          qualityOk: e.target.checked,
+                        }))
+                      }
+                      color="success"
+                    />
+                  }
+                  label="Quality OK"
+                />
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={inspectionChecklist.quantityMatches}
+                      onChange={(e) =>
+                        setInspectionChecklist((prev) => ({
+                          ...prev,
+                          quantityMatches: e.target.checked,
+                        }))
+                      }
+                      color="success"
+                    />
+                  }
+                  label="Quantity Matches"
+                />
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={inspectionChecklist.noDamage}
+                      onChange={(e) =>
+                        setInspectionChecklist((prev) => ({
+                          ...prev,
+                          noDamage: e.target.checked,
+                        }))
+                      }
+                      color="success"
+                    />
+                  }
+                  label="No Damage"
+                />
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={inspectionChecklist.specsCorrect}
+                      onChange={(e) =>
+                        setInspectionChecklist((prev) => ({
+                          ...prev,
+                          specsCorrect: e.target.checked,
+                        }))
+                      }
+                      color="success"
+                    />
+                  }
+                  label="Specs Correct"
+                />
+              </Box>
+            </Paper>
           </Grid>
 
           {/* Items Table */}
@@ -490,22 +680,21 @@ export default function DeliveryDialog({
                     <TableCell>Material</TableCell>
                     <TableCell align="right">Ordered</TableCell>
                     <TableCell align="right">Pending</TableCell>
-                    <TableCell align="right" sx={{ width: 100 }}>
+                    <TableCell align="right" sx={{ width: 90 }}>
                       Received
                     </TableCell>
-                    <TableCell align="right" sx={{ width: 100 }}>
+                    <TableCell align="right" sx={{ width: 90 }}>
                       Accepted
                     </TableCell>
-                    <TableCell align="right" sx={{ width: 100 }}>
-                      Rejected
+                    <TableCell align="center" sx={{ width: 100 }}>
+                      Issue?
                     </TableCell>
-                    <TableCell>Rejection Reason</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
                   {items.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={7} align="center">
+                      <TableCell colSpan={6} align="center">
                         <Typography
                           variant="body2"
                           color="text.secondary"
@@ -517,23 +706,40 @@ export default function DeliveryDialog({
                     </TableRow>
                   ) : (
                     items.map((item, index) => (
-                      <TableRow key={index}>
+                      <TableRow
+                        key={index}
+                        sx={{
+                          bgcolor: item.hasIssue ? "warning.50" : "inherit",
+                        }}
+                      >
                         <TableCell>
                           <Typography variant="body2">
                             {item.materialName}
                           </Typography>
                           <Typography variant="caption" color="text.secondary">
                             {item.unit}
-                            {item.unit_price && ` • ${formatCurrency(item.unit_price)}/${item.pricing_mode === 'per_kg' ? 'kg' : 'unit'}`}
+                            {item.unit_price &&
+                              ` • ${formatCurrency(item.unit_price)}/${
+                                item.pricing_mode === "per_kg" ? "kg" : "unit"
+                              }`}
                           </Typography>
                         </TableCell>
                         <TableCell align="right">
                           {item.orderedQty}
-                          {item.pricing_mode === 'per_kg' && (item.actual_weight ?? item.calculated_weight) && (
-                            <Typography variant="caption" color="text.secondary" display="block">
-                              {((item.actual_weight ?? item.calculated_weight) || 0).toFixed(1)} kg
-                            </Typography>
-                          )}
+                          {item.pricing_mode === "per_kg" &&
+                            (item.actual_weight ?? item.calculated_weight) && (
+                              <Typography
+                                variant="caption"
+                                color="text.secondary"
+                                display="block"
+                              >
+                                {(
+                                  (item.actual_weight ??
+                                    item.calculated_weight) || 0
+                                ).toFixed(1)}{" "}
+                                kg
+                              </Typography>
+                            )}
                         </TableCell>
                         <TableCell align="right">
                           <Chip
@@ -563,7 +769,7 @@ export default function DeliveryDialog({
                                 },
                               },
                             }}
-                            sx={{ width: 80 }}
+                            sx={{ width: 75 }}
                           />
                         </TableCell>
                         <TableCell align="right">
@@ -587,48 +793,70 @@ export default function DeliveryDialog({
                                 },
                               },
                             }}
-                            sx={{ width: 80 }}
-                          />
-                        </TableCell>
-                        <TableCell align="right">
-                          <TextField
-                            size="small"
-                            type="number"
-                            value={item.rejected_qty}
-                            onChange={(e) =>
-                              handleItemChange(
-                                index,
-                                "rejected_qty",
-                                parseFloat(e.target.value) || 0
-                              )
-                            }
-                            slotProps={{
-                              input: {
-                                inputProps: {
-                                  min: 0,
-                                  max: item.received_qty,
-                                  step: 0.01,
-                                },
-                              },
-                            }}
-                            sx={{ width: 80 }}
+                            sx={{ width: 75 }}
                             error={(item.rejected_qty || 0) > 0}
                           />
                         </TableCell>
-                        <TableCell>
-                          {(item.rejected_qty || 0) > 0 && (
-                            <TextField
+                        <TableCell align="center">
+                          {item.hasIssue ? (
+                            <Stack spacing={0.5}>
+                              <Chip
+                                label={item.issueType || "Select"}
+                                size="small"
+                                color="warning"
+                                onClick={() =>
+                                  handleItemChange(index, "hasIssue", false)
+                                }
+                                onDelete={() =>
+                                  handleItemChange(index, "hasIssue", false)
+                                }
+                              />
+                              <Box
+                                sx={{
+                                  display: "flex",
+                                  gap: 0.5,
+                                  flexWrap: "wrap",
+                                  justifyContent: "center",
+                                }}
+                              >
+                                {["short", "damaged", "wrong_spec", "missing"].map(
+                                  (issue) => (
+                                    <Chip
+                                      key={issue}
+                                      label={issue.replace("_", " ")}
+                                      size="small"
+                                      variant={
+                                        item.issueType === issue
+                                          ? "filled"
+                                          : "outlined"
+                                      }
+                                      color={
+                                        item.issueType === issue
+                                          ? "warning"
+                                          : "default"
+                                      }
+                                      onClick={() =>
+                                        handleItemChange(
+                                          index,
+                                          "issueType",
+                                          issue
+                                        )
+                                      }
+                                      sx={{ fontSize: "0.65rem" }}
+                                    />
+                                  )
+                                )}
+                              </Box>
+                            </Stack>
+                          ) : (
+                            <Chip
+                              label="OK"
                               size="small"
-                              placeholder="Reason"
-                              value={item.rejection_reason || ""}
-                              onChange={(e) =>
-                                handleItemChange(
-                                  index,
-                                  "rejection_reason",
-                                  e.target.value
-                                )
+                              color="success"
+                              variant="outlined"
+                              onClick={() =>
+                                handleItemChange(index, "hasIssue", true)
                               }
-                              sx={{ minWidth: 120 }}
                             />
                           )}
                         </TableCell>
@@ -656,7 +884,10 @@ export default function DeliveryDialog({
                     Total Received
                   </Typography>
                   <Typography variant="h6">
-                    {totals.unit === 'kg' ? totals.totalReceived.toFixed(1) : totals.totalReceived} {totals.unit}
+                    {totals.unit === "kg"
+                      ? totals.totalReceived.toFixed(1)
+                      : totals.totalReceived}{" "}
+                    {totals.unit}
                   </Typography>
                 </Box>
                 <Box sx={{ textAlign: "center" }}>
@@ -664,7 +895,10 @@ export default function DeliveryDialog({
                     Total Accepted
                   </Typography>
                   <Typography variant="h6" color="success.main">
-                    {totals.unit === 'kg' ? totals.totalAccepted.toFixed(1) : totals.totalAccepted} {totals.unit}
+                    {totals.unit === "kg"
+                      ? totals.totalAccepted.toFixed(1)
+                      : totals.totalAccepted}{" "}
+                    {totals.unit}
                   </Typography>
                 </Box>
                 {totals.totalRejected > 0 && (
@@ -701,19 +935,53 @@ export default function DeliveryDialog({
               placeholder="Inspection notes, remarks..."
             />
           </Grid>
+
+          {/* Stock Creation Notice */}
+          <Grid size={12}>
+            <Alert
+              severity="info"
+              icon={<InventoryIcon />}
+              sx={{ bgcolor: "success.50" }}
+            >
+              <Typography variant="body2">
+                <strong>Stock will be added immediately</strong> when you submit.
+                Materials will be available for use right away.
+              </Typography>
+            </Alert>
+          </Grid>
         </Grid>
       </DialogContent>
 
-      <DialogActions sx={{ px: 3, py: 2 }}>
+      <DialogActions sx={{ px: 3, py: 2, flexWrap: "wrap", gap: 1 }}>
         <Button onClick={onClose} disabled={isSubmitting}>
           Cancel
         </Button>
+        <Box sx={{ flex: 1 }} />
+
+        {hasAnyIssues && (
+          <Button
+            variant="contained"
+            color="warning"
+            startIcon={<WarningIcon />}
+            onClick={() => handleSubmit(true)}
+            disabled={isSubmitting || photos.length === 0}
+          >
+            {isSubmitting ? "Saving..." : "Flag for Review"}
+          </Button>
+        )}
+
         <Button
           variant="contained"
-          onClick={handleSubmit}
-          disabled={isSubmitting || items.every((i) => i.received_qty === 0)}
+          color="success"
+          startIcon={<CheckIcon />}
+          onClick={() => handleSubmit(false)}
+          disabled={
+            isSubmitting ||
+            photos.length === 0 ||
+            items.every((i) => i.received_qty === 0)
+          }
         >
-          {isSubmitting ? "Recording..." : "Record Delivery"}
+          {isSubmitting ? "Processing..." : "Record & Verify"}
         </Button>
       </DialogActions>
     </Dialog>

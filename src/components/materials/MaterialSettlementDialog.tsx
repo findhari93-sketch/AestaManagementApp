@@ -19,11 +19,13 @@ import {
   Alert,
   CircularProgress,
   Chip,
+  Paper,
 } from "@mui/material";
 import {
   Payment as PaymentIcon,
   CheckCircle as CheckCircleIcon,
   Warning as WarningIcon,
+  QrCode2 as QrCodeIcon,
 } from "@mui/icons-material";
 import { createClient } from "@/lib/supabase/client";
 import PayerSourceSelector from "@/components/settlement/PayerSourceSelector";
@@ -238,6 +240,8 @@ export default function MaterialSettlementDialog({
   const record = purchase || purchaseOrder;
   const purchaseAmount = Number(record!.total_amount || 0);
   const vendorName = record!.vendor?.name || (purchase?.vendor_name) || "Unknown Vendor";
+  const vendorQrCodeUrl = record!.vendor?.qr_code_url || null;
+  const vendorUpiId = record!.vendor?.upi_id || null;
   const refCode = purchase?.ref_code || purchaseOrder?.po_number || "";
   const dateField = purchase?.purchase_date || purchaseOrder?.order_date || "";
 
@@ -343,6 +347,133 @@ export default function MaterialSettlementDialog({
               size="small"
             />
           </Box>
+        )}
+
+        {/* Vendor QR Code - Show prominently when payment mode is UPI */}
+        {paymentMode === "upi" && (
+          <Paper
+            variant="outlined"
+            sx={{
+              p: 2,
+              mb: 2,
+              bgcolor: "primary.50",
+              borderColor: "primary.main",
+            }}
+          >
+            <Box sx={{ display: "flex", gap: 2, alignItems: "flex-start" }}>
+              {/* QR Code Display */}
+              {vendorQrCodeUrl ? (
+                <Box sx={{ textAlign: "center", flexShrink: 0 }}>
+                  <Box
+                    component="img"
+                    src={vendorQrCodeUrl}
+                    alt="Vendor Payment QR"
+                    sx={{
+                      width: 140,
+                      height: 140,
+                      objectFit: "contain",
+                      borderRadius: 1,
+                      border: "2px solid",
+                      borderColor: "primary.main",
+                      bgcolor: "white",
+                      p: 0.5,
+                    }}
+                  />
+                  <Typography
+                    variant="caption"
+                    color="primary.main"
+                    fontWeight={600}
+                    display="block"
+                    sx={{ mt: 1 }}
+                  >
+                    Scan to Pay
+                  </Typography>
+                </Box>
+              ) : (
+                <Box
+                  sx={{
+                    width: 140,
+                    height: 140,
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    borderRadius: 1,
+                    border: "2px dashed",
+                    borderColor: "grey.400",
+                    bgcolor: "grey.100",
+                    flexShrink: 0,
+                  }}
+                >
+                  <QrCodeIcon sx={{ fontSize: 48, color: "grey.400" }} />
+                  <Typography variant="caption" color="text.secondary" sx={{ mt: 1 }}>
+                    No QR Code
+                  </Typography>
+                </Box>
+              )}
+
+              {/* Vendor Payment Details */}
+              <Box sx={{ flex: 1 }}>
+                <Typography variant="subtitle2" fontWeight={600} gutterBottom>
+                  Pay to: {vendorName}
+                </Typography>
+                {vendorUpiId ? (
+                  <Box sx={{ mt: 1 }}>
+                    <Typography variant="body2" color="text.secondary">
+                      UPI ID:
+                    </Typography>
+                    <Typography
+                      variant="body1"
+                      fontWeight={600}
+                      fontFamily="monospace"
+                      sx={{
+                        bgcolor: "grey.100",
+                        px: 1,
+                        py: 0.5,
+                        borderRadius: 0.5,
+                        display: "inline-block",
+                        userSelect: "all",
+                      }}
+                    >
+                      {vendorUpiId}
+                    </Typography>
+                  </Box>
+                ) : (
+                  <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                    No UPI ID available
+                  </Typography>
+                )}
+
+                {/* Amount to Pay - Emphasized */}
+                <Box
+                  sx={{
+                    mt: 2,
+                    p: 1.5,
+                    bgcolor: "success.lighter",
+                    borderRadius: 1,
+                    border: "1px solid",
+                    borderColor: "success.light",
+                  }}
+                >
+                  <Typography variant="caption" color="success.dark">
+                    Amount to Pay:
+                  </Typography>
+                  <Typography variant="h5" color="success.dark" fontWeight={700}>
+                    {formatCurrency(Number(amountPaid) || purchaseAmount)}
+                  </Typography>
+                </Box>
+
+                {/* No QR Code Alert */}
+                {!vendorQrCodeUrl && !vendorUpiId && (
+                  <Alert severity="info" sx={{ mt: 2 }} icon={false}>
+                    <Typography variant="body2">
+                      Add vendor&apos;s QR code in Vendor Management for easier payments.
+                    </Typography>
+                  </Alert>
+                )}
+              </Box>
+            </Box>
+          </Paper>
         )}
 
         {/* Editable Amount Field for Bargaining */}
@@ -464,8 +595,12 @@ export default function MaterialSettlementDialog({
             folderPath={`settlements/${record!.site_id}`}
             fileNamePrefix="payment-proof"
             accept="image"
-            label="Payment Proof"
-            helperText="UPI screenshot / Bank statement"
+            label={paymentMode === "upi" ? "UPI Payment Screenshot" : "Payment Proof"}
+            helperText={
+              paymentMode === "upi"
+                ? "Upload screenshot after scanning QR code and completing payment"
+                : "UPI screenshot / Bank statement"
+            }
             uploadOnSelect
             value={
               paymentScreenshotUrl

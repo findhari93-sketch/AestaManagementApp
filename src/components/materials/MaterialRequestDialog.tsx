@@ -30,6 +30,7 @@ import {
   Close as CloseIcon,
   Add as AddIcon,
   Delete as DeleteIcon,
+  Warning as WarningIcon,
 } from "@mui/icons-material";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useAuth } from "@/contexts/AuthContext";
@@ -38,6 +39,8 @@ import { useSiteStock } from "@/hooks/queries/useStockInventory";
 import {
   useCreateMaterialRequest,
   useUpdateMaterialRequest,
+  useLinkedPOsCount,
+  useRevertLinkedPOsToDraft,
 } from "@/hooks/queries/useMaterialRequests";
 import { useQuery } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase/client";
@@ -101,6 +104,13 @@ export default function MaterialRequestDialog({
 
   const createRequest = useCreateMaterialRequest();
   const updateRequest = useUpdateMaterialRequest();
+  const revertPOsToDraft = useRevertLinkedPOsToDraft();
+
+  // Check if this request has linked POs (only relevant for edit mode)
+  const { data: linkedPOsData } = useLinkedPOsCount(
+    isEdit ? request?.id : undefined
+  );
+  const linkedPOsCount = linkedPOsData?.total || 0;
 
   const [error, setError] = useState("");
   const [sectionId, setSectionId] = useState("");
@@ -229,6 +239,16 @@ export default function MaterialRequestDialog({
             notes: notes || undefined,
           },
         });
+
+        // Revert linked POs to draft status if any exist
+        if (linkedPOsCount > 0) {
+          try {
+            await revertPOsToDraft.mutateAsync({ requestId: request.id, siteId });
+          } catch (revertError) {
+            console.warn("Failed to revert linked POs to draft:", revertError);
+            // Don't fail the whole operation, the request was already updated
+          }
+        }
       } else {
         await createRequest.mutateAsync({
           site_id: siteId,
@@ -292,6 +312,19 @@ export default function MaterialRequestDialog({
         {error && (
           <Alert severity="error" sx={{ mb: 2 }}>
             {error}
+          </Alert>
+        )}
+
+        {/* Warning for edit mode with linked POs */}
+        {isEdit && linkedPOsCount > 0 && (
+          <Alert
+            severity="warning"
+            icon={<WarningIcon />}
+            sx={{ mb: 2 }}
+          >
+            This request has <strong>{linkedPOsCount}</strong> linked Purchase Order
+            {linkedPOsCount !== 1 ? "s" : ""}. Saving changes will revert non-delivered POs
+            back to <strong>draft</strong> status for re-processing.
           </Alert>
         )}
 

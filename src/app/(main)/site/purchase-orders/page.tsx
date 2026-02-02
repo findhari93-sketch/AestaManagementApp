@@ -53,7 +53,7 @@ import {
   usePushBatchToSettlement,
 } from "@/hooks/queries/usePurchaseOrders";
 import UnifiedPurchaseOrderDialog from "@/components/materials/UnifiedPurchaseOrderDialog";
-import DeliveryDialog from "@/components/materials/DeliveryDialog";
+import RecordAndVerifyDeliveryDialog from "@/components/materials/RecordAndVerifyDeliveryDialog";
 import PODetailsDrawer from "@/components/materials/PODetailsDrawer";
 import PODeleteConfirmationDialog from "@/components/materials/PODeleteConfirmationDialog";
 import type {
@@ -766,8 +766,8 @@ export default function PurchaseOrdersPage() {
         prefilledUnit={prefilledData?.unit}
       />
 
-      {/* Delivery Dialog */}
-      <DeliveryDialog
+      {/* Record & Verify Delivery Dialog */}
+      <RecordAndVerifyDeliveryDialog
         open={deliveryDialogOpen}
         onClose={handleCloseDeliveryDialog}
         purchaseOrder={selectedPO}

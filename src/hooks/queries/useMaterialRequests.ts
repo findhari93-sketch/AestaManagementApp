@@ -18,6 +18,7 @@ import type {
   RequestItemForConversion,
   LinkedPurchaseOrderSummary,
   PurchaseOrder,
+  POStatus,
 } from "@/types/material.types";
 
 // ============================================
@@ -1266,5 +1267,472 @@ export function usePaginatedMaterialRequests(
     },
     enabled: !!siteId,
     placeholderData: (previousData) => previousData, // Keep previous data while loading
+  });
+}
+
+// ============================================
+// MATERIAL REQUEST CASCADE DELETE & EDIT REVERT
+// ============================================
+
+/**
+ * Type for material request deletion impact preview
+ */
+export interface MaterialRequestDeletionImpact {
+  linkedPOs: {
+    id: string;
+    po_number: string;
+    status: POStatus;
+    total_amount: number | null;
+    deliveryCount: number;
+    hasDeliveredItems: boolean;
+  }[];
+  totalPOCount: number;
+  totalDeliveries: number;
+  totalExpenses: number;
+  totalExpenseAmount: number;
+  hasDeliveredItems: boolean;
+}
+
+/**
+ * Query to preview the impact of deleting a material request
+ * Shows all linked POs, deliveries, and expenses that will be cascade deleted
+ */
+export function useMaterialRequestDeletionImpact(requestId: string | undefined) {
+  const supabase = createClient();
+
+  return useQuery({
+    queryKey: requestId
+      ? ["material-requests", "deletion-impact", requestId]
+      : ["material-requests", "deletion-impact", "unknown"],
+    queryFn: async (): Promise<MaterialRequestDeletionImpact> => {
+      if (!requestId) {
+        return {
+          linkedPOs: [],
+          totalPOCount: 0,
+          totalDeliveries: 0,
+          totalExpenses: 0,
+          totalExpenseAmount: 0,
+          hasDeliveredItems: false,
+        };
+      }
+
+      // Get all POs linked to this request via source_request_id
+      const { data: linkedPOs, error: poError } = await supabase
+        .from("purchase_orders")
+        .select(`
+          id, po_number, status, total_amount,
+          deliveries:deliveries(id, delivery_status)
+        `)
+        .eq("source_request_id", requestId);
+
+      if (poError) {
+        console.warn("[useMaterialRequestDeletionImpact] Error fetching POs:", poError);
+        return {
+          linkedPOs: [],
+          totalPOCount: 0,
+          totalDeliveries: 0,
+          totalExpenses: 0,
+          totalExpenseAmount: 0,
+          hasDeliveredItems: false,
+        };
+      }
+
+      // Process POs and calculate totals
+      let totalDeliveries = 0;
+      let hasDeliveredItems = false;
+      const processedPOs = (linkedPOs || []).map((po: any) => {
+        const deliveries = po.deliveries || [];
+        const deliveryCount = deliveries.length;
+        totalDeliveries += deliveryCount;
+
+        const poHasDelivered = ["delivered", "partial_delivered"].includes(po.status);
+        if (poHasDelivered) hasDeliveredItems = true;
+
+        return {
+          id: po.id,
+          po_number: po.po_number,
+          status: po.status as POStatus,
+          total_amount: po.total_amount,
+          deliveryCount,
+          hasDeliveredItems: poHasDelivered,
+        };
+      });
+
+      // Get material expenses count and amount for all linked POs
+      let totalExpenses = 0;
+      let totalExpenseAmount = 0;
+
+      if (processedPOs.length > 0) {
+        const poIds = processedPOs.map((po) => po.id);
+        const { data: expenses } = await (supabase as any)
+          .from("material_purchase_expenses")
+          .select("id, total_amount")
+          .in("purchase_order_id", poIds);
+
+        if (expenses) {
+          totalExpenses = expenses.length;
+          totalExpenseAmount = expenses.reduce(
+            (sum: number, e: { total_amount: number }) => sum + (e.total_amount || 0),
+            0
+          );
+        }
+      }
+
+      return {
+        linkedPOs: processedPOs,
+        totalPOCount: processedPOs.length,
+        totalDeliveries,
+        totalExpenses,
+        totalExpenseAmount,
+        hasDeliveredItems,
+      };
+    },
+    enabled: !!requestId,
+    staleTime: 0, // Always fetch fresh data
+  });
+}
+
+/**
+ * Delete a material request with full cascade delete of all children
+ * Deletes: Request → POs → Deliveries → Stock → Expenses
+ */
+export function useDeleteMaterialRequestCascade() {
+  const queryClient = useQueryClient();
+  const supabase = createClient();
+
+  return useMutation({
+    retry: false, // Cascade delete is not idempotent
+    mutationFn: async ({ id, siteId }: { id: string; siteId: string }) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
+      console.log("[useDeleteMaterialRequestCascade] Starting cascade delete for request:", id);
+
+      // Step 1: Get all POs linked to this request
+      const { data: linkedPOs, error: poError } = await supabase
+        .from("purchase_orders")
+        .select("id, po_number, status")
+        .eq("source_request_id", id);
+
+      if (poError) throw poError;
+
+      console.log("[useDeleteMaterialRequestCascade] Found linked POs:", linkedPOs?.length || 0);
+
+      // Step 2: Delete each linked PO with its cascade
+      // We need to import and use the PO cascade delete logic inline
+      for (const po of linkedPOs || []) {
+        console.log("[useDeleteMaterialRequestCascade] Deleting PO:", po.po_number);
+
+        // Get material purchase expenses for this PO
+        const { data: materialExpenses } = await (supabase as any)
+          .from("material_purchase_expenses")
+          .select("id, ref_code, purchase_type")
+          .eq("purchase_order_id", po.id);
+
+        // Get all deliveries for stock cleanup
+        const { data: stockDeliveries } = await supabase
+          .from("deliveries")
+          .select("id")
+          .eq("po_id", po.id);
+
+        // Clean up stock inventory records
+        if (stockDeliveries && stockDeliveries.length > 0) {
+          const stockDeliveryIds = stockDeliveries.map((d) => d.id);
+
+          const { data: deliveryItems } = await supabase
+            .from("delivery_items")
+            .select("material_id, brand_id")
+            .in("delivery_id", stockDeliveryIds);
+
+          if (deliveryItems && deliveryItems.length > 0) {
+            const materialBrandPairs = new Map<string, { material_id: string; brand_id: string | null }>();
+            for (const item of deliveryItems) {
+              const key = `${item.material_id}-${item.brand_id || "null"}`;
+              materialBrandPairs.set(key, {
+                material_id: item.material_id,
+                brand_id: item.brand_id,
+              });
+            }
+
+            // Delete stock inventory and transactions
+            for (const { material_id, brand_id } of materialBrandPairs.values()) {
+              let stockQuery = supabase
+                .from("stock_inventory")
+                .select("id")
+                .eq("site_id", siteId)
+                .eq("material_id", material_id);
+
+              if (brand_id) {
+                stockQuery = stockQuery.eq("brand_id", brand_id);
+              } else {
+                stockQuery = stockQuery.is("brand_id", null);
+              }
+
+              const { data: stockInventory } = await stockQuery;
+
+              if (stockInventory && stockInventory.length > 0) {
+                const inventoryIds = stockInventory.map((s) => s.id);
+
+                // Delete transactions first
+                await supabase
+                  .from("stock_transactions")
+                  .delete()
+                  .in("inventory_id", inventoryIds);
+
+                // Delete inventory
+                await supabase
+                  .from("stock_inventory")
+                  .delete()
+                  .in("id", inventoryIds);
+              }
+            }
+          }
+        }
+
+        // Delete material expenses linked to this PO
+        const groupStockExpense = materialExpenses?.find(
+          (e: { purchase_type: string }) => e.purchase_type === "group_stock"
+        );
+
+        if (groupStockExpense) {
+          const batchRefCode = groupStockExpense.ref_code;
+
+          // Delete derived expenses
+          await (supabase as any)
+            .from("material_purchase_expenses")
+            .delete()
+            .eq("original_batch_code", batchRefCode);
+
+          // Delete settlement allocations
+          await (supabase as any)
+            .from("settlement_expense_allocations")
+            .delete()
+            .eq("batch_ref_code", batchRefCode);
+
+          // Delete settlement payments and items
+          const { data: settlements } = await (supabase as any)
+            .from("inter_site_material_settlements")
+            .select("id")
+            .eq("batch_ref_code", batchRefCode);
+
+          if (settlements && settlements.length > 0) {
+            const settlementIds = settlements.map((s: { id: string }) => s.id);
+
+            await (supabase as any)
+              .from("inter_site_settlement_payments")
+              .delete()
+              .in("settlement_id", settlementIds);
+
+            await (supabase as any)
+              .from("inter_site_settlement_items")
+              .delete()
+              .in("settlement_id", settlementIds);
+
+            await (supabase as any)
+              .from("inter_site_material_settlements")
+              .delete()
+              .in("id", settlementIds);
+          }
+
+          // Delete batch usage records
+          await (supabase as any)
+            .from("batch_usage_records")
+            .delete()
+            .eq("batch_ref_code", batchRefCode);
+        }
+
+        // Delete material expense items and expenses
+        if (materialExpenses && materialExpenses.length > 0) {
+          const expenseIds = materialExpenses.map((e: { id: string }) => e.id);
+
+          await (supabase as any)
+            .from("material_purchase_expense_items")
+            .delete()
+            .in("purchase_expense_id", expenseIds);
+
+          await (supabase as any)
+            .from("material_purchase_expenses")
+            .delete()
+            .in("id", expenseIds);
+        }
+
+        // Delete delivery items and deliveries
+        if (stockDeliveries && stockDeliveries.length > 0) {
+          const deliveryIds = stockDeliveries.map((d) => d.id);
+
+          await supabase
+            .from("delivery_items")
+            .delete()
+            .in("delivery_id", deliveryIds);
+
+          await supabase
+            .from("deliveries")
+            .delete()
+            .in("id", deliveryIds);
+        }
+
+        // Delete PO items (should cascade via FK but explicit for safety)
+        await supabase
+          .from("purchase_order_items")
+          .delete()
+          .eq("po_id", po.id);
+
+        // Delete the PO
+        await supabase
+          .from("purchase_orders")
+          .delete()
+          .eq("id", po.id);
+
+        console.log("[useDeleteMaterialRequestCascade] Deleted PO:", po.po_number);
+      }
+
+      // Step 3: Delete junction table records for this request's items
+      const { data: requestItems } = await supabase
+        .from("material_request_items")
+        .select("id")
+        .eq("request_id", id);
+
+      if (requestItems && requestItems.length > 0) {
+        const requestItemIds = requestItems.map((item) => item.id);
+
+        // Delete junction records (should cascade via FK but explicit)
+        await (supabase as any)
+          .from("purchase_order_request_items")
+          .delete()
+          .in("request_item_id", requestItemIds);
+      }
+
+      // Step 4: Delete request items
+      await supabase
+        .from("material_request_items")
+        .delete()
+        .eq("request_id", id);
+
+      // Step 5: Delete the material request itself
+      const { error: deleteError } = await supabase
+        .from("material_requests")
+        .delete()
+        .eq("id", id);
+
+      if (deleteError) throw deleteError;
+
+      console.log("[useDeleteMaterialRequestCascade] Cascade delete complete for request:", id);
+
+      return { id, siteId };
+    },
+    onSuccess: (result) => {
+      // Invalidate all relevant queries
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.materialRequests.bySite(result.siteId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.materialRequests.all,
+      });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.purchaseOrders.bySite(result.siteId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["deliveries"],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["stock-inventory"],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["material-purchase-expenses"],
+      });
+    },
+  });
+}
+
+/**
+ * Revert linked POs to draft status when a material request is edited
+ * Only reverts POs that haven't been delivered yet
+ */
+export function useRevertLinkedPOsToDraft() {
+  const queryClient = useQueryClient();
+  const supabase = createClient();
+
+  return useMutation({
+    mutationFn: async ({ requestId, siteId }: { requestId: string; siteId: string }) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
+      // Find all linked POs that can be reverted (not delivered)
+      const { data: linkedPOs, error: poError } = await supabase
+        .from("purchase_orders")
+        .select("id, po_number, status")
+        .eq("source_request_id", requestId)
+        .in("status", ["draft", "pending_approval", "approved", "ordered"]);
+
+      if (poError) throw poError;
+
+      const revertedPOs: { id: string; po_number: string; oldStatus: string }[] = [];
+
+      // Revert each PO to draft
+      for (const po of linkedPOs || []) {
+        const { error: updateError } = await supabase
+          .from("purchase_orders")
+          .update({
+            status: "draft",
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", po.id);
+
+        if (!updateError) {
+          revertedPOs.push({
+            id: po.id,
+            po_number: po.po_number,
+            oldStatus: po.status || "unknown",
+          });
+        }
+      }
+
+      return { requestId, siteId, revertedPOs, revertedCount: revertedPOs.length };
+    },
+    onSuccess: (result) => {
+      // Invalidate PO queries
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.purchaseOrders.bySite(result.siteId),
+      });
+      // Invalidate request linked POs query
+      queryClient.invalidateQueries({
+        queryKey: ["material-requests", "linked-pos", result.requestId],
+      });
+    },
+  });
+}
+
+/**
+ * Get count of linked POs for a material request
+ * Useful for checking if edit warning should be shown
+ */
+export function useLinkedPOsCount(requestId: string | undefined) {
+  const supabase = createClient();
+
+  return useQuery({
+    queryKey: requestId
+      ? ["material-requests", "linked-pos-count", requestId]
+      : ["material-requests", "linked-pos-count", "unknown"],
+    queryFn: async () => {
+      if (!requestId) return { total: 0, nonDelivered: 0 };
+
+      const { data, error } = await supabase
+        .from("purchase_orders")
+        .select("id, status")
+        .eq("source_request_id", requestId);
+
+      if (error) {
+        console.warn("[useLinkedPOsCount] Error:", error);
+        return { total: 0, nonDelivered: 0 };
+      }
+
+      const total = data?.length || 0;
+      const nonDelivered = (data || []).filter(
+        (po) => !["delivered", "partial_delivered"].includes(po.status || "")
+      ).length;
+
+      return { total, nonDelivered };
+    },
+    enabled: !!requestId,
   });
 }

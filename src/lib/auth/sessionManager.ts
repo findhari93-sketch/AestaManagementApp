@@ -16,6 +16,8 @@ import { createClient } from "@/lib/supabase/client";
 
 // const REFRESH_INTERVAL = 45 * 60 * 1000; // REMOVED: Conflicting with Supabase auto-refresh
 const IDLE_THRESHOLD = 15 * 60 * 1000; // 15 minutes
+const PROACTIVE_REFRESH_INTERVAL = 10 * 60 * 1000; // 10 minutes - check if refresh needed
+const EXPIRY_BUFFER = 15 * 60; // 15 minutes in seconds - refresh if token expires within this time
 const ACTIVITY_DEBOUNCE = 2000; // 2 seconds
 const SESSION_CHECK_DEBOUNCE = 5000; // 5 seconds - skip session check if done recently
 const SESSION_CHECK_TIMEOUT = 8000; // 8 seconds - balanced timeout (was 15s)
@@ -25,6 +27,7 @@ type SessionManagerState = {
   lastActivity: number;
   lastSessionCheckTime: number;
   // refreshTimer: ReturnType<typeof setInterval> | null; // REMOVED
+  proactiveRefreshTimer: ReturnType<typeof setInterval> | null;
   activityTimer: ReturnType<typeof setTimeout> | null;
 };
 
@@ -34,6 +37,7 @@ class SessionManager {
     lastActivity: Date.now(),
     lastSessionCheckTime: 0,
     // refreshTimer: null,
+    proactiveRefreshTimer: null,
     activityTimer: null,
   };
 
@@ -54,10 +58,13 @@ class SessionManager {
     // Start refresh timer - REMOVED to avoid race condition with Supabase auto-refresh
     // this.startRefreshTimer();
 
+    // Start proactive refresh timer to prevent session expiry during idle
+    this.startProactiveRefreshTimer();
+
     // Setup activity tracking
     this.setupActivityTracking();
 
-    console.log("[SessionManager] Initialized - relying on Supabase auto-refresh");
+    console.log("[SessionManager] Initialized with proactive refresh timer");
   }
 
   /**
@@ -71,6 +78,11 @@ class SessionManager {
     //   clearInterval(this.state.refreshTimer);
     //   this.state.refreshTimer = null;
     // }
+
+    if (this.state.proactiveRefreshTimer) {
+      clearInterval(this.state.proactiveRefreshTimer);
+      this.state.proactiveRefreshTimer = null;
+    }
 
     if (this.state.activityTimer) {
       clearTimeout(this.state.activityTimer);
@@ -200,6 +212,53 @@ class SessionManager {
   //     await this.refreshSession();
   //   }, REFRESH_INTERVAL);
   // }
+
+  private startProactiveRefreshTimer(): void {
+    // Clear existing timer if any
+    if (this.state.proactiveRefreshTimer) {
+      clearInterval(this.state.proactiveRefreshTimer);
+    }
+
+    // Run proactive refresh check every 10 minutes
+    this.state.proactiveRefreshTimer = setInterval(async () => {
+      await this.proactiveRefreshIfNeeded();
+    }, PROACTIVE_REFRESH_INTERVAL);
+
+    // Also run immediately on start to catch near-expiry sessions
+    this.proactiveRefreshIfNeeded();
+  }
+
+  private async proactiveRefreshIfNeeded(): Promise<void> {
+    try {
+      const supabase = createClient();
+      const { data: { session } } = await supabase.auth.getSession();
+
+      if (!session) {
+        // No session - nothing to refresh
+        return;
+      }
+
+      const expiresAt = session.expires_at;
+      if (expiresAt) {
+        const nowSeconds = Math.floor(Date.now() / 1000);
+        const timeUntilExpiry = expiresAt - nowSeconds;
+
+        // Refresh if within buffer period (15 minutes)
+        if (timeUntilExpiry < EXPIRY_BUFFER && timeUntilExpiry > 0) {
+          console.log(`[SessionManager] Proactive refresh - ${Math.round(timeUntilExpiry / 60)} min until expiry`);
+          const { error } = await supabase.auth.refreshSession();
+          if (error) {
+            console.error("[SessionManager] Proactive refresh failed:", error);
+            this.dispatchRefreshFailedEvent(error.message);
+          } else {
+            console.log("[SessionManager] Proactive refresh successful");
+          }
+        }
+      }
+    } catch (err) {
+      console.error("[SessionManager] Proactive refresh error:", err);
+    }
+  }
 
   private setupActivityTracking(): void {
     if (typeof window === "undefined") return;

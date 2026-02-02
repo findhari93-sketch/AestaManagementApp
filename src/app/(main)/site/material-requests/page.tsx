@@ -27,6 +27,7 @@ import {
   Cancel as CancelIcon,
   ShoppingCart as ConvertIcon,
   ShoppingCart as POIcon,
+  Delete as DeleteIcon,
 } from "@mui/icons-material";
 import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
 import PageHeader from "@/components/layout/PageHeader";
@@ -42,6 +43,7 @@ import {
   useRejectMaterialRequest,
 } from "@/hooks/queries/useMaterialRequests";
 import MaterialRequestDialog from "@/components/materials/MaterialRequestDialog";
+import MaterialRequestDeleteConfirmationDialog from "@/components/materials/MaterialRequestDeleteConfirmationDialog";
 import RequestApprovalDialog from "@/components/materials/RequestApprovalDialog";
 import RequestDetailsDrawer from "@/components/materials/RequestDetailsDrawer";
 import UnifiedPurchaseOrderDialog from "@/components/materials/UnifiedPurchaseOrderDialog";
@@ -89,9 +91,11 @@ export default function MaterialRequestsPage() {
   const [detailsDrawerOpen, setDetailsDrawerOpen] = useState(false);
   const [convertDialogOpen, setConvertDialogOpen] = useState(false);
   const [directPODialogOpen, setDirectPODialogOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [editingRequest, setEditingRequest] = useState<MaterialRequestWithDetails | null>(null);
   const [selectedRequest, setSelectedRequest] = useState<MaterialRequestWithDetails | null>(null);
   const [requestToConvert, setRequestToConvert] = useState<MaterialRequestWithDetails | null>(null);
+  const [requestToDelete, setRequestToDelete] = useState<MaterialRequestWithDetails | null>(null);
   const [currentTab, setCurrentTab] = useState<TabValue>("all");
   const [searchTerm, setSearchTerm] = useState("");
 
@@ -189,6 +193,16 @@ export default function MaterialRequestsPage() {
     // Optionally navigate to the PO or show a success message
     handleCloseConvertDialog();
   }, [handleCloseConvertDialog]);
+
+  const handleOpenDeleteDialog = useCallback((request: MaterialRequestWithDetails) => {
+    setRequestToDelete(request);
+    setDeleteDialogOpen(true);
+  }, []);
+
+  const handleCloseDeleteDialog = useCallback(() => {
+    setDeleteDialogOpen(false);
+    setRequestToDelete(null);
+  }, []);
 
   const handleCancel = useCallback(
     async (request: MaterialRequestWithDetails) => {
@@ -369,6 +383,19 @@ export default function MaterialRequestsPage() {
             </>
           )}
 
+          {/* Delete action - available for admin on any request */}
+          {isAdmin && (
+            <Tooltip title="Delete">
+              <IconButton
+                size="small"
+                color="error"
+                onClick={() => handleOpenDeleteDialog(request)}
+              >
+                <DeleteIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          )}
+
           {["approved", "ordered", "partial_fulfilled"].includes(request.status) && isAdmin && (
             <Tooltip title="Convert to PO">
               <IconButton
@@ -390,6 +417,7 @@ export default function MaterialRequestsPage() {
       handleOpenDialog,
       handleOpenApprovalDialog,
       handleOpenConvertDialog,
+      handleOpenDeleteDialog,
       handleCancel,
       handleReject,
     ]
@@ -581,6 +609,15 @@ export default function MaterialRequestsPage() {
       <UnifiedPurchaseOrderDialog
         open={directPODialogOpen}
         onClose={() => setDirectPODialogOpen(false)}
+        siteId={selectedSite.id}
+      />
+
+      {/* Delete Confirmation Dialog */}
+      <MaterialRequestDeleteConfirmationDialog
+        open={deleteDialogOpen}
+        onClose={handleCloseDeleteDialog}
+        requestId={requestToDelete?.id}
+        requestNumber={requestToDelete?.request_number}
         siteId={selectedSite.id}
       />
     </Box>

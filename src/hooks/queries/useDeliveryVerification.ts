@@ -377,11 +377,15 @@ export function useDeliveriesWithVerification(
  * Helper function to create/update stock inventory from delivery items
  * This is needed because the database trigger only fires on INSERT,
  * but delivery isn't verified at INSERT time
+ *
+ * Exported for use by useRecordAndVerifyDelivery hook
  */
-async function createStockFromDeliveryItems(
+export async function createStockFromDeliveryItems(
   supabase: ReturnType<typeof createClient>,
   deliveryId: string
 ) {
+  console.log("[Stock Creation] Starting for delivery:", deliveryId);
+
   // Get delivery details
   const { data: delivery, error: deliveryError } = await supabase
     .from("deliveries")
@@ -390,9 +394,12 @@ async function createStockFromDeliveryItems(
     .single();
 
   if (deliveryError || !delivery) {
-    console.error("Failed to fetch delivery for stock creation:", deliveryError);
-    return;
+    const errorMsg = `Failed to fetch delivery for stock creation: ${deliveryError?.message || "Delivery not found"}`;
+    console.error("[Stock Creation]", errorMsg);
+    throw new Error(errorMsg);
   }
+
+  console.log("[Stock Creation] Delivery found:", { site_id: delivery.site_id, location_id: delivery.location_id });
 
   // Get delivery items
   const { data: items, error: itemsError } = await supabase
@@ -401,14 +408,27 @@ async function createStockFromDeliveryItems(
     .eq("delivery_id", deliveryId);
 
   if (itemsError || !items) {
-    console.error("Failed to fetch delivery items for stock creation:", itemsError);
-    return;
+    const errorMsg = `Failed to fetch delivery items for stock creation: ${itemsError?.message || "No items found"}`;
+    console.error("[Stock Creation]", errorMsg);
+    throw new Error(errorMsg);
   }
+
+  console.log("[Stock Creation] Found", items.length, "delivery items");
+
+  if (items.length === 0) {
+    throw new Error("No delivery items found to create stock from");
+  }
+
+  let stockCreatedCount = 0;
+  let stockUpdatedCount = 0;
 
   // Create/update stock for each item
   for (const item of items) {
     const qty = item.accepted_qty ?? item.received_qty;
-    if (!qty || qty <= 0) continue;
+    if (!qty || qty <= 0) {
+      console.log("[Stock Creation] Skipping item with zero/null qty:", item.id);
+      continue;
+    }
 
     // Check if stock inventory exists
     let stockQuery = supabase
@@ -429,7 +449,12 @@ async function createStockFromDeliveryItems(
       stockQuery = stockQuery.is("brand_id", null);
     }
 
-    const { data: existingStock } = await stockQuery.maybeSingle();
+    const { data: existingStock, error: stockQueryError } = await stockQuery.maybeSingle();
+
+    if (stockQueryError) {
+      console.error("[Stock Creation] Error checking existing stock:", stockQueryError);
+      throw new Error(`Failed to check existing stock: ${stockQueryError.message}`);
+    }
 
     if (existingStock) {
       // Update existing stock with weighted average cost
@@ -438,7 +463,7 @@ async function createStockFromDeliveryItems(
       const newValue = qty * (item.unit_price || 0);
       const newAvgCost = newQty > 0 ? (existingValue + newValue) / newQty : 0;
 
-      await supabase
+      const { error: updateError } = await supabase
         .from("stock_inventory")
         .update({
           current_qty: newQty,
@@ -447,9 +472,16 @@ async function createStockFromDeliveryItems(
           updated_at: new Date().toISOString(),
         })
         .eq("id", existingStock.id);
+
+      if (updateError) {
+        console.error("[Stock Creation] Error updating stock:", updateError);
+        throw new Error(`Failed to update stock inventory: ${updateError.message}`);
+      }
+      stockUpdatedCount++;
+      console.log("[Stock Creation] Updated existing stock:", existingStock.id, "new qty:", newQty);
     } else {
       // Create new stock inventory record
-      await supabase.from("stock_inventory").insert({
+      const { error: insertError } = await supabase.from("stock_inventory").insert({
         site_id: delivery.site_id,
         location_id: delivery.location_id,
         material_id: item.material_id,
@@ -458,7 +490,20 @@ async function createStockFromDeliveryItems(
         avg_unit_cost: item.unit_price || 0,
         last_received_date: delivery.delivery_date,
       });
+
+      if (insertError) {
+        console.error("[Stock Creation] Error inserting stock:", insertError);
+        throw new Error(`Failed to create stock inventory: ${insertError.message}`);
+      }
+      stockCreatedCount++;
+      console.log("[Stock Creation] Created new stock for material:", item.material_id, "qty:", qty);
     }
+  }
+
+  console.log("[Stock Creation] Complete. Created:", stockCreatedCount, "Updated:", stockUpdatedCount);
+
+  if (stockCreatedCount === 0 && stockUpdatedCount === 0) {
+    throw new Error("No stock records were created or updated - all items may have zero quantity");
   }
 }
 

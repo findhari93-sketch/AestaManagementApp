@@ -202,6 +202,18 @@ export default function UnifiedPurchaseOrderDialog({
 
   const today = new Date().toISOString().split("T")[0];
 
+  // Helper to convert date string to YYYY-MM-DD format for HTML date input
+  const toDateInputFormat = (dateStr: string | null | undefined): string => {
+    if (!dateStr) return "";
+    try {
+      const date = new Date(dateStr);
+      if (isNaN(date.getTime())) return "";
+      return date.toISOString().split("T")[0];
+    } catch {
+      return "";
+    }
+  };
+
   const [error, setError] = useState("");
   const [selectedVendor, setSelectedVendor] = useState<Vendor | VendorForMaterials | null>(null);
   const [purchaseDate, setPurchaseDate] = useState(today);
@@ -444,8 +456,20 @@ export default function UnifiedPurchaseOrderDialog({
         }
       }
 
-      setPurchaseDate(today);
-      setExpectedDeliveryDate("");
+      // Auto-fill dates based on mode
+      if (isRequestMode && request) {
+        // Purchase Date: Use request's request_date or today
+        const requestDate = toDateInputFormat(request.request_date);
+        setPurchaseDate(requestDate || today);
+
+        // Expected Delivery Date: Use request's required_by_date if available
+        const requiredByDate = toDateInputFormat(request.required_by_date);
+        setExpectedDeliveryDate(requiredByDate);
+      } else {
+        setPurchaseDate(today);
+        setExpectedDeliveryDate("");
+      }
+
       setDeliveryAddress("");
       setPaymentTerms("");
       setNotes("");
@@ -466,7 +490,7 @@ export default function UnifiedPurchaseOrderDialog({
     }
     setNewItemQty("");
     setNewItemPrice("");
-  }, [purchaseOrder, allVendors, groupedMaterials, materialSearchOptions, open, prefilledVendorId, prefilledMaterialId]);
+  }, [purchaseOrder, allVendors, groupedMaterials, materialSearchOptions, open, prefilledVendorId, prefilledMaterialId, request, isRequestMode, today]);
 
   // Initialize request items state when request items load
   useEffect(() => {

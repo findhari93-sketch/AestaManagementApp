@@ -50,6 +50,7 @@ After making any frontend/UI changes, I must verify and fix issues automatically
 
 8. **Re-verify after each fix** - Take new screenshot and check console again
 9. **Repeat until clean** - No visual issues AND no console errors/warnings
+10. **Close the browser** - After testing is complete, use `playwright_close` to close the test browser
 
 ### Important Rules
 - For **Supabase production writes**: ALWAYS ask for user confirmation first

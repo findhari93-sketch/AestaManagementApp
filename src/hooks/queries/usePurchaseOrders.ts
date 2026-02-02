@@ -16,7 +16,10 @@ import type {
   DeliveryFormData,
   DeliveryItem,
   DeliveryItemFormData,
+  RecordAndVerifyDeliveryFormData,
+  DeliveryDiscrepancy,
 } from "@/types/material.types";
+import { createStockFromDeliveryItems } from "./useDeliveryVerification";
 
 // ============================================
 // PURCHASE ORDERS
@@ -2091,6 +2094,301 @@ export function useRecordDelivery() {
       queryClient.invalidateQueries({
         queryKey: queryKeys.batchUsage.all,
       });
+      if (variables.po_id) {
+        queryClient.invalidateQueries({
+          queryKey: ["purchase-orders", "detail", variables.po_id],
+        });
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.purchaseOrders.bySite(variables.site_id),
+        });
+      }
+    },
+  });
+}
+
+/**
+ * Record and Verify Delivery in a single step
+ * This hook combines the recording and verification into one operation,
+ * creating delivery + expense + stock in a single step.
+ *
+ * Key differences from useRecordDelivery:
+ * - Sets verification_status to "verified" (or "disputed" if hasIssues)
+ * - Creates stock inventory immediately (no separate verification step needed)
+ * - Requires at least one photo (serves dual purpose)
+ */
+export function useRecordAndVerifyDelivery() {
+  const queryClient = useQueryClient();
+  const supabase = createClient();
+
+  return useMutation({
+    retry: false, // Not idempotent - creates stock and expenses
+    mutationFn: async (data: RecordAndVerifyDeliveryFormData) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
+      // Validate photos (required for unified flow)
+      if (!data.photos || data.photos.length === 0) {
+        throw new Error("At least one photo is required for Record & Verify");
+      }
+
+      // Generate GRN number
+      const timestamp = Date.now().toString(36).toUpperCase();
+      const random = Math.random().toString(36).substring(2, 6).toUpperCase();
+      const grnNumber = `GRN-${timestamp}-${random}`;
+
+      // Validate and get vendor_id - it's required in the database
+      let vendorId = data.vendor_id && data.vendor_id.trim() !== "" ? data.vendor_id : null;
+
+      // If vendor_id is missing but we have a PO, fetch it from the PO
+      if (!vendorId && data.po_id) {
+        const { data: po } = await supabase
+          .from("purchase_orders")
+          .select("vendor_id")
+          .eq("id", data.po_id)
+          .single();
+
+        if (po?.vendor_id) {
+          vendorId = po.vendor_id;
+        }
+      }
+
+      // vendor_id is required - throw error if still missing
+      if (!vendorId) {
+        throw new Error("Vendor ID is required for delivery. Please ensure the PO has a vendor.");
+      }
+
+      // Handle empty strings as null for optional UUID fields
+      const locationId = data.location_id && data.location_id.trim() !== "" ? data.location_id : null;
+
+      // Get current user for tracking who recorded and verified the delivery
+      const { data: { user } } = await supabase.auth.getUser();
+      const now = new Date().toISOString();
+
+      // Determine verification status based on whether issues were flagged
+      const verificationStatus = data.hasIssues ? "disputed" : "verified";
+
+      // Build the insert payload - set both recording AND verification fields
+      const deliveryPayload = {
+        po_id: data.po_id || null,
+        site_id: data.site_id,
+        vendor_id: vendorId,
+        location_id: locationId,
+        grn_number: grnNumber,
+        delivery_date: data.delivery_date,
+        delivery_status: "delivered",
+        // KEY CHANGE: Set verified status immediately (or disputed if issues)
+        verification_status: verificationStatus,
+        requires_verification: false, // Already verified
+        // Recording fields
+        delivery_photos: data.photos.length > 0 ? JSON.stringify(data.photos) : null,
+        recorded_by: user?.id || null,
+        recorded_at: now,
+        // Verification fields (set simultaneously)
+        verification_photos: data.photos, // Same photos serve both purposes
+        verification_notes: data.notes || null,
+        engineer_verified_by: user?.id || null,
+        engineer_verified_at: now,
+        discrepancies: data.issues && data.issues.length > 0 ? JSON.stringify(data.issues) : null,
+        // Transport details
+        challan_number: data.challan_number || null,
+        challan_date: data.challan_date || null,
+        challan_url: data.challan_url || null,
+        vehicle_number: data.vehicle_number || null,
+        driver_name: data.driver_name || null,
+        driver_phone: data.driver_phone || null,
+        notes: data.notes || null,
+      };
+
+      console.log("[useRecordAndVerifyDelivery] Inserting delivery with payload:", deliveryPayload);
+
+      const { data: delivery, error: deliveryError } = await (
+        supabase.from("deliveries") as any
+      )
+        .insert(deliveryPayload)
+        .select()
+        .single();
+
+      if (deliveryError) {
+        console.error("[useRecordAndVerifyDelivery] Delivery insert error:", deliveryError);
+        throw deliveryError;
+      }
+
+      // Insert delivery items
+      const deliveryItems = data.items.map((item) => ({
+        delivery_id: delivery.id,
+        po_item_id: item.po_item_id || null,
+        material_id: item.material_id,
+        brand_id: item.brand_id || null,
+        ordered_qty: item.ordered_qty,
+        received_qty: item.received_qty,
+        accepted_qty: item.accepted_qty ?? item.received_qty,
+        rejected_qty: item.rejected_qty ?? 0,
+        rejection_reason: item.rejection_reason || null,
+        unit_price: item.unit_price,
+        notes: item.notes || null,
+      }));
+
+      console.log("[useRecordAndVerifyDelivery] Inserting delivery items:", deliveryItems);
+
+      const { error: itemsError } = await supabase
+        .from("delivery_items")
+        .insert(deliveryItems);
+
+      if (itemsError) {
+        console.error("[useRecordAndVerifyDelivery] Delivery items insert error:", itemsError);
+        throw itemsError;
+      }
+
+      // Update PO item received quantities (same as useRecordDelivery)
+      if (data.po_id) {
+        for (const item of data.items) {
+          if (item.po_item_id) {
+            const { data: poItem } = await supabase
+              .from("purchase_order_items")
+              .select("received_qty")
+              .eq("id", item.po_item_id)
+              .single();
+
+            if (poItem) {
+              await supabase
+                .from("purchase_order_items")
+                .update({
+                  received_qty:
+                    (poItem.received_qty ?? 0) +
+                    (item.accepted_qty ?? item.received_qty),
+                })
+                .eq("id", item.po_item_id);
+            }
+          }
+        }
+
+        // Check if PO is fully delivered
+        const { data: poItems } = await supabase
+          .from("purchase_order_items")
+          .select("quantity, received_qty")
+          .eq("po_id", data.po_id);
+
+        if (poItems) {
+          const allDelivered = poItems.every(
+            (item) => (item.received_qty ?? 0) >= item.quantity
+          );
+          const someDelivered = poItems.some(
+            (item) => (item.received_qty ?? 0) > 0
+          );
+
+          const newStatus = allDelivered
+            ? "delivered"
+            : someDelivered
+            ? "partial_delivered"
+            : undefined;
+
+          if (newStatus) {
+            await supabase
+              .from("purchase_orders")
+              .update({
+                status: newStatus,
+                updated_at: now,
+              })
+              .eq("id", data.po_id);
+
+            // When PO becomes "delivered", auto-create Material Purchase Expense
+            if (newStatus === "delivered") {
+              try {
+                // Get full PO details with vendor and items
+                const { data: po } = await supabase
+                  .from("purchase_orders")
+                  .select(`
+                    *,
+                    vendor:vendors(id, name),
+                    items:purchase_order_items(
+                      id, material_id, brand_id, quantity, unit_price, tax_rate
+                    )
+                  `)
+                  .eq("id", data.po_id)
+                  .single();
+
+                if (po) {
+                  // Check if expense already exists for this PO (prevent duplicates)
+                  const { data: existingExpense } = await (supabase as any)
+                    .from("material_purchase_expenses")
+                    .select("id, ref_code")
+                    .eq("purchase_order_id", data.po_id)
+                    .maybeSingle();
+
+                  if (!existingExpense) {
+                    // Parse internal_notes if it's a JSON string
+                    let parsedNotes: { is_group_stock?: boolean; site_group_id?: string; group_id?: string } | null = null;
+                    if (po.internal_notes) {
+                      try {
+                        parsedNotes = typeof po.internal_notes === "string"
+                          ? JSON.parse(po.internal_notes)
+                          : po.internal_notes;
+                      } catch {
+                        // Ignore parse errors
+                      }
+                    }
+
+                    const isGroupStock = parsedNotes?.is_group_stock === true;
+                    const purchaseType = isGroupStock ? "group_stock" : "own_site";
+
+                    // Generate expense reference code
+                    const expenseTimestamp = Date.now().toString(36).toUpperCase();
+                    const expenseRandom = Math.random().toString(36).substring(2, 5).toUpperCase();
+                    const refCode = `MPE-${expenseTimestamp}-${expenseRandom}`;
+
+                    // Calculate total amount from items
+                    let totalAmount = 0;
+                    for (const item of po.items || []) {
+                      const itemSubtotal = (item.quantity || 0) * (item.unit_price || 0);
+                      const itemTax = item.tax_rate ? itemSubtotal * (item.tax_rate / 100) : 0;
+                      totalAmount += itemSubtotal + itemTax;
+                    }
+
+                    // Create the expense record
+                    await (supabase as any)
+                      .from("material_purchase_expenses")
+                      .insert({
+                        ref_code: refCode,
+                        site_id: data.site_id,
+                        vendor_id: vendorId,
+                        purchase_order_id: data.po_id,
+                        purchase_type: purchaseType,
+                        purchase_date: data.delivery_date,
+                        total_amount: totalAmount,
+                        bill_url: data.challan_url || null,
+                        notes: `Auto-created from PO ${po.po_number}`,
+                        created_by: user?.id || null,
+                      });
+
+                    console.log("[useRecordAndVerifyDelivery] Material expense created:", refCode);
+                  }
+                }
+              } catch (expenseErr) {
+                console.error("[useRecordAndVerifyDelivery] Error creating expense (non-fatal):", expenseErr);
+                // Don't fail the whole transaction for expense creation failure
+              }
+            }
+          }
+        }
+      }
+
+      // KEY ADDITION: Create stock inventory immediately (if verified, not disputed)
+      if (verificationStatus === "verified") {
+        console.log("[useRecordAndVerifyDelivery] Creating stock inventory...");
+        await createStockFromDeliveryItems(supabase, delivery.id);
+        console.log("[useRecordAndVerifyDelivery] Stock inventory created successfully");
+      } else {
+        console.log("[useRecordAndVerifyDelivery] Skipping stock creation (disputed delivery)");
+      }
+
+      return { delivery, grnNumber, verificationStatus };
+    },
+    onSuccess: (result, variables) => {
+      // Invalidate all relevant queries
+      queryClient.invalidateQueries({ queryKey: queryKeys.deliveries.all });
+      queryClient.invalidateQueries({ queryKey: queryKeys.materialStock.all });
+      queryClient.invalidateQueries({ queryKey: queryKeys.purchaseOrders.all });
+
       if (variables.po_id) {
         queryClient.invalidateQueries({
           queryKey: ["purchase-orders", "detail", variables.po_id],

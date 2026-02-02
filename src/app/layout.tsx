@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import ThemeProvider from "@/components/providers/ThemeProvider";
+import { SessionErrorHandler } from "@/components/providers/SessionErrorHandler";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { SiteProvider } from "@/contexts/SiteContext";
 import { DateRangeProvider } from "@/contexts/DateRangeContext";
@@ -39,17 +40,19 @@ export default function RootLayout({
         <ThemeProvider>
           <TabProvider>
             <AuthProvider>
-              <SiteProvider>
-                <DateRangeProvider>
-                  <QueryProvider>
-                    <NotificationProvider>
-                      <ToastProvider>
-                        {children}
-                      </ToastProvider>
-                    </NotificationProvider>
-                  </QueryProvider>
-                </DateRangeProvider>
-              </SiteProvider>
+              <SessionErrorHandler>
+                <SiteProvider>
+                  <DateRangeProvider>
+                    <QueryProvider>
+                      <NotificationProvider>
+                        <ToastProvider>
+                          {children}
+                        </ToastProvider>
+                      </NotificationProvider>
+                    </QueryProvider>
+                  </DateRangeProvider>
+                </SiteProvider>
+              </SessionErrorHandler>
             </AuthProvider>
           </TabProvider>
         </ThemeProvider>

@@ -1288,6 +1288,38 @@ export interface DeliveryItemFormData {
   notes?: string;
 }
 
+/**
+ * Combined Record & Verify Delivery form data
+ * Used for the unified flow that records delivery and creates stock in one step
+ */
+export interface RecordAndVerifyDeliveryFormData {
+  po_id?: string;
+  site_id: string;
+  vendor_id: string;
+  location_id?: string;
+  delivery_date: string;
+  challan_number?: string;
+  challan_date?: string;
+  challan_url?: string;
+  vehicle_number?: string;
+  driver_name?: string;
+  driver_phone?: string;
+  // Photos are now required (minimum 1) - serves dual purpose of delivery & verification
+  photos: string[];
+  notes?: string;
+  items: DeliveryItemFormData[];
+  // Inspection checklist - optional tracking of what was verified
+  inspectionChecklist?: {
+    qualityOk: boolean;
+    quantityMatches: boolean;
+    noDamage: boolean;
+    specsCorrect: boolean;
+  };
+  // If issues are flagged, creates "disputed" status instead of "verified"
+  issues?: DeliveryDiscrepancy[];
+  hasIssues: boolean;
+}
+
 export interface StockTransferFormData {
   from_site_id: string;
   to_site_id: string;

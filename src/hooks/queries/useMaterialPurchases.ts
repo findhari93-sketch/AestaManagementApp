@@ -65,7 +65,7 @@ export function useMaterialPurchases(
           .select(`
             *,
             site:sites!site_id(id, name),
-            vendor:vendors(id, name),
+            vendor:vendors(id, name, qr_code_url, upi_id),
             site_group:site_groups(id, name),
             items:material_purchase_expense_items(
               *,
@@ -132,7 +132,7 @@ export function useGroupMaterialPurchases(
           .select(`
             *,
             site:sites!site_id(id, name),
-            vendor:vendors(id, name),
+            vendor:vendors(id, name, qr_code_url, upi_id),
             site_group:site_groups(id, name),
             items:material_purchase_expense_items(
               *,
@@ -191,7 +191,7 @@ export function useMaterialPurchaseById(id: string | undefined) {
         .select(`
           *,
           site:sites!site_id(id, name),
-          vendor:vendors(id, name),
+          vendor:vendors(id, name, qr_code_url, upi_id),
           site_group:site_groups(id, name),
           items:material_purchase_expense_items(
             *,
@@ -227,7 +227,7 @@ export function useMaterialPurchaseByRefCode(refCode: string | undefined) {
         .select(`
           *,
           site:sites!site_id(id, name),
-          vendor:vendors(id, name),
+          vendor:vendors(id, name, qr_code_url, upi_id),
           site_group:site_groups(id, name),
           items:material_purchase_expense_items(
             *,
@@ -274,7 +274,7 @@ export function useGroupStockBatches(
           .select(`
             *,
             site:sites!site_id(id, name),
-            vendor:vendors(id, name),
+            vendor:vendors(id, name, qr_code_url, upi_id),
             items:material_purchase_expense_items(
               *,
               material:materials(id, name, code, unit),
@@ -1071,7 +1071,7 @@ export function useSiteMaterialExpenses(siteId: string | undefined) {
           .from("material_purchase_expenses")
           .select(`
             *,
-            vendor:vendors(id, name),
+            vendor:vendors(id, name, qr_code_url, upi_id),
             purchase_order:purchase_orders(id, po_number, vendor_bill_url, bill_verified),
             paying_site:sites!material_purchase_expenses_paying_site_id_fkey(id, name),
             items:material_purchase_expense_items(
@@ -1099,7 +1099,7 @@ export function useSiteMaterialExpenses(siteId: string | undefined) {
           .from("purchase_orders")
           .select(`
             *,
-            vendor:vendors(id, name),
+            vendor:vendors(id, name, qr_code_url, upi_id),
             items:purchase_order_items(
               *,
               material:materials(id, name, code, unit),
