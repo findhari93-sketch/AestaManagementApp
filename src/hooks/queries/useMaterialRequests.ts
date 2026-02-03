@@ -22,6 +22,40 @@ import type {
   POStatus,
 } from "@/types/material.types";
 
+// Timeout for database operations (30 seconds)
+const DB_OPERATION_TIMEOUT = 30000;
+
+/**
+ * Wraps a promise or thenable with a timeout to prevent indefinite hangs.
+ * Throws an error if the operation takes longer than the specified timeout.
+ * Works with Supabase PostgrestBuilder which is thenable but not a full Promise.
+ */
+async function withTimeout<T>(
+  promiseOrThenable: Promise<T> | PromiseLike<T>,
+  timeoutMs: number,
+  operationName: string
+): Promise<T> {
+  let timeoutId: NodeJS.Timeout;
+
+  // Wrap thenable in a proper Promise for compatibility
+  const wrappedPromise = Promise.resolve(promiseOrThenable);
+
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error(`Operation '${operationName}' timed out after ${timeoutMs / 1000} seconds. Please try again.`));
+    }, timeoutMs);
+  });
+
+  try {
+    const result = await Promise.race([wrappedPromise, timeoutPromise]);
+    clearTimeout(timeoutId!);
+    return result;
+  } catch (error) {
+    clearTimeout(timeoutId!);
+    throw error;
+  }
+}
+
 // ============================================
 // MATERIAL REQUESTS
 // ============================================
@@ -118,8 +152,11 @@ export function useCreateMaterialRequest() {
 
   return useMutation({
     mutationFn: async (data: MaterialRequestFormData) => {
+      console.log("[useCreateMaterialRequest] Starting mutation...");
+
       // Ensure fresh session before mutation
       await ensureFreshSession();
+      console.log("[useCreateMaterialRequest] Session verified");
 
       // Calculate estimated total cost
       let estimatedCost = 0;
@@ -137,26 +174,37 @@ export function useCreateMaterialRequest() {
         : Math.random().toString(36).substring(2, 10).toUpperCase();
       const requestNumber = `MR-${timestamp}-${randomBytes}`;
 
-      // Insert request
-      const { data: request, error: requestError } = await supabase
-        .from("material_requests")
-        .insert({
-          site_id: data.site_id,
-          section_id: data.section_id || null, // Convert undefined to null for UUID
-          requested_by: data.requested_by!,
-          request_number: requestNumber,
-          request_date: new Date().toISOString().split("T")[0],
-          required_by_date: data.required_by_date || null,
-          priority: data.priority,
-          status: "pending",
-          notes: data.notes || null,
-        })
-        .select()
-        .single();
+      console.log("[useCreateMaterialRequest] Inserting request...");
 
-      if (requestError) throw requestError;
+      // Insert request with timeout protection
+      const { data: request, error: requestError } = await withTimeout(
+        supabase
+          .from("material_requests")
+          .insert({
+            site_id: data.site_id,
+            section_id: data.section_id || null, // Convert undefined to null for UUID
+            requested_by: data.requested_by!,
+            request_number: requestNumber,
+            request_date: new Date().toISOString().split("T")[0],
+            required_by_date: data.required_by_date || null,
+            priority: data.priority,
+            status: "pending",
+            notes: data.notes || null,
+          })
+          .select()
+          .single(),
+        DB_OPERATION_TIMEOUT,
+        "Insert material request"
+      ) as { data: any; error: any };
 
-      // Insert request items
+      if (requestError) {
+        console.error("[useCreateMaterialRequest] Insert error:", requestError);
+        throw requestError;
+      }
+
+      console.log("[useCreateMaterialRequest] Request created:", request.id);
+
+      // Insert request items with timeout protection
       const requestItems = data.items.map((item: any) => ({
         request_id: request.id,
         material_id: item.material_id,
@@ -167,12 +215,22 @@ export function useCreateMaterialRequest() {
         fulfilled_qty: 0,
       }));
 
-      const { error: itemsError } = await supabase
-        .from("material_request_items")
-        .insert(requestItems);
+      console.log("[useCreateMaterialRequest] Inserting", requestItems.length, "items...");
 
-      if (itemsError) throw itemsError;
+      const { error: itemsError } = await withTimeout(
+        supabase
+          .from("material_request_items")
+          .insert(requestItems),
+        DB_OPERATION_TIMEOUT,
+        "Insert request items"
+      ) as { error: any };
 
+      if (itemsError) {
+        console.error("[useCreateMaterialRequest] Items insert error:", itemsError);
+        throw itemsError;
+      }
+
+      console.log("[useCreateMaterialRequest] Mutation complete");
       return request as MaterialRequest;
     },
     // Optimistic update: Show new request immediately
@@ -270,23 +328,34 @@ export function useUpdateMaterialRequest() {
       id: string;
       data: Partial<MaterialRequestFormData>;
     }) => {
+      console.log("[useUpdateMaterialRequest] Starting update...");
+
       // Ensure fresh session before mutation
       await ensureFreshSession();
 
-      const { data: result, error } = await supabase
-        .from("material_requests")
-        .update({
-          section_id: data.section_id,
-          required_by_date: data.required_by_date,
-          priority: data.priority,
-          notes: data.notes,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", id)
-        .select()
-        .single();
+      const { data: result, error } = await withTimeout(
+        supabase
+          .from("material_requests")
+          .update({
+            section_id: data.section_id,
+            required_by_date: data.required_by_date,
+            priority: data.priority,
+            notes: data.notes,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", id)
+          .select()
+          .single(),
+        DB_OPERATION_TIMEOUT,
+        "Update material request"
+      ) as { data: any; error: any };
 
-      if (error) throw error;
+      if (error) {
+        console.error("[useUpdateMaterialRequest] Update error:", error);
+        throw error;
+      }
+
+      console.log("[useUpdateMaterialRequest] Update complete");
       return result as MaterialRequest;
     },
     onSuccess: (result) => {

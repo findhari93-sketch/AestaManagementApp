@@ -10,6 +10,40 @@ import type {
 } from "@/types/material.types";
 import dayjs from "dayjs";
 
+// Timeout for database operations (30 seconds)
+const DB_OPERATION_TIMEOUT = 30000;
+
+/**
+ * Wraps a promise or thenable with a timeout to prevent indefinite hangs.
+ * Throws an error if the operation takes longer than the specified timeout.
+ * Works with Supabase PostgrestBuilder which is thenable but not a full Promise.
+ */
+async function withTimeout<T>(
+  promiseOrThenable: Promise<T> | PromiseLike<T>,
+  timeoutMs: number,
+  operationName: string
+): Promise<T> {
+  let timeoutId: NodeJS.Timeout;
+
+  // Wrap thenable in a proper Promise for compatibility
+  const wrappedPromise = Promise.resolve(promiseOrThenable);
+
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error(`Operation '${operationName}' timed out after ${timeoutMs / 1000} seconds. Please try again.`));
+    }, timeoutMs);
+  });
+
+  try {
+    const result = await Promise.race([wrappedPromise, timeoutPromise]);
+    clearTimeout(timeoutId!);
+    return result;
+  } catch (error) {
+    clearTimeout(timeoutId!);
+    throw error;
+  }
+}
+
 // ============================================
 // DAILY MATERIAL USAGE
 // ============================================
@@ -193,7 +227,11 @@ export function useCreateMaterialUsage() {
       }
 
       console.log("[useCreateMaterialUsage] Fetching inventory...");
-      const { data: inventory, error: inventoryError } = await inventoryQuery.maybeSingle();
+      const { data: inventory, error: inventoryError } = await withTimeout(
+        inventoryQuery.maybeSingle(),
+        DB_OPERATION_TIMEOUT,
+        "Fetch inventory"
+      ) as { data: any; error: any };
       console.log("[useCreateMaterialUsage] Inventory result:", { inventory, inventoryError });
 
       if (inventoryError) {
@@ -218,14 +256,18 @@ export function useCreateMaterialUsage() {
       // 4. Reduce inventory quantity
       const newQty = inventory.current_qty - data.quantity;
       console.log("[useCreateMaterialUsage] Updating stock inventory...");
-      const { error: updateError } = await supabase
-        .from("stock_inventory")
-        .update({
-          current_qty: newQty,
-          last_issued_date: data.usage_date || new Date().toISOString().split("T")[0],
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", inventory.id);
+      const { error: updateError } = await withTimeout(
+        supabase
+          .from("stock_inventory")
+          .update({
+            current_qty: newQty,
+            last_issued_date: data.usage_date || new Date().toISOString().split("T")[0],
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", inventory.id),
+        DB_OPERATION_TIMEOUT,
+        "Update stock inventory"
+      ) as { error: any };
       console.log("[useCreateMaterialUsage] Stock update result:", { updateError });
 
       if (updateError) {
@@ -234,20 +276,24 @@ export function useCreateMaterialUsage() {
 
       // 5. Create stock transaction record for this usage
       console.log("[useCreateMaterialUsage] Creating stock transaction...");
-      const { error: txError } = await supabase
-        .from("stock_transactions")
-        .insert({
-          site_id: data.site_id,
-          inventory_id: inventory.id,
-          transaction_type: "usage",
-          transaction_date: data.usage_date || new Date().toISOString().split("T")[0],
-          quantity: -data.quantity, // Negative for usage/outgoing
-          unit_cost: unitCost,
-          total_cost: totalCost,
-          section_id: data.section_id || null,
-          notes: data.work_description || "Material usage recorded",
-          created_by: userId,
-        });
+      const { error: txError } = await withTimeout(
+        supabase
+          .from("stock_transactions")
+          .insert({
+            site_id: data.site_id,
+            inventory_id: inventory.id,
+            transaction_type: "usage",
+            transaction_date: data.usage_date || new Date().toISOString().split("T")[0],
+            quantity: -data.quantity, // Negative for usage/outgoing
+            unit_cost: unitCost,
+            total_cost: totalCost,
+            section_id: data.section_id || null,
+            notes: data.work_description || "Material usage recorded",
+            created_by: userId,
+          }),
+        DB_OPERATION_TIMEOUT,
+        "Create stock transaction"
+      ) as { error: any };
       console.log("[useCreateMaterialUsage] Transaction result:", { txError });
 
       if (txError) {
@@ -257,22 +303,26 @@ export function useCreateMaterialUsage() {
 
       // 6. Create the daily usage record
       console.log("[useCreateMaterialUsage] Creating daily usage record...");
-      const { data: result, error } = await supabase
-        .from("daily_material_usage")
-        .insert({
-          site_id: data.site_id,
-          usage_date: data.usage_date,
-          material_id: data.material_id,
-          brand_id: data.brand_id || inventory.brand_id || null,
-          quantity: data.quantity,
-          unit_cost: unitCost,
-          total_cost: totalCost,
-          section_id: data.section_id || null,
-          work_description: data.work_description || null,
-          created_by: userId,
-        })
-        .select()
-        .single();
+      const { data: result, error } = await withTimeout(
+        supabase
+          .from("daily_material_usage")
+          .insert({
+            site_id: data.site_id,
+            usage_date: data.usage_date,
+            material_id: data.material_id,
+            brand_id: data.brand_id || inventory.brand_id || null,
+            quantity: data.quantity,
+            unit_cost: unitCost,
+            total_cost: totalCost,
+            section_id: data.section_id || null,
+            work_description: data.work_description || null,
+            created_by: userId,
+          })
+          .select()
+          .single(),
+        DB_OPERATION_TIMEOUT,
+        "Create daily usage record"
+      ) as { data: any; error: any };
 
       if (error) {
         // If usage record fails, try to rollback stock update
