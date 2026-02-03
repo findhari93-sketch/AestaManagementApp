@@ -585,6 +585,8 @@ const SectionListItem = memo(function SectionListItem({
         {getStatusIcon(section.status)}
       </Box>
       <ListItemText
+        primaryTypographyProps={{ component: "div" }}
+        secondaryTypographyProps={{ component: "div" }}
         primary={
           <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
             {isDefault && (
@@ -627,7 +629,6 @@ const SectionListItem = memo(function SectionListItem({
             />
           </Box>
         }
-        secondaryTypographyProps={{ component: "div" }}
       />
       <ListItemSecondaryAction>
         <Box sx={{ display: "flex", gap: 0.5 }}>

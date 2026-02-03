@@ -72,6 +72,8 @@ import {
   TrendingUp as TrendingUpIcon,
   HomeWork as RentalIcon,
   ReceiptLong as ReceiptLongIcon,
+  Build as BuildIcon,
+  Videocam as VideocamIcon,
 } from "@mui/icons-material";
 import { useRouter, usePathname } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
@@ -255,6 +257,22 @@ const companyNavCategories: NavCategory[] = [
         text: "Market Laborer Rates",
         icon: <PaymentsIcon />,
         path: "/company/market-laborers",
+      },
+    ],
+  },
+  {
+    label: "Equipment & Assets",
+    emoji: "🔧",
+    items: [
+      {
+        text: "Equipment",
+        icon: <BuildIcon />,
+        path: "/company/equipment",
+      },
+      {
+        text: "Cameras",
+        icon: <VideocamIcon />,
+        path: "/company/equipment?tab=surveillance",
       },
     ],
   },

@@ -61,7 +61,13 @@
       "mcp__playwright__playwright_evaluate",
       "Bash(ngrok config add-authtoken 332lkB1Ao6bXxrt8iKmxTdwUeG0_gJE9eDx1Ex8KDMzqJ51z)",
       "Bash(ngrok http:*)",
-      "Bash(netstat:*)"
+      "Bash(netstat:*)",
+      "mcp__supabase__execute_sql",
+      "mcp__playwright__playwright_press_key",
+      "mcp__supabase__list_projects",
+      "mcp__supabase__apply_migration",
+      "mcp__playwright__playwright_hover",
+      "mcp__supabase__list_tables"
     ],
     "deny": [],
     "ask": []

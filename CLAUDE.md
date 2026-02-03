@@ -59,6 +59,82 @@ After making any frontend/UI changes, I must verify and fix issues automatically
 
 This ensures complete verification before the user manually checks.
 
+## HTML Nesting Rules (Hydration Error Prevention)
+To avoid React hydration errors, follow these rules when writing MUI components:
+
+### ListItemText Component
+- **NEVER** put `<Box>` or `<div>` directly inside `primary` or `secondary` props without adding typography props
+- **FIX**: Add typography props to change wrapper from `<p>` to `<div>`:
+  ```tsx
+  <ListItemText
+    primary={<Box>...</Box>}
+    primaryTypographyProps={{ component: "div" }}
+    secondary={<Box>...</Box>}
+    secondaryTypographyProps={{ component: "div" }}
+  />
+  ```
+- **Alternative**: Use `component="span"` on Box inside these props
+
+### Typography Component
+- **NEVER** put block elements (`<Box>`, `<div>`, `<Paper>`) inside `<Typography>`
+- **FIX**: Use `component="div"` on Typography if you need block children:
+  ```tsx
+  <Typography component="div">
+    <Box>...</Box>
+  </Typography>
+  ```
+
+### FormControlLabel Component
+- When using `<Box>` in `label` prop, use `component="span"`:
+  ```tsx
+  <FormControlLabel
+    label={
+      <Box component="span" sx={{ display: "flex" }}>
+        ...
+      </Box>
+    }
+  />
+  ```
+
+### General Rule
+Block elements (`div`, `Box`, `Paper`, `Card`) cannot be nested inside:
+- `<p>` tags (Typography default, ListItemText wrappers)
+- `<span>` tags
+- `<a>` tags
+- Other inline elements
+
+This causes hydration errors because browsers auto-correct invalid HTML differently than React expects during server-side rendering.
+
+## Accessibility Guidelines
+
+### MUI Autocomplete in Dialogs/Modals
+When using Autocomplete components inside Dialog, Modal, or Drawer components:
+- **Always add** `slotProps={{ popper: { disablePortal: false } }}` to prevent aria-hidden conflicts
+- This ensures the dropdown renders **outside** the Dialog DOM tree via portal
+- Prevents "Blocked aria-hidden on element because its descendant retained focus" browser warnings
+- Required for WCAG accessibility compliance
+
+**Why this matters:**
+MUI Dialog sets `aria-hidden="true"` on background content. Without portal rendering, the Autocomplete dropdown stays inside the Dialog and causes focus conflicts when users interact with it.
+
+**Example:**
+```tsx
+<Dialog open={open}>
+  <Autocomplete
+    options={options}
+    slotProps={{
+      popper: { disablePortal: false }  // Required inside Dialogs
+    }}
+    renderInput={(params) => <TextField {...params} />}
+  />
+</Dialog>
+```
+
+**Affected components in this codebase:**
+- `UnifiedPurchaseOrderDialog.tsx` - 5 Autocomplete components
+- `RequestItemRow.tsx` - 3 Autocomplete components (used inside Dialog)
+- Any future Dialog/Modal/Drawer with Autocomplete inputs
+
 ## Project Structure
 - `src/app/` - Next.js app router pages
 - `src/components/` - React components

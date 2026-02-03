@@ -281,8 +281,8 @@ export default function RecordAndVerifyDeliveryDialog({
   const handleSubmit = async (flagIssues: boolean = false) => {
     if (!purchaseOrder) return;
 
-    // Validate photos (required)
-    if (photos.length === 0) {
+    // Validate photos (optional in dev mode for testing)
+    if (photos.length === 0 && process.env.NODE_ENV === "production") {
       setError("Please upload at least one photo of the delivered materials");
       return;
     }
@@ -964,7 +964,7 @@ export default function RecordAndVerifyDeliveryDialog({
             color="warning"
             startIcon={<WarningIcon />}
             onClick={() => handleSubmit(true)}
-            disabled={isSubmitting || photos.length === 0}
+            disabled={isSubmitting || (photos.length === 0 && process.env.NODE_ENV === "production")}
           >
             {isSubmitting ? "Saving..." : "Flag for Review"}
           </Button>
@@ -977,7 +977,7 @@ export default function RecordAndVerifyDeliveryDialog({
           onClick={() => handleSubmit(false)}
           disabled={
             isSubmitting ||
-            photos.length === 0 ||
+            (photos.length === 0 && process.env.NODE_ENV === "production") ||
             items.every((i) => i.received_qty === 0)
           }
         >

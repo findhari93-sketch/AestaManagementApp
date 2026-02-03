@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, useCallback } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   Box,
   Button,
@@ -17,6 +18,7 @@ import {
   CardContent,
   Grid,
   Stack,
+  Badge,
 } from "@mui/material";
 import {
   Add as AddIcon,
@@ -28,6 +30,8 @@ import {
   ShoppingCart as ConvertIcon,
   ShoppingCart as POIcon,
   Delete as DeleteIcon,
+  Link as LinkIcon,
+  CheckCircleOutline as FulfilledIcon,
 } from "@mui/icons-material";
 import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
 import PageHeader from "@/components/layout/PageHeader";
@@ -38,6 +42,7 @@ import { hasAdminPermission, hasEditPermission } from "@/lib/permissions";
 import {
   useMaterialRequests,
   useRequestSummary,
+  useRequestsPOSummary,
   useCancelMaterialRequest,
   useApproveMaterialRequest,
   useRejectMaterialRequest,
@@ -51,6 +56,7 @@ import type {
   MaterialRequestWithDetails,
   MaterialRequestStatus,
   RequestPriority,
+  RequestPOSummary,
 } from "@/types/material.types";
 import { formatDate } from "@/lib/formatters";
 
@@ -107,7 +113,9 @@ export default function MaterialRequestsPage() {
 
   const { data: allRequests = [], isLoading } = useMaterialRequests(selectedSite?.id);
   const { data: summary } = useRequestSummary(selectedSite?.id);
+  const { data: poSummaryMap = new Map<string, RequestPOSummary>() } = useRequestsPOSummary(selectedSite?.id);
 
+  const queryClient = useQueryClient();
   const cancelRequest = useCancelMaterialRequest();
   const approveRequest = useApproveMaterialRequest();
   const rejectRequest = useRejectMaterialRequest();
@@ -190,9 +198,11 @@ export default function MaterialRequestsPage() {
   }, []);
 
   const handleConvertSuccess = useCallback((poId: string) => {
-    // Optionally navigate to the PO or show a success message
+    // Invalidate queries to refresh the PO Status column
+    queryClient.invalidateQueries({ queryKey: ["material-requests", "po-summary", selectedSite?.id] });
+    queryClient.invalidateQueries({ queryKey: ["material-requests", selectedSite?.id] });
     handleCloseConvertDialog();
-  }, [handleCloseConvertDialog]);
+  }, [handleCloseConvertDialog, queryClient, selectedSite?.id]);
 
   const handleOpenDeleteDialog = useCallback((request: MaterialRequestWithDetails) => {
     setRequestToDelete(request);
@@ -298,6 +308,99 @@ export default function MaterialRequestsPage() {
         ),
       },
       {
+        id: "po_status",
+        header: "PO Status",
+        size: 150,
+        Cell: ({ row }) => {
+          const summary = poSummaryMap.get(row.original.id);
+          const canCreate = ["approved", "ordered", "partial_fulfilled"].includes(row.original.status);
+
+          // No linked POs
+          if (!summary || summary.totalLinkedPOs === 0) {
+            if (canCreate && isAdmin) {
+              return (
+                <Button
+                  size="small"
+                  variant="text"
+                  startIcon={<ConvertIcon fontSize="small" />}
+                  onClick={() => handleOpenConvertDialog(row.original)}
+                  sx={{ textTransform: "none", fontSize: "0.75rem" }}
+                >
+                  Create PO
+                </Button>
+              );
+            }
+            return (
+              <Typography variant="caption" color="text.secondary">
+                -
+              </Typography>
+            );
+          }
+
+          // Single PO
+          if (summary.totalLinkedPOs === 1) {
+            const po = summary.linkedPOs[0];
+            return (
+              <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                <Typography
+                  variant="body2"
+                  sx={{
+                    cursor: "pointer",
+                    color: "primary.main",
+                    "&:hover": { textDecoration: "underline" },
+                  }}
+                  onClick={() => window.open(`/site/purchase-orders?highlight=${po.id}`, "_blank")}
+                >
+                  → {po.po_number}
+                </Typography>
+                {summary.hasRemainingItems && (
+                  <Chip
+                    size="small"
+                    label={`+${summary.remainingItemCount}`}
+                    color="warning"
+                    sx={{ height: 20, fontSize: "0.65rem" }}
+                  />
+                )}
+                {!summary.hasRemainingItems && (
+                  <FulfilledIcon fontSize="small" color="success" sx={{ ml: 0.5 }} />
+                )}
+              </Box>
+            );
+          }
+
+          // Multiple POs
+          return (
+            <Tooltip
+              title={
+                <Box>
+                  {summary.linkedPOs.map((po) => (
+                    <Typography key={po.id} variant="caption" sx={{ display: "block" }}>
+                      {po.po_number} - {po.vendor_name}
+                    </Typography>
+                  ))}
+                </Box>
+              }
+            >
+              <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                <Typography variant="body2" color="primary.main">
+                  {summary.totalLinkedPOs} POs
+                </Typography>
+                {summary.hasRemainingItems ? (
+                  <Chip
+                    size="small"
+                    label={`+${summary.remainingItemCount}`}
+                    color="warning"
+                    sx={{ height: 20, fontSize: "0.65rem" }}
+                  />
+                ) : (
+                  <FulfilledIcon fontSize="small" color="success" />
+                )}
+              </Box>
+            </Tooltip>
+          );
+        },
+      },
+      {
         accessorKey: "items",
         header: "Items",
         size: 80,
@@ -313,7 +416,7 @@ export default function MaterialRequestsPage() {
             : "-",
       },
     ],
-    [handleViewDetails]
+    [handleViewDetails, poSummaryMap, isAdmin, handleOpenConvertDialog]
   );
 
   // Memoized props for DataTable to prevent re-renders
@@ -324,20 +427,27 @@ export default function MaterialRequestsPage() {
     []
   );
 
-  const mobileHiddenColumns = useMemo(() => ["items", "required_by_date"], []);
+  const mobileHiddenColumns = useMemo(() => ["items", "required_by_date", "po_status"], []);
 
   // Row actions
   const renderRowActions = useCallback(
     ({ row }: { row: { original: MaterialRequestWithDetails } }) => {
       const request = row.original;
+      const summary = poSummaryMap.get(request.id);
+      const hasLinkedPOs = summary && summary.totalLinkedPOs > 0;
+      const hasRemainingItems = summary?.hasRemainingItems ?? true;
+      const canCreatePO = ["approved", "ordered", "partial_fulfilled"].includes(request.status);
+
       return (
         <Box sx={{ display: "flex", gap: 0.5 }}>
+          {/* View Details - always show */}
           <Tooltip title="View Details">
             <IconButton size="small" onClick={() => handleViewDetails(request)}>
               <ViewIcon fontSize="small" />
             </IconButton>
           </Tooltip>
 
+          {/* Approve/Reject - only for pending requests */}
           {request.status === "pending" && isAdmin && (
             <>
               <Tooltip title="Approve">
@@ -361,6 +471,7 @@ export default function MaterialRequestsPage() {
             </>
           )}
 
+          {/* Edit/Cancel - only for draft or pending */}
           {["draft", "pending"].includes(request.status) && canEdit && (
             <>
               <Tooltip title="Edit">
@@ -383,12 +494,12 @@ export default function MaterialRequestsPage() {
             </>
           )}
 
-          {/* Delete action - available for admin on any request */}
+          {/* Delete action - show warning color if has linked POs */}
           {isAdmin && (
-            <Tooltip title="Delete">
+            <Tooltip title={hasLinkedPOs ? "Delete (has linked POs)" : "Delete"}>
               <IconButton
                 size="small"
-                color="error"
+                color={hasLinkedPOs ? "warning" : "error"}
                 onClick={() => handleOpenDeleteDialog(request)}
               >
                 <DeleteIcon fontSize="small" />
@@ -396,14 +507,41 @@ export default function MaterialRequestsPage() {
             </Tooltip>
           )}
 
-          {["approved", "ordered", "partial_fulfilled"].includes(request.status) && isAdmin && (
-            <Tooltip title="Convert to PO">
+          {/* Convert to PO - Smart behavior based on PO status */}
+          {canCreatePO && isAdmin && hasRemainingItems && (
+            <Tooltip title={hasLinkedPOs ? `Add to PO (${summary?.remainingItemCount} remaining)` : "Convert to PO"}>
+              <Badge
+                badgeContent={hasLinkedPOs ? summary?.remainingItemCount : 0}
+                color="warning"
+                invisible={!hasLinkedPOs}
+                sx={{
+                  "& .MuiBadge-badge": {
+                    fontSize: "0.6rem",
+                    height: 16,
+                    minWidth: 16,
+                  },
+                }}
+              >
+                <IconButton
+                  size="small"
+                  color="primary"
+                  onClick={() => handleOpenConvertDialog(request)}
+                >
+                  <ConvertIcon fontSize="small" />
+                </IconButton>
+              </Badge>
+            </Tooltip>
+          )}
+
+          {/* View Linked POs - show when fully converted (no remaining items) */}
+          {canCreatePO && hasLinkedPOs && !hasRemainingItems && (
+            <Tooltip title="Fully converted to PO(s)">
               <IconButton
                 size="small"
-                color="primary"
-                onClick={() => handleOpenConvertDialog(request)}
+                color="success"
+                onClick={() => handleViewDetails(request)}
               >
-                <ConvertIcon fontSize="small" />
+                <FulfilledIcon fontSize="small" />
               </IconButton>
             </Tooltip>
           )}
@@ -413,6 +551,7 @@ export default function MaterialRequestsPage() {
     [
       canEdit,
       isAdmin,
+      poSummaryMap,
       handleViewDetails,
       handleOpenDialog,
       handleOpenApprovalDialog,

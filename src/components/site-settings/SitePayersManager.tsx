@@ -496,6 +496,8 @@ const PayerListItem = memo(function PayerListItem({
         </Avatar>
       </ListItemAvatar>
       <ListItemText
+        primaryTypographyProps={{ component: "div" }}
+        secondaryTypographyProps={{ component: "div" }}
         primary={
           <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
             <Typography variant="body1" fontWeight={500}>
@@ -520,7 +522,6 @@ const PayerListItem = memo(function PayerListItem({
             )}
           </Box>
         }
-        secondaryTypographyProps={{ component: "div" }}
       />
       {canEdit && (
         <ListItemSecondaryAction>

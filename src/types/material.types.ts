@@ -916,6 +916,25 @@ export interface LinkedPurchaseOrderSummary {
 }
 
 /**
+ * PO summary for Material Requests table - shows at-a-glance PO linkage info
+ */
+export interface RequestPOSummary {
+  requestId: string;
+  linkedPOs: {
+    id: string;
+    po_number: string;
+    status: POStatus;
+    vendor_name: string;
+    total_amount: number | null;
+  }[];
+  totalLinkedPOs: number;
+  hasRemainingItems: boolean;
+  remainingItemCount: number;
+  totalApprovedQty: number;
+  totalOrderedQty: number;
+}
+
+/**
  * Source request info for display in PO Details
  */
 export interface SourceRequestInfo {
@@ -1257,6 +1276,8 @@ export interface PurchaseOrderItemFormData {
   calculated_weight?: number | null;
   actual_weight?: number | null;
   actual_weight_per_piece?: number | null; // Derived: actual_weight / quantity
+  // Link to material request item (for POs created from requests)
+  request_item_id?: string;
 }
 
 export interface DeliveryFormData {

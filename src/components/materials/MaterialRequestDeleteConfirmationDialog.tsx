@@ -151,6 +151,7 @@ export default function MaterialRequestDeleteConfirmationDialog({
                       <POIcon color="action" fontSize="small" />
                     </ListItemIcon>
                     <ListItemText
+                      primaryTypographyProps={{ component: "div" }}
                       primary={
                         <Box
                           sx={{

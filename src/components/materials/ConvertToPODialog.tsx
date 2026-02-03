@@ -71,8 +71,8 @@ export default function ConvertToPODialog({
   // Extract material IDs from request items for vendor filtering
   const materialIds = useMemo(() => {
     return requestItems
-      .filter(item => item.remaining_qty > 0)
-      .map(item => item.material_id);
+      .filter((item: any) => item.remaining_qty > 0)
+      .map((item: any) => item.material_id);
   }, [requestItems]);
 
   // Get vendors that supply these specific materials

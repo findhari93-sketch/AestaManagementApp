@@ -173,6 +173,7 @@ export function TemplateDownloader({
                       <OptionalIcon color="disabled" fontSize="small" />
                     </ListItemIcon>
                     <ListItemText
+                      primaryTypographyProps={{ component: "div" }}
                       primary={
                         <Stack direction="row" spacing={1} alignItems="center">
                           <span>{field.csvHeader}</span>

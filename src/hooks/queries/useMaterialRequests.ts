@@ -17,6 +17,7 @@ import type {
   ConvertRequestToPOFormData,
   RequestItemForConversion,
   LinkedPurchaseOrderSummary,
+  RequestPOSummary,
   PurchaseOrder,
   POStatus,
 } from "@/types/material.types";
@@ -32,7 +33,7 @@ export function useMaterialRequests(
   siteId: string | undefined,
   status?: MaterialRequestStatus | null
 ) {
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useQuery({
     queryKey: siteId
@@ -74,7 +75,7 @@ export function useMaterialRequests(
  * Fetch a single material request by ID
  */
 export function useMaterialRequest(id: string | undefined) {
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useQuery({
     queryKey: id
@@ -113,7 +114,7 @@ export function useMaterialRequest(id: string | undefined) {
  */
 export function useCreateMaterialRequest() {
   const queryClient = useQueryClient();
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useMutation({
     mutationFn: async (data: MaterialRequestFormData) => {
@@ -122,7 +123,7 @@ export function useCreateMaterialRequest() {
 
       // Calculate estimated total cost
       let estimatedCost = 0;
-      data.items.forEach((item) => {
+      data.items.forEach((item: any) => {
         if (item.estimated_cost) {
           estimatedCost += item.estimated_cost;
         }
@@ -156,7 +157,7 @@ export function useCreateMaterialRequest() {
       if (requestError) throw requestError;
 
       // Insert request items
-      const requestItems = data.items.map((item) => ({
+      const requestItems = data.items.map((item: any) => ({
         request_id: request.id,
         material_id: item.material_id,
         brand_id: item.brand_id || null, // Convert undefined to null for UUID
@@ -259,7 +260,7 @@ export function useCreateMaterialRequest() {
  */
 export function useUpdateMaterialRequest() {
   const queryClient = useQueryClient();
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useMutation({
     mutationFn: async ({
@@ -305,7 +306,7 @@ export function useUpdateMaterialRequest() {
  */
 export function useApproveMaterialRequest() {
   const queryClient = useQueryClient();
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useMutation({
     mutationFn: async ({
@@ -361,7 +362,7 @@ export function useApproveMaterialRequest() {
       // Optimistically update the request status
       queryClient.setQueryData<MaterialRequestWithDetails[]>(queryKey, (old) => {
         if (!old) return [];
-        return old.map((request) => {
+        return old.map((request: any) => {
           if (request.id === variables.id) {
             return {
               ...request,
@@ -411,7 +412,7 @@ export function useApproveMaterialRequest() {
  */
 export function useRejectMaterialRequest() {
   const queryClient = useQueryClient();
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useMutation({
     mutationFn: async ({
@@ -458,7 +459,7 @@ export function useRejectMaterialRequest() {
       // Optimistically update the request status
       queryClient.setQueryData<MaterialRequestWithDetails[]>(queryKey, (old) => {
         if (!old) return [];
-        return old.map((request) => {
+        return old.map((request: any) => {
           if (request.id === variables.id) {
             return {
               ...request,
@@ -508,7 +509,7 @@ export function useRejectMaterialRequest() {
  */
 export function useCancelMaterialRequest() {
   const queryClient = useQueryClient();
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useMutation({
     mutationFn: async (id: string) => {
@@ -545,7 +546,7 @@ export function useCancelMaterialRequest() {
  */
 export function useMarkRequestOrdered() {
   const queryClient = useQueryClient();
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useMutation({
     mutationFn: async ({ id, poId }: { id: string; poId: string }) => {
@@ -582,7 +583,7 @@ export function useMarkRequestOrdered() {
  */
 export function useUpdateFulfilledQty() {
   const queryClient = useQueryClient();
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useMutation({
     mutationFn: async ({
@@ -612,12 +613,12 @@ export function useUpdateFulfilledQty() {
 
       if (items) {
         const allFulfilled = items.every(
-          (item) =>
+          (item: any) =>
             (item.fulfilled_qty ?? 0) >=
             (item.approved_qty || item.fulfilled_qty || 0)
         );
         const someFulfilled = items.some(
-          (item) => (item.fulfilled_qty ?? 0) > 0
+          (item: any) => (item.fulfilled_qty ?? 0) > 0
         );
 
         const newStatus = allFulfilled
@@ -655,7 +656,7 @@ export function useUpdateFulfilledQty() {
  * Get request summary counts by status
  */
 export function useRequestSummary(siteId: string | undefined) {
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useQuery({
     queryKey: siteId
@@ -683,7 +684,7 @@ export function useRequestSummary(siteId: string | undefined) {
         total: data.length,
       };
 
-      data.forEach((req) => {
+      data.forEach((req: any) => {
         summary[req.status as MaterialRequestStatus]++;
       });
 
@@ -697,7 +698,7 @@ export function useRequestSummary(siteId: string | undefined) {
  * Get pending requests count (for notifications)
  */
 export function usePendingRequestsCount(siteId?: string) {
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useQuery({
     queryKey: siteId
@@ -724,7 +725,7 @@ export function usePendingRequestsCount(siteId?: string) {
  * Get my requests (for the requesting user)
  */
 export function useMyRequests(userId: string | undefined, siteId?: string) {
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useQuery({
     queryKey: ["material-requests", "mine", userId, siteId],
@@ -765,7 +766,7 @@ export function useMyRequests(userId: string | undefined, siteId?: string) {
  * Get all purchase orders linked to a material request
  */
 export function useRequestLinkedPOs(requestId: string | undefined) {
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useQuery({
     queryKey: requestId
@@ -798,7 +799,7 @@ export function useRequestLinkedPOs(requestId: string | undefined) {
         }
 
         // Transform to LinkedPurchaseOrderSummary
-        return (data || []).map((po) => ({
+        return (data || []).map((po: any) => ({
           id: po.id,
           po_number: po.po_number,
           status: po.status,
@@ -818,11 +819,124 @@ export function useRequestLinkedPOs(requestId: string | undefined) {
 }
 
 /**
+ * Get PO summary for all material requests in a site
+ * Used to display PO linkage info in the Material Requests table
+ */
+export function useRequestsPOSummary(siteId: string | undefined) {
+  const supabase = createClient() as any;
+
+  return useQuery({
+    queryKey: siteId
+      ? ["material-requests", "po-summary", siteId]
+      : ["material-requests", "po-summary", "unknown"],
+    queryFn: async () => {
+      if (!siteId) return new Map<string, RequestPOSummary>();
+
+      try {
+        // Step 1: Get all requests for this site with their items
+        const { data: requests, error: reqError } = await supabase
+          .from("material_requests")
+          .select(`
+            id,
+            items:material_request_items(id, approved_qty)
+          `)
+          .eq("site_id", siteId);
+
+        if (reqError) throw reqError;
+        if (!requests || requests.length === 0) return new Map<string, RequestPOSummary>();
+
+        // Step 2: Get all POs linked to these requests
+        const requestIds = requests.map((r: any) => r.id);
+        const { data: linkedPOs, error: poError } = await supabase
+          .from("purchase_orders")
+          .select(`
+            id, po_number, status, total_amount, source_request_id,
+            vendor:vendors(name)
+          `)
+          .in("source_request_id", requestIds);
+
+        if (poError && !poError.message?.includes("source_request_id")) throw poError;
+
+        // Step 3: Get all allocations from junction table for request items
+        const allRequestItemIds = requests.flatMap((r: any) =>
+          (r.items as any[])?.map((i: any) => i.id) || []
+        );
+
+        let allocations: { request_item_id: string; quantity_allocated: number }[] = [];
+        if (allRequestItemIds.length > 0) {
+          const { data: allocData, error: allocError } = await supabase
+            .from("purchase_order_request_items")
+            .select("request_item_id, quantity_allocated")
+            .in("request_item_id", allRequestItemIds);
+
+          if (!allocError) {
+            allocations = allocData || [];
+          }
+        }
+
+        // Step 4: Calculate allocated qty per request item
+        const allocatedByItem: Record<string, number> = {};
+        allocations.forEach((alloc: any) => {
+          allocatedByItem[alloc.request_item_id] =
+            (allocatedByItem[alloc.request_item_id] || 0) + (alloc.quantity_allocated || 0);
+        });
+
+        // Step 5: Build summary map
+        const summaryMap = new Map<string, RequestPOSummary>();
+
+        requests.forEach((request: any) => {
+          const items = (request.items as any[]) || [];
+          const requestLinkedPOs = (linkedPOs || []).filter(
+            (po: any) => po.source_request_id === request.id
+          );
+
+          // Calculate totals
+          let totalApprovedQty = 0;
+          let totalOrderedQty = 0;
+
+          items.forEach((item: any) => {
+            const approvedQty = item.approved_qty || 0;
+            const orderedQty = allocatedByItem[item.id] || 0;
+            totalApprovedQty += approvedQty;
+            totalOrderedQty += orderedQty;
+          });
+
+          const remainingItemCount = Math.max(0, totalApprovedQty - totalOrderedQty);
+          const hasRemainingItems = remainingItemCount > 0;
+
+          summaryMap.set(request.id, {
+            requestId: request.id,
+            linkedPOs: requestLinkedPOs.map((po: any) => ({
+              id: po.id,
+              po_number: po.po_number,
+              status: po.status,
+              vendor_name: (po.vendor as any)?.name || "Unknown",
+              total_amount: po.total_amount,
+            })),
+            totalLinkedPOs: requestLinkedPOs.length,
+            hasRemainingItems,
+            remainingItemCount,
+            totalApprovedQty,
+            totalOrderedQty,
+          });
+        });
+
+        return summaryMap;
+      } catch (err) {
+        console.warn("[useRequestsPOSummary] Error:", err);
+        return new Map<string, RequestPOSummary>();
+      }
+    },
+    enabled: !!siteId,
+  });
+}
+
+/**
  * Get request items prepared for conversion to PO
  * Includes remaining quantities after existing PO allocations
  */
 export function useRequestItemsForConversion(requestId: string | undefined) {
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useQuery({
     queryKey: requestId
@@ -844,7 +958,7 @@ export function useRequestItemsForConversion(requestId: string | undefined) {
         .eq("request_id", requestId);
 
       // Get all material IDs to fetch their variants
-      const materialIds = (items || []).map(item => item.material_id).filter(Boolean);
+      const materialIds = (items || []).map((item: any) => item.material_id).filter(Boolean);
 
       // Fetch variants for these materials (materials where parent_material_id matches)
       let variantsByParent: Record<string, Array<{ id: string; name: string }>> = {};
@@ -856,7 +970,7 @@ export function useRequestItemsForConversion(requestId: string | undefined) {
           .eq("is_active", true);
 
         if (!variantsError && variants) {
-          variants.forEach(v => {
+          variants.forEach((v: any) => {
             if (v.parent_id) {
               if (!variantsByParent[v.parent_id]) {
                 variantsByParent[v.parent_id] = [];
@@ -870,7 +984,7 @@ export function useRequestItemsForConversion(requestId: string | undefined) {
       if (itemsError) throw itemsError;
 
       // Get already allocated quantities from junction table
-      const itemIds = (items || []).map((item) => item.id);
+      const itemIds = (items || []).map((item: any) => item.id);
 
       let allocations: { request_item_id: string; quantity_allocated: number }[] = [];
       if (itemIds.length > 0) {
@@ -893,13 +1007,13 @@ export function useRequestItemsForConversion(requestId: string | undefined) {
 
       // Calculate already ordered quantities
       const allocatedByItem: Record<string, number> = {};
-      allocations.forEach((alloc) => {
+      allocations.forEach((alloc: any) => {
         allocatedByItem[alloc.request_item_id] =
           (allocatedByItem[alloc.request_item_id] || 0) + Number(alloc.quantity_allocated);
       });
 
       // Transform to RequestItemForConversion
-      return (items || []).map((item) => {
+      return (items || []).map((item: any) => {
         const material = item.material as any;
         const brand = item.brand as any;
         const approvedQty = item.approved_qty ?? item.requested_qty;
@@ -927,7 +1041,7 @@ export function useRequestItemsForConversion(requestId: string | undefined) {
           selected: remainingQty > 0,
           quantity_to_order: remainingQty,
           unit_price: 0,
-          tax_rate: material?.gst_rate || 0,
+          tax_rate: 0, // Default to 0, user can adjust if needed
           // Enhanced fields for variant/brand selection
           has_variants: hasVariants,
           variants: hasVariants ? variants : undefined,
@@ -948,7 +1062,7 @@ export function useRequestItemsForConversion(requestId: string | undefined) {
  */
 export function useConvertRequestToPO() {
   const queryClient = useQueryClient();
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useMutation({
     mutationFn: async (data: ConvertRequestToPOFormData) => {
@@ -972,7 +1086,7 @@ export function useConvertRequestToPO() {
       let subtotal = 0;
       let taxAmount = 0;
 
-      const itemsWithTotals = data.items.map((item) => {
+      const itemsWithTotals = data.items.map((item: any) => {
         const itemTotal = item.quantity * item.unit_price;
         const itemTax = item.tax_rate ? (itemTotal * item.tax_rate) / 100 : 0;
 
@@ -1024,7 +1138,7 @@ export function useConvertRequestToPO() {
       if (poError) throw poError;
 
       // Insert PO items
-      const poItems = itemsWithTotals.map((item) => ({
+      const poItems = itemsWithTotals.map((item: any) => ({
         po_id: po.id,
         material_id: item.material_id,
         brand_id: item.brand_id,
@@ -1072,7 +1186,7 @@ export function useConvertRequestToPO() {
         .eq("request_id", data.request_id);
 
       if (!allItemsError && allItems) {
-        const itemIds = allItems.map((i) => i.id);
+        const itemIds = allItems.map((i: any) => i.id);
 
         // Cast to any since this table is new and not in generated types yet
         const { data: allAllocations } = await (supabase as any)
@@ -1088,7 +1202,7 @@ export function useConvertRequestToPO() {
         });
 
         // Check if all items are fully allocated
-        const allFullyAllocated = allItems.every((item) => {
+        const allFullyAllocated = allItems.every((item: any) => {
           const approved = item.approved_qty ?? item.requested_qty;
           const allocated = allocatedByItem[item.id] || 0;
           return allocated >= approved;
@@ -1107,7 +1221,7 @@ export function useConvertRequestToPO() {
       }
 
       // Auto-record prices to price_history
-      const priceRecords = itemsWithTotals.map((item) => ({
+      const priceRecords = itemsWithTotals.map((item: any) => ({
         vendor_id: data.vendor_id,
         material_id: item.material_id,
         brand_id: item.brand_id || null,
@@ -1196,7 +1310,7 @@ export function usePaginatedMaterialRequests(
     searchTerm?: string;
   }
 ) {
-  const supabase = createClient();
+  const supabase = createClient() as any;
   const { pagination, status, priority, searchTerm } = options;
   const { pageIndex, pageSize } = pagination;
   const offset = pageIndex * pageSize;
@@ -1298,7 +1412,7 @@ export interface MaterialRequestDeletionImpact {
  * Shows all linked POs, deliveries, and expenses that will be cascade deleted
  */
 export function useMaterialRequestDeletionImpact(requestId: string | undefined) {
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useQuery({
     queryKey: requestId
@@ -1363,7 +1477,7 @@ export function useMaterialRequestDeletionImpact(requestId: string | undefined) 
       let totalExpenseAmount = 0;
 
       if (processedPOs.length > 0) {
-        const poIds = processedPOs.map((po) => po.id);
+        const poIds = processedPOs.map((po: any) => po.id);
         const { data: expenses } = await (supabase as any)
           .from("material_purchase_expenses")
           .select("id, total_amount")
@@ -1398,7 +1512,7 @@ export function useMaterialRequestDeletionImpact(requestId: string | undefined) 
  */
 export function useDeleteMaterialRequestCascade() {
   const queryClient = useQueryClient();
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useMutation({
     retry: false, // Cascade delete is not idempotent
@@ -1437,7 +1551,7 @@ export function useDeleteMaterialRequestCascade() {
 
         // Clean up stock inventory records
         if (stockDeliveries && stockDeliveries.length > 0) {
-          const stockDeliveryIds = stockDeliveries.map((d) => d.id);
+          const stockDeliveryIds = stockDeliveries.map((d: any) => d.id);
 
           const { data: deliveryItems } = await supabase
             .from("delivery_items")
@@ -1471,7 +1585,7 @@ export function useDeleteMaterialRequestCascade() {
               const { data: stockInventory } = await stockQuery;
 
               if (stockInventory && stockInventory.length > 0) {
-                const inventoryIds = stockInventory.map((s) => s.id);
+                const inventoryIds = stockInventory.map((s: any) => s.id);
 
                 // Delete transactions first
                 await supabase
@@ -1558,7 +1672,7 @@ export function useDeleteMaterialRequestCascade() {
 
         // Delete delivery items and deliveries
         if (stockDeliveries && stockDeliveries.length > 0) {
-          const deliveryIds = stockDeliveries.map((d) => d.id);
+          const deliveryIds = stockDeliveries.map((d: any) => d.id);
 
           await supabase
             .from("delivery_items")
@@ -1593,7 +1707,7 @@ export function useDeleteMaterialRequestCascade() {
         .eq("request_id", id);
 
       if (requestItems && requestItems.length > 0) {
-        const requestItemIds = requestItems.map((item) => item.id);
+        const requestItemIds = requestItems.map((item: any) => item.id);
 
         // Delete junction records (should cascade via FK but explicit)
         await (supabase as any)
@@ -1650,7 +1764,7 @@ export function useDeleteMaterialRequestCascade() {
  */
 export function useRevertLinkedPOsToDraft() {
   const queryClient = useQueryClient();
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useMutation({
     mutationFn: async ({ requestId, siteId }: { requestId: string; siteId: string }) => {
@@ -1707,7 +1821,7 @@ export function useRevertLinkedPOsToDraft() {
  * Useful for checking if edit warning should be shown
  */
 export function useLinkedPOsCount(requestId: string | undefined) {
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useQuery({
     queryKey: requestId
@@ -1728,7 +1842,7 @@ export function useLinkedPOsCount(requestId: string | undefined) {
 
       const total = data?.length || 0;
       const nonDelivered = (data || []).filter(
-        (po) => !["delivered", "partial_delivered"].includes(po.status || "")
+        (po: any) => !["delivered", "partial_delivered"].includes(po.status || "")
       ).length;
 
       return { total, nonDelivered };

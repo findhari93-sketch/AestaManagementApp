@@ -176,8 +176,8 @@ export default function UnifiedPurchaseOrderDialog({
   const requestMaterialIds = useMemo(() => {
     if (!isRequestMode || !requestItems.length) return undefined;
     return requestItems
-      .filter(item => item.remaining_qty > 0)
-      .map(item => item.material_id);
+      .filter((item: any) => item.remaining_qty > 0)
+      .map((item: any) => item.material_id);
   }, [isRequestMode, requestItems]);
 
   // Get filtered vendors for request mode
@@ -458,12 +458,9 @@ export default function UnifiedPurchaseOrderDialog({
 
       // Auto-fill dates based on mode
       if (isRequestMode && request) {
-        // Purchase Date: Use request's request_date or today
-        const requestDate = toDateInputFormat(request.request_date);
-        setPurchaseDate(requestDate || today);
-
-        // Expected Delivery Date: Use request's required_by_date if available
+        // Both Purchase Date and Expected Delivery use required_by_date from the material request
         const requiredByDate = toDateInputFormat(request.required_by_date);
+        setPurchaseDate(requiredByDate || today);
         setExpectedDeliveryDate(requiredByDate);
       } else {
         setPurchaseDate(today);
@@ -634,6 +631,15 @@ export default function UnifiedPurchaseOrderDialog({
     setRequestItemsState((prev) =>
       prev.map((item) =>
         item.id === itemId ? { ...item, unit_price: price } : item
+      )
+    );
+  };
+
+  const handleRequestItemTaxRateChange = (itemId: string, value: string) => {
+    const taxRate = parseFloat(value) || 0;
+    setRequestItemsState((prev) =>
+      prev.map((item) =>
+        item.id === itemId ? { ...item, tax_rate: taxRate } : item
       )
     );
   };
@@ -1101,6 +1107,9 @@ export default function UnifiedPurchaseOrderDialog({
                       ? "No vendors supply these materials"
                       : "No vendors found"
               }
+              slotProps={{
+                popper: { disablePortal: false }
+              }}
             />
             {isRequestMode && vendors.length > 0 && (
               <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: "block" }}>
@@ -1218,6 +1227,9 @@ export default function UnifiedPurchaseOrderDialog({
                         <TableCell align="right" sx={{ minWidth: 120 }}>
                           Unit Price (₹)
                         </TableCell>
+                        <TableCell align="right" sx={{ minWidth: 80 }}>
+                          GST %
+                        </TableCell>
                         <TableCell align="right">Total</TableCell>
                       </TableRow>
                     </TableHead>
@@ -1230,6 +1242,7 @@ export default function UnifiedPurchaseOrderDialog({
                           onToggle={() => handleToggleRequestItem(item.id)}
                           onQuantityChange={(value) => handleRequestItemQuantityChange(item.id, value)}
                           onPriceChange={(value) => handleRequestItemPriceChange(item.id, value)}
+                          onTaxRateChange={(value) => handleRequestItemTaxRateChange(item.id, value)}
                           onVariantChange={(variantId, variantName) =>
                             handleRequestItemVariantChange(item.id, variantId, variantName)
                           }
@@ -1505,6 +1518,9 @@ export default function UnifiedPurchaseOrderDialog({
                   </Box>
                 </li>
               )}
+              slotProps={{
+                popper: { disablePortal: false }
+              }}
             />
           </Grid>
 
@@ -1520,6 +1536,9 @@ export default function UnifiedPurchaseOrderDialog({
                   setSelectedBrandName(null);
                   setSelectedBrandVariant(null);
                   setNewItemPrice("");
+                }}
+                slotProps={{
+                  popper: { disablePortal: false }
                 }}
                 renderInput={(params) => (
                   <TextField {...params} label="Variant" size="small" required />
@@ -1568,6 +1587,9 @@ export default function UnifiedPurchaseOrderDialog({
                   <Typography variant="body2">{brandName}</Typography>
                 </li>
               )}
+              slotProps={{
+                popper: { disablePortal: false }
+              }}
             />
           </Grid>
 
@@ -1581,6 +1603,9 @@ export default function UnifiedPurchaseOrderDialog({
                 onChange={(_, value) => {
                   setSelectedBrandVariant(value);
                   setNewItemPrice("");
+                }}
+                slotProps={{
+                  popper: { disablePortal: false }
                 }}
                 renderInput={(params) => (
                   <TextField {...params} label="Variant" size="small" required />

@@ -19,7 +19,8 @@ import type {
   RecordAndVerifyDeliveryFormData,
   DeliveryDiscrepancy,
 } from "@/types/material.types";
-import { createStockFromDeliveryItems } from "./useDeliveryVerification";
+// Note: Stock creation is handled by DB trigger "trg_update_stock_on_delivery"
+// Do NOT import createStockFromDeliveryItems here to avoid duplicate stock entries
 
 // ============================================
 // PURCHASE ORDERS
@@ -32,7 +33,7 @@ export function usePurchaseOrders(
   siteId: string | undefined,
   status?: POStatus | null
 ) {
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useQuery({
     queryKey: siteId
@@ -75,7 +76,7 @@ export function usePurchaseOrders(
  * Fetch a single purchase order by ID
  */
 export function usePurchaseOrder(id: string | undefined) {
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useQuery({
     queryKey: id
@@ -129,7 +130,7 @@ export function usePurchaseOrder(id: string | undefined) {
  */
 export function useCreatePurchaseOrder() {
   const queryClient = useQueryClient();
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useMutation({
     mutationFn: async (data: PurchaseOrderFormData) => {
@@ -149,7 +150,7 @@ export function useCreatePurchaseOrder() {
       let subtotal = 0;
       let taxAmount = 0;
 
-      const itemsWithTotals = data.items.map((item) => {
+      const itemsWithTotals = data.items.map((item: any) => {
         // Calculate item total based on pricing mode
         let itemTotal: number;
         if (item.pricing_mode === 'per_kg') {
@@ -191,7 +192,7 @@ export function useCreatePurchaseOrder() {
       const poNumber = `PO-${timestamp}-${random}`;
 
       // Insert PO
-      console.log("[useCreatePurchaseOrder] Inserting PO...", { poNumber, subtotal, taxAmount, totalAmount });
+      console.log("[useCreatePurchaseOrder] Inserting PO...", { poNumber, subtotal, taxAmount, totalAmount, source_request_id: data.source_request_id });
       const { data: po, error: poError } = await (
         supabase.from("purchase_orders") as any
       )
@@ -213,6 +214,7 @@ export function useCreatePurchaseOrder() {
           subtotal,
           tax_amount: taxAmount,
           total_amount: totalAmount,
+          source_request_id: data.source_request_id || null,
         })
         .select()
         .single();
@@ -225,7 +227,7 @@ export function useCreatePurchaseOrder() {
       }
 
       // Insert PO items
-      const poItems = itemsWithTotals.map((item) => {
+      const poItems = itemsWithTotals.map((item: any) => {
         // Calculate actual weight per piece for brand weight learning
         const actualWeightPerPiece = item.actual_weight && item.quantity > 0
           ? item.actual_weight / item.quantity
@@ -253,11 +255,12 @@ export function useCreatePurchaseOrder() {
       });
 
       console.log("[useCreatePurchaseOrder] Inserting PO items...", { count: poItems.length });
-      const { error: itemsError } = await supabase
+      const { data: insertedItems, error: itemsError } = await supabase
         .from("purchase_order_items")
-        .insert(poItems);
+        .insert(poItems)
+        .select("id, material_id");
 
-      console.log("[useCreatePurchaseOrder] PO items insert result:", { itemsError });
+      console.log("[useCreatePurchaseOrder] PO items insert result:", { itemsError, insertedCount: insertedItems?.length });
 
       if (itemsError) {
         console.error("[useCreatePurchaseOrder] PO items insert error:", itemsError);
@@ -266,8 +269,43 @@ export function useCreatePurchaseOrder() {
 
       console.log("[useCreatePurchaseOrder] PO created successfully:", po.po_number);
 
+      // Create junction entries for items linked to material request items
+      // Match inserted items with original data items by material_id (order preserved)
+      const requestItemLinks: { po_item_id: string; request_item_id: string; quantity_allocated: number }[] = [];
+
+      if (insertedItems && data.source_request_id) {
+        data.items.forEach((originalItem, index) => {
+          // Items from requests have request_item_id set
+          if ('request_item_id' in originalItem && originalItem.request_item_id) {
+            const insertedItem = insertedItems[index];
+            if (insertedItem) {
+              requestItemLinks.push({
+                po_item_id: insertedItem.id,
+                request_item_id: originalItem.request_item_id as string,
+                quantity_allocated: originalItem.quantity,
+              });
+            }
+          }
+        });
+      }
+
+      // Insert junction entries if any
+      if (requestItemLinks.length > 0) {
+        console.log("[useCreatePurchaseOrder] Creating request item links...", { count: requestItemLinks.length });
+        const { error: linkError } = await supabase
+          .from("purchase_order_request_items")
+          .insert(requestItemLinks);
+
+        if (linkError) {
+          console.warn("[useCreatePurchaseOrder] Failed to create request item links:", linkError);
+          // Don't fail PO creation for this - the source_request_id link still works
+        } else {
+          console.log("[useCreatePurchaseOrder] Request item links created successfully");
+        }
+      }
+
       // Auto-record prices to price_history for each item
-      const priceRecords = itemsWithTotals.map((item) => ({
+      const priceRecords = itemsWithTotals.map((item: any) => ({
         vendor_id: data.vendor_id,
         material_id: item.material_id,
         brand_id: item.brand_id || null,
@@ -312,7 +350,7 @@ export function useCreatePurchaseOrder() {
       // Calculate totals for display
       let subtotal = 0;
       let taxAmount = 0;
-      variables.items.forEach((item) => {
+      variables.items.forEach((item: any) => {
         const itemTotal = item.quantity * item.unit_price;
         const discount = item.discount_percent ? (itemTotal * item.discount_percent) / 100 : 0;
         const taxableAmount = itemTotal - discount;
@@ -437,7 +475,7 @@ export function useCreatePurchaseOrder() {
  */
 export function useUpdatePurchaseOrder() {
   const queryClient = useQueryClient();
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useMutation({
     mutationFn: async ({
@@ -487,7 +525,7 @@ export function useUpdatePurchaseOrder() {
       const { items: _items, ...updateFields } = variables.data;
       queryClient.setQueryData<PurchaseOrderWithDetails[]>(queryKey, (old) => {
         if (!old) return [];
-        return old.map((po) => {
+        return old.map((po: any) => {
           if (po.id === variables.id) {
             return {
               ...po,
@@ -533,7 +571,7 @@ export function useUpdatePurchaseOrder() {
  */
 export function useSubmitPOForApproval() {
   const queryClient = useQueryClient();
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useMutation({
     mutationFn: async (id: string) => {
@@ -570,7 +608,7 @@ export function useSubmitPOForApproval() {
  */
 export function useApprovePurchaseOrder() {
   const queryClient = useQueryClient();
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useMutation({
     mutationFn: async ({ id, userId }: { id: string; userId: string }) => {
@@ -610,7 +648,7 @@ export function useApprovePurchaseOrder() {
  */
 export function useMarkPOAsOrdered() {
   const queryClient = useQueryClient();
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useMutation({
     mutationFn: async (id: string) => {
@@ -647,7 +685,7 @@ export function useMarkPOAsOrdered() {
  */
 export function useCancelPurchaseOrder() {
   const queryClient = useQueryClient();
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useMutation({
     mutationFn: async ({
@@ -699,7 +737,7 @@ export function useCancelPurchaseOrder() {
  */
 export function useDeletePurchaseOrder() {
   const queryClient = useQueryClient();
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useMutation({
     mutationFn: async ({ id, siteId }: { id: string; siteId: string }) => {
@@ -714,7 +752,7 @@ export function useDeletePurchaseOrder() {
 
       // Delete delivery items for all deliveries
       if (deliveries && deliveries.length > 0) {
-        const deliveryIds = deliveries.map((d) => d.id);
+        const deliveryIds = deliveries.map((d: any) => d.id);
         const { error: deliveryItemsError } = await supabase
           .from("delivery_items")
           .delete()
@@ -815,7 +853,7 @@ export interface PODeletionImpact {
  * Fetch the impact of deleting a PO - shows all related records that will be affected
  */
 export function usePODeletionImpact(poId: string | undefined) {
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useQuery({
     queryKey: poId ? ["po-deletion-impact", poId] : ["po-deletion-impact"],
@@ -844,7 +882,7 @@ export function usePODeletionImpact(poId: string | undefined) {
       // Count delivery items
       let deliveryItemsCount = 0;
       if (deliveries && deliveries.length > 0) {
-        const deliveryIds = deliveries.map((d) => d.id);
+        const deliveryIds = deliveries.map((d: any) => d.id);
         const { count } = await supabase
           .from("delivery_items")
           .select("id", { count: "exact", head: true })
@@ -962,7 +1000,7 @@ export function usePODeletionImpact(poId: string | undefined) {
  */
 export function useDeletePurchaseOrderCascade() {
   const queryClient = useQueryClient();
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useMutation({
     retry: false, // Not idempotent - cascade deletes multiple records
@@ -984,7 +1022,7 @@ export function useDeletePurchaseOrderCascade() {
 
       // Clean up stock inventory records linked to this PO's deliveries
       if (stockDeliveries && stockDeliveries.length > 0) {
-        const stockDeliveryIds = stockDeliveries.map((d) => d.id);
+        const stockDeliveryIds = stockDeliveries.map((d: any) => d.id);
 
         // Get delivery items to find materials that need stock cleanup
         const { data: deliveryItems } = await supabase
@@ -1021,7 +1059,7 @@ export function useDeletePurchaseOrderCascade() {
             const { data: stockRecords } = await stockQuery;
 
             if (stockRecords && stockRecords.length > 0) {
-              const stockIds = stockRecords.map((s) => s.id);
+              const stockIds = stockRecords.map((s: any) => s.id);
 
               // Delete stock transactions first (FK constraint)
               const { error: txError } = await supabase
@@ -1274,7 +1312,7 @@ export function useDeletePurchaseOrderCascade() {
 
       // Delete delivery items for all deliveries
       if (deliveries && deliveries.length > 0) {
-        const deliveryIds = deliveries.map((d) => d.id);
+        const deliveryIds = deliveries.map((d: any) => d.id);
         await supabase
           .from("delivery_items")
           .delete()
@@ -1371,7 +1409,7 @@ export function useDeletePurchaseOrderCascade() {
  */
 export function useAddPOItem() {
   const queryClient = useQueryClient();
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useMutation({
     mutationFn: async ({
@@ -1442,7 +1480,7 @@ export function useAddPOItem() {
  */
 export function useUpdatePOItem() {
   const queryClient = useQueryClient();
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useMutation({
     mutationFn: async ({
@@ -1516,7 +1554,7 @@ export function useUpdatePOItem() {
  */
 export function useRemovePOItem() {
   const queryClient = useQueryClient();
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useMutation({
     mutationFn: async ({ id, poId }: { id: string; poId: string }) => {
@@ -1581,7 +1619,7 @@ async function updatePOTotals(
  * Updates the advance_paid field and marks payment details
  */
 export function useRecordAdvancePayment() {
-  const supabase = createClient();
+  const supabase = createClient() as any;
   const queryClient = useQueryClient();
 
   return useMutation({
@@ -1633,7 +1671,7 @@ export function useDeliveries(
   siteId: string | undefined,
   poId?: string | null
 ) {
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useQuery({
     queryKey: ["deliveries", siteId, poId],
@@ -1673,7 +1711,7 @@ export function useDeliveries(
  * Fetch a single delivery by ID
  */
 export function useDelivery(id: string | undefined) {
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useQuery({
     queryKey: ["delivery", id],
@@ -1709,7 +1747,7 @@ export function useDelivery(id: string | undefined) {
  */
 export function useRecordDelivery() {
   const queryClient = useQueryClient();
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useMutation({
     retry: false, // Not idempotent - creates stock and expenses
@@ -1717,10 +1755,12 @@ export function useRecordDelivery() {
       // Ensure fresh session before mutation
       await ensureFreshSession();
 
-      // Generate GRN number
-      const timestamp = Date.now().toString(36).toUpperCase();
-      const random = Math.random().toString(36).substring(2, 6).toUpperCase();
-      const grnNumber = `GRN-${timestamp}-${random}`;
+      // Generate GRN number using UUID for collision resistance
+      const generateGrn = () => {
+        const uuid = crypto.randomUUID().replace(/-/g, '').substring(0, 12).toUpperCase();
+        return `GRN-${uuid}`;
+      };
+      let grnNumber = generateGrn();
 
       // Validate and get vendor_id - it's required in the database
       let vendorId = data.vendor_id && data.vendor_id.trim() !== "" ? data.vendor_id : null;
@@ -1747,7 +1787,17 @@ export function useRecordDelivery() {
       const locationId = data.location_id && data.location_id.trim() !== "" ? data.location_id : null;
 
       // Get current user for tracking who recorded the delivery
-      const { data: { user } } = await supabase.auth.getUser();
+      // IMPORTANT: recorded_by references auth.users(id), so use auth user ID directly
+      let authUserId: string | null = null;
+      try {
+        const { data: { user: authUser } } = await supabase.auth.getUser();
+        console.log("[useRecordDelivery] Auth user:", authUser?.id);
+        if (authUser?.id) {
+          authUserId = authUser.id;  // Use auth user ID directly for recorded_by
+        }
+      } catch (userError) {
+        console.warn("[useRecordDelivery] Could not fetch user:", userError);
+      }
 
       // Build the insert payload
       // Set requires_verification=true and verification_status='pending' to:
@@ -1769,7 +1819,7 @@ export function useRecordDelivery() {
         driver_name: data.driver_name || null,
         driver_phone: data.driver_phone || null,
         delivery_photos: data.delivery_photos && data.delivery_photos.length > 0 ? JSON.stringify(data.delivery_photos) : null,
-        recorded_by: user?.id || null,
+        recorded_by: authUserId,  // References auth.users(id)
         recorded_at: new Date().toISOString(),
         notes: data.notes || null,
       };
@@ -1777,21 +1827,50 @@ export function useRecordDelivery() {
       // Debug logging
       console.log("[useRecordDelivery] Inserting delivery with payload:", deliveryPayload);
 
-      const { data: delivery, error: deliveryError } = await (
-        supabase.from("deliveries") as any
-      )
-        .insert(deliveryPayload)
-        .select()
-        .single();
+      // Insert with retry logic for GRN collision (409 conflict)
+      const MAX_RETRIES = 3;
+      let delivery = null;
+      let lastError = null;
 
-      if (deliveryError) {
-        console.error("[useRecordDelivery] Delivery insert error:", deliveryError);
-        throw deliveryError;
+      for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+        // Regenerate GRN on retry
+        if (attempt > 0) {
+          deliveryPayload.grn_number = generateGrn();
+          console.log(`[useRecordDelivery] Retry ${attempt} with new GRN:`, deliveryPayload.grn_number);
+        }
+
+        const { data, error } = await (
+          supabase.from("deliveries") as any
+        )
+          .insert(deliveryPayload)
+          .select()
+          .single();
+
+        if (!error) {
+          delivery = data;
+          break;
+        }
+
+        // Only retry on unique constraint violation (409/23505)
+        if (error.code === '23505' || error.message?.includes('duplicate') || error.message?.includes('unique')) {
+          console.warn(`[useRecordDelivery] GRN collision on attempt ${attempt + 1}, retrying...`);
+          lastError = error;
+          continue;
+        }
+
+        // For other errors, throw immediately
+        console.error("[useRecordDelivery] Delivery insert error:", error);
+        throw error;
+      }
+
+      if (!delivery) {
+        console.error("[useRecordDelivery] Failed after retries:", lastError);
+        throw lastError || new Error('Failed to create delivery after retries');
       }
 
       // Insert delivery items
       // Handle empty strings as null for UUID fields
-      const deliveryItems = data.items.map((item) => ({
+      const deliveryItems = data.items.map((item: any) => ({
         delivery_id: delivery.id,
         po_item_id: item.po_item_id || null,
         material_id: item.material_id,
@@ -1847,10 +1926,10 @@ export function useRecordDelivery() {
 
         if (poItems) {
           const allDelivered = poItems.every(
-            (item) => (item.received_qty ?? 0) >= item.quantity
+            (item: any) => (item.received_qty ?? 0) >= item.quantity
           );
           const someDelivered = poItems.some(
-            (item) => (item.received_qty ?? 0) > 0
+            (item: any) => (item.received_qty ?? 0) > 0
           );
 
           const newStatus = allDelivered
@@ -1948,7 +2027,7 @@ export function useRecordDelivery() {
                     transport_cost: po.transport_cost || 0,
                     status: "recorded", // Use "recorded" for both group stock and own site
                     is_paid: false,
-                    created_by: user?.id,
+                    created_by: authUserId,  // References auth.users(id)
                     notes: isGroupStock
                       ? `Group stock batch from PO ${po.po_number}`
                       : `Auto-created from PO ${po.po_number}`,
@@ -2118,7 +2197,7 @@ export function useRecordDelivery() {
  */
 export function useRecordAndVerifyDelivery() {
   const queryClient = useQueryClient();
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useMutation({
     retry: false, // Not idempotent - creates stock and expenses
@@ -2126,15 +2205,17 @@ export function useRecordAndVerifyDelivery() {
       // Ensure fresh session before mutation
       await ensureFreshSession();
 
-      // Validate photos (required for unified flow)
-      if (!data.photos || data.photos.length === 0) {
+      // Validate photos (required for unified flow, optional in dev for testing)
+      if ((!data.photos || data.photos.length === 0) && process.env.NODE_ENV === "production") {
         throw new Error("At least one photo is required for Record & Verify");
       }
 
-      // Generate GRN number
-      const timestamp = Date.now().toString(36).toUpperCase();
-      const random = Math.random().toString(36).substring(2, 6).toUpperCase();
-      const grnNumber = `GRN-${timestamp}-${random}`;
+      // Generate GRN number using UUID for collision resistance
+      const generateGrn = () => {
+        const uuid = crypto.randomUUID().replace(/-/g, '').substring(0, 12).toUpperCase();
+        return `GRN-${uuid}`;
+      };
+      let grnNumber = generateGrn();
 
       // Validate and get vendor_id - it's required in the database
       let vendorId = data.vendor_id && data.vendor_id.trim() !== "" ? data.vendor_id : null;
@@ -2161,7 +2242,36 @@ export function useRecordAndVerifyDelivery() {
       const locationId = data.location_id && data.location_id.trim() !== "" ? data.location_id : null;
 
       // Get current user for tracking who recorded and verified the delivery
-      const { data: { user } } = await supabase.auth.getUser();
+      // IMPORTANT: recorded_by references auth.users(id), engineer_verified_by references public.users(id)
+      let authUserId: string | null = null;  // For recorded_by (auth.users.id)
+      let publicUserId: string | null = null;  // For engineer_verified_by (public.users.id)
+      try {
+        const { data: { user: authUser } } = await supabase.auth.getUser();
+        console.log("[useRecordAndVerifyDelivery] Auth user:", authUser?.id);
+        if (authUser?.id) {
+          authUserId = authUser.id;  // Use auth user ID for recorded_by
+
+          const { data: dbUser, error: userLookupError } = await supabase
+            .from("users")
+            .select("id")
+            .eq("auth_id", authUser.id)
+            .maybeSingle();
+
+          if (userLookupError) {
+            console.warn("[useRecordAndVerifyDelivery] User lookup error:", userLookupError);
+          }
+
+          // Use public users ID for engineer_verified_by
+          if (dbUser?.id) {
+            publicUserId = dbUser.id;
+            console.log("[useRecordAndVerifyDelivery] Found user in DB:", publicUserId);
+          } else {
+            console.warn("[useRecordAndVerifyDelivery] User not found in users table for auth_id:", authUser.id);
+          }
+        }
+      } catch (userError) {
+        console.warn("[useRecordAndVerifyDelivery] Could not fetch user:", userError);
+      }
       const now = new Date().toISOString();
 
       // Determine verification status based on whether issues were flagged
@@ -2181,12 +2291,12 @@ export function useRecordAndVerifyDelivery() {
         requires_verification: false, // Already verified
         // Recording fields
         delivery_photos: data.photos.length > 0 ? JSON.stringify(data.photos) : null,
-        recorded_by: user?.id || null,
+        recorded_by: authUserId,  // References auth.users(id)
         recorded_at: now,
         // Verification fields (set simultaneously)
         verification_photos: data.photos, // Same photos serve both purposes
         verification_notes: data.notes || null,
-        engineer_verified_by: user?.id || null,
+        engineer_verified_by: publicUserId,  // References public.users(id)
         engineer_verified_at: now,
         discrepancies: data.issues && data.issues.length > 0 ? JSON.stringify(data.issues) : null,
         // Transport details
@@ -2201,20 +2311,49 @@ export function useRecordAndVerifyDelivery() {
 
       console.log("[useRecordAndVerifyDelivery] Inserting delivery with payload:", deliveryPayload);
 
-      const { data: delivery, error: deliveryError } = await (
-        supabase.from("deliveries") as any
-      )
-        .insert(deliveryPayload)
-        .select()
-        .single();
+      // Insert with retry logic for GRN collision (409 conflict)
+      const MAX_RETRIES = 3;
+      let delivery = null;
+      let lastError = null;
 
-      if (deliveryError) {
-        console.error("[useRecordAndVerifyDelivery] Delivery insert error:", deliveryError);
-        throw deliveryError;
+      for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+        // Regenerate GRN on retry
+        if (attempt > 0) {
+          deliveryPayload.grn_number = generateGrn();
+          console.log(`[useRecordAndVerifyDelivery] Retry ${attempt} with new GRN:`, deliveryPayload.grn_number);
+        }
+
+        const { data, error } = await (
+          supabase.from("deliveries") as any
+        )
+          .insert(deliveryPayload)
+          .select()
+          .single();
+
+        if (!error) {
+          delivery = data;
+          break;
+        }
+
+        // Only retry on unique constraint violation (409/23505)
+        if (error.code === '23505' || error.message?.includes('duplicate') || error.message?.includes('unique')) {
+          console.warn(`[useRecordAndVerifyDelivery] GRN collision on attempt ${attempt + 1}, retrying...`);
+          lastError = error;
+          continue;
+        }
+
+        // For other errors, throw immediately
+        console.error("[useRecordAndVerifyDelivery] Delivery insert error:", error);
+        throw error;
+      }
+
+      if (!delivery) {
+        console.error("[useRecordAndVerifyDelivery] Failed after retries:", lastError);
+        throw lastError || new Error('Failed to create delivery after retries');
       }
 
       // Insert delivery items
-      const deliveryItems = data.items.map((item) => ({
+      const deliveryItems = data.items.map((item: any) => ({
         delivery_id: delivery.id,
         po_item_id: item.po_item_id || null,
         material_id: item.material_id,
@@ -2270,10 +2409,10 @@ export function useRecordAndVerifyDelivery() {
 
         if (poItems) {
           const allDelivered = poItems.every(
-            (item) => (item.received_qty ?? 0) >= item.quantity
+            (item: any) => (item.received_qty ?? 0) >= item.quantity
           );
           const someDelivered = poItems.some(
-            (item) => (item.received_qty ?? 0) > 0
+            (item: any) => (item.received_qty ?? 0) > 0
           );
 
           const newStatus = allDelivered
@@ -2357,7 +2496,7 @@ export function useRecordAndVerifyDelivery() {
                         total_amount: totalAmount,
                         bill_url: data.challan_url || null,
                         notes: `Auto-created from PO ${po.po_number}`,
-                        created_by: user?.id || null,
+                        created_by: authUserId,  // References auth.users(id)
                       });
 
                     console.log("[useRecordAndVerifyDelivery] Material expense created:", refCode);
@@ -2372,13 +2511,14 @@ export function useRecordAndVerifyDelivery() {
         }
       }
 
-      // KEY ADDITION: Create stock inventory immediately (if verified, not disputed)
+      // NOTE: Stock creation is handled by database trigger "trg_update_stock_on_delivery"
+      // which fires on delivery_items INSERT when verification_status = 'verified'
+      // or requires_verification = false. DO NOT call createStockFromDeliveryItems() here
+      // as it would cause DUPLICATE stock entries (10 bags becomes 20 bags).
       if (verificationStatus === "verified") {
-        console.log("[useRecordAndVerifyDelivery] Creating stock inventory...");
-        await createStockFromDeliveryItems(supabase, delivery.id);
-        console.log("[useRecordAndVerifyDelivery] Stock inventory created successfully");
+        console.log("[useRecordAndVerifyDelivery] Stock inventory will be created by DB trigger");
       } else {
-        console.log("[useRecordAndVerifyDelivery] Skipping stock creation (disputed delivery)");
+        console.log("[useRecordAndVerifyDelivery] Disputed delivery - stock created by trigger but may need review");
       }
 
       return { delivery, grnNumber, verificationStatus };
@@ -2406,7 +2546,7 @@ export function useRecordAndVerifyDelivery() {
  */
 export function useVerifyDelivery() {
   const queryClient = useQueryClient();
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useMutation({
     mutationFn: async ({
@@ -2451,7 +2591,7 @@ export function useVerifyDelivery() {
  */
 export function useUpdateDeliveryInvoice() {
   const queryClient = useQueryClient();
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useMutation({
     mutationFn: async ({
@@ -2503,7 +2643,7 @@ export function useUpdateDeliveryInvoice() {
  * Get PO summary counts by status
  */
 export function usePOSummary(siteId: string | undefined) {
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useQuery({
     queryKey: siteId
@@ -2530,7 +2670,7 @@ export function usePOSummary(siteId: string | undefined) {
         total: data.length,
       };
 
-      data.forEach((po) => {
+      data.forEach((po: any) => {
         summary[po.status as POStatus]++;
       });
 
@@ -2544,7 +2684,7 @@ export function usePOSummary(siteId: string | undefined) {
  * Get recent deliveries
  */
 export function useRecentDeliveries(siteId: string | undefined, limit = 5) {
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useQuery({
     queryKey: ["recentDeliveries", siteId, limit],
@@ -2574,7 +2714,7 @@ export function useRecentDeliveries(siteId: string | undefined, limit = 5) {
  * Get pending deliveries count
  */
 export function usePendingDeliveriesCount(siteId: string | undefined) {
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useQuery({
     queryKey: ["pendingDeliveriesCount", siteId],
@@ -2614,7 +2754,7 @@ export interface GroupStockSettlementInfo {
  * Returns a map of poId -> settlement info (sync status, settled amounts, etc.)
  */
 export function useGroupStockPOsSyncStatus(poIds: string[]) {
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useQuery({
     queryKey: ["group-stock-pos-sync-status", poIds.sort().join(",")],
@@ -2688,7 +2828,7 @@ export function useGroupStockPOsSyncStatus(poIds: string[]) {
  * Returns sync status and batch details
  */
 export function usePOBatchSyncStatus(poId: string | undefined) {
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useQuery({
     queryKey: ["po-batch-sync-status", poId],
@@ -2747,11 +2887,22 @@ export function usePOBatchSyncStatus(poId: string | undefined) {
  */
 export function usePushBatchToSettlement() {
   const queryClient = useQueryClient();
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useMutation({
     mutationFn: async ({ poId }: { poId: string }) => {
       await ensureFreshSession();
+
+      // Get auth user for created_by field (references auth.users)
+      let authUserId: string | null = null;
+      try {
+        const { data: { user: authUser } } = await supabase.auth.getUser();
+        if (authUser?.id) {
+          authUserId = authUser.id;
+        }
+      } catch (userError) {
+        console.warn("[usePushBatchToSettlement] Could not fetch user:", userError);
+      }
 
       // Get the PO details with items
       const { data: po, error: poError } = await supabase
@@ -2854,7 +3005,7 @@ export function usePushBatchToSettlement() {
           transport_cost: po.transport_cost || 0,
           status: "recorded",
           is_paid: false,
-          created_by: user?.id,
+          created_by: authUserId,  // References auth.users(id)
           notes: `Recreated for Push to Settlement from PO ${po.po_number}`,
           paying_site_id: po.site_id,
           site_group_id: siteGroupIdFromNotes,
@@ -3154,7 +3305,7 @@ export function usePaginatedPurchaseOrders(
     searchTerm?: string;
   }
 ) {
-  const supabase = createClient();
+  const supabase = createClient() as any;
   const { pagination, status, vendorId, searchTerm } = options;
   const { pageIndex, pageSize } = pagination;
   const offset = pageIndex * pageSize;

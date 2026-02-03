@@ -24,6 +24,7 @@ interface RequestItemRowProps {
   onToggle: () => void;
   onQuantityChange: (value: string) => void;
   onPriceChange: (value: string) => void;
+  onTaxRateChange: (value: string) => void;
   onVariantChange: (variantId: string | null, variantName: string | null) => void;
   onBrandChange: (brandId: string | null, brandName: string | null) => void;
 }
@@ -34,6 +35,7 @@ export default function RequestItemRow({
   onToggle,
   onQuantityChange,
   onPriceChange,
+  onTaxRateChange,
   onVariantChange,
   onBrandChange,
 }: RequestItemRowProps) {
@@ -109,8 +111,10 @@ export default function RequestItemRow({
     onBrandChange(brand.id, brand.brand_name);
   };
 
-  // Calculate item total
-  const itemTotal = item.selected ? item.quantity_to_order * item.unit_price : 0;
+  // Calculate item total (including tax)
+  const itemSubtotal = item.selected ? item.quantity_to_order * item.unit_price : 0;
+  const itemTax = item.tax_rate ? (itemSubtotal * item.tax_rate) / 100 : 0;
+  const itemTotal = itemSubtotal + itemTax;
 
   // Check if brand has variants
   const hasBrandVariants = brandVariantsForSelectedBrand.length > 1 ||
@@ -169,6 +173,9 @@ export default function RequestItemRow({
                 onPriceChange("0");
               }}
               disabled={isDisabled || !item.selected}
+              slotProps={{
+                popper: { disablePortal: false }
+              }}
               renderInput={(params) => (
                 <TextField
                   {...params}
@@ -201,6 +208,9 @@ export default function RequestItemRow({
             onChange={(_, value) => handleBrandNameChange(value)}
             disabled={isDisabled || !item.selected || !vendorId}
             loading={isLoadingBrands}
+            slotProps={{
+              popper: { disablePortal: false }
+            }}
             renderInput={(params) => (
               <TextField
                 {...params}
@@ -236,6 +246,9 @@ export default function RequestItemRow({
               value={selectedBrandVariant || null}
               onChange={(_, value) => handleBrandVariantChange(value)}
               disabled={isDisabled || !item.selected}
+              slotProps={{
+                popper: { disablePortal: false }
+              }}
               renderInput={(params) => (
                 <TextField
                   {...params}
@@ -333,6 +346,28 @@ export default function RequestItemRow({
             Last: {formatCurrency(priceData.price)}
           </Typography>
         )}
+      </TableCell>
+
+      {/* GST % */}
+      <TableCell align="right">
+        <TextField
+          type="number"
+          size="small"
+          value={item.tax_rate || ""}
+          onChange={(e) => onTaxRateChange(e.target.value)}
+          disabled={isDisabled || !item.selected}
+          inputProps={{
+            min: 0,
+            max: 100,
+            step: 1,
+            style: { textAlign: "right", width: 50 },
+          }}
+          InputProps={{
+            endAdornment: (
+              <InputAdornment position="end">%</InputAdornment>
+            ),
+          }}
+        />
       </TableCell>
 
       {/* Total */}
