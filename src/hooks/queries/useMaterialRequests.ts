@@ -22,8 +22,8 @@ import type {
   POStatus,
 } from "@/types/material.types";
 
-// Timeout for database operations (30 seconds)
-const DB_OPERATION_TIMEOUT = 30000;
+// Timeout for database operations (15 seconds - reduced for better UX)
+const DB_OPERATION_TIMEOUT = 15000;
 
 /**
  * Wraps a promise or thenable with a timeout to prevent indefinite hangs.
@@ -36,13 +36,34 @@ async function withTimeout<T>(
   operationName: string
 ): Promise<T> {
   let timeoutId: NodeJS.Timeout;
+  let isTimedOut = false;
+
+  console.log(`[withTimeout] Starting ${operationName} with ${timeoutMs}ms timeout`);
+  const startTime = Date.now();
 
   // Wrap thenable in a proper Promise for compatibility
-  const wrappedPromise = Promise.resolve(promiseOrThenable);
+  const wrappedPromise = Promise.resolve(promiseOrThenable).then(
+    (result) => {
+      const elapsed = Date.now() - startTime;
+      console.log(`[withTimeout] ${operationName} completed in ${elapsed}ms`);
+      if (isTimedOut) {
+        console.warn(`[withTimeout] ${operationName} completed AFTER timeout - result discarded`);
+      }
+      return result;
+    },
+    (error) => {
+      const elapsed = Date.now() - startTime;
+      console.error(`[withTimeout] ${operationName} failed in ${elapsed}ms:`, error);
+      throw error;
+    }
+  );
 
   const timeoutPromise = new Promise<never>((_, reject) => {
     timeoutId = setTimeout(() => {
-      reject(new Error(`Operation '${operationName}' timed out after ${timeoutMs / 1000} seconds. Please try again.`));
+      isTimedOut = true;
+      const errorMsg = `Operation '${operationName}' timed out after ${timeoutMs / 1000} seconds. Please try again.`;
+      console.error(`[withTimeout] TIMEOUT: ${errorMsg}`);
+      reject(new Error(errorMsg));
     }, timeoutMs);
   });
 

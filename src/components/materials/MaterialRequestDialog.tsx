@@ -34,6 +34,7 @@ import {
 } from "@mui/icons-material";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useAuth } from "@/contexts/AuthContext";
+import { useToast } from "@/contexts/ToastContext";
 import { useMaterials } from "@/hooks/queries/useMaterials";
 import { useSiteStock } from "@/hooks/queries/useStockInventory";
 import {
@@ -80,6 +81,7 @@ export default function MaterialRequestDialog({
 }: MaterialRequestDialogProps) {
   const isMobile = useIsMobile();
   const { userProfile } = useAuth();
+  const { showError: showToastError } = useToast();
   const isEdit = !!request;
 
   const { data: materials = [] } = useMaterials();
@@ -267,6 +269,7 @@ export default function MaterialRequestDialog({
       }
       onClose();
     } catch (err: unknown) {
+      console.error("[MaterialRequestDialog] Submit error:", err);
       // Extract error details
       let message = "Failed to save request";
       if (err instanceof Error) {
@@ -276,6 +279,10 @@ export default function MaterialRequestDialog({
       const errObj = err as Record<string, unknown>;
       if (errObj?.code === "23505" || errObj?.status === 409 || message.includes("409")) {
         message = "A request with this number already exists. Please try again.";
+      }
+      // Check for timeout errors
+      if (message.includes("timed out")) {
+        showToastError("Request timed out. Please check your connection and try again.", 8000);
       }
       setError(message);
     } finally {
