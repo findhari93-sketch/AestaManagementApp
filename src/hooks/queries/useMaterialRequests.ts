@@ -8,6 +8,7 @@ import {
   createStatusUpdater,
   createAddItemUpdater,
 } from "@/lib/optimistic/updaters";
+import { calculatePieceWeight } from "@/lib/weightCalculation";
 import type {
   MaterialRequest,
   MaterialRequestWithDetails,
@@ -429,13 +430,14 @@ export function useApproveMaterialRequest() {
 
       if (requestError) throw requestError;
 
-      // Update item approved quantities
-      for (const item of approvedItems) {
-        await supabase
+      // Update item approved quantities in parallel (optimized from sequential loop)
+      const updatePromises = approvedItems.map((item) =>
+        supabase
           .from("material_request_items")
           .update({ approved_qty: item.approved_qty })
-          .eq("id", item.itemId);
-      }
+          .eq("id", item.itemId)
+      );
+      await Promise.all(updatePromises);
 
       return request as MaterialRequest;
     },
@@ -1035,13 +1037,13 @@ export function useRequestItemsForConversion(requestId: string | undefined) {
     queryFn: async () => {
       if (!requestId) return [];
 
-      // Get request items with material details including variants
+      // Get request items with material details including variants and weight data
       const { data: items, error: itemsError } = await supabase
         .from("material_request_items")
         .select(
           `
           id, material_id, brand_id, requested_qty, approved_qty, fulfilled_qty, estimated_cost,
-          material:materials(id, name, code, unit, gst_rate, parent_id),
+          material:materials(id, name, code, unit, gst_rate, parent_id, weight_per_unit, weight_unit, length_per_piece, length_unit),
           brand:material_brands(id, brand_name)
         `
         )
@@ -1114,6 +1116,22 @@ export function useRequestItemsForConversion(requestId: string | undefined) {
         const variants = variantsByParent[item.material_id] || [];
         const hasVariants = variants.length > 0;
 
+        // Calculate standard piece weight for weight-based materials (TMT, steel, etc.)
+        let standardPieceWeight: number | null = null;
+        if (material?.weight_per_unit && material?.length_per_piece) {
+          standardPieceWeight = calculatePieceWeight(
+            material.weight_per_unit,
+            material.length_per_piece,
+            material.length_unit || "ft"
+          );
+        }
+
+        // Calculate weight based on remaining quantity
+        const calculatedWeight =
+          standardPieceWeight && remainingQty > 0
+            ? standardPieceWeight * remainingQty
+            : null;
+
         return {
           id: item.id,
           material_id: item.material_id,
@@ -1139,6 +1157,16 @@ export function useRequestItemsForConversion(requestId: string | undefined) {
           selected_variant_name: null,
           selected_brand_id: item.brand_id || null,
           selected_brand_name: brand?.brand_name || null,
+          // Weight-based pricing fields
+          weight_per_unit: material?.weight_per_unit || null,
+          weight_unit: material?.weight_unit || null,
+          length_per_piece: material?.length_per_piece || null,
+          length_unit: material?.length_unit || null,
+          standard_piece_weight: standardPieceWeight,
+          // Pricing mode form state - default to per_piece
+          pricing_mode: "per_piece" as const,
+          calculated_weight: calculatedWeight,
+          actual_weight: null,
         } as RequestItemForConversion;
       });
     },
@@ -1610,219 +1638,29 @@ export function useDeleteMaterialRequestCascade() {
       // Ensure fresh session before mutation
       await ensureFreshSession();
 
-      console.log("[useDeleteMaterialRequestCascade] Starting cascade delete for request:", id);
+      console.log("[useDeleteMaterialRequestCascade] Starting atomic cascade delete for request:", id);
 
-      // Step 1: Get all POs linked to this request
-      const { data: linkedPOs, error: poError } = await supabase
-        .from("purchase_orders")
-        .select("id, po_number, status")
-        .eq("source_request_id", id);
+      // Use atomic RPC function instead of 30+ sequential queries
+      // This single call replaces the entire N+1 cascade delete pattern
+      const { data, error } = await supabase.rpc("cascade_delete_material_request", {
+        p_request_id: id,
+        p_site_id: siteId,
+      });
 
-      if (poError) throw poError;
-
-      console.log("[useDeleteMaterialRequestCascade] Found linked POs:", linkedPOs?.length || 0);
-
-      // Step 2: Delete each linked PO with its cascade
-      // We need to import and use the PO cascade delete logic inline
-      for (const po of linkedPOs || []) {
-        console.log("[useDeleteMaterialRequestCascade] Deleting PO:", po.po_number);
-
-        // Get material purchase expenses for this PO
-        const { data: materialExpenses } = await (supabase as any)
-          .from("material_purchase_expenses")
-          .select("id, ref_code, purchase_type")
-          .eq("purchase_order_id", po.id);
-
-        // Get all deliveries for stock cleanup
-        const { data: stockDeliveries } = await supabase
-          .from("deliveries")
-          .select("id")
-          .eq("po_id", po.id);
-
-        // Clean up stock inventory records
-        if (stockDeliveries && stockDeliveries.length > 0) {
-          const stockDeliveryIds = stockDeliveries.map((d: any) => d.id);
-
-          const { data: deliveryItems } = await supabase
-            .from("delivery_items")
-            .select("material_id, brand_id")
-            .in("delivery_id", stockDeliveryIds);
-
-          if (deliveryItems && deliveryItems.length > 0) {
-            const materialBrandPairs = new Map<string, { material_id: string; brand_id: string | null }>();
-            for (const item of deliveryItems) {
-              const key = `${item.material_id}-${item.brand_id || "null"}`;
-              materialBrandPairs.set(key, {
-                material_id: item.material_id,
-                brand_id: item.brand_id,
-              });
-            }
-
-            // Delete stock inventory and transactions
-            for (const { material_id, brand_id } of materialBrandPairs.values()) {
-              let stockQuery = supabase
-                .from("stock_inventory")
-                .select("id")
-                .eq("site_id", siteId)
-                .eq("material_id", material_id);
-
-              if (brand_id) {
-                stockQuery = stockQuery.eq("brand_id", brand_id);
-              } else {
-                stockQuery = stockQuery.is("brand_id", null);
-              }
-
-              const { data: stockInventory } = await stockQuery;
-
-              if (stockInventory && stockInventory.length > 0) {
-                const inventoryIds = stockInventory.map((s: any) => s.id);
-
-                // Delete transactions first
-                await supabase
-                  .from("stock_transactions")
-                  .delete()
-                  .in("inventory_id", inventoryIds);
-
-                // Delete inventory
-                await supabase
-                  .from("stock_inventory")
-                  .delete()
-                  .in("id", inventoryIds);
-              }
-            }
-          }
-        }
-
-        // Delete material expenses linked to this PO
-        const groupStockExpense = materialExpenses?.find(
-          (e: { purchase_type: string }) => e.purchase_type === "group_stock"
-        );
-
-        if (groupStockExpense) {
-          const batchRefCode = groupStockExpense.ref_code;
-
-          // Delete derived expenses
-          await (supabase as any)
-            .from("material_purchase_expenses")
-            .delete()
-            .eq("original_batch_code", batchRefCode);
-
-          // Delete settlement allocations
-          await (supabase as any)
-            .from("settlement_expense_allocations")
-            .delete()
-            .eq("batch_ref_code", batchRefCode);
-
-          // Delete settlement payments and items
-          const { data: settlements } = await (supabase as any)
-            .from("inter_site_material_settlements")
-            .select("id")
-            .eq("batch_ref_code", batchRefCode);
-
-          if (settlements && settlements.length > 0) {
-            const settlementIds = settlements.map((s: { id: string }) => s.id);
-
-            await (supabase as any)
-              .from("inter_site_settlement_payments")
-              .delete()
-              .in("settlement_id", settlementIds);
-
-            await (supabase as any)
-              .from("inter_site_settlement_items")
-              .delete()
-              .in("settlement_id", settlementIds);
-
-            await (supabase as any)
-              .from("inter_site_material_settlements")
-              .delete()
-              .in("id", settlementIds);
-          }
-
-          // Delete batch usage records
-          await (supabase as any)
-            .from("batch_usage_records")
-            .delete()
-            .eq("batch_ref_code", batchRefCode);
-        }
-
-        // Delete material expense items and expenses
-        if (materialExpenses && materialExpenses.length > 0) {
-          const expenseIds = materialExpenses.map((e: { id: string }) => e.id);
-
-          await (supabase as any)
-            .from("material_purchase_expense_items")
-            .delete()
-            .in("purchase_expense_id", expenseIds);
-
-          await (supabase as any)
-            .from("material_purchase_expenses")
-            .delete()
-            .in("id", expenseIds);
-        }
-
-        // Delete delivery items and deliveries
-        if (stockDeliveries && stockDeliveries.length > 0) {
-          const deliveryIds = stockDeliveries.map((d: any) => d.id);
-
-          await supabase
-            .from("delivery_items")
-            .delete()
-            .in("delivery_id", deliveryIds);
-
-          await supabase
-            .from("deliveries")
-            .delete()
-            .in("id", deliveryIds);
-        }
-
-        // Delete PO items (should cascade via FK but explicit for safety)
-        await supabase
-          .from("purchase_order_items")
-          .delete()
-          .eq("po_id", po.id);
-
-        // Delete the PO
-        await supabase
-          .from("purchase_orders")
-          .delete()
-          .eq("id", po.id);
-
-        console.log("[useDeleteMaterialRequestCascade] Deleted PO:", po.po_number);
+      if (error) {
+        console.error("[useDeleteMaterialRequestCascade] RPC error:", error);
+        throw error;
       }
 
-      // Step 3: Delete junction table records for this request's items
-      const { data: requestItems } = await supabase
-        .from("material_request_items")
-        .select("id")
-        .eq("request_id", id);
-
-      if (requestItems && requestItems.length > 0) {
-        const requestItemIds = requestItems.map((item: any) => item.id);
-
-        // Delete junction records (should cascade via FK but explicit)
-        await (supabase as any)
-          .from("purchase_order_request_items")
-          .delete()
-          .in("request_item_id", requestItemIds);
+      // Check for function-level errors
+      if (data && !data.success) {
+        console.error("[useDeleteMaterialRequestCascade] Function error:", data.error);
+        throw new Error(data.error || "Cascade delete failed");
       }
 
-      // Step 4: Delete request items
-      await supabase
-        .from("material_request_items")
-        .delete()
-        .eq("request_id", id);
+      console.log("[useDeleteMaterialRequestCascade] Cascade delete complete:", data);
 
-      // Step 5: Delete the material request itself
-      const { error: deleteError } = await supabase
-        .from("material_requests")
-        .delete()
-        .eq("id", id);
-
-      if (deleteError) throw deleteError;
-
-      console.log("[useDeleteMaterialRequestCascade] Cascade delete complete for request:", id);
-
-      return { id, siteId };
+      return { id, siteId, ...data };
     },
     onSuccess: (result) => {
       // Invalidate all relevant queries
