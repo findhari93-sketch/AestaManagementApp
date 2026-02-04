@@ -1202,45 +1202,55 @@ export function useVendorMaterialBrands(
     queryFn: async () => {
       if (!vendorId || !materialId) return [];
 
-      const { data, error } = await (supabase as any)
-        .from("vendor_inventory")
-        .select(
+      try {
+        const { data, error } = await (supabase as any)
+          .from("vendor_inventory")
+          .select(
+            `
+            brand_id,
+            brand:material_brands(id, material_id, brand_name, variant_name, is_preferred, quality_rating, notes, is_active, created_at)
           `
-          brand_id,
-          brand:material_brands(id, material_id, brand_name, variant_name, is_preferred, quality_rating, notes, is_active, created_at)
-        `
-        )
-        .eq("vendor_id", vendorId)
-        .eq("material_id", materialId)
-        .eq("is_available", true);
+          )
+          .eq("vendor_id", vendorId)
+          .eq("material_id", materialId)
+          .eq("is_available", true);
 
-      if (error) throw error;
+        if (error) {
+          console.error("[useVendorMaterialBrands] Query error:", error);
+          return []; // Return empty array on error instead of throwing
+        }
 
-      // Extract unique brands with their full details (matching MaterialBrand type)
-      const brandMap = new Map<string, {
-        id: string;
-        material_id: string;
-        brand_name: string;
-        variant_name: string | null;
-        is_preferred: boolean;
-        quality_rating: number | null;
-        notes: string | null;
-        is_active: boolean;
-        created_at: string;
-      }>();
+        // Extract unique brands with their full details (matching MaterialBrand type)
+        const brandMap = new Map<string, {
+          id: string;
+          material_id: string;
+          brand_name: string;
+          variant_name: string | null;
+          is_preferred: boolean;
+          quality_rating: number | null;
+          notes: string | null;
+          is_active: boolean;
+          created_at: string;
+        }>();
 
-      for (const item of data || []) {
-        if (item.brand && item.brand.is_active) {
-          // Use brand_id as key to avoid duplicates
-          if (!brandMap.has(item.brand.id)) {
-            brandMap.set(item.brand.id, item.brand);
+        for (const item of data || []) {
+          if (item.brand && item.brand.is_active) {
+            // Use brand_id as key to avoid duplicates
+            if (!brandMap.has(item.brand.id)) {
+              brandMap.set(item.brand.id, item.brand);
+            }
           }
         }
-      }
 
-      return Array.from(brandMap.values());
+        return Array.from(brandMap.values());
+      } catch (err) {
+        console.error("[useVendorMaterialBrands] Unexpected error:", err);
+        return []; // Return empty array on error
+      }
     },
     enabled: !!vendorId && !!materialId,
+    retry: false, // Don't retry on failure - prevents stuck loading state
+    staleTime: 30000, // Cache for 30 seconds to prevent unnecessary refetches
   });
 }
 
