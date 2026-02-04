@@ -716,6 +716,15 @@ export default function UnifiedPurchaseOrderDialog({
     );
   };
 
+  const handleRequestItemActualWeightChange = (itemId: string, value: string) => {
+    const weight = parseFloat(value) || 0;
+    setRequestItemsState((prev) =>
+      prev.map((item) =>
+        item.id === itemId ? { ...item, actual_weight: weight > 0 ? weight : null } : item
+      )
+    );
+  };
+
   // ============================================================================
   // Handlers - Add/Remove items
   // ============================================================================
@@ -992,11 +1001,11 @@ export default function UnifiedPurchaseOrderDialog({
     <Dialog
       open={open}
       onClose={onClose}
-      maxWidth="lg"
+      maxWidth="xl"
       fullWidth
       fullScreen={isMobile}
       PaperProps={{
-        sx: { minHeight: isMobile ? "100%" : "80vh" },
+        sx: { minHeight: isMobile ? "100%" : "80vh", maxWidth: "1400px" },
       }}
     >
       <DialogTitle
@@ -1263,13 +1272,14 @@ export default function UnifiedPurchaseOrderDialog({
                           Unit Price (₹)
                         </TableCell>
                         {hasWeightBasedRequestItems && (
-                          <TableCell align="right" sx={{ minWidth: 90 }}>
-                            Price Per
+                          <TableCell align="right" sx={{ minWidth: 130 }}>
+                            Price Per / Weight
                           </TableCell>
                         )}
                         <TableCell align="right" sx={{ minWidth: 80 }}>
                           GST %
                         </TableCell>
+                        <TableCell align="right">Subtotal</TableCell>
                         <TableCell align="right">Total</TableCell>
                       </TableRow>
                     </TableHead>
@@ -1292,11 +1302,74 @@ export default function UnifiedPurchaseOrderDialog({
                           onPricingModeChange={(value) =>
                             handleRequestItemPricingModeChange(item.id, value)
                           }
+                          onActualWeightChange={(value) =>
+                            handleRequestItemActualWeightChange(item.id, value)
+                          }
                           showPricingModeColumn={hasWeightBasedRequestItems}
                         />
                       ))}
                     </TableBody>
                   </Table>
+
+                  {/* Request Items Summary */}
+                  {requestItemsTotals.selectedCount > 0 && (
+                    <Box
+                      sx={{
+                        display: "flex",
+                        justifyContent: "flex-end",
+                        p: 2,
+                        bgcolor: "grey.50",
+                        borderTop: "1px solid",
+                        borderColor: "divider",
+                      }}
+                    >
+                      <Box sx={{ minWidth: 280 }}>
+                        <Box
+                          sx={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            mb: 0.5,
+                          }}
+                        >
+                          <Typography variant="body2" color="text.secondary">
+                            Subtotal ({requestItemsTotals.selectedCount} item
+                            {requestItemsTotals.selectedCount !== 1 ? "s" : ""}):
+                          </Typography>
+                          <Typography variant="body2" fontWeight={500}>
+                            {formatCurrency(requestItemsTotals.subtotal)}
+                          </Typography>
+                        </Box>
+                        <Box
+                          sx={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            mb: 0.5,
+                          }}
+                        >
+                          <Typography variant="body2" color="text.secondary">
+                            GST:
+                          </Typography>
+                          <Typography variant="body2">
+                            {formatCurrency(requestItemsTotals.taxAmount)}
+                          </Typography>
+                        </Box>
+                        <Divider sx={{ my: 1 }} />
+                        <Box
+                          sx={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                          }}
+                        >
+                          <Typography variant="subtitle2" fontWeight={600}>
+                            Request Items Total:
+                          </Typography>
+                          <Typography variant="subtitle2" fontWeight={600} color="primary.main">
+                            {formatCurrency(requestItemsTotals.subtotal + requestItemsTotals.taxAmount)}
+                          </Typography>
+                        </Box>
+                      </Box>
+                    </Box>
+                  )}
                 </Paper>
               )}
             </Grid>

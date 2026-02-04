@@ -29,6 +29,7 @@ interface RequestItemRowProps {
   onVariantChange: (variantId: string | null, variantName: string | null) => void;
   onBrandChange: (brandId: string | null, brandName: string | null) => void;
   onPricingModeChange: (value: "per_piece" | "per_kg") => void;
+  onActualWeightChange: (value: string) => void;
   showPricingModeColumn: boolean; // Whether to show the pricing mode column (for table alignment)
 }
 
@@ -42,6 +43,7 @@ export default function RequestItemRow({
   onVariantChange,
   onBrandChange,
   onPricingModeChange,
+  onActualWeightChange,
   showPricingModeColumn,
 }: RequestItemRowProps) {
   const isDisabled = item.remaining_qty <= 0;
@@ -417,9 +419,9 @@ export default function RequestItemRow({
 
       {/* Price Per Mode - show column for alignment when any items have weight data */}
       {showPricingModeColumn && (
-        <TableCell align="right" sx={{ minWidth: 90 }}>
+        <TableCell align="right" sx={{ minWidth: 130 }}>
           {item.weight_per_unit ? (
-            <>
+            <Box>
               <TextField
                 select
                 size="small"
@@ -443,7 +445,38 @@ export default function RequestItemRow({
                   ~{item.standard_piece_weight.toFixed(2)} kg/pc
                 </Typography>
               )}
-            </>
+              {/* Actual Weight input for per_kg mode */}
+              {item.pricing_mode === "per_kg" && item.selected && item.calculated_weight && (
+                <Box sx={{ mt: 1 }}>
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    sx={{ display: "block", fontSize: "0.65rem" }}
+                  >
+                    Est: {item.calculated_weight.toFixed(1)} kg
+                  </Typography>
+                  <TextField
+                    type="number"
+                    size="small"
+                    value={item.actual_weight ?? item.calculated_weight ?? ""}
+                    onChange={(e) => onActualWeightChange(e.target.value)}
+                    disabled={isDisabled}
+                    placeholder="Actual kg"
+                    inputProps={{
+                      min: 0,
+                      step: 0.1,
+                      style: { textAlign: "right", width: 70 },
+                    }}
+                    InputProps={{
+                      endAdornment: (
+                        <InputAdornment position="end" sx={{ fontSize: "0.7rem" }}>kg</InputAdornment>
+                      ),
+                    }}
+                    sx={{ mt: 0.5 }}
+                  />
+                </Box>
+              )}
+            </Box>
           ) : (
             <Typography variant="caption" color="text.secondary">
               -
@@ -474,12 +507,30 @@ export default function RequestItemRow({
         />
       </TableCell>
 
-      {/* Total */}
+      {/* Subtotal (before GST) */}
       <TableCell align="right">
         {item.selected && !isDisabled ? (
-          <Typography variant="body2" fontWeight={500}>
-            {formatCurrency(itemTotal)}
+          <Typography variant="body2">
+            {formatCurrency(itemSubtotal)}
           </Typography>
+        ) : (
+          "-"
+        )}
+      </TableCell>
+
+      {/* Total (with GST) */}
+      <TableCell align="right">
+        {item.selected && !isDisabled ? (
+          <Box>
+            <Typography variant="body2" fontWeight={500}>
+              {formatCurrency(itemTotal)}
+            </Typography>
+            {itemTax > 0 && (
+              <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
+                +{formatCurrency(itemTax)} GST
+              </Typography>
+            )}
+          </Box>
         ) : (
           "-"
         )}
