@@ -8,9 +8,14 @@ export default defineConfig({
   workers: process.env.CI ? 1 : undefined,
   reporter: 'html',
 
+  // Run auth setup before tests to save authenticated session
+  globalSetup: require.resolve('./tests/auth.setup'),
+
   use: {
     baseURL: 'http://localhost:3000',
     trace: 'on-first-retry',
+    // Reuse authenticated session from globalSetup
+    storageState: './tests/.auth/user.json',
   },
 
   webServer: {

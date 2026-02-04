@@ -78,7 +78,7 @@ export function useCreateStockLocation() {
 // ============================================
 
 /**
- * Extended stock type that includes shared/group stock information
+ * Extended stock type that includes shared/group stock information and pricing mode
  */
 export type ExtendedStockInventory = StockInventoryWithDetails & {
   is_shared: boolean;
@@ -86,6 +86,8 @@ export type ExtendedStockInventory = StockInventoryWithDetails & {
   paid_by_site_id?: string | null;
   paid_by_site_name?: string | null;
   batch_code?: string | null;
+  pricing_mode?: "per_piece" | "per_kg";
+  total_weight?: number | null;
 };
 
 /**
@@ -120,7 +122,9 @@ export function useSiteStock(
         .select(
           `
           *,
-          material:materials(id, name, code, unit, category_id, reorder_level),
+          pricing_mode,
+          total_weight,
+          material:materials(id, name, code, unit, category_id, reorder_level, weight_per_unit, length_per_piece),
           brand:material_brands(id, brand_name),
           location:stock_locations(id, name)
         `
@@ -151,6 +155,8 @@ export function useSiteStock(
             paid_by_site_id: siteId,
             paid_by_site_name: null,
             batch_code: item.batch_code || null,
+            pricing_mode: item.pricing_mode || "per_piece",
+            total_weight: item.total_weight ? Number(item.total_weight) : null,
           };
         }
       );

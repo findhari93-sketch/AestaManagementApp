@@ -19,6 +19,16 @@ npm run db:start     # Start local Supabase
 npm run db:reset     # Reset local database
 ```
 
+## "Move to Prod" Command
+When the user says **"move to prod"** or similar (e.g., "push to production", "deploy changes"), I must:
+
+1. **Run `npm run build`** - Ensure production build passes with no errors
+2. **Run `git status`** - Check ALL uncommitted changes (staged, unstaged, and untracked)
+3. **Commit ALL changes** - Stage and commit everything with appropriate commit message(s)
+4. **Push to remote** - Push all commits to the remote repository
+
+**Important:** Do NOT selectively commit only some files. ALL pending changes must be included when "move to prod" is requested.
+
 ## Test Credentials (for Playwright testing)
 - **Email**: Haribabu@nerasmclasses.onmicrosoft.com
 - **Password**: Padma@123

@@ -209,7 +209,14 @@ export default function InventoryPage() {
   }, [stock]);
 
   const totalStockValue = useMemo(() => {
-    return stock.reduce((sum, s) => sum + s.current_qty * (s.avg_unit_cost || 0), 0);
+    return stock.reduce((sum, s) => {
+      const extendedStock = s as ExtendedStockInventory;
+      // For per-kg pricing, use total_weight; for per-piece, use current_qty
+      if (extendedStock.pricing_mode === "per_kg" && extendedStock.total_weight) {
+        return sum + extendedStock.total_weight * (s.avg_unit_cost || 0);
+      }
+      return sum + s.current_qty * (s.avg_unit_cost || 0);
+    }, 0);
   }, [stock]);
 
   // Use the extended stock type from the hook
@@ -329,7 +336,14 @@ export default function InventoryPage() {
         header: "Value",
         size: 120,
         Cell: ({ row }) => {
-          const value = row.original.current_qty * (row.original.avg_unit_cost || 0);
+          const extendedStock = row.original as ExtendedStock;
+          // For per-kg pricing, use total_weight; for per-piece, use current_qty
+          let value: number;
+          if (extendedStock.pricing_mode === "per_kg" && extendedStock.total_weight) {
+            value = extendedStock.total_weight * (row.original.avg_unit_cost || 0);
+          } else {
+            value = row.original.current_qty * (row.original.avg_unit_cost || 0);
+          }
           return `₹${value.toLocaleString()}`;
         },
       },
