@@ -290,7 +290,7 @@ export default function MaterialRequestDialog({
     }
   };
 
-  const isSubmitting = createRequest.isPending || updateRequest.isPending;
+  const isSubmitting = createRequest.isPending || updateRequest.isPending || revertPOsToDraft.isPending;
 
   return (
     <Dialog
