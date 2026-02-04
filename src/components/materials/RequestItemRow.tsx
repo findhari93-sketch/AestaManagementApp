@@ -12,6 +12,7 @@ import {
   InputAdornment,
   Tooltip,
   CircularProgress,
+  MenuItem,
 } from "@mui/material";
 import { Warning as WarningIcon } from "@mui/icons-material";
 import { useVendorMaterialBrands, useVendorMaterialPrice } from "@/hooks/queries/useVendorInventory";
@@ -27,6 +28,8 @@ interface RequestItemRowProps {
   onTaxRateChange: (value: string) => void;
   onVariantChange: (variantId: string | null, variantName: string | null) => void;
   onBrandChange: (brandId: string | null, brandName: string | null) => void;
+  onPricingModeChange: (value: "per_piece" | "per_kg") => void;
+  showPricingModeColumn: boolean; // Whether to show the pricing mode column (for table alignment)
 }
 
 export default function RequestItemRow({
@@ -38,6 +41,8 @@ export default function RequestItemRow({
   onTaxRateChange,
   onVariantChange,
   onBrandChange,
+  onPricingModeChange,
+  showPricingModeColumn,
 }: RequestItemRowProps) {
   const isDisabled = item.remaining_qty <= 0;
 
@@ -111,8 +116,52 @@ export default function RequestItemRow({
     onBrandChange(brand.id, brand.brand_name);
   };
 
-  // Calculate item total (including tax)
-  const itemSubtotal = item.selected ? item.quantity_to_order * item.unit_price : 0;
+  // Calculate converted price (per-piece if per-kg selected, and vice versa)
+  const convertedPrice = useMemo(() => {
+    const price = item.unit_price || 0;
+    if (price <= 0 || !item.standard_piece_weight) return null;
+
+    if (item.pricing_mode === "per_kg") {
+      // User entered per-kg price, show per-piece equivalent
+      return {
+        value: price * item.standard_piece_weight,
+        label: `~₹${(price * item.standard_piece_weight).toFixed(2)}/pc`,
+      };
+    } else {
+      // User entered per-piece price, show per-kg equivalent
+      return {
+        value: price / item.standard_piece_weight,
+        label: `~₹${(price / item.standard_piece_weight).toFixed(2)}/kg`,
+      };
+    }
+  }, [item.unit_price, item.pricing_mode, item.standard_piece_weight]);
+
+  // Calculate price including GST
+  const priceIncludingGst = useMemo(() => {
+    const price = item.unit_price || 0;
+    const gst = item.tax_rate || 0;
+    if (price <= 0) return null;
+    return price * (1 + gst / 100);
+  }, [item.unit_price, item.tax_rate]);
+
+  // Calculate item total based on pricing mode
+  const itemSubtotal = useMemo(() => {
+    if (!item.selected) return 0;
+
+    if (item.pricing_mode === "per_kg") {
+      const weight = item.actual_weight ?? item.calculated_weight ?? 0;
+      return weight * item.unit_price;
+    }
+    return item.quantity_to_order * item.unit_price;
+  }, [
+    item.selected,
+    item.pricing_mode,
+    item.actual_weight,
+    item.calculated_weight,
+    item.quantity_to_order,
+    item.unit_price,
+  ]);
+
   const itemTax = item.tax_rate ? (itemSubtotal * item.tax_rate) / 100 : 0;
   const itemTotal = itemSubtotal + itemTax;
 
@@ -343,10 +392,65 @@ export default function RequestItemRow({
         {/* Show last price hint if available */}
         {priceData?.price && item.unit_price !== priceData.price && (
           <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
-            Last: {formatCurrency(priceData.price)}
+            → Last: {formatCurrency(priceData.price)}
+          </Typography>
+        )}
+        {/* Show converted price if weight-based */}
+        {convertedPrice && item.selected && (
+          <Typography
+            variant="caption"
+            sx={{ display: "block", color: "info.main", fontWeight: 500 }}
+          >
+            {convertedPrice.label}
+          </Typography>
+        )}
+        {/* Show GST-included price */}
+        {priceIncludingGst && item.tax_rate > 0 && item.selected && (
+          <Typography
+            variant="caption"
+            sx={{ display: "block", color: "success.main", fontWeight: 500 }}
+          >
+            Incl. {item.tax_rate}% GST: ₹{priceIncludingGst.toFixed(2)}
           </Typography>
         )}
       </TableCell>
+
+      {/* Price Per Mode - show column for alignment when any items have weight data */}
+      {showPricingModeColumn && (
+        <TableCell align="right" sx={{ minWidth: 90 }}>
+          {item.weight_per_unit ? (
+            <>
+              <TextField
+                select
+                size="small"
+                value={item.pricing_mode}
+                onChange={(e) =>
+                  onPricingModeChange(e.target.value as "per_piece" | "per_kg")
+                }
+                disabled={isDisabled || !item.selected}
+                sx={{ width: 85 }}
+              >
+                <MenuItem value="per_piece">Per Pc</MenuItem>
+                <MenuItem value="per_kg">Per Kg</MenuItem>
+              </TextField>
+              {/* Show weight per piece */}
+              {item.standard_piece_weight && item.selected && (
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  sx={{ display: "block", mt: 0.5, fontSize: "0.65rem" }}
+                >
+                  ~{item.standard_piece_weight.toFixed(2)} kg/pc
+                </Typography>
+              )}
+            </>
+          ) : (
+            <Typography variant="caption" color="text.secondary">
+              -
+            </Typography>
+          )}
+        </TableCell>
+      )}
 
       {/* GST % */}
       <TableCell align="right">

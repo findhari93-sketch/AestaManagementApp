@@ -143,6 +143,97 @@ MUI Dialog sets `aria-hidden="true"` on background content. Without portal rende
 - `src/types/` - TypeScript type definitions
 - `supabase/migrations/` - Database migrations
 
+## Domain Quick Reference
+
+### Materials Domain (52 components) - LARGEST
+**Key Files:**
+| File | Purpose |
+|------|---------|
+| `src/hooks/queries/usePurchaseOrders.ts` | PO workflow (3,385 lines) |
+| `src/hooks/queries/useMaterialRequests.ts` | Request CRUD, timeout protection (1,969 lines) |
+| `src/hooks/queries/useMaterialPurchases.ts` | Purchase tracking (1,599 lines) |
+| `src/types/material.types.ts` | All material types (59KB) |
+| `src/components/materials/` | 52 UI components |
+
+**Workflows:**
+- Material Request: `draft → pending → approved → ordered → fulfilled`
+- Purchase Order: `draft → pending → approved → ordered → partially_delivered → delivered`
+- Delivery: `pending → verified → completed`
+
+**Common Issues:** Timeout on large PO lists (15-second protection exists), parent-child material relationships
+
+---
+
+### Payments & Settlements Domain (37 components)
+**Key Files:**
+| File | Purpose |
+|------|---------|
+| `src/lib/services/settlementService.ts` | Settlement calculations (93KB - largest service) |
+| `src/hooks/queries/useInterSiteSettlements.ts` | Multi-site reconciliation (1,850 lines) |
+| `src/components/payments/` | 37 UI components |
+| `src/types/settlement.types.ts` | Settlement types |
+
+**Workflows:**
+- Settlement: `pending → approved → paid`
+- Payment sources: `company`, `site_cash`, `engineer_own`
+
+**Common Issues:** Multi-party calculations, wage/batch reconciliation
+
+---
+
+### Equipment Domain (10 components)
+**Key Files:** `src/hooks/queries/useEquipment.ts`, `src/components/equipment/`, `src/types/equipment.types.ts`
+
+**Workflows:**
+- Status: `available → deployed → under_repair → disposed`
+- Transfer: `pending → in_transit → received/rejected`
+- Condition: `excellent → good → fair → poor → damaged`
+
+---
+
+### Rentals Domain (11 components)
+**Key Files:** `src/hooks/queries/useRentals.ts` (1,673 lines), `src/lib/services/rentalService.ts` (19KB)
+
+**Workflows:**
+- Rental: `active → completed → cancelled`
+- Advance: `pending → paid → settled`
+
+---
+
+### Tea Shop Domain (13 components)
+**Key Files:** `src/hooks/queries/useCombinedTeaShop.ts`, `src/hooks/queries/useGroupTeaShop.ts`
+
+**Note:** Multi-site group allocation logic is complex
+
+---
+
+### Attendance Domain (7 components)
+**Key Files:** `src/hooks/queries/useAttendance.ts`, `src/components/attendance/`
+
+---
+
+### Wallet/Financial Domain (9 components)
+**Key Files:** `src/lib/services/walletService.ts` (28KB), `src/hooks/queries/useEngineerWallet.ts`
+
+---
+
+## Route Quick Reference
+| Route | Purpose |
+|-------|---------|
+| `/company/materials` | Material catalog |
+| `/company/equipment` | Equipment management |
+| `/company/rentals` | Rental store |
+| `/company/laborers` | Internal workforce |
+| `/company/engineer-wallet` | Fund management |
+| `/site/material-requests` | Create/manage requests |
+| `/site/purchase-orders` | PO workflow |
+| `/site/delivery-verification` | Verify deliveries |
+| `/site/attendance` | Daily attendance |
+| `/site/payments` | Payment entry |
+| `/site/rentals` | Site rental orders |
+| `/site/tea-shop` | Tea shop entries |
+| `/site/my-wallet` | Site wallet |
+
 ## Full-Stack Testing Workflow
 
 ### Database Safety Rules

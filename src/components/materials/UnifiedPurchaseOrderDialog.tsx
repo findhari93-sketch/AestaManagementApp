@@ -568,7 +568,14 @@ export default function UnifiedPurchaseOrderDialog({
     let taxAmount = 0;
 
     selectedItems.forEach((item) => {
-      const itemTotal = item.quantity_to_order * item.unit_price;
+      // Calculate item total based on pricing mode
+      let itemTotal: number;
+      if (item.pricing_mode === "per_kg") {
+        const weight = item.actual_weight ?? item.calculated_weight ?? 0;
+        itemTotal = weight * item.unit_price;
+      } else {
+        itemTotal = item.quantity_to_order * item.unit_price;
+      }
       const itemTax = item.tax_rate ? (itemTotal * item.tax_rate) / 100 : 0;
       subtotal += itemTotal;
       taxAmount += itemTax;
@@ -621,7 +628,20 @@ export default function UnifiedPurchaseOrderDialog({
       prev.map((item) => {
         if (item.id !== itemId) return item;
         const validQty = Math.min(Math.max(0, qty), item.remaining_qty);
-        return { ...item, quantity_to_order: validQty };
+
+        // Recalculate weight when quantity changes
+        const calculatedWeight =
+          item.standard_piece_weight && validQty > 0
+            ? item.standard_piece_weight * validQty
+            : null;
+
+        return {
+          ...item,
+          quantity_to_order: validQty,
+          calculated_weight: calculatedWeight,
+          // Also update actual_weight to match (user can override later)
+          actual_weight: calculatedWeight,
+        };
       })
     );
   };
@@ -681,6 +701,17 @@ export default function UnifiedPurchaseOrderDialog({
               selected_brand_name: brandName,
             }
           : item
+      )
+    );
+  };
+
+  const handleRequestItemPricingModeChange = (
+    itemId: string,
+    value: "per_piece" | "per_kg"
+  ) => {
+    setRequestItemsState((prev) =>
+      prev.map((item) =>
+        item.id === itemId ? { ...item, pricing_mode: value } : item
       )
     );
   };
@@ -835,9 +866,10 @@ export default function UnifiedPurchaseOrderDialog({
         quantity: item.quantity_to_order,
         unit_price: item.unit_price,
         tax_rate: item.tax_rate || undefined,
-        pricing_mode: 'per_piece' as const,
-        calculated_weight: null,
-        actual_weight: null,
+        // Include pricing mode and weight data from the form state
+        pricing_mode: item.pricing_mode || "per_piece",
+        calculated_weight: item.calculated_weight || null,
+        actual_weight: item.actual_weight || null,
         // Track request item linkage
         request_item_id: item.id,
       }));
@@ -948,6 +980,9 @@ export default function UnifiedPurchaseOrderDialog({
 
   // Check if there are convertible items in request mode
   const hasConvertibleItems = !isRequestMode || requestItemsState.some((item) => item.remaining_qty > 0);
+
+  // Check if any request items have weight-based pricing
+  const hasWeightBasedRequestItems = requestItemsState.some((item) => item.weight_per_unit);
 
   // ============================================================================
   // Render
@@ -1227,6 +1262,11 @@ export default function UnifiedPurchaseOrderDialog({
                         <TableCell align="right" sx={{ minWidth: 120 }}>
                           Unit Price (₹)
                         </TableCell>
+                        {hasWeightBasedRequestItems && (
+                          <TableCell align="right" sx={{ minWidth: 90 }}>
+                            Price Per
+                          </TableCell>
+                        )}
                         <TableCell align="right" sx={{ minWidth: 80 }}>
                           GST %
                         </TableCell>
@@ -1249,6 +1289,10 @@ export default function UnifiedPurchaseOrderDialog({
                           onBrandChange={(brandId, brandName) =>
                             handleRequestItemBrandChange(item.id, brandId, brandName)
                           }
+                          onPricingModeChange={(value) =>
+                            handleRequestItemPricingModeChange(item.id, value)
+                          }
+                          showPricingModeColumn={hasWeightBasedRequestItems}
                         />
                       ))}
                     </TableBody>

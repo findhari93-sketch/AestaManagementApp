@@ -976,6 +976,16 @@ export interface RequestItemForConversion {
   selected_variant_name?: string | null;
   selected_brand_id?: string | null;
   selected_brand_name?: string | null;
+  // Weight-based pricing fields (for TMT steel and other weight-based materials)
+  weight_per_unit?: number | null;
+  weight_unit?: string | null;
+  length_per_piece?: number | null;
+  length_unit?: string | null;
+  standard_piece_weight?: number | null;
+  // Pricing mode form state
+  pricing_mode: "per_piece" | "per_kg";
+  calculated_weight?: number | null;
+  actual_weight?: number | null;
 }
 
 /**
@@ -991,6 +1001,9 @@ export interface ConvertRequestToPOFormData {
     quantity: number;
     unit_price: number;
     tax_rate?: number;
+    pricing_mode?: "per_piece" | "per_kg";
+    calculated_weight?: number | null;
+    actual_weight?: number | null;
   }>;
   expected_delivery_date?: string;
   delivery_address?: string;
