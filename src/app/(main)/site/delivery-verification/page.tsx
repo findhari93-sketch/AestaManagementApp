@@ -483,7 +483,14 @@ function transformPOForDialog(po: POAwaitingDelivery): PurchaseOrderWithDetails 
       unit_price: item.unit_price,
       received_qty: item.received_qty,
       pending_qty: item.quantity - item.received_qty,
-      total_amount: item.quantity * item.unit_price,
+      // Calculate total based on pricing mode
+      total_amount: item.pricing_mode === "per_kg"
+        ? (item.actual_weight ?? item.calculated_weight ?? item.quantity) * item.unit_price
+        : item.quantity * item.unit_price,
+      pricing_mode: item.pricing_mode || "per_piece",
+      calculated_weight: item.calculated_weight,
+      actual_weight: item.actual_weight,
+      tax_rate: item.tax_rate,
       material: {
         id: item.material_id,
         name: item.material_name || "",

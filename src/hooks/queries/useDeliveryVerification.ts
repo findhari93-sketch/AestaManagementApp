@@ -48,6 +48,10 @@ export interface POAwaitingDelivery {
     received_qty: number;
     unit: string;
     unit_price: number;
+    pricing_mode: "per_piece" | "per_kg";
+    calculated_weight: number | null;
+    actual_weight: number | null;
+    tax_rate: number | null;
   }>;
 }
 
@@ -88,6 +92,10 @@ export function usePOsAwaitingDelivery(siteId: string | undefined) {
             quantity,
             received_qty,
             unit_price,
+            pricing_mode,
+            calculated_weight,
+            actual_weight,
+            tax_rate,
             material:materials(id, name, code, unit),
             brand:material_brands(id, brand_name)
           )
@@ -138,6 +146,10 @@ export function usePOsAwaitingDelivery(siteId: string | undefined) {
             received_qty: Number(item.received_qty || 0),
             unit: item.material?.unit || "nos",
             unit_price: Number(item.unit_price || 0),
+            pricing_mode: item.pricing_mode || "per_piece",
+            calculated_weight: item.calculated_weight ? Number(item.calculated_weight) : null,
+            actual_weight: item.actual_weight ? Number(item.actual_weight) : null,
+            tax_rate: item.tax_rate ? Number(item.tax_rate) : null,
           })),
         };
       });
