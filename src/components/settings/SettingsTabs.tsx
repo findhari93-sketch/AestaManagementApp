@@ -16,13 +16,16 @@ import {
   Tune as TuneIcon,
   AccountCircle as AccountIcon,
   Group as GroupIcon,
+  Business as BusinessIcon,
 } from "@mui/icons-material";
 import { useAuth } from "@/contexts/AuthContext";
+import { useSelectedCompany } from "@/contexts/CompanyContext";
 import ProfileTab from "./ProfileTab";
 import SecurityTab from "./SecurityTab";
 import PreferencesTab from "./PreferencesTab";
 import AccountTab from "./AccountTab";
 import UsersManagement from "./UsersManagement";
+import TeamManagement from "./TeamManagement";
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -59,6 +62,7 @@ interface SettingsTabsProps {
 
 export default function SettingsTabs({ defaultTab = 0 }: SettingsTabsProps) {
   const { userProfile } = useAuth();
+  const { selectedCompany } = useSelectedCompany();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("md"));
   const [value, setValue] = useState(defaultTab);
@@ -97,6 +101,15 @@ export default function SettingsTabs({ defaultTab = 0 }: SettingsTabsProps) {
     { label: "Preferences", icon: <TuneIcon />, component: PreferencesTab },
     { label: "Account", icon: <AccountIcon />, component: AccountTab },
   ];
+
+  // Add Team tab if user has a company
+  if (selectedCompany) {
+    tabs.push({
+      label: "Team",
+      icon: <BusinessIcon />,
+      component: TeamManagement as any,
+    });
+  }
 
   // Add Users tab for admin
   if (isAdmin) {

@@ -1019,6 +1019,9 @@ export interface DailyMaterialUsageWithDetails extends DailyMaterialUsage {
   brand?: MaterialBrand | null;
   section?: { name: string } | null;
   created_by_user?: { name: string };
+  // Added for shared stock usage tracking
+  is_shared_usage?: boolean; // True when using material from another site's stock
+  paid_by_site_name?: string | null; // Name of site that paid for the material
 }
 
 export interface StockTransferWithDetails extends StockTransfer {
@@ -1848,7 +1851,7 @@ export interface MaterialPurchaseExpenseWithDetails extends MaterialPurchaseExpe
   paying_site?: { id: string; name: string } | null;
   vendor?: Vendor | null;
   site_group?: SiteGroup | null;
-  purchase_order?: { id: string; po_number: string; vendor_bill_url?: string | null; bill_verified?: boolean } | null;
+  purchase_order?: { id: string; po_number: string; vendor_bill_url?: string | null; bill_verified?: boolean; total_amount?: number } | null;
   items?: MaterialPurchaseExpenseItemWithDetails[];
   created_by_user?: { name: string } | null;
 }

@@ -1072,7 +1072,7 @@ export function useSiteMaterialExpenses(siteId: string | undefined) {
           .select(`
             *,
             vendor:vendors(id, name, qr_code_url, upi_id),
-            purchase_order:purchase_orders(id, po_number, vendor_bill_url, bill_verified),
+            purchase_order:purchase_orders(id, po_number, vendor_bill_url, bill_verified, total_amount),
             paying_site:sites!material_purchase_expenses_paying_site_id_fkey(id, name),
             items:material_purchase_expense_items(
               *,

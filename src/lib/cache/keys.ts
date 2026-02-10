@@ -64,6 +64,36 @@ export const queryKeys = {
     profile: (userId: string) => ['users', 'profile', userId] as const,
   },
 
+  // ==================== COMPANY DATA (Multi-tenancy) ====================
+
+  companies: {
+    all: ['companies'] as const,
+    list: () => ['companies', 'list'] as const,
+    byId: (id: string) => ['companies', id] as const,
+    current: () => ['companies', 'current'] as const,
+  },
+
+  companyMembers: {
+    all: ['company-members'] as const,
+    list: (companyId: string) => ['company-members', companyId, 'list'] as const,
+    byId: (memberId: string) => ['company-members', memberId] as const,
+  },
+
+  companyInvites: {
+    all: ['company-invites'] as const,
+    list: (companyId: string) => ['company-invites', companyId, 'list'] as const,
+    pending: (companyId: string) => ['company-invites', companyId, 'pending'] as const,
+    byToken: (token: string) => ['company-invites', 'token', token] as const,
+  },
+
+  companyPrices: {
+    all: ['company-prices'] as const,
+    list: (companyId: string) => ['company-prices', companyId, 'list'] as const,
+    byVendor: (companyId: string, vendorId: string) => ['company-prices', companyId, 'vendor', vendorId] as const,
+    byMaterial: (companyId: string, materialId: string) => ['company-prices', companyId, 'material', materialId] as const,
+    comparison: (companyId: string, location: string) => ['company-prices', companyId, 'comparison', location] as const,
+  },
+
   subcontracts: {
     all: ['subcontracts'] as const,
     bySite: (siteId: string) => ['subcontracts', 'site', siteId] as const,
@@ -369,6 +399,10 @@ export function getCacheTTL(queryKey: readonly unknown[]): number {
     'vendors',
     'users',
     'subcontracts',
+    'companies',
+    'company-members',
+    'company-invites',
+    'company-prices',
   ];
 
   // Dashboard/stats entities - 2 minute cache

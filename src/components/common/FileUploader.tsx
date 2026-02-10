@@ -27,6 +27,41 @@ import {
 } from "@mui/icons-material";
 import { SupabaseClient } from "@supabase/supabase-js";
 import { ensureFreshSession } from "@/lib/auth/sessionManager";
+import { TIMEOUTS } from "@/lib/utils/timeout";
+
+// Upload status type for better UX feedback
+type UploadStatus =
+  | "idle"
+  | "compressing"
+  | "checking_session"
+  | "uploading"
+  | "retrying"
+  | "success"
+  | "error";
+
+// Upload configuration constants
+const UPLOAD_CONSTANTS = {
+  // Use centralized timeout from timeout.ts (3 minutes)
+  GLOBAL_TIMEOUT: TIMEOUTS.FILE_UPLOAD,
+
+  // Per-attempt timeout (shorter to allow retries within global timeout)
+  ATTEMPT_TIMEOUT: 45000, // 45 seconds per attempt
+
+  // Retry configuration
+  MAX_RETRIES: 2, // Total 3 attempts (1 initial + 2 retries)
+  INITIAL_RETRY_DELAY: 1000, // 1 second base delay
+
+  // Progress simulation - more realistic phases
+  PROGRESS_PHASES: {
+    START: 0,
+    COMPRESSION_START: 5,
+    COMPRESSION_END: 20,
+    SESSION_CHECK: 25,
+    UPLOAD_START: 30,
+    UPLOAD_PROGRESS_MAX: 90, // Cap simulated progress here (was 85)
+    COMPLETE: 100,
+  },
+} as const;
 
 export type FileType = "pdf" | "image" | "all";
 export type UploadedFile = {
@@ -330,9 +365,75 @@ export default function FileUploader({
   // Store last uploaded file to display until parent updates value prop
   const [lastUploadedFile, setLastUploadedFile] = useState<UploadedFile | null>(null);
 
+  // New state for improved upload UX
+  const [uploadStatus, setUploadStatus] = useState<UploadStatus>("idle");
+  const [retryCount, setRetryCount] = useState(0);
+
+  // Refs for abort handling and cleanup
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const globalTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const isMountedRef = useRef(true);
+
   const acceptMime = acceptString || FILE_TYPE_CONFIG[accept].accept;
   const acceptLabel = FILE_TYPE_CONFIG[accept].label;
   const maxSizeBytes = maxSizeMB * 1024 * 1024;
+
+  // Cleanup effect for unmount
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      // Abort any in-progress upload on unmount
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+      // Clear global timeout
+      if (globalTimeoutRef.current) {
+        clearTimeout(globalTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  // Cancel handler for user-initiated cancellation
+  const handleCancel = useCallback(() => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    if (globalTimeoutRef.current) {
+      clearTimeout(globalTimeoutRef.current);
+      globalTimeoutRef.current = null;
+    }
+    setUploading(false);
+    setUploadProgress(0);
+    setUploadStatus("idle");
+    setRetryCount(0);
+    setError("Upload cancelled");
+    // Clear error after 3 seconds
+    setTimeout(() => {
+      if (isMountedRef.current) setError(null);
+    }, 3000);
+  }, []);
+
+  // Helper function for status text
+  const getStatusText = useCallback((status: UploadStatus, currentRetry: number): string => {
+    switch (status) {
+      case "compressing":
+        return "Compressing image...";
+      case "checking_session":
+        return "Verifying session...";
+      case "uploading":
+        return "Uploading file...";
+      case "retrying":
+        return `Retrying (${currentRetry}/${UPLOAD_CONSTANTS.MAX_RETRIES})...`;
+      case "success":
+        return "Upload complete!";
+      case "error":
+        return "Upload failed";
+      default:
+        return "Processing...";
+    }
+  }, []);
 
   const validateFile = useCallback(
     (file: File): string | null => {
@@ -355,6 +456,85 @@ export default function FileUploader({
     [acceptMime, acceptLabel, maxSizeBytes, maxSizeMB]
   );
 
+  // Upload with automatic retry and exponential backoff
+  const uploadWithRetry = useCallback(
+    async (
+      filePath: string,
+      fileToUpload: File,
+      maxRetries: number = UPLOAD_CONSTANTS.MAX_RETRIES
+    ): Promise<{ data: { path: string } | null; error: Error | null }> => {
+      let lastError: Error | null = null;
+
+      for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        // Check if cancelled
+        if (abortControllerRef.current?.signal.aborted) {
+          return { data: null, error: new Error("Upload cancelled") };
+        }
+
+        // Update retry status for UI (only on retries, not first attempt)
+        if (attempt > 0) {
+          if (isMountedRef.current) {
+            setUploadStatus("retrying");
+            setRetryCount(attempt);
+          }
+          // Exponential backoff delay
+          const delay = UPLOAD_CONSTANTS.INITIAL_RETRY_DELAY * Math.pow(2, attempt - 1);
+          console.log(`[FileUploader] Waiting ${delay}ms before retry ${attempt}`);
+          await new Promise((resolve) => setTimeout(resolve, delay));
+        }
+
+        console.log(`[FileUploader] Upload attempt ${attempt + 1}/${maxRetries + 1}`);
+
+        try {
+          // Create timeout promise for this attempt
+          const attemptTimeoutPromise = new Promise<never>((_, reject) => {
+            setTimeout(() => {
+              reject(
+                new Error(
+                  `Upload attempt timed out after ${UPLOAD_CONSTANTS.ATTEMPT_TIMEOUT / 1000}s`
+                )
+              );
+            }, UPLOAD_CONSTANTS.ATTEMPT_TIMEOUT);
+          });
+
+          // Actual upload
+          const uploadPromise = supabase.storage
+            .from(bucketName)
+            .upload(filePath, fileToUpload, {
+              cacheControl: "3600",
+              upsert: true,
+            });
+
+          const result = (await Promise.race([
+            uploadPromise,
+            attemptTimeoutPromise,
+          ])) as { data: { path: string } | null; error: { message: string } | null };
+
+          if (!result.error && result.data?.path) {
+            return { data: result.data, error: null };
+          }
+
+          lastError = new Error(result.error?.message || "Upload failed");
+          console.warn(`[FileUploader] Attempt ${attempt + 1} failed:`, lastError.message);
+        } catch (err) {
+          lastError = err instanceof Error ? err : new Error(String(err));
+          console.warn(`[FileUploader] Attempt ${attempt + 1} exception:`, lastError.message);
+
+          // Don't retry on explicit cancellation
+          if (
+            lastError.message.includes("cancelled") ||
+            lastError.message.includes("aborted")
+          ) {
+            break;
+          }
+        }
+      }
+
+      return { data: null, error: lastError };
+    },
+    [supabase, bucketName]
+  );
+
   const uploadFile = useCallback(
     async (file: File): Promise<UploadedFile | null> => {
       const validationError = validateFile(file);
@@ -364,99 +544,146 @@ export default function FileUploader({
         return null;
       }
 
+      // Initialize upload state
       setUploading(true);
-      setUploadProgress(0);
+      setUploadProgress(UPLOAD_CONSTANTS.PROGRESS_PHASES.START);
       setUploadSuccess(false);
+      setUploadStatus("idle");
+      setRetryCount(0);
       setError(null);
 
+      // Create abort controller for this upload
+      abortControllerRef.current = new AbortController();
+
       let progressInterval: NodeJS.Timeout | null = null;
-      let globalTimeout: NodeJS.Timeout | null = null;
-      let isAborted = false;
 
-      // Global timeout to prevent indefinite hanging (60 seconds)
-      // Increased from 20s to handle slow networks and Supabase delays
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        globalTimeout = setTimeout(() => {
-          isAborted = true;
-          reject(new Error("Upload timed out. Please try with a smaller file or check your connection."));
-        }, 60000);
-      });
+      // Cleanup helper
+      const cleanup = () => {
+        if (progressInterval) clearInterval(progressInterval);
+        if (globalTimeoutRef.current) {
+          clearTimeout(globalTimeoutRef.current);
+          globalTimeoutRef.current = null;
+        }
+      };
 
-      // ... existing imports
-
-      // Inside FileUploader component, uploadFile function:
+      // Global timeout safety net - use centralized TIMEOUTS.FILE_UPLOAD (3 minutes)
+      globalTimeoutRef.current = setTimeout(() => {
+        console.warn("[FileUploader] Global timeout reached");
+        if (abortControllerRef.current) {
+          abortControllerRef.current.abort();
+        }
+        if (isMountedRef.current) {
+          cleanup();
+          setUploading(false);
+          setUploadProgress(0);
+          setUploadStatus("error");
+          setError(
+            "Upload timed out. Please check your internet connection and try again."
+          );
+        }
+      }, UPLOAD_CONSTANTS.GLOBAL_TIMEOUT);
 
       try {
-        const uploadPromise = (async () => {
-          // Ensure fresh session before starting upload
-          await ensureFreshSession();
+        // === PHASE 1: Image Compression ===
+        let fileToUpload = file;
+        const effectiveMime = getEffectiveMimeType(file);
 
-          // Compress image if enabled and file is an image
-          let fileToUpload = file;
-          const effectiveMime = getEffectiveMimeType(file);
-          if (compressImages && effectiveMime.startsWith("image/")) {
-            setUploadProgress(5); // Show early progress for compression
-            try {
-              fileToUpload = await compressImage(
-                file,
-                maxCompressedSizeKB,
-                maxImageWidth,
-                maxImageHeight
+        if (compressImages && effectiveMime.startsWith("image/")) {
+          setUploadStatus("compressing");
+          setUploadProgress(UPLOAD_CONSTANTS.PROGRESS_PHASES.COMPRESSION_START);
+
+          try {
+            fileToUpload = await compressImage(
+              file,
+              maxCompressedSizeKB,
+              maxImageWidth,
+              maxImageHeight
+            );
+            if (isMountedRef.current) {
+              console.log(
+                `[FileUploader] Image compressed: ${formatFileSize(file.size)} -> ${formatFileSize(fileToUpload.size)}`
               );
-              if (!isAborted) {
-                console.log(
-                  `Image compressed: ${formatFileSize(file.size)} -> ${formatFileSize(fileToUpload.size)}`
-                );
-              }
-            } catch (compressionError) {
-              console.warn("Image compression failed, uploading original:", compressionError);
-              // Continue with original file if compression fails
+            }
+          } catch (compressionError) {
+            console.warn(
+              "[FileUploader] Image compression failed, uploading original:",
+              compressionError
+            );
+          }
+        }
+
+        // Check if cancelled
+        if (abortControllerRef.current?.signal.aborted) {
+          throw new Error("Upload cancelled");
+        }
+
+        setUploadProgress(UPLOAD_CONSTANTS.PROGRESS_PHASES.COMPRESSION_END);
+
+        // === PHASE 2: Session Check ===
+        setUploadStatus("checking_session");
+
+        await ensureFreshSession();
+
+        // Check if cancelled
+        if (abortControllerRef.current?.signal.aborted) {
+          throw new Error("Upload cancelled");
+        }
+
+        setUploadProgress(UPLOAD_CONSTANTS.PROGRESS_PHASES.SESSION_CHECK);
+
+        // === PHASE 3: Upload with retry ===
+        setUploadStatus("uploading");
+
+        // Start progress simulation for upload phase (30% to 90%)
+        let simulatedProgress: number = UPLOAD_CONSTANTS.PROGRESS_PHASES.UPLOAD_START;
+        progressInterval = setInterval(() => {
+          if (simulatedProgress < UPLOAD_CONSTANTS.PROGRESS_PHASES.UPLOAD_PROGRESS_MAX) {
+            // Slower, more realistic progress increments (1-6% per 500ms)
+            const increment = Math.random() * 5 + 1;
+            simulatedProgress = Math.min(
+              simulatedProgress + increment,
+              UPLOAD_CONSTANTS.PROGRESS_PHASES.UPLOAD_PROGRESS_MAX
+            );
+            if (isMountedRef.current) {
+              setUploadProgress(simulatedProgress);
             }
           }
+        }, 500);
 
-          if (isAborted) throw new Error("Upload cancelled");
+        const ext = file.name.split(".").pop() || "file";
+        const timestamp = Date.now();
+        const fileName = `${fileNamePrefix}_${timestamp}.${ext}`;
+        const filePath = `${folderPath}/${fileName}`;
 
-          // Simulate progress for better UX
-          progressInterval = setInterval(() => {
-            setUploadProgress((prev) => {
-              if (prev < 85) return prev + Math.random() * 15;
-              return prev;
-            });
-          }, 200);
+        const { data, error: uploadError } = await uploadWithRetry(
+          filePath,
+          fileToUpload
+        );
 
-          const ext = file.name.split(".").pop() || "file";
-          const timestamp = Date.now();
-          const fileName = `${fileNamePrefix}_${timestamp}.${ext}`;
-          const filePath = `${folderPath}/${fileName}`;
+        // Stop progress simulation
+        if (progressInterval) {
+          clearInterval(progressInterval);
+          progressInterval = null;
+        }
 
-          const { data, error: uploadError } = await supabase.storage
-            .from(bucketName)
-            .upload(filePath, fileToUpload, {
-              cacheControl: "3600",
-              upsert: true,
-            });
+        // Check if cancelled
+        if (abortControllerRef.current?.signal.aborted) {
+          throw new Error("Upload cancelled");
+        }
 
-          if (isAborted) throw new Error("Upload cancelled");
+        if (uploadError) {
+          throw uploadError;
+        }
 
-          if (uploadError) {
-            throw new Error(uploadError.message || "Upload failed");
-          }
+        if (!data?.path) {
+          throw new Error("Upload completed but no file path returned");
+        }
 
-          if (!data?.path) {
-            throw new Error("Upload completed but no file path returned");
-          }
-
-          return { data, fileToUpload };
-        })();
-
-        // Race between upload and timeout
-        const { data, fileToUpload } = await Promise.race([uploadPromise, timeoutPromise]);
-
-        if (progressInterval) clearInterval(progressInterval);
-        if (globalTimeout) clearTimeout(globalTimeout);
-
-        setUploadProgress(100);
+        // === PHASE 4: Success ===
+        cleanup();
+        setUploadProgress(UPLOAD_CONSTANTS.PROGRESS_PHASES.COMPLETE);
         setUploadSuccess(true);
+        setUploadStatus("success");
 
         // Get public URL (bucket must be public in Supabase)
         const {
@@ -477,23 +704,42 @@ export default function FileUploader({
 
         // Keep success state visible briefly before resetting
         setTimeout(() => {
-          setUploadProgress(0);
-          setUploadSuccess(false);
+          if (isMountedRef.current) {
+            setUploadProgress(0);
+            setUploadSuccess(false);
+            setUploadStatus("idle");
+            setRetryCount(0);
+          }
         }, 2000);
 
         return uploadedFile;
-      } catch (err: any) {
-        if (progressInterval) clearInterval(progressInterval);
-        if (globalTimeout) clearTimeout(globalTimeout);
+      } catch (err: unknown) {
+        cleanup();
         setUploadProgress(0);
-        const errorMsg = err.message || "Upload failed";
+        setUploadStatus("error");
+        setRetryCount(0);
+
+        // User-friendly error messages
+        const error = err instanceof Error ? err : new Error(String(err));
+        let errorMsg = error.message || "Upload failed";
+        if (errorMsg.includes("timed out")) {
+          errorMsg = "Upload timed out. Please check your connection and try again.";
+        } else if (
+          errorMsg.includes("cancelled") ||
+          errorMsg.includes("aborted")
+        ) {
+          errorMsg = "Upload cancelled";
+        }
+
         setError(errorMsg);
         onError?.(errorMsg);
         return null;
       } finally {
-        setUploading(false);
-        if (progressInterval) clearInterval(progressInterval);
-        if (globalTimeout) clearTimeout(globalTimeout);
+        if (isMountedRef.current) {
+          setUploading(false);
+        }
+        cleanup();
+        abortControllerRef.current = null;
       }
     },
     [
@@ -508,6 +754,7 @@ export default function FileUploader({
       maxImageHeight,
       onUpload,
       onError,
+      uploadWithRetry,
     ]
   );
 
@@ -700,24 +947,70 @@ export default function FileUploader({
                 </Typography>
               </>
             ) : (
-              // Still uploading
+              // Still uploading - show detailed status
               <>
-                <CircularProgress
-                  size={compact ? 36 : 48}
-                  variant={uploadProgress > 0 ? "determinate" : "indeterminate"}
-                  value={uploadProgress}
-                  sx={{ mb: 1.5 }}
-                />
-                <Typography variant="body2" color="text.secondary">
-                  {uploadProgress < 20
-                    ? "Compressing image..."
-                    : `Uploading... ${Math.round(uploadProgress)}%`}
+                <Box sx={{ position: "relative", display: "inline-flex" }}>
+                  <CircularProgress
+                    size={compact ? 36 : 48}
+                    variant="determinate"
+                    value={uploadProgress}
+                  />
+                  <Box
+                    sx={{
+                      top: 0,
+                      left: 0,
+                      bottom: 0,
+                      right: 0,
+                      position: "absolute",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <Typography
+                      variant="caption"
+                      component="div"
+                      color="text.secondary"
+                      sx={{ fontSize: compact ? "0.55rem" : "0.65rem" }}
+                    >
+                      {`${Math.round(uploadProgress)}%`}
+                    </Typography>
+                  </Box>
+                </Box>
+
+                {/* Status message */}
+                <Typography
+                  variant="body2"
+                  color="text.secondary"
+                  sx={{ mt: 1.5, mb: 0.5 }}
+                >
+                  {getStatusText(uploadStatus, retryCount)}
                 </Typography>
+
                 <LinearProgress
                   variant="determinate"
                   value={uploadProgress}
                   sx={{ mt: 1, maxWidth: 200, mx: "auto", borderRadius: 1 }}
                 />
+
+                {/* Cancel button */}
+                <Button
+                  size="small"
+                  variant="text"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleCancel();
+                  }}
+                  startIcon={<Close sx={{ fontSize: 14 }} />}
+                  sx={{
+                    mt: 1.5,
+                    fontSize: "0.75rem",
+                    color: "text.secondary",
+                    "&:hover": { color: "error.main" },
+                  }}
+                >
+                  Cancel
+                </Button>
               </>
             )}
           </Box>

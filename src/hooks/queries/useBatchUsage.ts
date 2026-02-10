@@ -448,7 +448,7 @@ export function useBatchesWithUsage(groupId: string | undefined) {
             vendor:vendors(id, name),
             items:material_purchase_expense_items(
               *,
-              material:materials(id, name, code, unit),
+              material:materials(id, name, code, unit, weight_per_unit),
               brand:material_brands(id, brand_name)
             )
           `)

@@ -398,10 +398,10 @@ export async function createStockFromDeliveryItems(
 ) {
   console.log("[Stock Creation] Starting for delivery:", deliveryId);
 
-  // Get delivery details
+  // Get delivery details including PO info for group stock detection
   const { data: delivery, error: deliveryError } = await supabase
     .from("deliveries")
-    .select("id, site_id, location_id, delivery_date")
+    .select("id, site_id, location_id, delivery_date, po_id, purchase_orders(internal_notes)")
     .eq("id", deliveryId)
     .single();
 
@@ -413,10 +413,13 @@ export async function createStockFromDeliveryItems(
 
   console.log("[Stock Creation] Delivery found:", { site_id: delivery.site_id, location_id: delivery.location_id });
 
-  // Get delivery items
+  // Get delivery items with tax rate from purchase order items
   const { data: items, error: itemsError } = await supabase
     .from("delivery_items")
-    .select("id, material_id, brand_id, received_qty, accepted_qty, unit_price")
+    .select(`
+      id, material_id, brand_id, received_qty, accepted_qty, unit_price, po_item_id,
+      purchase_order_item:purchase_order_items!po_item_id(tax_rate)
+    `)
     .eq("delivery_id", deliveryId);
 
   if (itemsError || !items) {
@@ -431,6 +434,29 @@ export async function createStockFromDeliveryItems(
     throw new Error("No delivery items found to create stock from");
   }
 
+  // Check if this is a group stock PO and get batch_code
+  let batchCode: string | null = null;
+
+  if (delivery.po_id) {
+    const internalNotes = (delivery.purchase_orders as { internal_notes: Record<string, unknown> } | null)?.internal_notes;
+    const isGroupStock = internalNotes?.is_group_stock === true;
+
+    if (isGroupStock) {
+      // Look up the batch ref_code from material_purchase_expenses
+      const { data: expenseData } = await supabase
+        .from("material_purchase_expenses")
+        .select("ref_code")
+        .eq("purchase_order_id", delivery.po_id)
+        .eq("purchase_type", "group_stock")
+        .maybeSingle();
+
+      if (expenseData?.ref_code) {
+        batchCode = expenseData.ref_code;
+        console.log("[Stock Creation] Group stock batch detected:", batchCode);
+      }
+    }
+  }
+
   let stockCreatedCount = 0;
   let stockUpdatedCount = 0;
 
@@ -442,10 +468,15 @@ export async function createStockFromDeliveryItems(
       continue;
     }
 
+    // Get tax rate from purchase order item (GST)
+    const taxRate = (item.purchase_order_item as { tax_rate: number | null } | null)?.tax_rate || 0;
+    // Calculate unit price including GST
+    const unitPriceWithGst = (item.unit_price || 0) * (1 + taxRate / 100);
+
     // Check if stock inventory exists
     let stockQuery = supabase
       .from("stock_inventory")
-      .select("id, current_qty, avg_unit_cost")
+      .select("id, current_qty, avg_unit_cost, batch_code")
       .eq("site_id", delivery.site_id)
       .eq("material_id", item.material_id);
 
@@ -469,10 +500,10 @@ export async function createStockFromDeliveryItems(
     }
 
     if (existingStock) {
-      // Update existing stock with weighted average cost
+      // Update existing stock with weighted average cost (including GST)
       const newQty = existingStock.current_qty + qty;
       const existingValue = existingStock.current_qty * (existingStock.avg_unit_cost || 0);
-      const newValue = qty * (item.unit_price || 0);
+      const newValue = qty * unitPriceWithGst;
       const newAvgCost = newQty > 0 ? (existingValue + newValue) / newQty : 0;
 
       const { error: updateError } = await supabase
@@ -482,6 +513,8 @@ export async function createStockFromDeliveryItems(
           avg_unit_cost: newAvgCost,
           last_received_date: delivery.delivery_date,
           updated_at: new Date().toISOString(),
+          // Set batch_code if this is a group stock delivery and existing stock doesn't have one
+          ...(batchCode && !existingStock.batch_code ? { batch_code: batchCode } : {}),
         })
         .eq("id", existingStock.id);
 
@@ -492,15 +525,16 @@ export async function createStockFromDeliveryItems(
       stockUpdatedCount++;
       console.log("[Stock Creation] Updated existing stock:", existingStock.id, "new qty:", newQty);
     } else {
-      // Create new stock inventory record
+      // Create new stock inventory record (with unit cost including GST)
       const { error: insertError } = await supabase.from("stock_inventory").insert({
         site_id: delivery.site_id,
         location_id: delivery.location_id,
         material_id: item.material_id,
         brand_id: item.brand_id,
         current_qty: qty,
-        avg_unit_cost: item.unit_price || 0,
+        avg_unit_cost: unitPriceWithGst,
         last_received_date: delivery.delivery_date,
+        batch_code: batchCode,  // Link to group stock batch if applicable
       });
 
       if (insertError) {

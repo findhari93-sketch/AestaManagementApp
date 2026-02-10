@@ -35,6 +35,8 @@ import {
   Close as CloseIcon,
   Add as AddIcon,
   Delete as DeleteIcon,
+  Edit as EditIcon,
+  Check as CheckIcon,
   Groups as GroupsIcon,
   TrendingUp as TrendingUpIcon,
   TrendingDown as TrendingDownIcon,
@@ -54,6 +56,7 @@ import {
   useUpdatePurchaseOrder,
   useAddPOItem,
   useRemovePOItem,
+  useUpdatePOItem,
 } from "@/hooks/queries/usePurchaseOrders";
 import {
   useRequestItemsForConversion,
@@ -194,6 +197,7 @@ export default function UnifiedPurchaseOrderDialog({
   const updatePO = useUpdatePurchaseOrder();
   const addItem = useAddPOItem();
   const removeItem = useRemovePOItem();
+  const updateItem = useUpdatePOItem();
   const approveRequest = useApproveMaterialRequest();
 
   // ============================================================================
@@ -223,6 +227,14 @@ export default function UnifiedPurchaseOrderDialog({
   const [paymentTiming, setPaymentTiming] = useState<"advance" | "on_delivery">("on_delivery");
   const [notes, setNotes] = useState("");
   const [items, setItems] = useState<POItemRow[]>([]);
+
+  // Inline editing state for PO items
+  const [editingItemIndex, setEditingItemIndex] = useState<number | null>(null);
+  const [editingItemData, setEditingItemData] = useState<{
+    quantity: string;
+    unit_price: string;
+    tax_rate: string;
+  } | null>(null);
 
   // Group stock fields
   const [isGroupStock, setIsGroupStock] = useState(false);
@@ -825,6 +837,82 @@ export default function UnifiedPurchaseOrderDialog({
     setItems(items.filter((_, i) => i !== index));
   };
 
+  // Handle starting edit mode for an item
+  const handleStartEditItem = (index: number) => {
+    const item = items[index];
+    setEditingItemIndex(index);
+    setEditingItemData({
+      quantity: item.quantity.toString(),
+      unit_price: item.unit_price.toString(),
+      tax_rate: item.tax_rate?.toString() || "",
+    });
+  };
+
+  // Handle canceling edit mode
+  const handleCancelEditItem = () => {
+    setEditingItemIndex(null);
+    setEditingItemData(null);
+  };
+
+  // Handle saving edited item
+  const handleSaveEditItem = async (index: number) => {
+    if (!editingItemData) return;
+
+    const item = items[index];
+    const newQuantity = parseFloat(editingItemData.quantity) || 0;
+    const newUnitPrice = parseFloat(editingItemData.unit_price) || 0;
+    const newTaxRate = editingItemData.tax_rate ? parseFloat(editingItemData.tax_rate) : undefined;
+
+    // Validate
+    if (newQuantity <= 0 || newUnitPrice <= 0) {
+      setError("Quantity and price must be greater than 0");
+      return;
+    }
+
+    // Calculate new weight if weight-based
+    const newCalculatedWeight = item.standard_piece_weight
+      ? item.standard_piece_weight * newQuantity
+      : null;
+
+    // If item has an ID (existing item in DB), call the mutation
+    if (item.id && purchaseOrder) {
+      try {
+        await updateItem.mutateAsync({
+          id: item.id,
+          poId: purchaseOrder.id,
+          item: {
+            quantity: newQuantity,
+            unit_price: newUnitPrice,
+            tax_rate: newTaxRate,
+            pricing_mode: item.pricing_mode,
+            calculated_weight: newCalculatedWeight,
+            actual_weight: item.actual_weight ?? null,
+          },
+        });
+        showSuccess("Item updated successfully");
+      } catch (err) {
+        console.error("Failed to update item:", err);
+        showError("Failed to update item");
+        return;
+      }
+    }
+
+    // Update local state (for both saved and unsaved items)
+    const newItems = [...items];
+    newItems[index] = {
+      ...item,
+      quantity: newQuantity,
+      unit_price: newUnitPrice,
+      tax_rate: newTaxRate,
+      calculated_weight: newCalculatedWeight,
+    };
+    setItems(newItems);
+
+    // Reset edit state
+    setEditingItemIndex(null);
+    setEditingItemData(null);
+  };
+
   // ============================================================================
   // Submit handler
   // ============================================================================
@@ -985,7 +1073,7 @@ export default function UnifiedPurchaseOrderDialog({
   const handleSubmit = () => handleCreatePO("ordered");
   const handleSaveAsDraft = () => handleCreatePO("draft");
 
-  const isSubmitting = createPO.isPending || updatePO.isPending || addItem.isPending || approveRequest.isPending;
+  const isSubmitting = createPO.isPending || updatePO.isPending || addItem.isPending || approveRequest.isPending || updateItem.isPending;
 
   // Check if there are convertible items in request mode
   const hasConvertibleItems = !isRequestMode || requestItemsState.some((item) => item.remaining_qty > 0);
@@ -1908,14 +1996,32 @@ export default function UnifiedPurchaseOrderDialog({
                           </TableCell>
                           <TableCell align="right">
                             <Box>
-                              <Typography variant="body2" fontWeight={500}>
-                                {item.quantity} pcs
-                                {item.pricing_mode === 'per_kg' && item.calculated_weight && (
-                                  <Typography component="span" variant="caption" color="text.secondary">
-                                    {` (~${(item.actual_weight ?? item.calculated_weight).toFixed(1)} kg)`}
-                                  </Typography>
-                                )}
-                              </Typography>
+                              {editingItemIndex === index ? (
+                                <TextField
+                                  size="small"
+                                  type="number"
+                                  value={editingItemData?.quantity || ""}
+                                  onChange={(e) => setEditingItemData(prev =>
+                                    prev ? { ...prev, quantity: e.target.value } : null
+                                  )}
+                                  slotProps={{
+                                    input: {
+                                      endAdornment: <InputAdornment position="end">pcs</InputAdornment>,
+                                      inputProps: { min: 0, step: 1, style: { textAlign: "right" } },
+                                    },
+                                  }}
+                                  sx={{ width: 100 }}
+                                />
+                              ) : (
+                                <Typography variant="body2" fontWeight={500}>
+                                  {item.quantity} pcs
+                                  {item.pricing_mode === 'per_kg' && item.calculated_weight && (
+                                    <Typography component="span" variant="caption" color="text.secondary">
+                                      {` (~${(item.actual_weight ?? item.calculated_weight).toFixed(1)} kg)`}
+                                    </Typography>
+                                  )}
+                                </Typography>
+                              )}
                               {/* Weight section for weight-based materials */}
                               {item.calculated_weight && item.standard_piece_weight && (
                                 <Box sx={{ mt: 0.5, p: 1, bgcolor: "grey.50", borderRadius: 1 }}>
@@ -1981,13 +2087,51 @@ export default function UnifiedPurchaseOrderDialog({
                             </Box>
                           </TableCell>
                           <TableCell align="right">
-                            {formatCurrency(item.unit_price)}
-                            <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
-                              /{item.pricing_mode === 'per_kg' ? 'kg' : item.unit}
-                            </Typography>
+                            {editingItemIndex === index ? (
+                              <TextField
+                                size="small"
+                                type="number"
+                                value={editingItemData?.unit_price || ""}
+                                onChange={(e) => setEditingItemData(prev =>
+                                  prev ? { ...prev, unit_price: e.target.value } : null
+                                )}
+                                slotProps={{
+                                  input: {
+                                    startAdornment: <InputAdornment position="start">₹</InputAdornment>,
+                                    inputProps: { min: 0, step: 0.01, style: { textAlign: "right" } },
+                                  },
+                                }}
+                                sx={{ width: 120 }}
+                              />
+                            ) : (
+                              <>
+                                {formatCurrency(item.unit_price)}
+                                <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
+                                  /{item.pricing_mode === 'per_kg' ? 'kg' : item.unit}
+                                </Typography>
+                              </>
+                            )}
                           </TableCell>
                           <TableCell align="right">
-                            {item.tax_rate ? `${item.tax_rate}%` : "-"}
+                            {editingItemIndex === index ? (
+                              <TextField
+                                size="small"
+                                type="number"
+                                value={editingItemData?.tax_rate || ""}
+                                onChange={(e) => setEditingItemData(prev =>
+                                  prev ? { ...prev, tax_rate: e.target.value } : null
+                                )}
+                                slotProps={{
+                                  input: {
+                                    endAdornment: <InputAdornment position="end">%</InputAdornment>,
+                                    inputProps: { min: 0, max: 100, style: { textAlign: "right" } },
+                                  },
+                                }}
+                                sx={{ width: 80 }}
+                              />
+                            ) : (
+                              item.tax_rate ? `${item.tax_rate}%` : "-"
+                            )}
                           </TableCell>
                           <TableCell align="right">
                             {formatCurrency(itemTotal)}
@@ -1996,13 +2140,54 @@ export default function UnifiedPurchaseOrderDialog({
                             {formatCurrency(itemTotal + itemTax)}
                           </TableCell>
                           <TableCell>
-                            <IconButton
-                              size="small"
-                              color="error"
-                              onClick={() => handleRemoveItem(index)}
-                            >
-                              <DeleteIcon fontSize="small" />
-                            </IconButton>
+                            {editingItemIndex === index ? (
+                              <Box sx={{ display: "flex", gap: 0.5 }}>
+                                <Tooltip title="Save">
+                                  <IconButton
+                                    size="small"
+                                    color="primary"
+                                    onClick={() => handleSaveEditItem(index)}
+                                    disabled={updateItem.isPending}
+                                  >
+                                    {updateItem.isPending ? (
+                                      <CircularProgress size={16} />
+                                    ) : (
+                                      <CheckIcon fontSize="small" />
+                                    )}
+                                  </IconButton>
+                                </Tooltip>
+                                <Tooltip title="Cancel">
+                                  <IconButton
+                                    size="small"
+                                    onClick={handleCancelEditItem}
+                                    disabled={updateItem.isPending}
+                                  >
+                                    <CloseIcon fontSize="small" />
+                                  </IconButton>
+                                </Tooltip>
+                              </Box>
+                            ) : (
+                              <Box sx={{ display: "flex", gap: 0.5 }}>
+                                <Tooltip title="Edit">
+                                  <IconButton
+                                    size="small"
+                                    color="primary"
+                                    onClick={() => handleStartEditItem(index)}
+                                  >
+                                    <EditIcon fontSize="small" />
+                                  </IconButton>
+                                </Tooltip>
+                                <Tooltip title="Delete">
+                                  <IconButton
+                                    size="small"
+                                    color="error"
+                                    onClick={() => handleRemoveItem(index)}
+                                  >
+                                    <DeleteIcon fontSize="small" />
+                                  </IconButton>
+                                </Tooltip>
+                              </Box>
+                            )}
                           </TableCell>
                         </TableRow>
                       );

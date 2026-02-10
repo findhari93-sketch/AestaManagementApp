@@ -88,7 +88,7 @@ export default function SettlementVerificationPrompt({
         }}
       >
         <WarningIcon color="warning" />
-        <Typography variant="h6" fontWeight={600}>
+        <Typography variant="h6" fontWeight={600} component="div">
           Bill Verification Required
         </Typography>
       </DialogTitle>

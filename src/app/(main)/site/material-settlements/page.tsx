@@ -120,6 +120,15 @@ export default function MaterialSettlementsPage() {
     return allItems;
   }, [allItems, statusFilter]);
 
+  // Helper function to get the correct amount for an expense
+  // Uses the linked PO's total_amount (which reflects pricing mode changes) when available
+  const getExpenseAmount = (expense: MaterialPurchaseExpenseWithDetails) => {
+    if (expense.purchase_order?.total_amount) {
+      return Number(expense.purchase_order.total_amount);
+    }
+    return Number(expense.total_amount || 0);
+  };
+
   // Calculate summaries
   const summaries = useMemo(() => {
     const pendingExpenses = allPurchases.filter((p) => !p.settlement_reference);
@@ -127,23 +136,27 @@ export default function MaterialSettlementsPage() {
     const pendingPOs = allAdvancePOs.filter((po) => !po.advance_paid);
     const settledPOs = allAdvancePOs.filter((po) => !!po.advance_paid);
 
+    // Calculate totals using the correct amounts (from linked PO when available)
+    const allExpensesTotal = allPurchases.reduce((sum, p) => sum + getExpenseAmount(p), 0);
+    const allPOsTotal = allAdvancePOs.reduce((sum, po) => sum + Number(po.total_amount || 0), 0);
+
     return {
       total: {
         count: allItems.length,
-        amount: totalAmount,
+        amount: allExpensesTotal + allPOsTotal,
       },
       pending: {
         count: pendingExpenses.length + pendingPOs.length,
-        amount: pendingExpenses.reduce((sum, p) => sum + Number(p.total_amount || 0), 0) +
+        amount: pendingExpenses.reduce((sum, p) => sum + getExpenseAmount(p), 0) +
                 pendingPOs.reduce((sum, po) => sum + Number(po.total_amount || 0), 0),
       },
       settled: {
         count: settledExpenses.length + settledPOs.length,
-        amount: settledExpenses.reduce((sum, p) => sum + Number(p.total_amount || 0), 0) +
+        amount: settledExpenses.reduce((sum, p) => sum + getExpenseAmount(p), 0) +
                 settledPOs.reduce((sum, po) => sum + Number(po.total_amount || 0), 0),
       },
     };
-  }, [allPurchases, allAdvancePOs, allItems.length, totalAmount]);
+  }, [allPurchases, allAdvancePOs, allItems.length]);
 
   // Handle delete
   const handleDeleteClick = (purchase: MaterialPurchaseExpenseWithDetails) => {
@@ -350,7 +363,11 @@ export default function MaterialSettlementsPage() {
                   const refCode = purchase?.ref_code || po?.po_number || '';
                   const dateField = purchase?.purchase_date || po?.order_date || '';
                   const vendorName = item.vendor?.name || (purchase?.vendor_name) || '-';
-                  const amount = Number(item.total_amount || 0);
+                  // For expenses with linked PO, use the PO's total_amount (which is up-to-date with pricing changes)
+                  // For advance POs or expenses without linked PO, use item.total_amount
+                  const amount = purchase?.purchase_order?.total_amount
+                    ? Number(purchase.purchase_order.total_amount)
+                    : Number(item.total_amount || 0);
                   const materialsText = item.items && item.items.length > 0
                     ? item.items.map((i: any) => i.material?.name || "Unknown").join(", ")
                     : "Material purchase";

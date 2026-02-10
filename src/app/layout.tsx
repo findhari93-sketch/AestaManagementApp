@@ -4,6 +4,7 @@ import ThemeProvider from "@/components/providers/ThemeProvider";
 import { SessionErrorHandler } from "@/components/providers/SessionErrorHandler";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { SiteProvider } from "@/contexts/SiteContext";
+import { CompanyProvider } from "@/contexts/CompanyContext";
 import { DateRangeProvider } from "@/contexts/DateRangeContext";
 import { NotificationProvider } from "@/contexts/NotificationContext";
 import { ToastProvider } from "@/contexts/ToastContext";
@@ -41,7 +42,8 @@ export default function RootLayout({
           <TabProvider>
             <AuthProvider>
               <SessionErrorHandler>
-                <SiteProvider>
+                <CompanyProvider>
+                  <SiteProvider>
                   <DateRangeProvider>
                     <QueryProvider>
                       <NotificationProvider>
@@ -52,6 +54,7 @@ export default function RootLayout({
                     </QueryProvider>
                   </DateRangeProvider>
                 </SiteProvider>
+                </CompanyProvider>
               </SessionErrorHandler>
             </AuthProvider>
           </TabProvider>

@@ -41,6 +41,8 @@ import {
   Domain as SiteIcon,
   History as HistoryIcon,
   PlayArrow as UseIcon,
+  Edit as EditIcon,
+  Delete as DeleteIcon,
 } from "@mui/icons-material";
 import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
 import PageHeader from "@/components/layout/PageHeader";
@@ -57,14 +59,22 @@ import {
   useStockAdjustment,
   useAddInitialStock,
   useCompletedStock,
+  useGroupStockInventory,
   type ExtendedStockInventory,
   type CompletedStockItem,
+  type GroupStockItem,
 } from "@/hooks/queries/useStockInventory";
+import { useSiteGroupMembership } from "@/hooks/queries/useSiteGroups";
 import {
   useMaterialUsage,
   useTodayUsageSummary,
   useDeleteMaterialUsage,
+  useUpdateMaterialUsage,
 } from "@/hooks/queries/useMaterialUsage";
+import { useGroupMaterialPurchases } from "@/hooks/queries/useMaterialPurchases";
+import { useRecordBatchUsage } from "@/hooks/queries/useBatchUsage";
+import BatchUsageDialog from "@/components/inventory/BatchUsageDialog";
+import type { MaterialPurchaseExpenseWithDetails } from "@/types/material.types";
 import { useMaterials, useMaterialCategories } from "@/hooks/queries/useMaterials";
 import type {
   StockInventoryWithDetails,
@@ -74,6 +84,9 @@ import type {
 } from "@/types/material.types";
 import dayjs from "dayjs";
 import UsageEntryDrawer from "@/components/inventory/UsageEntryDrawer";
+import BulkUsageEntryDialog from "@/components/inventory/BulkUsageEntryDialog";
+import UsageDeleteConfirmDialog from "@/components/inventory/UsageDeleteConfirmDialog";
+import UsageEditDialog from "@/components/inventory/UsageEditDialog";
 
 const UNIT_LABELS: Record<MaterialUnit, string> = {
   kg: "Kg",
@@ -95,11 +108,11 @@ const UNIT_LABELS: Record<MaterialUnit, string> = {
 };
 
 type MainTabType = "stock" | "usage";
-type StockTabType = "site" | "shared" | "all" | "completed";
+type StockTabType = "all" | "site" | "shared" | "group" | "completed";
 
 export default function InventoryPage() {
   const { selectedSite } = useSite();
-  const { userProfile } = useAuth();
+  const { user, userProfile } = useAuth();
   const { formatForApi, isAllTime } = useDateRange();
   const isMobile = useIsMobile();
   const router = useRouter();
@@ -130,7 +143,26 @@ export default function InventoryPage() {
 
   // Usage entry drawer state
   const [usageDrawerOpen, setUsageDrawerOpen] = useState(false);
-  const [preSelectedStock, setPreSelectedStock] = useState<StockInventoryWithDetails | null>(null);
+  const [preSelectedStock, setPreSelectedStock] = useState<ExtendedStockInventory | null>(null);
+
+  // Bulk usage dialog state
+  const [bulkUsageDialogOpen, setBulkUsageDialogOpen] = useState(false);
+
+  // Batch usage dialog state (for Group Purchases)
+  const [batchUsageDialog, setBatchUsageDialog] = useState<{
+    open: boolean;
+    batch: MaterialPurchaseExpenseWithDetails | null;
+  }>({ open: false, batch: null });
+
+  // Usage delete/edit dialog state
+  const [usageDeleteDialog, setUsageDeleteDialog] = useState<{
+    open: boolean;
+    record: DailyMaterialUsageWithDetails | null;
+  }>({ open: false, record: null });
+  const [usageEditDialog, setUsageEditDialog] = useState<{
+    open: boolean;
+    record: DailyMaterialUsageWithDetails | null;
+  }>({ open: false, record: null });
 
   // Date range for usage
   const { dateFrom, dateTo } = formatForApi();
@@ -147,18 +179,39 @@ export default function InventoryPage() {
     };
   }, [dateFrom, dateTo, isAllTime]);
 
+  // Group membership for shared stock visibility
+  const { data: groupMembership } = useSiteGroupMembership(selectedSite?.id);
+
   // Data queries
   // is_shared is determined by batch_code in useSiteStock (batch_code = group purchase = shared)
-  const { data: stock = [], isLoading: stockLoading } = useSiteStock(selectedSite?.id);
+  // Pass siteGroupId to also fetch shared stock from other sites in the group
+  const { data: stock = [], isLoading: stockLoading } = useSiteStock(selectedSite?.id, {
+    siteGroupId: groupMembership?.groupId,
+  });
   const { data: completedStock = [], isLoading: completedLoading } = useCompletedStock(selectedSite?.id);
   const { data: lowStockAlerts = [] } = useLowStockAlerts(selectedSite?.id);
   const { data: materials = [] } = useMaterials();
-  const { data: usage = [], isLoading: usageLoading } = useMaterialUsage(selectedSite?.id, dateRange);
+  const { data: usage = [], isLoading: usageLoading } = useMaterialUsage(selectedSite?.id, {
+    ...dateRange,
+    siteGroupId: groupMembership?.groupId, // Fetch ALL group batch usage for visibility across sites
+  });
   const { data: todaySummary } = useTodayUsageSummary(selectedSite?.id);
+
+  // Group stock queries (for Group Purchases tab)
+  const { data: groupStock = [], isLoading: groupStockLoading } = useGroupStockInventory(
+    groupMembership?.groupId
+  );
+
+  // Group material purchases (batches from material_purchase_expenses)
+  const { data: groupBatches = [], isLoading: groupBatchesLoading } = useGroupMaterialPurchases(
+    groupMembership?.groupId
+  );
+  const recordBatchUsage = useRecordBatchUsage();
 
   const stockAdjustment = useStockAdjustment();
   const addInitialStock = useAddInitialStock();
   const deleteUsage = useDeleteMaterialUsage();
+  const updateUsage = useUpdateMaterialUsage();
 
   // Filter stock by search term and tab
   const filteredStock = useMemo(() => {
@@ -208,6 +261,11 @@ export default function InventoryPage() {
     return (stock as ExtendedStockInventory[]).filter((s) => s.is_shared).length;
   }, [stock]);
 
+  const groupStockCount = useMemo(() => {
+    // Count batches (material_purchase_expenses) instead of group_stock_inventory
+    return groupBatches.length;
+  }, [groupBatches]);
+
   const totalStockValue = useMemo(() => {
     return stock.reduce((sum, s) => {
       const extendedStock = s as ExtendedStockInventory;
@@ -219,17 +277,47 @@ export default function InventoryPage() {
     }, 0);
   }, [stock]);
 
+  // Filter group stock by search term
+  const filteredGroupStock = useMemo(() => {
+    if (!searchTerm) return groupStock;
+
+    const term = searchTerm.toLowerCase();
+    return groupStock.filter(
+      (s) =>
+        s.material?.name?.toLowerCase().includes(term) ||
+        s.material?.code?.toLowerCase().includes(term) ||
+        s.brand?.brand_name?.toLowerCase().includes(term) ||
+        s.batch_code?.toLowerCase().includes(term)
+    );
+  }, [groupStock, searchTerm]);
+
+  // Filter group batches by search term
+  const filteredGroupBatches = useMemo(() => {
+    if (!searchTerm) return groupBatches;
+
+    const term = searchTerm.toLowerCase();
+    return groupBatches.filter(
+      (b) =>
+        b.ref_code?.toLowerCase().includes(term) ||
+        b.items?.some((item) =>
+          item.material?.name?.toLowerCase().includes(term) ||
+          item.material?.code?.toLowerCase().includes(term) ||
+          item.brand?.brand_name?.toLowerCase().includes(term)
+        )
+    );
+  }, [groupBatches, searchTerm]);
+
   // Use the extended stock type from the hook
   type ExtendedStock = ExtendedStockInventory;
 
   // Handle opening usage drawer with pre-selected stock
-  const handleRecordUsage = (stockItem?: StockInventoryWithDetails) => {
+  const handleRecordUsage = (stockItem?: ExtendedStockInventory) => {
     setPreSelectedStock(stockItem || null);
     setUsageDrawerOpen(true);
   };
 
   // Stock table columns
-  const stockColumns = useMemo<MRT_ColumnDef<StockInventoryWithDetails>[]>(
+  const stockColumns = useMemo<MRT_ColumnDef<ExtendedStockInventory>[]>(
     () => [
       {
         accessorKey: "material.name",
@@ -328,7 +416,10 @@ export default function InventoryPage() {
         size: 100,
         Cell: ({ row }) =>
           row.original.avg_unit_cost
-            ? `₹${row.original.avg_unit_cost.toLocaleString()}`
+            ? `₹${row.original.avg_unit_cost.toLocaleString("en-IN", {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              })}`
             : "-",
       },
       {
@@ -336,15 +427,89 @@ export default function InventoryPage() {
         header: "Value",
         size: 120,
         Cell: ({ row }) => {
-          const extendedStock = row.original as ExtendedStock;
-          // For per-kg pricing, use total_weight; for per-piece, use current_qty
+          const s = row.original as ExtendedStock;
+          const isPerKg = s.pricing_mode === "per_kg" && s.total_weight;
           let value: number;
-          if (extendedStock.pricing_mode === "per_kg" && extendedStock.total_weight) {
-            value = extendedStock.total_weight * (row.original.avg_unit_cost || 0);
+          if (isPerKg) {
+            value = s.total_weight! * (s.avg_unit_cost || 0);
           } else {
-            value = row.original.current_qty * (row.original.avg_unit_cost || 0);
+            value = s.current_qty * (s.avg_unit_cost || 0);
           }
-          return `₹${value.toLocaleString()}`;
+          const fmt = (n: number) =>
+            n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+          const valueStr = `₹${fmt(value)}`;
+
+          // Build tooltip breakdown
+          const unit = s.material?.unit || "Pcs";
+          const hasBatchData = s.batch_unit_cost != null;
+
+          if (!hasBatchData) {
+            return (
+              <Tooltip
+                title={
+                  <Box sx={{ fontSize: 12, lineHeight: 1.6 }}>
+                    <div>{s.current_qty} {unit} × ₹{fmt(s.avg_unit_cost || 0)}/{unit}</div>
+                    <div>= {valueStr}</div>
+                  </Box>
+                }
+                arrow
+                placement="left"
+              >
+                <span style={{ cursor: "help" }}>{valueStr}</span>
+              </Tooltip>
+            );
+          }
+
+          const weightPerPiece = isPerKg && s.current_qty > 0
+            ? s.total_weight! / s.current_qty
+            : null;
+          const costPerPiece = isPerKg && weightPerPiece
+            ? weightPerPiece * (s.batch_unit_cost || 0)
+            : s.batch_unit_cost || 0;
+          const gstPct = s.batch_tax_ratio
+            ? Math.round((s.batch_tax_ratio - 1) * 100)
+            : null;
+
+          return (
+            <Tooltip
+              title={
+                <Box sx={{ fontSize: 12, lineHeight: 1.8, minWidth: 200 }}>
+                  <Box sx={{ fontWeight: 600, mb: 0.5, borderBottom: "1px solid rgba(255,255,255,0.3)", pb: 0.5 }}>
+                    Value Breakdown
+                  </Box>
+                  <div>Qty: {s.current_qty} {unit}</div>
+                  {isPerKg && weightPerPiece && (
+                    <div>Wt/Pc: {weightPerPiece.toFixed(2)} kg</div>
+                  )}
+                  {s.batch_raw_unit_price != null && (
+                    <div>Rate: ₹{fmt(s.batch_raw_unit_price)}/{isPerKg ? "kg" : unit}</div>
+                  )}
+                  {gstPct != null && gstPct > 0 && (
+                    <div>GST: ×{s.batch_tax_ratio!.toFixed(2)} ({gstPct}%)</div>
+                  )}
+                  <Box sx={{ borderTop: "1px solid rgba(255,255,255,0.3)", mt: 0.5, pt: 0.5 }}>
+                    <div>Cost/Pc: ₹{fmt(costPerPiece)}</div>
+                    <div><strong>Total: {s.current_qty} × ₹{fmt(costPerPiece)} = {valueStr}</strong></div>
+                  </Box>
+                  {(s.batch_code || s.batch_total_amount != null) && (
+                    <Box sx={{ borderTop: "1px solid rgba(255,255,255,0.3)", mt: 0.5, pt: 0.5, opacity: 0.85 }}>
+                      {s.batch_code && <div>Batch: {s.batch_code}</div>}
+                      {s.batch_total_amount != null && (
+                        <div>Purchased: ₹{fmt(s.batch_total_amount)}</div>
+                      )}
+                      {s.batch_original_qty != null && (
+                        <div>Orig Qty: {s.batch_original_qty} {unit}</div>
+                      )}
+                    </Box>
+                  )}
+                </Box>
+              }
+              arrow
+              placement="left"
+            >
+              <span style={{ cursor: "help", textDecoration: "underline dotted" }}>{valueStr}</span>
+            </Tooltip>
+          );
         },
       },
       {
@@ -494,7 +659,7 @@ export default function InventoryPage() {
 
   // Stock row actions - with Use button
   const renderStockRowActions = useCallback(
-    ({ row }: { row: { original: StockInventoryWithDetails } }) => (
+    ({ row }: { row: { original: ExtendedStockInventory } }) => (
       <Box sx={{ display: "flex", gap: 0.5 }}>
         <Tooltip title="Record Usage">
           <IconButton
@@ -555,15 +720,31 @@ export default function InventoryPage() {
       {
         accessorKey: "material.name",
         header: "Material",
-        size: 180,
+        size: 200,
         Cell: ({ row }) => (
           <Box>
-            <Typography variant="body2" fontWeight={500}>
-              {row.original.material?.name}
-            </Typography>
+            <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+              <Typography variant="body2" fontWeight={500}>
+                {row.original.material?.name}
+              </Typography>
+              {row.original.is_shared_usage && (
+                <Chip
+                  label="Shared"
+                  size="small"
+                  color="info"
+                  variant="outlined"
+                  sx={{ height: 18, fontSize: "0.65rem" }}
+                />
+              )}
+            </Box>
             {row.original.brand && (
               <Typography variant="caption" color="text.secondary">
                 {row.original.brand.brand_name}
+              </Typography>
+            )}
+            {row.original.is_shared_usage && row.original.paid_by_site_name && (
+              <Typography variant="caption" color="info.main" display="block">
+                Used by {row.original.paid_by_site_name}
               </Typography>
             )}
           </Box>
@@ -618,34 +799,57 @@ export default function InventoryPage() {
   // Usage row actions
   const renderUsageRowActions = useCallback(
     ({ row }: { row: { original: DailyMaterialUsageWithDetails } }) => {
-      const isToday =
-        dayjs(row.original.usage_date).format("YYYY-MM-DD") ===
-        dayjs().format("YYYY-MM-DD");
+      // Check if this usage is from group stock (has batch_code in related inventory)
+      const relatedStock = stock.find(
+        (s) =>
+          s.material_id === row.original.material_id &&
+          (s.brand_id === row.original.brand_id || (!s.brand_id && !row.original.brand_id))
+      );
+      const isGroupStock = !!relatedStock?.batch_code;
+
+      // Only show "View only" for usage records from OTHER sites
+      // If this site recorded the usage (even if from shared stock), allow edit/delete
+      const isOtherSiteUsage = row.original.is_shared_usage &&
+                                row.original.site_id !== selectedSite?.id;
+
+      if (isOtherSiteUsage) {
+        return (
+          <Tooltip title="Recorded by another site in the group">
+            <Typography variant="caption" color="text.secondary">
+              View only
+            </Typography>
+          </Tooltip>
+        );
+      }
 
       return (
         <Box sx={{ display: "flex", gap: 0.5 }}>
-          {isToday && canEdit && (
-            <Tooltip title="Delete">
-              <IconButton
-                size="small"
-                color="error"
-                onClick={() => {
-                  if (confirm("Delete this usage entry?")) {
-                    deleteUsage.mutate({
-                      id: row.original.id,
-                      siteId: selectedSite?.id || "",
-                    });
-                  }
-                }}
-              >
-                <RemoveIcon fontSize="small" />
-              </IconButton>
-            </Tooltip>
+          {canEdit && (
+            <>
+              <Tooltip title="Edit">
+                <IconButton
+                  size="small"
+                  color="primary"
+                  onClick={() => setUsageEditDialog({ open: true, record: row.original })}
+                >
+                  <EditIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+              <Tooltip title="Delete">
+                <IconButton
+                  size="small"
+                  color="error"
+                  onClick={() => setUsageDeleteDialog({ open: true, record: row.original })}
+                >
+                  <DeleteIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            </>
           )}
         </Box>
       );
     },
-    [canEdit, deleteUsage, selectedSite?.id]
+    [canEdit, stock, selectedSite?.id]
   );
 
   return (
@@ -660,7 +864,7 @@ export default function InventoryPage() {
               <Button
                 variant="contained"
                 startIcon={<UseIcon />}
-                onClick={() => handleRecordUsage()}
+                onClick={() => setBulkUsageDialogOpen(true)}
               >
                 Record Usage
               </Button>
@@ -704,7 +908,10 @@ export default function InventoryPage() {
                 Stock Value
               </Typography>
               <Typography variant="h5" fontWeight={600}>
-                ₹{totalStockValue.toLocaleString()}
+                ₹{totalStockValue.toLocaleString("en-IN", {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })}
               </Typography>
             </CardContent>
           </Card>
@@ -810,6 +1017,13 @@ export default function InventoryPage() {
                 iconPosition="start"
               />
               <Tab
+                label={`Group Purchases${groupStockCount > 0 ? ` (${groupStockCount})` : ""}`}
+                value="group"
+                icon={<GroupsIcon />}
+                iconPosition="start"
+                disabled={!groupMembership?.groupId}
+              />
+              <Tab
                 label={`Completed${completedStock.length > 0 ? ` (${completedStock.length})` : ""}`}
                 value="completed"
                 icon={<HistoryIcon />}
@@ -838,8 +1052,8 @@ export default function InventoryPage() {
             />
           </Box>
 
-          {/* Stock Table - Active Stock */}
-          {stockTab !== "completed" && (
+          {/* Stock Table - Active Stock (All, Site, Shared) */}
+          {stockTab !== "completed" && stockTab !== "group" && (
             <DataTable
               columns={stockColumns}
               data={filteredStock}
@@ -851,6 +1065,176 @@ export default function InventoryPage() {
                 sorting: [{ id: "material.name", desc: false }],
               }}
             />
+          )}
+
+          {/* Stock Table - Group Purchases (Batches) */}
+          {stockTab === "group" && (
+            <>
+              <Alert severity="info" sx={{ mb: 2 }}>
+                Showing group purchase batches for your site group. Record daily usage per site below.
+                Settlements are processed in <strong>Inter-Site Settlement</strong>.
+              </Alert>
+              {!groupMembership?.groupId ? (
+                <Alert severity="warning">
+                  This site is not part of a site group. Group purchases are only available for sites in a group.
+                </Alert>
+              ) : (
+                <DataTable
+                  columns={[
+                    {
+                      accessorKey: "ref_code",
+                      header: "Batch Code",
+                      size: 150,
+                      Cell: ({ row }) => (
+                        <Typography
+                          variant="caption"
+                          sx={{
+                            fontFamily: "monospace",
+                            bgcolor: "primary.lighter",
+                            px: 1,
+                            py: 0.5,
+                            borderRadius: 1,
+                          }}
+                        >
+                          {row.original.ref_code}
+                        </Typography>
+                      ),
+                    },
+                    {
+                      id: "materials",
+                      header: "Materials",
+                      size: 250,
+                      Cell: ({ row }) => {
+                        const items = row.original.items || [];
+                        if (items.length === 0) return <Typography variant="body2">-</Typography>;
+                        const firstItem = items[0];
+                        return (
+                          <Box>
+                            <Typography variant="body2" fontWeight={500}>
+                              {firstItem.material?.name || "Unknown"}
+                            </Typography>
+                            {firstItem.brand && (
+                              <Chip
+                                label={firstItem.brand.brand_name}
+                                size="small"
+                                variant="outlined"
+                                sx={{ mr: 0.5 }}
+                              />
+                            )}
+                            {items.length > 1 && (
+                              <Typography variant="caption" color="text.secondary">
+                                +{items.length - 1} more
+                              </Typography>
+                            )}
+                          </Box>
+                        );
+                      },
+                    },
+                    {
+                      id: "stock_progress",
+                      header: "Stock",
+                      size: 150,
+                      Cell: ({ row }) => {
+                        const original = row.original.original_qty ?? 0;
+                        const remaining = row.original.remaining_qty ?? original;
+                        const used = original - remaining;
+                        const usedPercent = original > 0 ? Math.round((used / original) * 100) : 0;
+                        return (
+                          <Box>
+                            <Typography variant="body2" fontWeight={600}>
+                              {remaining.toLocaleString()} / {original.toLocaleString()}
+                            </Typography>
+                            <Typography variant="caption" color={usedPercent > 80 ? "error.main" : "text.secondary"}>
+                              {usedPercent}% used
+                            </Typography>
+                          </Box>
+                        );
+                      },
+                    },
+                    {
+                      accessorKey: "total_amount",
+                      header: "Amount",
+                      size: 120,
+                      Cell: ({ row }) => (
+                        <Typography variant="body2">
+                          ₹{Number(row.original.total_amount || 0).toLocaleString("en-IN", {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}
+                        </Typography>
+                      ),
+                    },
+                    {
+                      accessorKey: "status",
+                      header: "Status",
+                      size: 100,
+                      Cell: ({ row }) => {
+                        // Calculate status based on actual quantities, not just database status
+                        const original = row.original.original_qty ?? 0;
+                        const remaining = row.original.remaining_qty ?? original;
+                        const dbStatus = row.original.status;
+
+                        // Determine correct status based on quantities
+                        let calculatedStatus: string;
+                        if (dbStatus === "completed") {
+                          calculatedStatus = "completed";
+                        } else if (remaining <= 0) {
+                          calculatedStatus = "partial_used"; // Fully used but not completed yet
+                        } else if (remaining < original) {
+                          calculatedStatus = "partial_used"; // Partially used
+                        } else {
+                          calculatedStatus = "recorded"; // No usage yet
+                        }
+
+                        const statusColors: Record<string, "default" | "primary" | "success" | "warning"> = {
+                          recorded: "primary",
+                          in_stock: "primary",
+                          partial_used: "warning",
+                          completed: "success",
+                        };
+                        return (
+                          <Chip
+                            label={calculatedStatus.replace("_", " ")}
+                            size="small"
+                            color={statusColors[calculatedStatus] || "default"}
+                            sx={{ textTransform: "capitalize" }}
+                          />
+                        );
+                      },
+                    },
+                    {
+                      accessorKey: "purchase_date",
+                      header: "Date",
+                      size: 100,
+                      Cell: ({ row }) =>
+                        row.original.purchase_date
+                          ? dayjs(row.original.purchase_date).format("DD MMM YYYY")
+                          : "-",
+                    },
+                  ] as MRT_ColumnDef<MaterialPurchaseExpenseWithDetails>[]}
+                  data={filteredGroupBatches}
+                  isLoading={groupBatchesLoading}
+                  enableRowActions={canEdit}
+                  renderRowActions={({ row }) => (
+                    <Box sx={{ display: "flex", gap: 1 }}>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        startIcon={<UseIcon />}
+                        onClick={() => setBatchUsageDialog({ open: true, batch: row.original })}
+                        disabled={(row.original.remaining_qty ?? 0) <= 0}
+                      >
+                        Record Usage
+                      </Button>
+                    </Box>
+                  )}
+                  mobileHiddenColumns={["total_amount", "purchase_date"]}
+                  initialState={{
+                    sorting: [{ id: "purchase_date", desc: true }],
+                  }}
+                />
+              )}
+            </>
           )}
 
           {/* Stock Table - Completed Stock */}
@@ -894,13 +1278,13 @@ export default function InventoryPage() {
         <Fab
           color="primary"
           sx={{ position: "fixed", bottom: 16, right: 16 }}
-          onClick={() => handleRecordUsage()}
+          onClick={() => setBulkUsageDialogOpen(true)}
         >
           <UseIcon />
         </Fab>
       )}
 
-      {/* Usage Entry Drawer */}
+      {/* Usage Entry Drawer (for single item from table row) */}
       <UsageEntryDrawer
         open={usageDrawerOpen}
         onClose={() => {
@@ -910,6 +1294,104 @@ export default function InventoryPage() {
         siteId={selectedSite?.id || ""}
         stock={stock}
         preSelectedStock={preSelectedStock}
+      />
+
+      {/* Bulk Usage Entry Dialog */}
+      <BulkUsageEntryDialog
+        open={bulkUsageDialogOpen}
+        onClose={() => setBulkUsageDialogOpen(false)}
+        siteId={selectedSite?.id || ""}
+        stock={stock}
+        siteGroupId={groupMembership?.groupId}
+        siteName={selectedSite?.name}
+      />
+
+      {/* Batch Usage Dialog (for Group Purchases) */}
+      <BatchUsageDialog
+        open={batchUsageDialog.open}
+        onClose={() => setBatchUsageDialog({ open: false, batch: null })}
+        batch={batchUsageDialog.batch}
+        currentSiteId={selectedSite?.id || ""}
+        sitesInGroup={groupMembership?.allSites || []}
+        onSubmit={async (data) => {
+          await recordBatchUsage.mutateAsync({
+            batch_ref_code: data.batch_ref_code,
+            usage_site_id: data.usage_site_id,
+            quantity: data.quantity,
+            usage_date: data.usage_date,
+            work_description: data.work_description,
+            created_by: user?.id,
+          });
+        }}
+        isSubmitting={recordBatchUsage.isPending}
+      />
+
+      {/* Usage Delete Confirmation Dialog */}
+      <UsageDeleteConfirmDialog
+        open={usageDeleteDialog.open}
+        usageRecord={usageDeleteDialog.record}
+        onClose={() => setUsageDeleteDialog({ open: false, record: null })}
+        onConfirm={() => {
+          if (usageDeleteDialog.record) {
+            deleteUsage.mutate(
+              {
+                id: usageDeleteDialog.record.id,
+                siteId: selectedSite?.id || "",
+                is_shared_usage: usageDeleteDialog.record.is_shared_usage || false,
+              },
+              {
+                onSuccess: () => setUsageDeleteDialog({ open: false, record: null }),
+              }
+            );
+          }
+        }}
+        isDeleting={deleteUsage.isPending}
+        isGroupStock={
+          !!stock.find(
+            (s) =>
+              s.material_id === usageDeleteDialog.record?.material_id &&
+              (s.brand_id === usageDeleteDialog.record?.brand_id ||
+                (!s.brand_id && !usageDeleteDialog.record?.brand_id))
+          )?.batch_code
+        }
+      />
+
+      {/* Usage Edit Dialog */}
+      <UsageEditDialog
+        open={usageEditDialog.open}
+        usageRecord={usageEditDialog.record}
+        currentStockQty={
+          stock.find(
+            (s) =>
+              s.material_id === usageEditDialog.record?.material_id &&
+              (s.brand_id === usageEditDialog.record?.brand_id ||
+                (!s.brand_id && !usageEditDialog.record?.brand_id))
+          )?.current_qty || 0
+        }
+        onClose={() => setUsageEditDialog({ open: false, record: null })}
+        onSave={(data) => {
+          if (usageEditDialog.record) {
+            updateUsage.mutate(
+              {
+                id: usageEditDialog.record.id,
+                siteId: selectedSite?.id || "",
+                data,
+              },
+              {
+                onSuccess: () => setUsageEditDialog({ open: false, record: null }),
+              }
+            );
+          }
+        }}
+        isSaving={updateUsage.isPending}
+        isGroupStock={
+          !!stock.find(
+            (s) =>
+              s.material_id === usageEditDialog.record?.material_id &&
+              (s.brand_id === usageEditDialog.record?.brand_id ||
+                (!s.brand_id && !usageEditDialog.record?.brand_id))
+          )?.batch_code
+        }
       />
 
       {/* Stock Adjustment Dialog */}

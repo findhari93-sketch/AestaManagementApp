@@ -84,6 +84,7 @@ import { useSite } from "@/contexts/SiteContext";
 import NotificationBell from "@/components/notifications/NotificationBell";
 import ActiveSectionChip from "@/components/layout/ActiveSectionChip";
 import SettlementDialogManager from "@/components/settlement/SettlementDialogManager";
+import ChatAssistant from "@/components/chat-assistant/ChatAssistant";
 import ThemeToggle from "@/components/common/ThemeToggle";
 import DateRangePicker from "@/components/common/DateRangePicker";
 import ManualRefreshButton from "@/components/common/ManualRefreshButton";
@@ -1272,6 +1273,9 @@ export default function MainLayout({
 
       {/* Settlement Dialogs (managed via NotificationContext) */}
       <SettlementDialogManager />
+
+      {/* Chat Assistant */}
+      <ChatAssistant />
 
       {/* Refresh feedback snackbar */}
       <Snackbar

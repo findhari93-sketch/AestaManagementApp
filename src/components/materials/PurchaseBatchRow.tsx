@@ -55,10 +55,25 @@ export default function PurchaseBatchRow({
   // From useGroupStockBatches: items[].material_name (transformed)
   // From useBatchesWithUsage: items[].material.name (raw Supabase)
   const firstItem = batch.items?.[0]
-  const materialName = batch.material?.name
+
+  // Get all unique material names from batch items
+  const allMaterialNames: string[] = batch.items?.map((item: any) => {
+    return item.material_name
+      || item.material?.name
+      || 'Unknown'
+  }).filter((name: string, index: number, arr: string[]) =>
+    name !== 'Unknown' && arr.indexOf(name) === index
+  ) || []
+
+  const primaryMaterialName = batch.material?.name
     || firstItem?.material_name
     || (firstItem as any)?.material?.name
     || 'Unknown'
+
+  const additionalMaterialsCount = allMaterialNames.length > 1
+    ? allMaterialNames.length - 1
+    : 0
+
   const materialUnit = batch.material?.unit
     || firstItem?.unit
     || (firstItem as any)?.material?.unit
@@ -66,6 +81,31 @@ export default function PurchaseBatchRow({
   const brandName = batch.brand?.brand_name
     || firstItem?.brand_name
     || (firstItem as any)?.brand?.brand_name
+
+  // Calculate per-unit rate from batch items instead of blended total_amount/qty
+  const itemsAvgUnitPrice = (() => {
+    const items = batch.items || []
+    if (items.length === 0) return null
+    const totalPrice = items.reduce((sum: number, item: any) => sum + Number(item.total_price || 0), 0)
+    const totalQty = items.reduce((sum: number, item: any) => sum + Number(item.quantity || 0), 0)
+    return totalQty > 0 ? totalPrice / totalQty : null
+  })()
+
+  // Determine pricing unit from material's pricing_mode
+  const itemsPricingUnit = (() => {
+    const items = batch.items || []
+    const firstItem = items[0]
+    if (!firstItem) return materialUnit
+    // Items may have a nested material object or flat fields
+    const material = (firstItem as any).material
+    if (material) {
+      if (material.pricing_mode === 'per_kg' || material.unit === 'kg') return 'kg'
+      return material.unit || materialUnit
+    }
+    // Flat item fields
+    if (firstItem.unit === 'kg') return 'kg'
+    return firstItem.unit || materialUnit
+  })()
 
   // Get purchase transaction for this batch
   const purchaseTransaction = transactions.find(tx => tx.transaction_type === 'purchase')
@@ -81,9 +121,9 @@ export default function PurchaseBatchRow({
     transaction_type: 'purchase',
     transaction_date: batch.purchase_date,
     quantity: batch.original_quantity || 0,
-    unit_cost: batch.total_amount && batch.original_quantity
+    unit_cost: itemsAvgUnitPrice ?? (batch.total_amount && batch.original_quantity
       ? batch.total_amount / batch.original_quantity
-      : 0,
+      : 0),
     total_cost: batch.total_amount || 0,
     notes: batch.notes,
     batch_ref_code: batch.ref_code,
@@ -179,9 +219,40 @@ export default function PurchaseBatchRow({
 
         {/* Material */}
         <TableCell>
-          <Typography variant="body2" fontWeight={500}>
-            {materialName}
-          </Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexWrap: 'wrap' }}>
+            <Typography variant="body2" fontWeight={500}>
+              {primaryMaterialName}
+            </Typography>
+            {additionalMaterialsCount > 0 && (
+              <Tooltip
+                title={
+                  <Box>
+                    <Typography variant="caption" sx={{ fontWeight: 600, mb: 0.5, display: 'block' }}>
+                      All materials in this batch:
+                    </Typography>
+                    {allMaterialNames.map((name, idx) => (
+                      <Typography key={idx} variant="caption" display="block">
+                        • {name}
+                      </Typography>
+                    ))}
+                  </Box>
+                }
+                arrow
+              >
+                <Chip
+                  label={`+${additionalMaterialsCount} more`}
+                  size="small"
+                  variant="outlined"
+                  sx={{
+                    height: 20,
+                    fontSize: '0.7rem',
+                    cursor: 'pointer',
+                    '&:hover': { bgcolor: 'action.hover' }
+                  }}
+                />
+              </Tooltip>
+            )}
+          </Box>
           {brandName && (
             <Typography variant="caption" color="text.secondary">
               {brandName}
@@ -196,7 +267,7 @@ export default function PurchaseBatchRow({
         <TableCell align="right">
           <Box>
             <Typography variant="body2" fontWeight={500}>
-              {batch.original_quantity} {materialUnit}
+              {batch.original_quantity} {itemsPricingUnit}
             </Typography>
             <Typography variant="caption" color="text.secondary">
               Used: {usedQuantity} ({usagePercentage.toFixed(0)}%)
@@ -212,7 +283,24 @@ export default function PurchaseBatchRow({
 
         {/* Unit Cost */}
         <TableCell align="right">
-          {formatCurrency(actionTransaction?.unit_cost || 0)}
+          <Tooltip
+            title={
+              itemsAvgUnitPrice != null ? (
+                <Box sx={{ fontSize: 12 }}>
+                  <div>Avg rate from items: {formatCurrency(itemsAvgUnitPrice)}/{itemsPricingUnit}</div>
+                  {batch.total_amount && batch.original_quantity && (
+                    <div>Blended (incl. GST): {formatCurrency(batch.total_amount / batch.original_quantity)}/{itemsPricingUnit}</div>
+                  )}
+                </Box>
+              ) : ''
+            }
+            arrow
+            placement="left"
+          >
+            <span style={{ cursor: itemsAvgUnitPrice != null ? 'help' : undefined }}>
+              {formatCurrency(itemsAvgUnitPrice ?? actionTransaction?.unit_cost ?? 0)}/{itemsPricingUnit}
+            </span>
+          </Tooltip>
         </TableCell>
 
         {/* Total Cost - show both original and paid amounts when bargained */}
@@ -352,7 +440,7 @@ export default function PurchaseBatchRow({
                               </Typography>
                             </TableCell>
                             <TableCell align="right">
-                              {formatCurrency(actionTransaction?.unit_cost || 0)}
+                              {formatCurrency(itemsAvgUnitPrice ?? actionTransaction?.unit_cost ?? 0)}/{itemsPricingUnit}
                             </TableCell>
                             <TableCell align="right">
                               <Typography variant="body2" fontWeight={500}>

@@ -50,6 +50,9 @@ async function withTimeout<T>(
 
 /**
  * Fetch material usage for a site within a date range
+ * Includes both:
+ * 1. Regular usage from site's own stock (site_id = current site)
+ * 2. ALL batch usage from the site's group (so both sites see all shared stock usage)
  */
 export function useMaterialUsage(
   siteId: string | undefined,
@@ -58,6 +61,7 @@ export function useMaterialUsage(
     endDate?: string;
     sectionId?: string;
     materialId?: string;
+    siteGroupId?: string | null; // For fetching ALL group batch usage
   }
 ) {
   const supabase = createClient();
@@ -69,6 +73,7 @@ export function useMaterialUsage(
     queryFn: async () => {
       if (!siteId) return [];
 
+      // 1. Get regular usage from daily_material_usage (own stock usage - non-group)
       let query = supabase
         .from("daily_material_usage")
         .select(
@@ -97,9 +102,99 @@ export function useMaterialUsage(
         query = query.eq("material_id", options.materialId);
       }
 
-      const { data, error } = await query;
-      if (error) throw error;
-      return data as unknown as DailyMaterialUsageWithDetails[];
+      const { data: ownUsage, error: ownError } = await query;
+      if (ownError) throw ownError;
+
+      // 2. Get ALL batch usage from the site group (so both sites see all shared stock usage)
+      // This includes usage from ALL sites in the group with "Used by [Site]" tag
+      let groupBatchUsage: any[] = [];
+      if (options?.siteGroupId) {
+        let batchQuery = supabase
+          .from("batch_usage_records")
+          .select(
+            `
+            *,
+            material:materials(id, name, code, unit),
+            brand:material_brands(id, brand_name),
+            usage_site:sites!batch_usage_records_usage_site_id_fkey(id, name)
+          `
+          )
+          .eq("site_group_id", options.siteGroupId) // ALL usage in the group
+          .order("usage_date", { ascending: false })
+          .order("created_at", { ascending: false });
+
+        if (options?.startDate) {
+          batchQuery = batchQuery.gte("usage_date", options.startDate);
+        }
+        if (options?.endDate) {
+          batchQuery = batchQuery.lte("usage_date", options.endDate);
+        }
+        if (options?.materialId) {
+          batchQuery = batchQuery.eq("material_id", options.materialId);
+        }
+
+        const { data: batchData, error: batchError } = await batchQuery;
+        if (batchError) {
+          console.warn("Failed to fetch group batch usage:", batchError);
+        } else {
+          groupBatchUsage = batchData || [];
+        }
+      }
+
+      // 3. Map own usage (non-batch) to include is_shared_usage = false
+      // Filter out any records that are already covered by batch_usage_records
+      const ownUsageWithFlag: DailyMaterialUsageWithDetails[] = ((ownUsage || []) as any[]).map(
+        (item) => ({
+          ...item,
+          is_shared_usage: false,
+          paid_by_site_name: null,
+        })
+      );
+
+      // 4. Map group batch usage to match DailyMaterialUsageWithDetails format
+      // Shows "Used by [Site Name]" for all batch usage in the group
+      const groupBatchMapped: DailyMaterialUsageWithDetails[] = groupBatchUsage.map(
+        (item: any) => ({
+          // Map batch_usage_records fields to daily_material_usage format
+          id: item.id,
+          site_id: item.usage_site_id, // Usage site
+          section_id: null, // batch_usage_records doesn't have section
+          usage_date: item.usage_date,
+          material_id: item.material_id,
+          brand_id: item.brand_id,
+          quantity: item.quantity,
+          unit_cost: item.unit_cost,
+          total_cost: item.total_cost,
+          work_description: item.work_description,
+          work_area: null,
+          used_by: null,
+          is_verified: false,
+          verified_by: null,
+          verified_at: null,
+          notes: null,
+          created_at: item.created_at || new Date().toISOString(),
+          updated_at: item.updated_at || new Date().toISOString(),
+          created_by: item.created_by,
+          // Include related data
+          material: item.material,
+          brand: item.brand,
+          section: undefined, // Use undefined to match optional type
+          created_by_user: undefined, // Use undefined to match optional type
+          // Shared stock indicators - shows which site used this material
+          is_shared_usage: true,
+          paid_by_site_name: item.usage_site?.name || "Unknown Site", // "Used by [Site Name]"
+        })
+      );
+
+      // 5. Combine and sort by date (newest first)
+      // Note: ownUsage is for non-group stock, groupBatchMapped is for all group batch usage
+      const combined = [...ownUsageWithFlag, ...groupBatchMapped].sort((a, b) => {
+        const dateCompare = new Date(b.usage_date).getTime() - new Date(a.usage_date).getTime();
+        if (dateCompare !== 0) return dateCompare;
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      });
+
+      return combined;
     },
     enabled: !!siteId,
   });
@@ -253,55 +348,11 @@ export function useCreateMaterialUsage() {
       const unitCost = data.unit_cost || inventory.avg_unit_cost || 0;
       const totalCost = data.total_cost || (data.quantity * unitCost);
 
-      // 4. Reduce inventory quantity
-      const newQty = inventory.current_qty - data.quantity;
-      console.log("[useCreateMaterialUsage] Updating stock inventory...");
-      const { error: updateError } = await withTimeout(
-        supabase
-          .from("stock_inventory")
-          .update({
-            current_qty: newQty,
-            last_issued_date: data.usage_date || new Date().toISOString().split("T")[0],
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", inventory.id),
-        DB_OPERATION_TIMEOUT,
-        "Update stock inventory"
-      ) as { error: any };
-      console.log("[useCreateMaterialUsage] Stock update result:", { updateError });
+      // NOTE: Stock inventory update and stock_transaction creation are handled by
+      // the database trigger 'trg_update_stock_on_usage' which fires on daily_material_usage insert.
+      // This prevents duplicate transactions and ensures atomic updates.
 
-      if (updateError) {
-        throw new Error(`Failed to update stock: ${updateError.message}`);
-      }
-
-      // 5. Create stock transaction record for this usage
-      console.log("[useCreateMaterialUsage] Creating stock transaction...");
-      const { error: txError } = await withTimeout(
-        supabase
-          .from("stock_transactions")
-          .insert({
-            site_id: data.site_id,
-            inventory_id: inventory.id,
-            transaction_type: "usage",
-            transaction_date: data.usage_date || new Date().toISOString().split("T")[0],
-            quantity: -data.quantity, // Negative for usage/outgoing
-            unit_cost: unitCost,
-            total_cost: totalCost,
-            section_id: data.section_id || null,
-            notes: data.work_description || "Material usage recorded",
-            created_by: userId,
-          }),
-        DB_OPERATION_TIMEOUT,
-        "Create stock transaction"
-      ) as { error: any };
-      console.log("[useCreateMaterialUsage] Transaction result:", { txError });
-
-      if (txError) {
-        // Log but don't fail - transaction record is for audit, not critical
-        console.error("Failed to create stock transaction:", txError);
-      }
-
-      // 6. Create the daily usage record
+      // 4. Create the daily usage record (trigger will update stock and create transaction)
       console.log("[useCreateMaterialUsage] Creating daily usage record...");
       const { data: result, error } = await withTimeout(
         supabase
@@ -325,15 +376,7 @@ export function useCreateMaterialUsage() {
       ) as { data: any; error: any };
 
       if (error) {
-        // If usage record fails, try to rollback stock update
-        await supabase
-          .from("stock_inventory")
-          .update({
-            current_qty: inventory.current_qty, // Restore original qty
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", inventory.id);
-
+        // No manual rollback needed - the trigger only runs on successful insert
         throw error;
       }
 
@@ -343,50 +386,28 @@ export function useCreateMaterialUsage() {
         console.log("[useCreateMaterialUsage] Syncing to batch_usage_records for batch:", inventory.batch_code);
 
         try {
-          // Get batch info to determine paying_site and site_group
-          const { data: batchInfo } = await (supabase as any)
-            .from("material_purchase_expenses")
-            .select("paying_site_id, site_group_id")
-            .eq("ref_code", inventory.batch_code)
-            .eq("purchase_type", "group_stock")
-            .maybeSingle();
+          // Use the database function record_batch_usage which handles everything:
+          // - Validates remaining quantity
+          // - Creates batch_usage_record
+          // - Updates material_purchase_expenses quantities
+          const usageDate = data.usage_date || new Date().toISOString().split("T")[0];
 
-          if (batchInfo?.site_group_id) {
-            // Get material unit for batch_usage_records
-            const { data: materialInfo } = await supabase
-              .from("materials")
-              .select("unit")
-              .eq("id", data.material_id)
-              .single();
+          const { data: batchUsageId, error: batchUsageError } = await supabase
+            .rpc("record_batch_usage", {
+              p_batch_ref_code: inventory.batch_code,
+              p_usage_site_id: data.site_id,
+              p_quantity: data.quantity,
+              p_usage_date: usageDate,
+              p_work_description: data.work_description ?? undefined,
+              p_created_by: userId ?? undefined,
+            });
 
-            const unit = materialInfo?.unit || "nos";
-            const isSelfUse = batchInfo.paying_site_id === data.site_id;
-
-            // Create batch_usage_record entry for inter-site settlement
-            const { error: batchUsageError } = await (supabase as any)
-              .from("batch_usage_records")
-              .insert({
-                batch_ref_code: inventory.batch_code,
-                site_group_id: batchInfo.site_group_id,
-                usage_site_id: data.site_id,
-                material_id: data.material_id,
-                brand_id: data.brand_id || inventory.brand_id || null,
-                quantity: data.quantity,
-                unit: unit,
-                unit_cost: unitCost,
-                usage_date: data.usage_date || new Date().toISOString().split("T")[0],
-                work_description: data.work_description || null,
-                is_self_use: isSelfUse,
-                settlement_status: isSelfUse ? "self_use" : "pending",
-                created_by: userId,
-              });
-
-            if (batchUsageError) {
-              // Log but don't fail - batch_usage is for inter-site settlement, not critical
-              console.warn("[useCreateMaterialUsage] Failed to create batch_usage_record:", batchUsageError);
-            } else {
-              console.log("[useCreateMaterialUsage] Created batch_usage_record for inter-site settlement");
-            }
+          if (batchUsageError) {
+            // Log but don't fail - batch_usage is for inter-site settlement, not critical
+            // Common errors: batch not found, insufficient quantity, completed batch
+            console.warn("[useCreateMaterialUsage] Failed to create batch_usage_record via RPC:", batchUsageError.message);
+          } else {
+            console.log("[useCreateMaterialUsage] Created batch_usage_record via RPC, id:", batchUsageId);
           }
         } catch (batchSyncError) {
           // Non-critical - log but don't fail
@@ -400,6 +421,7 @@ export function useCreateMaterialUsage() {
       const todayStr = dayjs().format("YYYY-MM-DD");
       queryClient.invalidateQueries({
         queryKey: queryKeys.materialUsage.bySite(variables.site_id),
+        exact: false, // Match all queries starting with this key (including those with options)
       });
       queryClient.invalidateQueries({
         queryKey: [
@@ -433,27 +455,483 @@ export function useCreateMaterialUsage() {
 }
 
 /**
- * Update a material usage entry
+ * Bulk create material usage entries
+ * Processes entries sequentially (DB trigger fires per INSERT)
+ * Returns both successful and failed entries for partial success handling
+ */
+export function useBulkCreateMaterialUsage() {
+  const queryClient = useQueryClient();
+  const supabase = createClient();
+
+  return useMutation({
+    retry: false, // Not idempotent
+    mutationFn: async (
+      entries: Array<{
+        site_id: string; // Site where inventory lives (for DB trigger)
+        usage_site_id?: string; // Actual site using material (for shared stock)
+        usage_date: string;
+        material_id: string;
+        brand_id?: string;
+        inventory_id: string;
+        quantity: number;
+        unit_cost?: number;
+        total_cost?: number;
+        work_description?: string;
+      }>
+    ) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
+      // Get current user for tracking
+      // Note: daily_material_usage.created_by references public.users(id)
+      // Note: batch_usage_records.created_by references auth.users(id)
+      let userId: string | null = null;  // For daily_material_usage
+      let authUserId: string | null = null;  // For batch_usage_records
+      try {
+        const { data: { user: authUser } } = await supabase.auth.getUser();
+        authUserId = authUser?.id || null;  // Store auth.users.id for batch_usage_records
+        if (authUser?.id) {
+          const { data: dbUser } = await supabase
+            .from("users")
+            .select("id")
+            .eq("auth_id", authUser.id)
+            .maybeSingle();
+          userId = dbUser?.id || null;  // Store public.users.id for daily_material_usage
+        }
+      } catch (userError) {
+        console.warn("Could not fetch user for created_by:", userError);
+      }
+
+      const results: DailyMaterialUsage[] = [];
+      const errors: { stockId: string; message: string }[] = [];
+      const batchSyncWarnings: string[] = []; // Track batch sync issues
+
+      // Process entries sequentially (DB trigger fires per INSERT)
+      for (const entry of entries) {
+        try {
+          // 1. Fetch inventory to validate stock and get batch_code
+          const { data: inventory, error: inventoryError } = await withTimeout(
+            supabase
+              .from("stock_inventory")
+              .select("id, current_qty, avg_unit_cost, brand_id, batch_code")
+              .eq("id", entry.inventory_id)
+              .single(),
+            DB_OPERATION_TIMEOUT,
+            "Fetch inventory for bulk usage"
+          ) as { data: any; error: any };
+
+          if (inventoryError || !inventory) {
+            errors.push({
+              stockId: entry.inventory_id,
+              message: `Failed to find inventory: ${inventoryError?.message || "Not found"}`,
+            });
+            continue;
+          }
+
+          // 2. Validate stock availability
+          if (inventory.current_qty < entry.quantity) {
+            errors.push({
+              stockId: entry.inventory_id,
+              message: `Insufficient stock. Available: ${inventory.current_qty}, Requested: ${entry.quantity}`,
+            });
+            continue;
+          }
+
+          // 3. Calculate costs
+          const unitCost = entry.unit_cost || inventory.avg_unit_cost || 0;
+          const totalCost = entry.total_cost || (entry.quantity * unitCost);
+
+          // 4. For shared stock (batch_code exists), ONLY use batch_usage_records
+          //    For own stock (no batch_code), use daily_material_usage
+          if (inventory.batch_code) {
+            // Shared stock: Insert directly to batch_usage_records and update stock manually
+            try {
+              // Fetch batch info
+              const { data: batchInfo, error: batchError } = await (supabase as any)
+                .from("material_purchase_expenses")
+                .select("paying_site_id, site_id, site_group_id")
+                .eq("ref_code", inventory.batch_code)
+                .maybeSingle();
+
+              if (batchError) {
+                errors.push({
+                  stockId: entry.inventory_id,
+                  message: `Batch lookup failed: ${batchError.message}`,
+                });
+                continue;
+              }
+
+              if (!batchInfo?.site_group_id) {
+                errors.push({
+                  stockId: entry.inventory_id,
+                  message: `No site_group_id for batch ${inventory.batch_code}`,
+                });
+                continue;
+              }
+
+              // Get material unit
+              const { data: materialInfo } = await supabase
+                .from("materials")
+                .select("unit")
+                .eq("id", entry.material_id)
+                .single();
+
+              const unit = materialInfo?.unit || "nos";
+              const actualUsageSiteId = entry.usage_site_id || entry.site_id;
+              const payingSiteId = batchInfo.paying_site_id || batchInfo.site_id;
+              const isSelfUse = payingSiteId === actualUsageSiteId;
+
+              // Insert into batch_usage_records
+              const insertData: Record<string, unknown> = {
+                batch_ref_code: inventory.batch_code,
+                site_group_id: batchInfo.site_group_id,
+                usage_site_id: actualUsageSiteId,
+                material_id: entry.material_id,
+                brand_id: entry.brand_id || inventory.brand_id || null,
+                quantity: entry.quantity,
+                unit: unit,
+                unit_cost: unitCost,
+                // total_cost is GENERATED ALWAYS AS (quantity * unit_cost) — do not insert explicitly
+                usage_date: entry.usage_date,
+                work_description: entry.work_description || null,
+                is_self_use: isSelfUse,
+                settlement_status: isSelfUse ? "self_use" : "pending",
+              };
+              if (authUserId) {
+                insertData.created_by = authUserId;
+              }
+
+              const { data: batchResult, error: batchInsertError } = await (supabase as any)
+                .from("batch_usage_records")
+                .insert(insertData)
+                .select()
+                .single();
+
+              if (batchInsertError) {
+                errors.push({
+                  stockId: entry.inventory_id,
+                  message: `Batch record insert failed: ${batchInsertError.message}`,
+                });
+                continue;
+              }
+
+              // Manually update stock inventory (since no trigger on batch_usage_records)
+              // Also reduce total_weight proportionally to keep weightPerPiece consistent
+              const stockUpdateData: Record<string, unknown> = {
+                current_qty: inventory.current_qty - entry.quantity,
+              };
+              if (inventory.total_weight && inventory.current_qty > 0) {
+                const weightPerPiece = inventory.total_weight / inventory.current_qty;
+                stockUpdateData.total_weight = inventory.total_weight - (entry.quantity * weightPerPiece);
+              }
+              const { error: stockUpdateError } = await supabase
+                .from("stock_inventory")
+                .update(stockUpdateData)
+                .eq("id", entry.inventory_id);
+
+              if (stockUpdateError) {
+                batchSyncWarnings.push(`Stock update failed for ${entry.inventory_id}: ${stockUpdateError.message}`);
+              }
+
+              // Create a compatible result object for tracking
+              results.push({
+                id: batchResult.id,
+                site_id: entry.site_id,
+                usage_date: entry.usage_date,
+                material_id: entry.material_id,
+                brand_id: entry.brand_id || inventory.brand_id || null,
+                quantity: entry.quantity,
+                unit_cost: unitCost,
+                total_cost: batchResult.total_cost || (entry.quantity * unitCost),
+                work_description: entry.work_description || null,
+                created_by: userId,
+                created_at: batchResult.created_at,
+                updated_at: batchResult.updated_at,
+              } as DailyMaterialUsage);
+
+            } catch (batchError) {
+              errors.push({
+                stockId: entry.inventory_id,
+                message: batchError instanceof Error ? batchError.message : "Batch sync failed",
+              });
+            }
+          } else {
+            // Own stock: Use daily_material_usage (trigger will update stock)
+            const { data: result, error: insertError } = await withTimeout(
+              supabase
+                .from("daily_material_usage")
+                .insert({
+                  site_id: entry.site_id,
+                  usage_date: entry.usage_date,
+                  material_id: entry.material_id,
+                  brand_id: entry.brand_id || inventory.brand_id || null,
+                  quantity: entry.quantity,
+                  unit_cost: unitCost,
+                  total_cost: totalCost,
+                  work_description: entry.work_description || null,
+                  created_by: userId,
+                })
+                .select()
+                .single(),
+              DB_OPERATION_TIMEOUT,
+              "Create bulk usage record"
+            ) as { data: any; error: any };
+
+            if (insertError) {
+              errors.push({
+                stockId: entry.inventory_id,
+                message: `Failed to create usage: ${insertError.message}`,
+              });
+              continue;
+            }
+
+            results.push(result as DailyMaterialUsage);
+          }
+        } catch (err) {
+          errors.push({
+            stockId: entry.inventory_id,
+            message: err instanceof Error ? err.message : "Unknown error",
+          });
+        }
+      }
+
+      // If all entries failed, throw an error
+      if (results.length === 0 && errors.length > 0) {
+        throw new Error(`All entries failed: ${errors.map((e) => e.message).join(", ")}`);
+      }
+
+      return {
+        successful: results,
+        failed: errors,
+        batchSyncWarnings: batchSyncWarnings,
+        totalCreated: results.length,
+        totalFailed: errors.length,
+      };
+    },
+    onSuccess: (result, variables) => {
+      // Get unique site IDs from entries (both inventory sites and usage sites)
+      const siteIds = new Set<string>();
+      variables.forEach((v) => {
+        siteIds.add(v.site_id); // Inventory owner site
+        if (v.usage_site_id) siteIds.add(v.usage_site_id); // Actual usage site
+      });
+      const todayStr = dayjs().format("YYYY-MM-DD");
+
+      siteIds.forEach((siteId) => {
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.materialUsage.bySite(siteId),
+          exact: false, // Match all queries starting with this key (including those with options)
+        });
+        queryClient.invalidateQueries({
+          queryKey: [...queryKeys.materialUsage.byDate(siteId, todayStr), "summary"],
+        });
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.materialStock.bySite(siteId),
+        });
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.materialStock.lowStock(siteId),
+        });
+        queryClient.invalidateQueries({
+          queryKey: [...queryKeys.materialStock.bySite(siteId), "transactions"],
+        });
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.batchUsage.bySite(siteId),
+        });
+      });
+
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.batchUsage.all,
+      });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.interSiteSettlements.all,
+      });
+    },
+  });
+}
+
+/**
+ * Update a material usage entry with cascading updates
+ * This function:
+ * 1. Gets the original usage record
+ * 2. Calculates quantity delta
+ * 3. Updates stock inventory (restore or reduce based on delta)
+ * 4. Creates adjustment stock transaction
+ * 5. Updates batch_usage_records if from group stock
+ * 6. Updates the usage record
  */
 export function useUpdateMaterialUsage() {
   const queryClient = useQueryClient();
   const supabase = createClient();
 
   return useMutation({
-    retry: false, // Not idempotent
+    retry: false, // Not idempotent - modifies stock
     mutationFn: async ({
       id,
+      siteId,
       data,
     }: {
       id: string;
-      data: Partial<UsageEntryFormData>;
+      siteId: string;
+      data: { quantity: number; work_description?: string };
     }) => {
       // Ensure fresh session before mutation
       await ensureFreshSession();
 
+      // Get current user for tracking
+      let userId: string | null = null;
+      try {
+        const { data: { user: authUser } } = await supabase.auth.getUser();
+        if (authUser?.id) {
+          const { data: dbUser } = await supabase
+            .from("users")
+            .select("id")
+            .eq("auth_id", authUser.id)
+            .maybeSingle();
+          userId = dbUser?.id || null;
+        }
+      } catch (userError) {
+        console.warn("Could not fetch user for created_by:", userError);
+      }
+
+      // 1. Get the original usage record
+      const { data: originalRecord, error: fetchError } = await supabase
+        .from("daily_material_usage")
+        .select("material_id, brand_id, quantity, unit_cost, usage_date, total_cost")
+        .eq("id", id)
+        .single();
+
+      if (fetchError) {
+        throw new Error(`Failed to fetch usage record: ${fetchError.message}`);
+      }
+
+      // 2. Calculate delta
+      const originalQuantity = originalRecord.quantity;
+      const newQuantity = data.quantity;
+      const quantityDelta = newQuantity - originalQuantity;
+
+      // If no quantity change, just update the record
+      if (quantityDelta === 0) {
+        const { data: result, error } = await supabase
+          .from("daily_material_usage")
+          .update({
+            work_description: data.work_description,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", id)
+          .select()
+          .single();
+
+        if (error) throw error;
+        return result as DailyMaterialUsage;
+      }
+
+      // 3. Find stock inventory record
+      let inventoryQuery = supabase
+        .from("stock_inventory")
+        .select("id, current_qty, batch_code, pricing_mode, total_weight")
+        .eq("site_id", siteId)
+        .eq("material_id", originalRecord.material_id) as any;
+
+      if (originalRecord.brand_id) {
+        inventoryQuery = inventoryQuery.eq("brand_id", originalRecord.brand_id);
+      } else {
+        inventoryQuery = inventoryQuery.is("brand_id", null);
+      }
+
+      const { data: inventory, error: invError } = await inventoryQuery.maybeSingle();
+
+      if (invError) {
+        throw new Error(`Failed to find stock inventory: ${invError.message}`);
+      }
+
+      // 4. Validate stock if increasing quantity
+      if (quantityDelta > 0 && inventory) {
+        if (inventory.current_qty < quantityDelta) {
+          throw new Error(
+            `Not enough stock. Available: ${inventory.current_qty}, Needed: ${quantityDelta}`
+          );
+        }
+      }
+
+      // 5. Update stock inventory
+      if (inventory) {
+        const newStockQty = inventory.current_qty - quantityDelta; // Subtract delta (positive = reduce, negative = restore)
+
+        // For per_kg items, proportionally adjust total_weight
+        const updateData: Record<string, unknown> = {
+          current_qty: newStockQty,
+          updated_at: new Date().toISOString(),
+        };
+
+        if (inventory.pricing_mode === "per_kg" && inventory.total_weight && inventory.current_qty > 0) {
+          const weightPerPiece = inventory.total_weight / inventory.current_qty;
+          updateData.total_weight = Math.round((inventory.total_weight - quantityDelta * weightPerPiece) * 1000) / 1000;
+        }
+
+        const { error: updateStockError } = await supabase
+          .from("stock_inventory")
+          .update(updateData)
+          .eq("id", inventory.id);
+
+        if (updateStockError) {
+          throw new Error(`Failed to update stock: ${updateStockError.message}`);
+        }
+
+        // 6. Create adjustment transaction
+        const transactionType = quantityDelta > 0 ? "usage" : "adjustment";
+        const transactionNotes = quantityDelta > 0
+          ? `Usage increased from ${originalQuantity} to ${newQuantity}`
+          : `Usage reduced from ${originalQuantity} to ${newQuantity} (restored ${Math.abs(quantityDelta)})`;
+
+        await supabase.from("stock_transactions").insert({
+          site_id: siteId,
+          inventory_id: inventory.id,
+          material_id: originalRecord.material_id,
+          brand_id: originalRecord.brand_id,
+          transaction_type: transactionType,
+          quantity: -quantityDelta, // Negative for usage, positive for restore
+          unit_cost: originalRecord.unit_cost,
+          total_cost: Math.abs(quantityDelta) * (originalRecord.unit_cost || 0),
+          transaction_date: new Date().toISOString(),
+          notes: transactionNotes,
+          created_by: userId,
+        });
+
+        // 7. Update batch_usage_records if group stock
+        if (inventory.batch_code) {
+          try {
+            // Find and update the batch usage record
+            const { error: batchUpdateError } = await supabase
+              .from("batch_usage_records")
+              .update({
+                quantity: newQuantity,
+                total_cost: newQuantity * (originalRecord.unit_cost || 0),
+                updated_at: new Date().toISOString(),
+              })
+              .eq("batch_ref_code", inventory.batch_code)
+              .eq("usage_site_id", siteId)
+              .eq("material_id", originalRecord.material_id)
+              .eq("usage_date", originalRecord.usage_date);
+
+            if (batchUpdateError) {
+              console.warn("Could not update batch_usage_record:", batchUpdateError);
+            }
+          } catch (batchError) {
+            console.warn("Error updating batch usage:", batchError);
+          }
+        }
+      }
+
+      // 8. Update the usage record
+      const newTotalCost = newQuantity * (originalRecord.unit_cost || 0);
       const { data: result, error } = await supabase
         .from("daily_material_usage")
-        .update({ ...data, updated_at: new Date().toISOString() })
+        .update({
+          quantity: newQuantity,
+          total_cost: newTotalCost,
+          work_description: data.work_description,
+          updated_at: new Date().toISOString(),
+        })
         .eq("id", id)
         .select()
         .single();
@@ -463,14 +941,37 @@ export function useUpdateMaterialUsage() {
     },
     onSuccess: (result) => {
       const todayStr = dayjs().format("YYYY-MM-DD");
+      // Invalidate all related caches
       queryClient.invalidateQueries({
         queryKey: queryKeys.materialUsage.bySite(result.site_id),
+        exact: false, // Match all queries starting with this key (including those with options)
       });
       queryClient.invalidateQueries({
         queryKey: [
           ...queryKeys.materialUsage.byDate(result.site_id, todayStr),
           "summary",
         ],
+      });
+      // Stock caches
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.materialStock.bySite(result.site_id),
+      });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.materialStock.lowStock(result.site_id),
+      });
+      queryClient.invalidateQueries({
+        queryKey: [...queryKeys.materialStock.bySite(result.site_id), "transactions"],
+      });
+      // Batch usage caches
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.batchUsage.bySite(result.site_id),
+      });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.batchUsage.all,
+      });
+      // Settlement caches
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.interSiteSettlements.all,
       });
     },
   });
@@ -490,7 +991,15 @@ export function useDeleteMaterialUsage() {
 
   return useMutation({
     retry: false, // Not idempotent - restores stock
-    mutationFn: async ({ id, siteId }: { id: string; siteId: string }) => {
+    mutationFn: async ({
+      id,
+      siteId,
+      is_shared_usage = false,
+    }: {
+      id: string;
+      siteId: string;
+      is_shared_usage?: boolean;
+    }) => {
       // Ensure fresh session before mutation
       await ensureFreshSession();
 
@@ -513,11 +1022,29 @@ export function useDeleteMaterialUsage() {
       }
 
       // 1. Get the usage record to know quantity to restore
-      const { data: usageRecord, error: fetchError } = await supabase
-        .from("daily_material_usage")
-        .select("material_id, brand_id, quantity, unit_cost, usage_date")
-        .eq("id", id)
-        .single();
+      // For batch usage, fetch from batch_usage_records; otherwise from daily_material_usage
+      let usageRecord: any;
+      let fetchError: any;
+
+      if (is_shared_usage) {
+        // Fetch from batch_usage_records (include site_group_id for cache invalidation)
+        const { data, error } = await supabase
+          .from("batch_usage_records")
+          .select("material_id, brand_id, quantity, unit_cost, usage_date, batch_ref_code, usage_site_id, site_group_id")
+          .eq("id", id)
+          .single();
+        usageRecord = data;
+        fetchError = error;
+      } else {
+        // Fetch from daily_material_usage
+        const { data, error } = await supabase
+          .from("daily_material_usage")
+          .select("material_id, brand_id, quantity, unit_cost, usage_date")
+          .eq("id", id)
+          .single();
+        usageRecord = data;
+        fetchError = error;
+      }
 
       if (fetchError) {
         throw new Error(`Failed to fetch usage record: ${fetchError.message}`);
@@ -527,9 +1054,9 @@ export function useDeleteMaterialUsage() {
       // Also fetch batch_code to check if we need to delete batch_usage_record
       let inventoryQuery = supabase
         .from("stock_inventory")
-        .select("id, current_qty, batch_code")
+        .select("id, current_qty, batch_code, pricing_mode, total_weight")
         .eq("site_id", siteId)
-        .eq("material_id", usageRecord.material_id);
+        .eq("material_id", usageRecord.material_id) as any;
 
       if (usageRecord.brand_id) {
         inventoryQuery = inventoryQuery.eq("brand_id", usageRecord.brand_id);
@@ -542,12 +1069,21 @@ export function useDeleteMaterialUsage() {
       if (inventory) {
         // 3. Restore quantity to inventory
         const restoredQty = inventory.current_qty + usageRecord.quantity;
+
+        // For per_kg items, proportionally restore total_weight
+        const updateData: Record<string, unknown> = {
+          current_qty: restoredQty,
+          updated_at: new Date().toISOString(),
+        };
+
+        if (inventory.pricing_mode === "per_kg" && inventory.total_weight && inventory.current_qty > 0) {
+          const weightPerPiece = inventory.total_weight / inventory.current_qty;
+          updateData.total_weight = Math.round((inventory.total_weight + usageRecord.quantity * weightPerPiece) * 1000) / 1000;
+        }
+
         await supabase
           .from("stock_inventory")
-          .update({
-            current_qty: restoredQty,
-            updated_at: new Date().toISOString(),
-          })
+          .update(updateData)
           .eq("id", inventory.id);
 
         // 4. Create reversal transaction
@@ -565,8 +1101,8 @@ export function useDeleteMaterialUsage() {
             created_by: userId,
           });
 
-        // 4.5 Delete corresponding batch_usage_record if inventory came from group stock
-        if (inventory.batch_code) {
+        // 4.5 Delete corresponding batch_usage_record if inventory came from group stock (for non-batch deletes)
+        if (inventory.batch_code && !is_shared_usage) {
           try {
             const { error: batchUsageDeleteError } = await (supabase as any)
               .from("batch_usage_records")
@@ -586,30 +1122,105 @@ export function useDeleteMaterialUsage() {
         }
       }
 
-      // 5. Delete the usage record
-      const { error } = await supabase
-        .from("daily_material_usage")
-        .delete()
-        .eq("id", id);
+      // 5. For batch usage records, restore quantity to the batch
+      if (is_shared_usage && usageRecord.batch_ref_code) {
+        try {
+          // Get current batch remaining_qty
+          const { data: batch } = await supabase
+            .from("material_purchase_expenses")
+            .select("remaining_qty")
+            .eq("ref_code", usageRecord.batch_ref_code)
+            .single();
 
-      if (error) throw error;
-      return { id, siteId };
+          if (batch) {
+            // Restore quantity to batch
+            await supabase
+              .from("material_purchase_expenses")
+              .update({
+                remaining_qty: (batch.remaining_qty || 0) + usageRecord.quantity,
+              })
+              .eq("ref_code", usageRecord.batch_ref_code);
+          }
+        } catch (err) {
+          console.warn("Error restoring batch quantity:", err);
+        }
+      }
+
+      // 6. Delete the usage record from the appropriate table
+      if (is_shared_usage) {
+        const { error } = await supabase
+          .from("batch_usage_records")
+          .delete()
+          .eq("id", id);
+
+        if (error) throw error;
+      } else {
+        const { error } = await supabase
+          .from("daily_material_usage")
+          .delete()
+          .eq("id", id);
+
+        if (error) throw error;
+      }
+
+      return { id, siteId, siteGroupId: usageRecord.site_group_id || null };
     },
-    onSuccess: (result) => {
+    onSuccess: async (result) => {
       const todayStr = dayjs().format("YYYY-MM-DD");
-      queryClient.invalidateQueries({
-        queryKey: queryKeys.materialUsage.bySite(result.siteId),
-      });
-      queryClient.invalidateQueries({
-        queryKey: [
-          ...queryKeys.materialUsage.byDate(result.siteId, todayStr),
-          "summary",
-        ],
-      });
+
+      // For shared usage records, invalidate cache for ALL sites in the group
+      if (result.siteGroupId) {
+        try {
+          // Get all sites in the group
+          const { data: groupSites } = await supabase
+            .from("site_groups")
+            .select("site_id")
+            .eq("group_id", result.siteGroupId);
+
+          const siteIds = groupSites?.map((gs: any) => gs.site_id) || [result.siteId];
+
+          // Invalidate material usage cache for all sites in the group
+          siteIds.forEach((siteId: string) => {
+            queryClient.invalidateQueries({
+              queryKey: queryKeys.materialUsage.bySite(siteId),
+              exact: false,
+            });
+            queryClient.invalidateQueries({
+              queryKey: [
+                ...queryKeys.materialUsage.byDate(siteId, todayStr),
+                "summary",
+              ],
+            });
+            queryClient.invalidateQueries({
+              queryKey: queryKeys.materialStock.bySite(siteId),
+            });
+            queryClient.invalidateQueries({
+              queryKey: queryKeys.batchUsage.bySite(siteId),
+            });
+          });
+        } catch (error) {
+          console.warn("Failed to invalidate group caches:", error);
+          // Fallback to invalidating only current site
+          queryClient.invalidateQueries({
+            queryKey: queryKeys.materialUsage.bySite(result.siteId),
+            exact: false,
+          });
+        }
+      } else {
+        // For non-shared records, only invalidate current site
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.materialUsage.bySite(result.siteId),
+          exact: false,
+        });
+        queryClient.invalidateQueries({
+          queryKey: [
+            ...queryKeys.materialUsage.byDate(result.siteId, todayStr),
+            "summary",
+          ],
+        });
+      }
+
       // Also invalidate stock queries since we restored quantity
-      queryClient.invalidateQueries({
-        queryKey: queryKeys.materialStock.bySite(result.siteId),
-      });
       queryClient.invalidateQueries({
         queryKey: queryKeys.materialStock.lowStock(result.siteId),
       });
@@ -617,9 +1228,6 @@ export function useDeleteMaterialUsage() {
         queryKey: [...queryKeys.materialStock.bySite(result.siteId), "transactions"],
       });
       // Invalidate batch usage and inter-site settlement queries
-      queryClient.invalidateQueries({
-        queryKey: queryKeys.batchUsage.bySite(result.siteId),
-      });
       queryClient.invalidateQueries({
         queryKey: queryKeys.batchUsage.all,
       });

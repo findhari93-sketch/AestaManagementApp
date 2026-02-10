@@ -462,11 +462,7 @@ export function useCreatePurchaseOrder() {
         queryKey: ["price-history"],
       });
     },
-    onSettled: (_, __, variables) => {
-      queryClient.invalidateQueries({
-        queryKey: queryKeys.purchaseOrders.bySite(variables.site_id),
-      });
-    },
+    // Note: Removed duplicate onSettled invalidation - onSuccess already handles this
   });
 }
 
@@ -558,11 +554,7 @@ export function useUpdatePurchaseOrder() {
         queryKey: ["purchase-orders", "detail", result.id],
       });
     },
-    onSettled: (_, __, variables) => {
-      queryClient.invalidateQueries({
-        queryKey: queryKeys.purchaseOrders.bySite(variables.siteId),
-      });
-    },
+    // Note: Removed duplicate onSettled invalidation - onSuccess already handles this
   });
 }
 
@@ -2081,9 +2073,11 @@ export function useRecordDelivery() {
                       console.warn("Failed to create material expense items:", itemsInsertError);
                     }
 
-                    // For group stock, also populate group_stock_inventory for backward compatibility
-                    // with the Weekly Usage Report dialog
+                    // For group stock, also populate group_stock_inventory and group_stock_transactions
+                    // This auto-pushes to Inter-Site Settlement immediately on delivery
                     if (isGroupStock && siteGroupId) {
+                      const transactionsToInsert = [];
+
                       for (const item of po.items) {
                         try {
                           // Check if inventory record exists
@@ -2101,8 +2095,10 @@ export function useRecordDelivery() {
                           }
 
                           const { data: existingInv } = await invQuery.maybeSingle();
+                          let inventoryId: string;
 
                           if (existingInv) {
+                            inventoryId = existingInv.id;
                             // Update existing inventory - add quantity and recalculate avg cost
                             const newQty = Number(existingInv.current_qty) + Number(item.quantity);
                             const newAvgCost = newQty > 0
@@ -2122,7 +2118,7 @@ export function useRecordDelivery() {
                               .eq("id", existingInv.id);
                           } else {
                             // Insert new inventory record
-                            await (supabase as any)
+                            const { data: newInv, error: invInsertError } = await (supabase as any)
                               .from("group_stock_inventory")
                               .insert({
                                 site_group_id: siteGroupId,
@@ -2132,10 +2128,51 @@ export function useRecordDelivery() {
                                 avg_unit_cost: Number(item.unit_price),
                                 last_received_date: new Date().toISOString().split("T")[0],
                                 batch_code: expense.ref_code, // Store batch code for usage tracking
-                              });
+                              })
+                              .select("id")
+                              .single();
+
+                            if (invInsertError) {
+                              console.warn("Failed to insert group_stock_inventory:", invInsertError);
+                              continue;
+                            }
+                            inventoryId = newInv.id;
                           }
+
+                          // Prepare transaction record for this item
+                          const unitCost = Number(item.unit_price) || 0;
+                          const totalCost = Number(item.quantity) * unitCost;
+
+                          transactionsToInsert.push({
+                            site_group_id: siteGroupId,
+                            inventory_id: inventoryId,
+                            transaction_type: "purchase",
+                            transaction_date: po.order_date || new Date().toISOString().split("T")[0],
+                            material_id: item.material_id,
+                            brand_id: item.brand_id || null,
+                            quantity: Number(item.quantity),
+                            unit_cost: unitCost,
+                            total_cost: totalCost,
+                            payment_source_site_id: po.site_id,
+                            batch_ref_code: expense.ref_code,
+                            reference_id: expense.id,
+                            notes: `Auto-created from delivery of PO ${po.po_number}`,
+                          });
                         } catch (invError) {
                           console.warn("Failed to update group_stock_inventory:", invError);
+                        }
+                      }
+
+                      // Insert all purchase transactions
+                      if (transactionsToInsert.length > 0) {
+                        const { error: txInsertError } = await (supabase as any)
+                          .from("group_stock_transactions")
+                          .insert(transactionsToInsert);
+
+                        if (txInsertError) {
+                          console.warn("[useRecordDelivery] Failed to create group_stock_transactions:", txInsertError);
+                        } else {
+                          console.log("[useRecordDelivery] Auto-pushed to Inter-Site Settlement:", transactionsToInsert.length, "transactions");
                         }
                       }
                     }
@@ -2173,12 +2210,24 @@ export function useRecordDelivery() {
       queryClient.invalidateQueries({
         queryKey: queryKeys.batchUsage.all,
       });
+      // Invalidate group stock sync status (for push to settlement button)
+      queryClient.invalidateQueries({
+        queryKey: ["group-stock-pos-sync-status"],
+      });
+      // Invalidate group stock inventory (for inventory page Group Purchases tab)
+      queryClient.invalidateQueries({
+        queryKey: ["group-stock-inventory"],
+      });
       if (variables.po_id) {
         queryClient.invalidateQueries({
           queryKey: ["purchase-orders", "detail", variables.po_id],
         });
         queryClient.invalidateQueries({
           queryKey: queryKeys.purchaseOrders.bySite(variables.site_id),
+        });
+        // Invalidate sync status for this specific PO
+        queryClient.invalidateQueries({
+          queryKey: ["po-batch-sync-status", variables.po_id],
         });
       }
     },
@@ -2468,23 +2517,27 @@ export function useRecordAndVerifyDelivery() {
                     }
 
                     const isGroupStock = parsedNotes?.is_group_stock === true;
+                    const siteGroupId = parsedNotes?.site_group_id || parsedNotes?.group_id || null;
                     const purchaseType = isGroupStock ? "group_stock" : "own_site";
 
                     // Generate expense reference code
-                    const expenseTimestamp = Date.now().toString(36).toUpperCase();
-                    const expenseRandom = Math.random().toString(36).substring(2, 5).toUpperCase();
-                    const refCode = `MPE-${expenseTimestamp}-${expenseRandom}`;
+                    const { data: generatedRefCode } = await (supabase as any).rpc(
+                      "generate_material_purchase_reference"
+                    );
+                    const refCode = generatedRefCode || `MPE-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 5).toUpperCase()}`;
 
                     // Calculate total amount from items
                     let totalAmount = 0;
+                    let totalQuantity = 0;
                     for (const item of po.items || []) {
                       const itemSubtotal = (item.quantity || 0) * (item.unit_price || 0);
                       const itemTax = item.tax_rate ? itemSubtotal * (item.tax_rate / 100) : 0;
                       totalAmount += itemSubtotal + itemTax;
+                      totalQuantity += Number(item.quantity || 0);
                     }
 
-                    // Create the expense record
-                    await (supabase as any)
+                    // Create the expense record with group stock fields if applicable
+                    const { data: expense, error: expenseError } = await (supabase as any)
                       .from("material_purchase_expenses")
                       .insert({
                         ref_code: refCode,
@@ -2496,10 +2549,139 @@ export function useRecordAndVerifyDelivery() {
                         total_amount: totalAmount,
                         bill_url: data.challan_url || null,
                         notes: `Auto-created from PO ${po.po_number}`,
-                        created_by: authUserId,  // References auth.users(id)
-                      });
+                        created_by: authUserId,
+                        // Group stock specific fields
+                        paying_site_id: isGroupStock ? data.site_id : null,
+                        site_group_id: isGroupStock ? siteGroupId : null,
+                        original_qty: isGroupStock ? totalQuantity : null,
+                        remaining_qty: isGroupStock ? totalQuantity : null,
+                        status: "recorded",
+                      })
+                      .select()
+                      .single();
 
-                    console.log("[useRecordAndVerifyDelivery] Material expense created:", refCode);
+                    if (expenseError) {
+                      console.error("[useRecordAndVerifyDelivery] Failed to create expense:", expenseError);
+                    } else if (expense) {
+                      console.log("[useRecordAndVerifyDelivery] Material expense created:", refCode);
+
+                      // Create expense items
+                      if (po.items?.length > 0) {
+                        const expenseItems = po.items.map((item: any) => ({
+                          purchase_expense_id: expense.id,
+                          material_id: item.material_id,
+                          brand_id: item.brand_id || null,
+                          quantity: item.quantity,
+                          unit_price: item.unit_price,
+                        }));
+
+                        const { error: itemsInsertError } = await (supabase as any)
+                          .from("material_purchase_expense_items")
+                          .insert(expenseItems);
+
+                        if (itemsInsertError) {
+                          console.warn("[useRecordAndVerifyDelivery] Failed to create expense items:", itemsInsertError);
+                        }
+
+                        // For group stock, auto-push to Inter-Site Settlement
+                        if (isGroupStock && siteGroupId) {
+                          const transactionsToInsert = [];
+
+                          for (const item of po.items) {
+                            try {
+                              // Check if inventory record exists
+                              let invQuery = (supabase as any)
+                                .from("group_stock_inventory")
+                                .select("id, current_qty, avg_unit_cost")
+                                .eq("site_group_id", siteGroupId)
+                                .eq("material_id", item.material_id);
+
+                              if (item.brand_id) {
+                                invQuery = invQuery.eq("brand_id", item.brand_id);
+                              } else {
+                                invQuery = invQuery.is("brand_id", null);
+                              }
+
+                              const { data: existingInv } = await invQuery.maybeSingle();
+                              let inventoryId: string;
+
+                              if (existingInv) {
+                                inventoryId = existingInv.id;
+                                const newQty = Number(existingInv.current_qty) + Number(item.quantity);
+                                const newAvgCost = newQty > 0
+                                  ? ((Number(existingInv.current_qty) * Number(existingInv.avg_unit_cost || 0)) +
+                                     (Number(item.quantity) * Number(item.unit_price))) / newQty
+                                  : Number(item.unit_price);
+
+                                await (supabase as any)
+                                  .from("group_stock_inventory")
+                                  .update({
+                                    current_qty: newQty,
+                                    avg_unit_cost: newAvgCost,
+                                    last_received_date: new Date().toISOString().split("T")[0],
+                                    updated_at: new Date().toISOString(),
+                                    batch_code: refCode,
+                                  })
+                                  .eq("id", existingInv.id);
+                              } else {
+                                const { data: newInv, error: invInsertError } = await (supabase as any)
+                                  .from("group_stock_inventory")
+                                  .insert({
+                                    site_group_id: siteGroupId,
+                                    material_id: item.material_id,
+                                    brand_id: item.brand_id || null,
+                                    current_qty: Number(item.quantity),
+                                    avg_unit_cost: Number(item.unit_price),
+                                    last_received_date: new Date().toISOString().split("T")[0],
+                                    batch_code: refCode,
+                                  })
+                                  .select("id")
+                                  .single();
+
+                                if (invInsertError) {
+                                  console.warn("[useRecordAndVerifyDelivery] Failed to insert inventory:", invInsertError);
+                                  continue;
+                                }
+                                inventoryId = newInv.id;
+                              }
+
+                              const unitCost = Number(item.unit_price) || 0;
+                              const totalCost = Number(item.quantity) * unitCost;
+
+                              transactionsToInsert.push({
+                                site_group_id: siteGroupId,
+                                inventory_id: inventoryId,
+                                transaction_type: "purchase",
+                                transaction_date: po.order_date || new Date().toISOString().split("T")[0],
+                                material_id: item.material_id,
+                                brand_id: item.brand_id || null,
+                                quantity: Number(item.quantity),
+                                unit_cost: unitCost,
+                                total_cost: totalCost,
+                                payment_source_site_id: data.site_id,
+                                batch_ref_code: refCode,
+                                reference_id: expense.id,
+                                notes: `Auto-created from delivery of PO ${po.po_number}`,
+                              });
+                            } catch (invError) {
+                              console.warn("[useRecordAndVerifyDelivery] Inventory error:", invError);
+                            }
+                          }
+
+                          if (transactionsToInsert.length > 0) {
+                            const { error: txInsertError } = await (supabase as any)
+                              .from("group_stock_transactions")
+                              .insert(transactionsToInsert);
+
+                            if (txInsertError) {
+                              console.warn("[useRecordAndVerifyDelivery] Failed to create transactions:", txInsertError);
+                            } else {
+                              console.log("[useRecordAndVerifyDelivery] Auto-pushed to Inter-Site Settlement:", transactionsToInsert.length, "transactions");
+                            }
+                          }
+                        }
+                      }
+                    }
                   }
                 }
               } catch (expenseErr) {
@@ -2528,6 +2710,13 @@ export function useRecordAndVerifyDelivery() {
       queryClient.invalidateQueries({ queryKey: queryKeys.deliveries.all });
       queryClient.invalidateQueries({ queryKey: queryKeys.materialStock.all });
       queryClient.invalidateQueries({ queryKey: queryKeys.purchaseOrders.all });
+      // Invalidate material purchases (for Inter-Site Settlement)
+      queryClient.invalidateQueries({ queryKey: queryKeys.materialPurchases.all });
+      queryClient.invalidateQueries({ queryKey: queryKeys.batchUsage.all });
+      // Invalidate group stock sync status (for push to settlement button)
+      queryClient.invalidateQueries({ queryKey: ["group-stock-pos-sync-status"] });
+      // Invalidate group stock inventory (for inventory page Group Purchases tab)
+      queryClient.invalidateQueries({ queryKey: ["group-stock-inventory"] });
 
       if (variables.po_id) {
         queryClient.invalidateQueries({
@@ -2535,6 +2724,10 @@ export function useRecordAndVerifyDelivery() {
         });
         queryClient.invalidateQueries({
           queryKey: queryKeys.purchaseOrders.bySite(variables.site_id),
+        });
+        // Invalidate sync status for this specific PO
+        queryClient.invalidateQueries({
+          queryKey: ["po-batch-sync-status", variables.po_id],
         });
       }
     },

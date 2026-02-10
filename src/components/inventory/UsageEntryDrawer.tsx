@@ -26,8 +26,8 @@ import {
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useMaterialCategories } from "@/hooks/queries/useMaterials";
 import { useCreateMaterialUsage } from "@/hooks/queries/useMaterialUsage";
+import type { ExtendedStockInventory } from "@/hooks/queries/useStockInventory";
 import type {
-  StockInventoryWithDetails,
   MaterialUnit,
   UsageEntryFormData,
   MaterialCategory,
@@ -57,8 +57,8 @@ interface UsageEntryDrawerProps {
   open: boolean;
   onClose: () => void;
   siteId: string;
-  stock: StockInventoryWithDetails[];
-  preSelectedStock?: StockInventoryWithDetails | null;
+  stock: ExtendedStockInventory[];
+  preSelectedStock?: ExtendedStockInventory | null;
 }
 
 export default function UsageEntryDrawer({
@@ -138,6 +138,37 @@ export default function UsageEntryDrawer({
   const selectedMaterial = selectedStock?.material;
   const unit = selectedMaterial?.unit || "piece";
 
+  // Calculate effective cost per piece for per-kg priced materials, shared stock, and GST
+  const getEffectiveCostPerPiece = () => {
+    // For shared stock with batch_unit_cost, use the original batch cost to ensure
+    // consistent pricing across all sites using the same batch
+    const baseCost = (selectedStock?.is_shared && selectedStock?.batch_unit_cost)
+      ? selectedStock.batch_unit_cost
+      : selectedStock?.avg_unit_cost;
+
+    if (!baseCost) return 0;
+
+    // Apply GST if not already included in the base cost
+    // batch_tax_ratio > 1 means GST was already factored in during batch cost calculation
+    const gstRate = selectedStock?.material?.gst_rate || 0;
+    const gstAlreadyIncluded = selectedStock?.batch_tax_ratio && selectedStock.batch_tax_ratio > 1;
+    const costWithGst = !gstAlreadyIncluded && gstRate > 0
+      ? baseCost * (1 + gstRate / 100)
+      : baseCost;
+
+    // For per-kg pricing, calculate weight per piece and multiply by cost
+    if (selectedStock?.pricing_mode === "per_kg" && selectedStock?.total_weight && selectedStock?.current_qty > 0) {
+      const weightPerPiece = selectedStock.total_weight / selectedStock.current_qty;
+      return weightPerPiece * costWithGst;
+    }
+
+    return costWithGst;
+  };
+
+  const effectiveCostPerPiece = getEffectiveCostPerPiece();
+  const estimatedCost = effectiveCostPerPiece * form.quantity;
+  const isPerKgPricing = selectedStock?.pricing_mode === "per_kg";
+
   const handleSubmit = async () => {
     setError(null);
 
@@ -159,8 +190,8 @@ export default function UsageEntryDrawer({
         site_id: siteId,
         brand_id: selectedStock?.brand_id || undefined,
         inventory_id: selectedStock?.id,
-        unit_cost: selectedStock?.avg_unit_cost || 0,
-        total_cost: (selectedStock?.avg_unit_cost || 0) * form.quantity,
+        unit_cost: effectiveCostPerPiece,
+        total_cost: estimatedCost,
       });
 
       onClose();
@@ -285,6 +316,9 @@ export default function UsageEntryDrawer({
               setSelectedStockId(value?.id || "");
               setForm({ ...form, material_id: value?.material?.id || "" });
             }}
+            slotProps={{
+              popper: { disablePortal: false }, // Required inside Drawer to prevent aria-hidden conflict
+            }}
             renderInput={(params) => (
               <TextField
                 {...params}
@@ -366,10 +400,19 @@ export default function UsageEntryDrawer({
               <Alert severity="info" sx={{ py: 0.5 }}>
                 <Box>
                   <Typography variant="body2" fontWeight={500}>
-                    Estimated cost: ₹{(selectedStock.avg_unit_cost * form.quantity).toLocaleString()}
+                    Estimated cost: ₹{estimatedCost.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
-                    @ ₹{selectedStock.avg_unit_cost.toLocaleString()}/{UNIT_LABELS[unit] || unit} (avg. rate)
+                    {isPerKgPricing ? (
+                      <>
+                        @ ₹{selectedStock.avg_unit_cost.toLocaleString()}/kg × {((selectedStock.total_weight || 0) / selectedStock.current_qty).toFixed(2)} kg/pc
+                      </>
+                    ) : (
+                      <>
+                        @ ₹{selectedStock.avg_unit_cost.toLocaleString()}/{UNIT_LABELS[unit] || unit}
+                      </>
+                    )}
+                    {" (avg. rate)"}
                     {selectedStock.brand && ` | ${selectedStock.brand.brand_name}`}
                   </Typography>
                 </Box>
