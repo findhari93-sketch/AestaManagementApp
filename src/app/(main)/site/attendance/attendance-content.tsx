@@ -6587,8 +6587,8 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
           }}
           sx={{
             position: "fixed",
-            bottom: 24,
-            right: 24,
+            bottom: { xs: 150, md: 90 },
+            right: { xs: 16, md: 24 },
             "& .MuiFab-primary": {
               bgcolor: "primary.main",
               "&:hover": { bgcolor: "primary.dark" },

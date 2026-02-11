@@ -448,7 +448,7 @@ export function shouldPersistQuery(queryKey: readonly unknown[]): boolean {
 
   // Don't persist sensitive, session-specific, or massive datasets that block main thread
   // Also exclude queries with "detail" sub-key to prevent hydration issues
-  const noPersistEntities = ['auth-session', 'temp', 'preview', 'purchase-orders', 'vendors'];
+  const noPersistEntities = ['auth-session', 'temp', 'preview', 'purchase-orders', 'vendors', 'group-tea-shop'];
 
   // Don't persist detail queries (they can cause hydration issues when pending)
   // Also exclude linked-pos queries that depend on source_request_id column
