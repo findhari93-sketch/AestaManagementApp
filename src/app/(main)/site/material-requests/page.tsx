@@ -151,7 +151,10 @@ export default function MaterialRequestsPage() {
       filtered = filtered.filter(
         (r) =>
           r.request_number.toLowerCase().includes(term) ||
-          r.section?.name?.toLowerCase().includes(term)
+          r.section?.name?.toLowerCase().includes(term) ||
+          r.items?.some((item) =>
+            item.material?.name?.toLowerCase().includes(term)
+          )
       );
     }
 
@@ -403,9 +406,74 @@ export default function MaterialRequestsPage() {
       },
       {
         accessorKey: "items",
-        header: "Items",
-        size: 80,
-        Cell: ({ row }) => row.original.items?.length || 0,
+        header: "Materials",
+        size: 200,
+        Cell: ({ row }) => {
+          const items = row.original.items;
+          if (!items || items.length === 0) {
+            return (
+              <Typography variant="caption" color="text.secondary">
+                No items
+              </Typography>
+            );
+          }
+
+          const materialNames = items.map((item) => {
+            const name = item.material?.name || "Unknown";
+            const qty = item.requested_qty;
+            const unit = item.material?.unit || "";
+            return qty ? `${name} (${qty} ${unit})` : name;
+          });
+
+          const shortNames = items.map((item) => item.material?.name || "Unknown");
+          const MAX_VISIBLE = 2;
+          const visibleNames = shortNames.slice(0, MAX_VISIBLE);
+          const remainingCount = shortNames.length - MAX_VISIBLE;
+
+          return (
+            <Tooltip
+              title={
+                <Box>
+                  {materialNames.map((name, idx) => (
+                    <Typography key={idx} variant="caption" sx={{ display: "block" }}>
+                      {name}
+                    </Typography>
+                  ))}
+                </Box>
+              }
+              arrow
+            >
+              <Box sx={{ display: "flex", gap: 0.5, flexWrap: "wrap", alignItems: "center" }}>
+                {visibleNames.map((name, idx) => (
+                  <Chip
+                    key={idx}
+                    label={name}
+                    size="small"
+                    variant="outlined"
+                    sx={{
+                      maxWidth: 120,
+                      height: 22,
+                      fontSize: "0.7rem",
+                      "& .MuiChip-label": {
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      },
+                    }}
+                  />
+                ))}
+                {remainingCount > 0 && (
+                  <Chip
+                    label={`+${remainingCount}`}
+                    size="small"
+                    color="default"
+                    sx={{ height: 20, fontSize: "0.65rem" }}
+                  />
+                )}
+              </Box>
+            </Tooltip>
+          );
+        },
       },
       {
         accessorKey: "required_by_date",
