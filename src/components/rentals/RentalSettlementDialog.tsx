@@ -192,7 +192,7 @@ export default function RentalSettlementDialog({
     >
       <DialogTitle>
         <Box display="flex" alignItems="center" justifyContent="space-between">
-          <Typography variant="h6">Settle Rental</Typography>
+          <Typography variant="h6" component="span">Settle Rental</Typography>
           <IconButton onClick={onClose} size="small">
             <CloseIcon />
           </IconButton>

@@ -6027,7 +6027,7 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
                     <Box sx={{ display: "flex", alignItems: "center", gap: { xs: 1, sm: 2 } }}>
                       <VisibilityIcon sx={{ fontSize: { xs: 20, sm: 24 } }} />
                       <Box>
-                        <Typography variant="h6" sx={{ fontSize: { xs: '1rem', sm: '1.25rem' } }}>
+                        <Typography variant="h6" component="span" sx={{ fontSize: { xs: '1rem', sm: '1.25rem' } }}>
                           Attendance Summary
                         </Typography>
                         <Typography variant="body2" sx={{ opacity: 0.9, fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>

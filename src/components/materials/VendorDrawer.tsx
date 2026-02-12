@@ -21,6 +21,10 @@ import {
   Tooltip,
   Stack,
   Alert,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
 } from "@mui/material";
 import {
   Close as CloseIcon,
@@ -123,6 +127,7 @@ export default function VendorDrawer({
   const [sortBy, setSortBy] = useState<SortOption>("best_price");
   const [removingVendorId, setRemovingVendorId] = useState<string | null>(null);
   const [addVendorDialogOpen, setAddVendorDialogOpen] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState<{ id: string; name: string } | null>(null);
   const supabase = createClient();
   const deleteVendorInventory = useDeleteVendorInventory();
 
@@ -426,26 +431,29 @@ export default function VendorDrawer({
   };
 
   // Remove vendor from this material
-  const handleRemoveVendor = async (vendorId: string, vendorName: string) => {
-    if (!material?.id) return;
-    if (!confirm(`Remove "${vendorName}" from this material's vendor list?`)) return;
+  const handleRemoveVendorClick = (vendorId: string, vendorName: string) => {
+    setDeleteConfirm({ id: vendorId, name: vendorName });
+  };
 
-    setRemovingVendorId(vendorId);
+  const handleRemoveVendorConfirm = async () => {
+    if (!material?.id || !deleteConfirm) return;
+
+    setRemovingVendorId(deleteConfirm.id);
+    setDeleteConfirm(null);
     try {
-      // Find the vendor_inventory record
       const { data: inventory } = await supabase
         .from("vendor_inventory")
         .select("id")
-        .eq("vendor_id", vendorId)
+        .eq("vendor_id", deleteConfirm.id)
         .eq("material_id", material.id)
         .single();
 
       if (inventory) {
         await deleteVendorInventory.mutateAsync({
           id: inventory.id,
-          vendorId,
+          vendorId: deleteConfirm.id,
         });
-        refetch(); // Refresh the vendor list
+        refetch();
       }
     } catch (err) {
       console.error("Failed to remove vendor:", err);
@@ -800,7 +808,7 @@ export default function VendorDrawer({
                         variant="outlined"
                         color="error"
                         startIcon={<DeleteIcon />}
-                        onClick={() => handleRemoveVendor(vendor.id, vendor.name)}
+                        onClick={() => handleRemoveVendorClick(vendor.id, vendor.name)}
                         disabled={removingVendorId === vendor.id}
                       >
                         {removingVendorId === vendor.id ? "Removing..." : "Remove"}
@@ -813,6 +821,25 @@ export default function VendorDrawer({
           </Stack>
         )}
       </Box>
+
+      {/* Remove Vendor Confirmation Dialog */}
+      <Dialog open={!!deleteConfirm} onClose={() => setDeleteConfirm(null)} maxWidth="xs" fullWidth>
+        <DialogTitle>Remove Vendor</DialogTitle>
+        <DialogContent>
+          <Typography>
+            Are you sure you want to remove <strong>{deleteConfirm?.name || "this vendor"}</strong> from <strong>{material?.name}</strong>?
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+            This vendor will no longer appear in the pricing list for this material.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteConfirm(null)}>Cancel</Button>
+          <Button onClick={handleRemoveVendorConfirm} color="error" variant="contained">
+            Remove
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Add Vendor Dialog */}
       <AddVendorToMaterialDialog

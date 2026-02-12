@@ -426,7 +426,7 @@ export default function TeamsPage() {
       >
         <DialogTitle>
           <Box>
-            <Typography variant="h6">
+            <Typography variant="h6" component="span">
               Mesthri&apos;s Team - {selectedTeam?.name}
             </Typography>
             <Typography variant="body2" color="text.secondary">

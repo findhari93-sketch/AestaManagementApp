@@ -72,7 +72,7 @@ export default function CancelPaymentDialog({
       <DialogTitle>
         <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
           <CancelIcon color="error" />
-          <Typography variant="h6">
+          <Typography variant="h6" component="span">
             {engineerName ? "Cancel Payment to Engineer" : "Cancel Payment"}
           </Typography>
         </Box>

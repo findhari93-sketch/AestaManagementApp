@@ -291,7 +291,7 @@ export default function RentalStoreInventoryTab({
             justifyContent="space-between"
             alignItems="center"
           >
-            <Typography variant="h6">
+            <Typography variant="h6" component="span">
               {editingItem ? "Edit Inventory Item" : "Add Inventory Item"}
             </Typography>
             <IconButton onClick={handleCloseDialog} size="small">

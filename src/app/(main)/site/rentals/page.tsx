@@ -687,7 +687,7 @@ export default function SiteRentalsPage() {
       >
         <DialogTitle sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <Box>
-            <Typography variant="h6">Rental Items</Typography>
+            <Typography variant="h6" component="span">Rental Items</Typography>
             <Typography variant="caption" color="text.secondary">
               {itemPhotosDialog.vendorName}
             </Typography>

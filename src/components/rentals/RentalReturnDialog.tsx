@@ -149,7 +149,7 @@ export default function RentalReturnDialog({
     >
       <DialogTitle>
         <Box display="flex" alignItems="center" justifyContent="space-between">
-          <Typography variant="h6">Record Return</Typography>
+          <Typography variant="h6" component="span">Record Return</Typography>
           <IconButton onClick={onClose} size="small">
             <CloseIcon />
           </IconButton>

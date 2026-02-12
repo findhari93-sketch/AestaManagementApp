@@ -206,7 +206,7 @@ export default function DailySettlementEditDialog({
         >
           <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
             <EditIcon color="primary" />
-            <Typography variant="h6">Edit Settlement</Typography>
+            <Typography variant="h6" component="span">Edit Settlement</Typography>
           </Box>
           <IconButton onClick={onClose} size="small">
             <CloseIcon />

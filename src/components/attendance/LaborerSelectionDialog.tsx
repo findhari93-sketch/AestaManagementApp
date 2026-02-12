@@ -299,7 +299,7 @@ export default function LaborerSelectionDialog({
     >
       <DialogTitle>
         <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <Typography variant="h6" fontWeight={600}>
+          <Typography variant="h6" component="span" fontWeight={600}>
             Select Laborers
           </Typography>
           <IconButton onClick={onClose} size="small">

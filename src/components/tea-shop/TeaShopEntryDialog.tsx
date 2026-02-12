@@ -640,7 +640,7 @@ export default function TeaShopEntryDialog({
       <DialogTitle>
         <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
-            <Typography variant="h6" fontWeight={700}>
+            <Typography variant="h6" component="span" fontWeight={700}>
               {entry ? "Edit Entry" : showGroupAllocation ? "Add Group T&S Entry" : "Add Tea/Snacks Entry"}
             </Typography>
             {showGroupAllocation && siteGroup?.sites && (

@@ -151,7 +151,7 @@ export default function AddProductDialog({
       }}
     >
       <DialogTitle>
-        <Typography variant="h6" fontWeight={600}>
+        <Typography variant="h6" component="span" fontWeight={600}>
           Add Product to Store
         </Typography>
         <Typography variant="body2" color="text.secondary">

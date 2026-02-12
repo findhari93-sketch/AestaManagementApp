@@ -514,7 +514,7 @@ export default function UnifiedSettlementDialog({
         <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
           {isWeekly ? <CalendarMonth /> : <CalendarToday />}
           <Box>
-            <Typography variant="h6" fontWeight={600}>
+            <Typography variant="h6" component="span" fontWeight={600}>
               {dialogTitle}
             </Typography>
             {isWeekly && config.weekLabel && (

@@ -157,7 +157,7 @@ export default function RentalItemDialog({
     >
       <DialogTitle>
         <Box display="flex" alignItems="center" justifyContent="space-between">
-          <Typography variant="h6">
+          <Typography variant="h6" component="span">
             {isEdit ? "Edit Rental Item" : "Add Rental Item"}
           </Typography>
           <IconButton onClick={onClose} size="small">

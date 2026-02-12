@@ -201,7 +201,7 @@ export default function RecordBatchUsageDialog({
       <DialogTitle>
         <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
           <BatchIcon color="primary" />
-          <Typography variant="h6">Record Batch Usage</Typography>
+          <Typography variant="h6" component="span">Record Batch Usage</Typography>
         </Box>
         <IconButton
           onClick={onClose}

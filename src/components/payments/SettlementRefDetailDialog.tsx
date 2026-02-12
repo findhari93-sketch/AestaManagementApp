@@ -309,7 +309,7 @@ export default function SettlementRefDetailDialog({
         >
           <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
             <ReceiptIcon color="primary" />
-            <Typography variant="h6">Settlement Details</Typography>
+            <Typography variant="h6" component="span">Settlement Details</Typography>
           </Box>
           <IconButton size="small" onClick={onClose}>
             <CloseIcon />

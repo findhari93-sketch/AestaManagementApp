@@ -123,7 +123,7 @@ export default function MaintenanceDialog({
     >
       <DialogTitle>
         <Box display="flex" justifyContent="space-between" alignItems="center">
-          <Typography variant="h6">Record Maintenance</Typography>
+          <Typography variant="h6" component="span">Record Maintenance</Typography>
           <IconButton onClick={onClose} size="small">
             <CloseIcon />
           </IconButton>

@@ -168,7 +168,7 @@ export default function PaymentRefDialog({
         <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
             <ReceiptIcon color="primary" />
-            <Typography variant="h6">Payment Details</Typography>
+            <Typography variant="h6" component="span">Payment Details</Typography>
           </Box>
           <IconButton size="small" onClick={onClose}>
             <CloseIcon />

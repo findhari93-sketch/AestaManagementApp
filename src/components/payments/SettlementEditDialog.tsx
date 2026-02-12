@@ -207,7 +207,7 @@ export default function SettlementEditDialog({
       <DialogTitle sx={{ display: "flex", alignItems: "center", gap: 1 }}>
         <EditIcon color="primary" />
         <Box sx={{ flex: 1 }}>
-          <Typography variant="h6">Edit Settlement Details</Typography>
+          <Typography variant="h6" component="span">Edit Settlement Details</Typography>
           <Typography variant="caption" color="text.secondary">
             {record.laborerName} - {dayjs(record.date).format("DD MMM YYYY")}
           </Typography>

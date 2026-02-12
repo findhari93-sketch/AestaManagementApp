@@ -168,7 +168,7 @@ export default function DeleteSettlementConfirmDialog({
       >
         <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
           <DeleteIcon color="error" />
-          <Typography variant="h6" color="error.main">
+          <Typography variant="h6" component="span" color="error.main">
             Delete Settlement
           </Typography>
         </Box>

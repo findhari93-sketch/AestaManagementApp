@@ -130,7 +130,7 @@ export default function TeaShopAssignmentDialog({
         <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
             <LinkIcon color="primary" />
-            <Typography variant="h6">
+            <Typography variant="h6" component="span">
               Assign Tea Shop
             </Typography>
           </Box>

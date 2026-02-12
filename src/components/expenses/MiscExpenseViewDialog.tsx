@@ -92,7 +92,7 @@ export default function MiscExpenseViewDialog({
       >
         <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
           <ViewIcon color="primary" />
-          <Typography variant="h6" fontWeight={600}>
+          <Typography variant="h6" component="span" fontWeight={600}>
             Expense Details
           </Typography>
         </Box>

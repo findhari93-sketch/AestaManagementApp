@@ -191,7 +191,7 @@ export default function RecordInterSitePaymentDialog({
       <DialogTitle>
         <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
           <SettlementIcon color="primary" />
-          <Typography variant="h6">Record Inter-Site Payment</Typography>
+          <Typography variant="h6" component="span">Record Inter-Site Payment</Typography>
         </Box>
         <IconButton
           onClick={onClose}

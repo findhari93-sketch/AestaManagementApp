@@ -240,7 +240,7 @@ export default function InitiateBatchSettlementDialog({
       <DialogTitle>
         <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
           <SettlementIcon color="primary" />
-          <Typography variant="h6">Process Settlement</Typography>
+          <Typography variant="h6" component="span">Process Settlement</Typography>
         </Box>
         <IconButton
           onClick={onClose}

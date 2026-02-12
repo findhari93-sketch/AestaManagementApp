@@ -134,7 +134,7 @@ export default function BillVerificationDialog({
         }}
       >
         <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
-          <Typography variant="h6" fontWeight={600}>
+          <Typography variant="h6" component="span" fontWeight={600}>
             Verify Bill - {purchaseOrder.po_number}
           </Typography>
           {purchaseOrder.bill_verified && (

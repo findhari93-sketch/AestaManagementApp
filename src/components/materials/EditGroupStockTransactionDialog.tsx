@@ -112,7 +112,7 @@ export default function EditGroupStockTransactionDialog({
       <DialogTitle>
         <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-            <Typography variant="h6">Edit Transaction</Typography>
+            <Typography variant="h6" component="span">Edit Transaction</Typography>
             <Chip
               icon={isPurchase ? <PurchaseIcon /> : <UsageIcon />}
               label={typeLabel}

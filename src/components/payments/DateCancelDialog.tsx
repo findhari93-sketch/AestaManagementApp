@@ -204,7 +204,7 @@ export default function DateCancelDialog({
       <DialogTitle sx={{ display: "flex", alignItems: "center", gap: 1 }}>
         <CancelIcon color="warning" />
         <Box>
-          <Typography variant="h6">Cancel Payments</Typography>
+          <Typography variant="h6" component="span">Cancel Payments</Typography>
           <Typography variant="caption" color="text.secondary">
             {dayjs(date).format("dddd, MMM D, YYYY")}
           </Typography>

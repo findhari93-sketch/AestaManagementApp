@@ -320,7 +320,7 @@ export default function SettlementsOverviewDialog({
             <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
               <ReceiptIcon color="primary" />
               <Box>
-                <Typography variant="h6">Settlements Overview</Typography>
+                <Typography variant="h6" component="span">Settlements Overview</Typography>
                 {(laborerName || dateRangeLabel) && (
                   <Typography variant="caption" color="text.secondary">
                     {laborerName && `${laborerName}`}

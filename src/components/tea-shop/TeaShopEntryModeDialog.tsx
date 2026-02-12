@@ -52,7 +52,7 @@ export default function TeaShopEntryModeDialog({
             alignItems: "center",
           }}
         >
-          <Typography variant="h6" fontWeight={600}>
+          <Typography variant="h6" component="span" fontWeight={600}>
             T&S Entry Type
           </Typography>
           <IconButton onClick={onClose} size="small">

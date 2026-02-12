@@ -122,7 +122,7 @@ export default function EquipmentTransferDialog({
     >
       <DialogTitle>
         <Box display="flex" justifyContent="space-between" alignItems="center">
-          <Typography variant="h6">Transfer Equipment</Typography>
+          <Typography variant="h6" component="span">Transfer Equipment</Typography>
           <IconButton onClick={onClose} size="small">
             <CloseIcon />
           </IconButton>

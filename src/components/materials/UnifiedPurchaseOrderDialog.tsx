@@ -1107,7 +1107,7 @@ export default function UnifiedPurchaseOrderDialog({
         <Box>
           <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.5 }}>
             <ShoppingCartIcon color="primary" />
-            <Typography variant="h6">
+            <Typography variant="h6" component="span">
               {isEdit
                 ? `Edit PO ${purchaseOrder?.po_number}`
                 : isRequestMode

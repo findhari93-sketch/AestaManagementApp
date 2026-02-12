@@ -181,7 +181,7 @@ export default function QuickPriceEntryDialog({
         }}
       >
         <Box>
-          <Typography variant="h6">
+          <Typography variant="h6" component="span">
             {isEdit ? "Update Price" : "Add Price"}
           </Typography>
           <Box sx={{ display: "flex", alignItems: "center", gap: 1, mt: 0.5 }}>

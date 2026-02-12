@@ -364,7 +364,7 @@ export default function ContractPaymentRecordDialog({
       <DialogTitle>
         <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <Box>
-            <Typography variant="h6">Record Payment</Typography>
+            <Typography variant="h6" component="span">Record Payment</Typography>
             <Typography variant="body2" color="text.secondary">
               Auto-allocates to oldest week first (waterfall)
             </Typography>

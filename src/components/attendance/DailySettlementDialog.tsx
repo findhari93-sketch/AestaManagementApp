@@ -310,7 +310,7 @@ export default function DailySettlementDialog({
         <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
           <AccountBalanceWallet />
           <Box>
-            <Typography variant="h6" fontWeight={600}>
+            <Typography variant="h6" component="span" fontWeight={600}>
               Daily Settlement
             </Typography>
             <Typography variant="caption" sx={{ opacity: 0.9 }}>

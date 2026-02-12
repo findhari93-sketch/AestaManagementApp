@@ -457,7 +457,7 @@ export default function AddVendorToMaterialDialog({
         }}
       >
         <Box>
-          <Typography variant="h6">Add Vendor</Typography>
+          <Typography variant="h6" component="span">Add Vendor</Typography>
           <Typography variant="caption" color="text.secondary">
             for {material?.name}
           </Typography>

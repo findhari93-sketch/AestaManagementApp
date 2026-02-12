@@ -11,6 +11,10 @@ import {
   Alert,
   CircularProgress,
   Stack,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
 } from "@mui/material";
 import {
   Add as AddIcon,
@@ -58,6 +62,7 @@ export default function MaterialVendorsTab({ material }: MaterialVendorsTabProps
     id: string;
     name: string;
   } | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<VendorInventoryWithDetails | null>(null);
 
   const { data: vendors = [], isLoading, error } = useMaterialVendors(material.id);
   const deleteInventory = useDeleteVendorInventory();
@@ -101,19 +106,24 @@ export default function MaterialVendorsTab({ material }: MaterialVendorsTabProps
     setDialogOpen(true);
   }, []);
 
-  const handleDelete = useCallback(async (item: VendorInventoryWithDetails) => {
-    if (window.confirm(`Remove ${item.vendor?.name || "this vendor"} from ${material.name}?`)) {
-      try {
-        await deleteInventory.mutateAsync({
-          id: item.id,
-          vendorId: item.vendor_id,
-          materialId: material.id,
-        });
-      } catch (err) {
-        console.error("Failed to delete:", err);
-      }
+  const handleDeleteClick = useCallback((item: VendorInventoryWithDetails) => {
+    setDeleteConfirm(item);
+  }, []);
+
+  const handleDeleteConfirm = useCallback(async () => {
+    if (!deleteConfirm) return;
+    try {
+      await deleteInventory.mutateAsync({
+        id: deleteConfirm.id,
+        vendorId: deleteConfirm.vendor_id,
+        materialId: material.id,
+      });
+    } catch (err) {
+      console.error("Failed to delete:", err);
+    } finally {
+      setDeleteConfirm(null);
     }
-  }, [deleteInventory, material]);
+  }, [deleteConfirm, deleteInventory, material]);
 
   const handleViewPriceHistory = useCallback((item: VendorInventoryWithDetails) => {
     if (item.vendor) {
@@ -345,7 +355,7 @@ export default function MaterialVendorsTab({ material }: MaterialVendorsTabProps
                 <IconButton
                   size="small"
                   color="error"
-                  onClick={() => handleDelete(row.original)}
+                  onClick={() => handleDeleteClick(row.original)}
                 >
                   <DeleteIcon fontSize="small" />
                 </IconButton>
@@ -365,6 +375,25 @@ export default function MaterialVendorsTab({ material }: MaterialVendorsTabProps
         material={material}
         inventoryItem={selectedItem}
       />
+
+      {/* Remove Vendor Confirmation Dialog */}
+      <Dialog open={!!deleteConfirm} onClose={() => setDeleteConfirm(null)} maxWidth="xs" fullWidth>
+        <DialogTitle>Remove Vendor</DialogTitle>
+        <DialogContent>
+          <Typography>
+            Are you sure you want to remove <strong>{deleteConfirm?.vendor?.name || "this vendor"}</strong> from <strong>{material.name}</strong>?
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+            This vendor will no longer appear in the pricing list for this material.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteConfirm(null)}>Cancel</Button>
+          <Button onClick={handleDeleteConfirm} color="error" variant="contained">
+            Remove
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Price History Dialog */}
       {historyVendor && (

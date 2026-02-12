@@ -260,7 +260,7 @@ export default function VendorInventoryDialog({
           alignItems: "center",
         }}
       >
-        <Typography variant="h6">{getDialogTitle()}</Typography>
+        <Typography variant="h6" component="span">{getDialogTitle()}</Typography>
         <IconButton onClick={onClose} size="small">
           <CloseIcon />
         </IconButton>

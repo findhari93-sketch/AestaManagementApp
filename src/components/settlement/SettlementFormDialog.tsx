@@ -248,7 +248,7 @@ export default function SettlementFormDialog({
       >
         <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
           <AccountBalanceWallet color="primary" />
-          <Typography variant="h6" fontWeight={600}>
+          <Typography variant="h6" component="span" fontWeight={600}>
             Settle Payment
           </Typography>
         </Box>

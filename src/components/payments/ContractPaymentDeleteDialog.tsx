@@ -106,7 +106,7 @@ export default function ContractPaymentDeleteDialog({
       <DialogTitle>
         <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
           <WarningIcon color="error" />
-          <Typography variant="h6">Cancel Payment</Typography>
+          <Typography variant="h6" component="span">Cancel Payment</Typography>
         </Box>
       </DialogTitle>
 

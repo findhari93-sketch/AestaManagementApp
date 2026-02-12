@@ -1104,7 +1104,7 @@ export default function ConstructionPhasesPage() {
         }}
       >
         <DialogTitle sx={{ pb: 1 }}>
-          <Typography variant="h6" fontWeight={600}>
+          <Typography variant="h6" component="span" fontWeight={600}>
             {editingPhase ? "Edit Phase" : "Create New Phase"}
           </Typography>
           <Typography variant="body2" color="text.secondary">
@@ -1195,7 +1195,7 @@ export default function ConstructionPhasesPage() {
         }}
       >
         <DialogTitle sx={{ pb: 1 }}>
-          <Typography variant="h6" fontWeight={600}>
+          <Typography variant="h6" component="span" fontWeight={600}>
             {editingSub ? "Edit SubPhase" : "Add New SubPhase"}
           </Typography>
           <Typography variant="body2" color="text.secondary">

@@ -221,7 +221,7 @@ export default function EquipmentDialog({
     >
       <DialogTitle>
         <Box display="flex" justifyContent="space-between" alignItems="center">
-          <Typography variant="h6">
+          <Typography variant="h6" component="span">
             {isEdit ? "Edit Equipment" : "Add Equipment"}
           </Typography>
           <IconButton onClick={onClose} size="small">

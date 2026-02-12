@@ -271,7 +271,7 @@ export default function ConvertToPODialog({
         <Box>
           <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.5 }}>
             <ShoppingCartIcon color="primary" />
-            <Typography variant="h6">Convert Request to Purchase Order</Typography>
+            <Typography variant="h6" component="span">Convert Request to Purchase Order</Typography>
           </Box>
           <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
             <Typography variant="body2" color="text.secondary">

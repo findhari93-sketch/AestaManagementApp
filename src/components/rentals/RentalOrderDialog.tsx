@@ -300,7 +300,7 @@ export default function RentalOrderDialog({
     >
       <DialogTitle>
         <Box display="flex" alignItems="center" justifyContent="space-between">
-          <Typography variant="h6">Create Rental Order</Typography>
+          <Typography variant="h6" component="span">Create Rental Order</Typography>
           <IconButton onClick={onClose} size="small">
             <CloseIcon />
           </IconButton>

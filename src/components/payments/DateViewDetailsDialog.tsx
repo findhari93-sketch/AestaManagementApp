@@ -270,7 +270,7 @@ export default function DateViewDetailsDialog({
           <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
             <CalendarToday color="primary" />
             <Box>
-              <Typography variant="h6" fontWeight={600}>
+              <Typography variant="h6" component="span" fontWeight={600}>
                 {dayjs(date).format("dddd, MMM D, YYYY")}
               </Typography>
               <Typography variant="caption" color="text.secondary">

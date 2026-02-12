@@ -154,7 +154,7 @@ export default function DateEditDialog({
       <DialogTitle sx={{ display: "flex", alignItems: "center", gap: 1 }}>
         <EditIcon color="primary" />
         <Box>
-          <Typography variant="h6">Edit Date Records</Typography>
+          <Typography variant="h6" component="span">Edit Date Records</Typography>
           <Typography variant="caption" color="text.secondary">
             {dayjs(date).format("dddd, MMM D, YYYY")}
           </Typography>

@@ -612,7 +612,7 @@ export default function TeaShopSettlementDialog({
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
       <DialogTitle>
         <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <Typography variant="h6" fontWeight={700}>
+          <Typography variant="h6" component="span" fontWeight={700}>
             {isEditMode ? "Edit Settlement" : "Pay Shop"}
           </Typography>
           <IconButton onClick={onClose} size="small">

@@ -526,7 +526,7 @@ export default function WeekSettlementsDialog({
         <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
           <CalendarIcon color="primary" />
           <Box>
-            <Typography variant="h6" fontWeight={600}>
+            <Typography variant="h6" component="span" fontWeight={600}>
               Week Settlements
             </Typography>
             {week && (

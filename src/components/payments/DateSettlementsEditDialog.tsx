@@ -339,7 +339,7 @@ export default function DateSettlementsEditDialog({
     <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
       <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <Box>
-          <Typography variant="h6">Edit Settlements</Typography>
+          <Typography variant="h6" component="span">Edit Settlements</Typography>
           <Typography variant="caption" color="text.secondary">
             {dayjs(date).format("dddd, DD MMM YYYY")} - {records.length} records
           </Typography>

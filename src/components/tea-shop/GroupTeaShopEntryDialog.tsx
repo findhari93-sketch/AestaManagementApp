@@ -275,7 +275,7 @@ export default function GroupTeaShopEntryDialog({
         >
           <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
             <GroupsIcon color="primary" />
-            <Typography variant="h6">
+            <Typography variant="h6" component="span">
               {entry ? "Edit Group Entry" : "New Group Entry"}
             </Typography>
           </Box>

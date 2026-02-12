@@ -227,7 +227,7 @@ export default function PriceAlertsDialog({
       <DialogTitle>
         <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
           <AlertIcon color="primary" />
-          <Typography variant="h6">Price Alerts - {material.name}</Typography>
+          <Typography variant="h6" component="span">Price Alerts - {material.name}</Typography>
         </Box>
       </DialogTitle>
 

@@ -320,7 +320,7 @@ export default function GroupTeaShopSettlementDialog({
         >
           <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
             <GroupsIcon color="primary" />
-            <Typography variant="h6">Group Settlement</Typography>
+            <Typography variant="h6" component="span">Group Settlement</Typography>
           </Box>
           <IconButton onClick={onClose} size="small">
             <CloseIcon />

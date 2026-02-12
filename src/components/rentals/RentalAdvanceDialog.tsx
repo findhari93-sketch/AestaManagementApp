@@ -148,7 +148,7 @@ export default function RentalAdvanceDialog({
     >
       <DialogTitle>
         <Box display="flex" alignItems="center" justifyContent="space-between">
-          <Typography variant="h6">Record Advance Payment</Typography>
+          <Typography variant="h6" component="span">Record Advance Payment</Typography>
           <IconButton onClick={onClose} size="small">
             <CloseIcon />
           </IconButton>
