@@ -138,31 +138,23 @@ export default function UsageEntryDrawer({
   const selectedMaterial = selectedStock?.material;
   const unit = selectedMaterial?.unit || "piece";
 
-  // Calculate effective cost per piece for per-kg priced materials, shared stock, and GST
+  // Calculate effective cost per piece (handles per-kg pricing and shared stock)
   const getEffectiveCostPerPiece = () => {
-    // For shared stock with batch_unit_cost, use the original batch cost to ensure
-    // consistent pricing across all sites using the same batch
+    // Both avg_unit_cost (from DB) and batch_unit_cost (computed with GST) are already GST-inclusive.
+    // Use batch_unit_cost for shared stock to ensure consistent pricing across sites.
     const baseCost = (selectedStock?.is_shared && selectedStock?.batch_unit_cost)
       ? selectedStock.batch_unit_cost
       : selectedStock?.avg_unit_cost;
 
     if (!baseCost) return 0;
 
-    // Apply GST if not already included in the base cost
-    // batch_tax_ratio > 1 means GST was already factored in during batch cost calculation
-    const gstRate = selectedStock?.material?.gst_rate || 0;
-    const gstAlreadyIncluded = selectedStock?.batch_tax_ratio && selectedStock.batch_tax_ratio > 1;
-    const costWithGst = !gstAlreadyIncluded && gstRate > 0
-      ? baseCost * (1 + gstRate / 100)
-      : baseCost;
-
-    // For per-kg pricing, calculate weight per piece and multiply by cost
+    // For per-kg pricing, convert per-kg rate to per-piece cost
     if (selectedStock?.pricing_mode === "per_kg" && selectedStock?.total_weight && selectedStock?.current_qty > 0) {
       const weightPerPiece = selectedStock.total_weight / selectedStock.current_qty;
-      return weightPerPiece * costWithGst;
+      return weightPerPiece * baseCost;
     }
 
-    return costWithGst;
+    return baseCost;
   };
 
   const effectiveCostPerPiece = getEffectiveCostPerPiece();
