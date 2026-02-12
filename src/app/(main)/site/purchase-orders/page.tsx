@@ -39,7 +39,7 @@ import {
 import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
 import PageHeader from "@/components/layout/PageHeader";
 import Breadcrumbs from "@/components/layout/Breadcrumbs";
-import RelatedPages from "@/components/layout/RelatedPages";
+import MaterialWorkflowBar from "@/components/materials/MaterialWorkflowBar";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSite } from "@/contexts/SiteContext";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -634,7 +634,7 @@ export default function PurchaseOrdersPage() {
         }
       />
 
-      <RelatedPages />
+      <MaterialWorkflowBar currentStep="purchaseOrders" />
 
       {/* Show info when coming from material-search */}
       {prefilledData?.source === "material-search" && dialogOpen && (

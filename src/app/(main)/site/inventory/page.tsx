@@ -47,7 +47,7 @@ import {
 import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
 import PageHeader from "@/components/layout/PageHeader";
 import Breadcrumbs from "@/components/layout/Breadcrumbs";
-import RelatedPages from "@/components/layout/RelatedPages";
+import MaterialWorkflowBar from "@/components/materials/MaterialWorkflowBar";
 import { useSite } from "@/contexts/SiteContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useDateRange } from "@/contexts/DateRangeContext";
@@ -882,7 +882,7 @@ export default function InventoryPage() {
         }
       />
 
-      <RelatedPages />
+      <MaterialWorkflowBar currentStep="inventory" />
 
       {/* Unified Summary Cards */}
       <Grid container spacing={2} sx={{ mb: 2 }}>

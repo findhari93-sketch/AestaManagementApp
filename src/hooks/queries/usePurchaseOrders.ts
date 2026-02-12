@@ -2055,6 +2055,33 @@ export function useRecordDelivery() {
                       total_amount: expense.total_amount,
                     });
 
+                    // FIX: Backfill batch_code on stock_inventory for prior verified deliveries
+                    // In the two-step flow, partial deliveries may have been verified and created
+                    // stock records BEFORE this expense existed. Now update them with batch_code.
+                    if (isGroupStock && expense.ref_code) {
+                      try {
+                        for (const item of po.items || []) {
+                          let batchUpdateQuery = (supabase as any)
+                            .from("stock_inventory")
+                            .update({ batch_code: expense.ref_code, updated_at: new Date().toISOString() })
+                            .eq("site_id", po.site_id)
+                            .eq("material_id", item.material_id)
+                            .is("batch_code", null); // Only update if not already set
+
+                          if (item.brand_id) {
+                            batchUpdateQuery = batchUpdateQuery.eq("brand_id", item.brand_id);
+                          } else {
+                            batchUpdateQuery = batchUpdateQuery.is("brand_id", null);
+                          }
+
+                          await batchUpdateQuery;
+                        }
+                        console.log("[useRecordDelivery] Backfilled stock_inventory batch_code:", expense.ref_code);
+                      } catch (batchErr) {
+                        console.warn("[useRecordDelivery] Error backfilling stock batch_code (non-fatal):", batchErr);
+                      }
+                    }
+
                     if (po.items?.length > 0) {
                       // Create expense items from PO items (ordered quantity)
                       const expenseItems = po.items.map((item: any) => ({
@@ -2564,6 +2591,33 @@ export function useRecordAndVerifyDelivery() {
                       console.error("[useRecordAndVerifyDelivery] Failed to create expense:", expenseError);
                     } else if (expense) {
                       console.log("[useRecordAndVerifyDelivery] Material expense created:", refCode);
+
+                      // FIX: Update stock_inventory records (created by DB trigger) with batch_code
+                      // The trigger fires on delivery_items INSERT and creates stock WITHOUT batch_code
+                      // because the expense (which provides the ref_code) doesn't exist yet at trigger time.
+                      if (isGroupStock && refCode) {
+                        try {
+                          for (const item of po.items || []) {
+                            let batchUpdateQuery = (supabase as any)
+                              .from("stock_inventory")
+                              .update({ batch_code: refCode, updated_at: new Date().toISOString() })
+                              .eq("site_id", data.site_id)
+                              .eq("material_id", item.material_id)
+                              .is("batch_code", null); // Only update if not already set
+
+                            if (item.brand_id) {
+                              batchUpdateQuery = batchUpdateQuery.eq("brand_id", item.brand_id);
+                            } else {
+                              batchUpdateQuery = batchUpdateQuery.is("brand_id", null);
+                            }
+
+                            await batchUpdateQuery;
+                          }
+                          console.log("[useRecordAndVerifyDelivery] Updated stock_inventory batch_code:", refCode);
+                        } catch (batchErr) {
+                          console.warn("[useRecordAndVerifyDelivery] Error updating stock batch_code (non-fatal):", batchErr);
+                        }
+                      }
 
                       // Create expense items
                       if (po.items?.length > 0) {

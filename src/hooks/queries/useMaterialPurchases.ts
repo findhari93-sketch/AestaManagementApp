@@ -913,13 +913,14 @@ export function useSettleMaterialPurchase() {
         updated_at: new Date().toISOString(),
       };
 
-      // Only set settlement fields for non-vendor-only payments
+      // Only set settlement reference/date for non-vendor-only payments
       if (!data.isVendorPaymentOnly) {
         updateData.settlement_reference = settlementRef;
         updateData.settlement_date = data.settlement_date;
-        updateData.settlement_payer_source = data.payer_source;
-        updateData.settlement_payer_name = data.payer_name || null;
       }
+      // Always store payer source and payer name
+      updateData.settlement_payer_source = data.payer_source;
+      updateData.settlement_payer_name = data.payer_name || null;
 
       const { error } = await (supabase as any)
         .from("material_purchase_expenses")

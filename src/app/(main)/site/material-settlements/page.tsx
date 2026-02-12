@@ -38,6 +38,7 @@ import {
   Remove as NoBillIcon,
 } from "@mui/icons-material";
 import PageHeader from "@/components/layout/PageHeader";
+import MaterialWorkflowBar from "@/components/materials/MaterialWorkflowBar";
 import Breadcrumbs from "@/components/layout/Breadcrumbs";
 import { useSite } from "@/contexts/SiteContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -205,6 +206,8 @@ export default function MaterialSettlementsPage() {
             : "Track and settle material purchases"
         }
       />
+
+      <MaterialWorkflowBar currentStep="settlements" />
 
       {/* Action Buttons */}
       <Box sx={{ display: "flex", gap: 2, mb: 3 }}>

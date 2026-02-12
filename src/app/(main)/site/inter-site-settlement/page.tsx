@@ -15,7 +15,7 @@ import {
 } from '@mui/icons-material'
 import PageHeader from '@/components/layout/PageHeader'
 import Breadcrumbs from '@/components/layout/Breadcrumbs'
-import RelatedPages from '@/components/layout/RelatedPages'
+import MaterialWorkflowBar from '@/components/materials/MaterialWorkflowBar'
 import { useSite } from '@/contexts/SiteContext'
 import { useAuth } from '@/contexts/AuthContext'
 import { hasEditPermission } from '@/lib/permissions'
@@ -340,7 +340,7 @@ export default function InterSiteSettlementPage() {
         }
       />
 
-      <RelatedPages />
+      <MaterialWorkflowBar currentStep="interSite" />
 
       {/* Summary Cards (3 cards) */}
       <SettlementSummaryCards summary={summary} isLoading={summaryLoading} />

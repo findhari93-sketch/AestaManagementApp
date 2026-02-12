@@ -24,6 +24,7 @@ import {
   Groups as GroupStockIcon,
 } from "@mui/icons-material";
 import PageHeader from "@/components/layout/PageHeader";
+import MaterialWorkflowBar from "@/components/materials/MaterialWorkflowBar";
 import { useSite } from "@/contexts/SiteContext";
 import {
   useDeliveriesWithVerification,
@@ -137,6 +138,8 @@ export default function DeliveryVerificationPage() {
         title="Delivery Management"
         subtitle="Record deliveries and add materials to stock"
       />
+
+      <MaterialWorkflowBar currentStep="deliveries" />
 
       {/* Disputed Alert */}
       {disputedDeliveries.length > 0 && (

@@ -182,7 +182,7 @@ export default function MaterialSettlementDialog({
     const isVendorPaymentOnly = purchase.purchase_type === "group_stock" && !purchase.original_batch_code;
 
     // Only validate payer source for non-vendor-only payments
-    if (!isVendorPaymentOnly && ["custom", "other_site_money"].includes(payerSource) && !payerName.trim()) {
+    if (["custom", "other_site_money"].includes(payerSource) && !payerName.trim()) {
       setError("Please enter the payer name");
       return;
     }
@@ -193,8 +193,8 @@ export default function MaterialSettlementDialog({
         id: purchase.id,
         settlement_date: settlementDate,
         payment_mode: paymentMode,
-        payer_source: isVendorPaymentOnly ? "own_money" : payerSource,
-        payer_name: isVendorPaymentOnly ? undefined : (payerName || undefined),
+        payer_source: payerSource,
+        payer_name: payerName || undefined,
         payment_reference: paymentReference || undefined,
         bill_url: billUrl || undefined,
         payment_screenshot_url: paymentScreenshotUrl || undefined,
@@ -551,7 +551,7 @@ export default function MaterialSettlementDialog({
         </FormControl>
 
         {/* Payer Source - only for regular expense settlements (not PO advance or group stock) */}
-        {!isPOAdvancePayment && !isGroupStockParent && (
+        {!isPOAdvancePayment && (
           <PayerSourceSelector
             value={payerSource}
             customName={payerName}

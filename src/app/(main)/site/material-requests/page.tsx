@@ -35,6 +35,7 @@ import {
 } from "@mui/icons-material";
 import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
 import PageHeader from "@/components/layout/PageHeader";
+import MaterialWorkflowBar from "@/components/materials/MaterialWorkflowBar";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSite } from "@/contexts/SiteContext";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -597,6 +598,8 @@ export default function MaterialRequestsPage() {
           ) : null
         }
       />
+
+      <MaterialWorkflowBar currentStep="requests" />
 
       {/* Summary Cards */}
       <Grid container spacing={2} sx={{ mb: 2 }}>

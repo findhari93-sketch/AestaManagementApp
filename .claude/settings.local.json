@@ -74,7 +74,10 @@
       "WebFetch(domain:thenewstack.io)",
       "WebFetch(domain:github.com)",
       "WebFetch(domain:www.builder.io)",
-      "WebFetch(domain:mui.com)"
+      "WebFetch(domain:mui.com)",
+      "WebFetch(domain:docs.htmlto.design)",
+      "WebFetch(domain:cursor.directory)",
+      "WebFetch(domain:html.to.design)"
     ],
     "deny": [],
     "ask": []
