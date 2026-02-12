@@ -768,8 +768,8 @@ export default function DashboardContent({
           onClick={() => router.push("/site/attendance")}
           sx={{
             position: "fixed",
-            bottom: { xs: 24, sm: 32 },
-            right: { xs: 24, sm: 32 },
+            bottom: { xs: 150, md: 90 },
+            right: { xs: 16, md: 24 },
             zIndex: 1000,
           }}
         >

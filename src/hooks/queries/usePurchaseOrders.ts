@@ -3,6 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { createClient, ensureFreshSession } from "@/lib/supabase/client";
 import { queryKeys } from "@/lib/cache/keys";
+import { generateOptimisticId } from "@/lib/optimistic";
 import type {
   PurchaseOrder,
   PurchaseOrderWithDetails,
@@ -15,7 +16,11 @@ import type {
   DeliveryFormData,
   DeliveryItem,
   DeliveryItemFormData,
+  RecordAndVerifyDeliveryFormData,
+  DeliveryDiscrepancy,
 } from "@/types/material.types";
+// Note: Stock creation is handled by DB trigger "trg_update_stock_on_delivery"
+// Do NOT import createStockFromDeliveryItems here to avoid duplicate stock entries
 
 // ============================================
 // PURCHASE ORDERS
@@ -28,7 +33,7 @@ export function usePurchaseOrders(
   siteId: string | undefined,
   status?: POStatus | null
 ) {
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useQuery({
     queryKey: siteId
@@ -46,10 +51,9 @@ export function usePurchaseOrders(
           *,
           vendor:vendors(id, name, phone, email),
           items:purchase_order_items(
-            id, material_id, brand_id, quantity, unit_price,
-            tax_rate, tax_amount, total_amount, received_qty, pending_qty,
-            material:materials(id, name, code, unit),
-            brand:material_brands(id, brand_name)
+            *,
+            material:materials(id, name, code, unit, weight_per_unit, weight_unit, length_per_piece, length_unit),
+            brand:material_brands(id, brand_name, variant_name)
           )
         `
         )
@@ -72,7 +76,7 @@ export function usePurchaseOrders(
  * Fetch a single purchase order by ID
  */
 export function usePurchaseOrder(id: string | undefined) {
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useQuery({
     queryKey: id
@@ -89,12 +93,16 @@ export function usePurchaseOrder(id: string | undefined) {
           vendor:vendors(*),
           items:purchase_order_items(
             *,
-            material:materials(id, name, code, unit, gst_rate),
-            brand:material_brands(id, brand_name)
+            material:materials(id, name, code, unit, gst_rate, weight_per_unit, weight_unit, length_per_piece, length_unit),
+            brand:material_brands(id, brand_name, variant_name)
           ),
           deliveries(
             id, grn_number, delivery_date, delivery_status,
             challan_number, invoice_amount
+          ),
+          source_request:material_requests!purchase_orders_source_request_id_fkey(
+            id, request_number, status, priority, required_by_date,
+            requested_by_user:users!material_requests_requested_by_fkey(name)
           )
         `
         )
@@ -102,7 +110,16 @@ export function usePurchaseOrder(id: string | undefined) {
         .single();
 
       if (error) throw error;
-      return data as PurchaseOrderWithDetails;
+
+      // Transform source_request from array to single object (FK returns array by default)
+      const transformed = {
+        ...data,
+        source_request: Array.isArray(data.source_request)
+          ? data.source_request[0] || null
+          : data.source_request,
+      };
+
+      return transformed as unknown as PurchaseOrderWithDetails;
     },
     enabled: !!id,
   });
@@ -113,19 +130,38 @@ export function usePurchaseOrder(id: string | undefined) {
  */
 export function useCreatePurchaseOrder() {
   const queryClient = useQueryClient();
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useMutation({
     mutationFn: async (data: PurchaseOrderFormData) => {
-      // Ensure fresh session before mutation
-      await ensureFreshSession();
+      console.log("[useCreatePurchaseOrder] Starting mutation with data:", {
+        site_id: data.site_id,
+        vendor_id: data.vendor_id,
+        itemsCount: data.items?.length,
+        items: data.items,
+      });
 
-      // Calculate totals
+      // Ensure fresh session before mutation
+      console.log("[useCreatePurchaseOrder] Checking session...");
+      await ensureFreshSession();
+      console.log("[useCreatePurchaseOrder] Session check complete, proceeding...");
+
+      // Calculate totals - supports both per_piece and per_kg pricing
       let subtotal = 0;
       let taxAmount = 0;
 
-      const itemsWithTotals = data.items.map((item) => {
-        const itemTotal = item.quantity * item.unit_price;
+      const itemsWithTotals = data.items.map((item: any) => {
+        // Calculate item total based on pricing mode
+        let itemTotal: number;
+        if (item.pricing_mode === 'per_kg') {
+          // Per kg pricing: use actual_weight if available, fallback to calculated_weight
+          const weight = item.actual_weight ?? item.calculated_weight ?? 0;
+          itemTotal = weight * item.unit_price;
+        } else {
+          // Per piece pricing: quantity × unit_price (default)
+          itemTotal = item.quantity * item.unit_price;
+        }
+
         const discount = item.discount_percent
           ? (itemTotal * item.discount_percent) / 100
           : 0;
@@ -139,13 +175,16 @@ export function useCreatePurchaseOrder() {
 
         return {
           ...item,
-          discount_amount: discount,
-          tax_amount: itemTax,
-          total_amount: taxableAmount + itemTax,
+          discount_amount: Math.round(discount),
+          tax_amount: Math.round(itemTax),
+          total_amount: Math.round(taxableAmount + itemTax),
         };
       });
 
-      const totalAmount = subtotal + taxAmount;
+      // Round final totals to whole numbers
+      const totalAmount = Math.round(subtotal + taxAmount);
+      subtotal = Math.round(subtotal);
+      taxAmount = Math.round(taxAmount);
 
       // Generate PO number
       const timestamp = Date.now().toString(36).toUpperCase();
@@ -153,6 +192,7 @@ export function useCreatePurchaseOrder() {
       const poNumber = `PO-${timestamp}-${random}`;
 
       // Insert PO
+      console.log("[useCreatePurchaseOrder] Inserting PO...", { poNumber, subtotal, taxAmount, totalAmount, source_request_id: data.source_request_id });
       const { data: po, error: poError } = await (
         supabase.from("purchase_orders") as any
       )
@@ -166,42 +206,106 @@ export function useCreatePurchaseOrder() {
           delivery_address: data.delivery_address,
           delivery_location_id: data.delivery_location_id,
           payment_terms: data.payment_terms,
+          payment_timing: data.payment_timing || "on_delivery",
           notes: data.notes,
           internal_notes: data.internal_notes,
           transport_cost: data.transport_cost || null,
+          vendor_bill_url: data.vendor_bill_url || null,
           subtotal,
           tax_amount: taxAmount,
           total_amount: totalAmount,
+          source_request_id: data.source_request_id || null,
         })
         .select()
         .single();
 
-      if (poError) throw poError;
+      console.log("[useCreatePurchaseOrder] PO insert result:", { po, poError });
+
+      if (poError) {
+        console.error("[useCreatePurchaseOrder] PO insert error:", poError);
+        throw poError;
+      }
 
       // Insert PO items
-      const poItems = itemsWithTotals.map((item) => ({
-        po_id: po.id,
-        material_id: item.material_id,
-        brand_id: item.brand_id,
-        quantity: item.quantity,
-        unit_price: item.unit_price,
-        tax_rate: item.tax_rate,
-        tax_amount: item.tax_amount,
-        discount_percent: item.discount_percent,
-        discount_amount: item.discount_amount,
-        total_amount: item.total_amount,
-        notes: item.notes,
-        received_qty: 0,
-      }));
+      const poItems = itemsWithTotals.map((item: any) => {
+        // Calculate actual weight per piece for brand weight learning
+        const actualWeightPerPiece = item.actual_weight && item.quantity > 0
+          ? item.actual_weight / item.quantity
+          : null;
 
-      const { error: itemsError } = await supabase
+        return {
+          po_id: po.id,
+          material_id: item.material_id,
+          brand_id: item.brand_id,
+          quantity: item.quantity,
+          unit_price: item.unit_price,
+          tax_rate: item.tax_rate,
+          tax_amount: item.tax_amount,
+          discount_percent: item.discount_percent,
+          discount_amount: item.discount_amount,
+          total_amount: item.total_amount,
+          notes: item.notes,
+          received_qty: 0,
+          // Pricing mode and weight tracking
+          pricing_mode: item.pricing_mode || 'per_piece',
+          calculated_weight: item.calculated_weight || null,
+          actual_weight: item.actual_weight || null,
+          actual_weight_per_piece: actualWeightPerPiece,
+        };
+      });
+
+      console.log("[useCreatePurchaseOrder] Inserting PO items...", { count: poItems.length });
+      const { data: insertedItems, error: itemsError } = await supabase
         .from("purchase_order_items")
-        .insert(poItems);
+        .insert(poItems)
+        .select("id, material_id");
 
-      if (itemsError) throw itemsError;
+      console.log("[useCreatePurchaseOrder] PO items insert result:", { itemsError, insertedCount: insertedItems?.length });
+
+      if (itemsError) {
+        console.error("[useCreatePurchaseOrder] PO items insert error:", itemsError);
+        throw itemsError;
+      }
+
+      console.log("[useCreatePurchaseOrder] PO created successfully:", po.po_number);
+
+      // Create junction entries for items linked to material request items
+      // Match inserted items with original data items by material_id (order preserved)
+      const requestItemLinks: { po_item_id: string; request_item_id: string; quantity_allocated: number }[] = [];
+
+      if (insertedItems && data.source_request_id) {
+        data.items.forEach((originalItem, index) => {
+          // Items from requests have request_item_id set
+          if ('request_item_id' in originalItem && originalItem.request_item_id) {
+            const insertedItem = insertedItems[index];
+            if (insertedItem) {
+              requestItemLinks.push({
+                po_item_id: insertedItem.id,
+                request_item_id: originalItem.request_item_id as string,
+                quantity_allocated: originalItem.quantity,
+              });
+            }
+          }
+        });
+      }
+
+      // Insert junction entries if any
+      if (requestItemLinks.length > 0) {
+        console.log("[useCreatePurchaseOrder] Creating request item links...", { count: requestItemLinks.length });
+        const { error: linkError } = await supabase
+          .from("purchase_order_request_items")
+          .insert(requestItemLinks);
+
+        if (linkError) {
+          console.warn("[useCreatePurchaseOrder] Failed to create request item links:", linkError);
+          // Don't fail PO creation for this - the source_request_id link still works
+        } else {
+          console.log("[useCreatePurchaseOrder] Request item links created successfully");
+        }
+      }
 
       // Auto-record prices to price_history for each item
-      const priceRecords = itemsWithTotals.map((item) => ({
+      const priceRecords = itemsWithTotals.map((item: any) => ({
         vendor_id: data.vendor_id,
         material_id: item.material_id,
         brand_id: item.brand_id || null,
@@ -230,6 +334,125 @@ export function useCreatePurchaseOrder() {
 
       return po as PurchaseOrder;
     },
+    // Optimistic update: Show new PO immediately
+    onMutate: async (variables) => {
+      const queryKey = queryKeys.purchaseOrders.bySite(variables.site_id);
+
+      // Cancel any outgoing refetches
+      await queryClient.cancelQueries({ queryKey });
+
+      // Snapshot the previous value
+      const previousData = queryClient.getQueryData<PurchaseOrderWithDetails[]>(queryKey);
+
+      // Generate optimistic ID
+      const optimisticId = generateOptimisticId();
+
+      // Calculate totals for display
+      let subtotal = 0;
+      let taxAmount = 0;
+      variables.items.forEach((item: any) => {
+        const itemTotal = item.quantity * item.unit_price;
+        const discount = item.discount_percent ? (itemTotal * item.discount_percent) / 100 : 0;
+        const taxableAmount = itemTotal - discount;
+        const itemTax = item.tax_rate ? (taxableAmount * item.tax_rate) / 100 : 0;
+        subtotal += taxableAmount;
+        taxAmount += itemTax;
+      });
+
+      // Optimistically add the new PO
+      const optimisticPO = {
+        id: optimisticId,
+        site_id: variables.site_id,
+        vendor_id: variables.vendor_id,
+        po_number: `PO-PENDING-${optimisticId.slice(-6).toUpperCase()}`,
+        status: variables.status || "draft",
+        order_date: variables.order_date || new Date().toISOString().split("T")[0],
+        expected_delivery_date: variables.expected_delivery_date || null,
+        delivery_address: variables.delivery_address || null,
+        delivery_location_id: variables.delivery_location_id || null,
+        payment_terms: variables.payment_terms || null,
+        payment_timing: variables.payment_timing || "on_delivery",
+        transport_cost: variables.transport_cost || null,
+        notes: variables.notes || null,
+        internal_notes: variables.internal_notes || null,
+        vendor_bill_url: variables.vendor_bill_url || null,
+        subtotal: Math.round(subtotal),
+        tax_amount: Math.round(taxAmount),
+        total_amount: Math.round(subtotal + taxAmount),
+        // Missing PurchaseOrder fields
+        discount_amount: null,
+        other_charges: null,
+        advance_paid: null,
+        quotation_url: null,
+        po_document_url: null,
+        approved_by: null,
+        approved_at: null,
+        cancelled_by: null,
+        cancelled_at: null,
+        cancellation_reason: null,
+        created_by: null,
+        bill_verified: false,
+        bill_verified_by: null,
+        bill_verified_at: null,
+        bill_verification_notes: null,
+        source_request_id: variables.source_request_id || null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        vendor: undefined,
+        site: undefined,
+        deliveries: undefined,
+        source_request: undefined,
+        items: variables.items.map((item, idx) => {
+          const itemTotal = item.quantity * item.unit_price;
+          const discountAmt = item.discount_percent ? (itemTotal * item.discount_percent) / 100 : 0;
+          const taxableAmount = itemTotal - discountAmt;
+          const itemTaxAmt = item.tax_rate ? (taxableAmount * item.tax_rate) / 100 : 0;
+          return {
+            id: `${optimisticId}-item-${idx}`,
+            po_id: optimisticId,
+            material_id: item.material_id,
+            brand_id: item.brand_id || null,
+            description: null,
+            quantity: item.quantity,
+            unit_price: item.unit_price,
+            tax_rate: item.tax_rate || null,
+            tax_amount: itemTaxAmt,
+            discount_percent: item.discount_percent || null,
+            discount_amount: discountAmt,
+            total_amount: taxableAmount + itemTaxAmt,
+            received_qty: 0,
+            pending_qty: item.quantity,
+            notes: null,
+            created_at: new Date().toISOString(),
+            pricing_mode: 'per_piece' as const,
+            calculated_weight: null,
+            actual_weight: null,
+            actual_weight_per_piece: null,
+            material: undefined,
+            brand: undefined,
+          };
+        }),
+        // Mark as pending optimistic update
+        isPending: true,
+        optimisticId,
+      } as unknown as PurchaseOrderWithDetails & { isPending: boolean; optimisticId: string };
+
+      queryClient.setQueryData<PurchaseOrderWithDetails[]>(queryKey, (old) => {
+        return [optimisticPO, ...(old || [])];
+      });
+
+      return { previousData, optimisticId, siteId: variables.site_id };
+    },
+    // Rollback on error
+    onError: (err, variables, context) => {
+      if (context?.previousData !== undefined) {
+        queryClient.setQueryData(
+          queryKeys.purchaseOrders.bySite(context.siteId),
+          context.previousData
+        );
+      }
+    },
+    // Refetch on success to reconcile
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({
         queryKey: queryKeys.purchaseOrders.bySite(variables.site_id),
@@ -239,23 +462,26 @@ export function useCreatePurchaseOrder() {
         queryKey: ["price-history"],
       });
     },
+    // Note: Removed duplicate onSettled invalidation - onSuccess already handles this
   });
 }
 
 /**
- * Update a purchase order
+ * Update a purchase order with optimistic update
  */
 export function useUpdatePurchaseOrder() {
   const queryClient = useQueryClient();
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useMutation({
     mutationFn: async ({
       id,
       data,
+      siteId,
     }: {
       id: string;
       data: Partial<PurchaseOrderFormData>;
+      siteId: string; // Added for optimistic update
     }) => {
       // Ensure fresh session before mutation
       await ensureFreshSession();
@@ -270,6 +496,7 @@ export function useUpdatePurchaseOrder() {
           payment_terms: data.payment_terms,
           transport_cost: data.transport_cost ?? undefined,
           notes: data.notes,
+          vendor_bill_url: data.vendor_bill_url ?? undefined,
           updated_at: new Date().toISOString(),
         })
         .eq("id", id)
@@ -279,14 +506,55 @@ export function useUpdatePurchaseOrder() {
       if (error) throw error;
       return result as PurchaseOrder;
     },
-    onSuccess: (result) => {
+    // Optimistic update: Update PO fields immediately
+    onMutate: async (variables) => {
+      const queryKey = queryKeys.purchaseOrders.bySite(variables.siteId);
+
+      // Cancel any outgoing refetches
+      await queryClient.cancelQueries({ queryKey });
+
+      // Snapshot the previous value
+      const previousData = queryClient.getQueryData<PurchaseOrderWithDetails[]>(queryKey);
+
+      // Optimistically update the PO
+      // Exclude items from the spread since they have different types (form data vs full data)
+      const { items: _items, ...updateFields } = variables.data;
+      queryClient.setQueryData<PurchaseOrderWithDetails[]>(queryKey, (old) => {
+        if (!old) return [];
+        return old.map((po: any) => {
+          if (po.id === variables.id) {
+            return {
+              ...po,
+              ...updateFields,
+              updated_at: new Date().toISOString(),
+              isPending: true,
+            } as PurchaseOrderWithDetails;
+          }
+          return po;
+        });
+      });
+
+      return { previousData, siteId: variables.siteId };
+    },
+    // Rollback on error
+    onError: (err, variables, context) => {
+      if (context?.previousData !== undefined) {
+        queryClient.setQueryData(
+          queryKeys.purchaseOrders.bySite(context.siteId),
+          context.previousData
+        );
+      }
+    },
+    // Refetch on success to reconcile
+    onSuccess: (result, variables) => {
       queryClient.invalidateQueries({
-        queryKey: queryKeys.purchaseOrders.bySite(result.site_id),
+        queryKey: queryKeys.purchaseOrders.bySite(variables.siteId),
       });
       queryClient.invalidateQueries({
         queryKey: ["purchase-orders", "detail", result.id],
       });
     },
+    // Note: Removed duplicate onSettled invalidation - onSuccess already handles this
   });
 }
 
@@ -295,7 +563,7 @@ export function useUpdatePurchaseOrder() {
  */
 export function useSubmitPOForApproval() {
   const queryClient = useQueryClient();
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useMutation({
     mutationFn: async (id: string) => {
@@ -332,7 +600,7 @@ export function useSubmitPOForApproval() {
  */
 export function useApprovePurchaseOrder() {
   const queryClient = useQueryClient();
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useMutation({
     mutationFn: async ({ id, userId }: { id: string; userId: string }) => {
@@ -372,7 +640,7 @@ export function useApprovePurchaseOrder() {
  */
 export function useMarkPOAsOrdered() {
   const queryClient = useQueryClient();
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useMutation({
     mutationFn: async (id: string) => {
@@ -409,7 +677,7 @@ export function useMarkPOAsOrdered() {
  */
 export function useCancelPurchaseOrder() {
   const queryClient = useQueryClient();
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useMutation({
     mutationFn: async ({
@@ -461,7 +729,7 @@ export function useCancelPurchaseOrder() {
  */
 export function useDeletePurchaseOrder() {
   const queryClient = useQueryClient();
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useMutation({
     mutationFn: async ({ id, siteId }: { id: string; siteId: string }) => {
@@ -476,7 +744,7 @@ export function useDeletePurchaseOrder() {
 
       // Delete delivery items for all deliveries
       if (deliveries && deliveries.length > 0) {
-        const deliveryIds = deliveries.map((d) => d.id);
+        const deliveryIds = deliveries.map((d: any) => d.id);
         const { error: deliveryItemsError } = await supabase
           .from("delivery_items")
           .delete()
@@ -577,7 +845,7 @@ export interface PODeletionImpact {
  * Fetch the impact of deleting a PO - shows all related records that will be affected
  */
 export function usePODeletionImpact(poId: string | undefined) {
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useQuery({
     queryKey: poId ? ["po-deletion-impact", poId] : ["po-deletion-impact"],
@@ -606,7 +874,7 @@ export function usePODeletionImpact(poId: string | undefined) {
       // Count delivery items
       let deliveryItemsCount = 0;
       if (deliveries && deliveries.length > 0) {
-        const deliveryIds = deliveries.map((d) => d.id);
+        const deliveryIds = deliveries.map((d: any) => d.id);
         const { count } = await supabase
           .from("delivery_items")
           .select("id", { count: "exact", head: true })
@@ -718,13 +986,16 @@ export function usePODeletionImpact(poId: string | undefined) {
 
 /**
  * Delete a purchase order with full cascade (includes group stock cleanup)
- * This enhanced version also cleans up batch usage records, settlements, and derived expenses
+ * This enhanced version also cleans up:
+ * - batch usage records, settlements, and derived expenses (for group stock)
+ * - stock_inventory and stock_transactions (for site stock)
  */
 export function useDeletePurchaseOrderCascade() {
   const queryClient = useQueryClient();
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useMutation({
+    retry: false, // Not idempotent - cascade deletes multiple records
     mutationFn: async ({ id, siteId }: { id: string; siteId: string }) => {
       // Ensure fresh session before mutation
       await ensureFreshSession();
@@ -734,6 +1005,90 @@ export function useDeletePurchaseOrderCascade() {
         .from("material_purchase_expenses")
         .select("id, ref_code, purchase_type")
         .eq("purchase_order_id", id);
+
+      // Get all deliveries and their items for stock cleanup
+      const { data: stockDeliveries } = await supabase
+        .from("deliveries")
+        .select("id")
+        .eq("po_id", id);
+
+      // Clean up stock inventory records linked to this PO's deliveries
+      if (stockDeliveries && stockDeliveries.length > 0) {
+        const stockDeliveryIds = stockDeliveries.map((d: any) => d.id);
+
+        // Get delivery items to find materials that need stock cleanup
+        const { data: deliveryItems } = await supabase
+          .from("delivery_items")
+          .select("material_id, brand_id")
+          .in("delivery_id", stockDeliveryIds);
+
+        if (deliveryItems && deliveryItems.length > 0) {
+          // Get unique material/brand combinations
+          const materialBrandPairs = new Map<string, { material_id: string; brand_id: string | null }>();
+          for (const item of deliveryItems) {
+            const key = `${item.material_id}-${item.brand_id || "null"}`;
+            materialBrandPairs.set(key, {
+              material_id: item.material_id,
+              brand_id: item.brand_id,
+            });
+          }
+
+          // Delete stock inventory and transactions for each material
+          for (const { material_id, brand_id } of materialBrandPairs.values()) {
+            // Find stock inventory records
+            let stockQuery = supabase
+              .from("stock_inventory")
+              .select("id")
+              .eq("site_id", siteId)
+              .eq("material_id", material_id);
+
+            if (brand_id) {
+              stockQuery = stockQuery.eq("brand_id", brand_id);
+            } else {
+              stockQuery = stockQuery.is("brand_id", null);
+            }
+
+            const { data: stockRecords } = await stockQuery;
+
+            if (stockRecords && stockRecords.length > 0) {
+              const stockIds = stockRecords.map((s: any) => s.id);
+
+              // Delete stock transactions first (FK constraint)
+              const { error: txError } = await supabase
+                .from("stock_transactions")
+                .delete()
+                .in("inventory_id", stockIds);
+
+              if (txError) {
+                console.warn("Warning: Could not delete stock_transactions:", txError);
+              }
+
+              // Delete daily_material_usage records linked to this material/site
+              const { error: usageError } = await supabase
+                .from("daily_material_usage")
+                .delete()
+                .eq("site_id", siteId)
+                .eq("material_id", material_id);
+
+              if (usageError) {
+                console.warn("Warning: Could not delete daily_material_usage:", usageError);
+              }
+
+              // Delete stock inventory records
+              const { error: stockError } = await supabase
+                .from("stock_inventory")
+                .delete()
+                .in("id", stockIds);
+
+              if (stockError) {
+                console.warn("Warning: Could not delete stock_inventory:", stockError);
+              } else {
+                console.log(`[useDeletePurchaseOrderCascade] Cleaned up stock for material ${material_id}`);
+              }
+            }
+          }
+        }
+      }
 
       // Find group stock batch if exists
       const groupStockExpense = materialExpenses?.find(
@@ -745,6 +1100,15 @@ export function useDeletePurchaseOrderCascade() {
       if (batchRefCode) {
         console.log("[useDeletePurchaseOrderCascade] Deleting batch cascade:", batchRefCode);
 
+        // Step 0: Get inventory IDs for this batch (usage transactions may link via inventory_id)
+        const { data: inventoryRecords } = await (supabase as any)
+          .from("group_stock_inventory")
+          .select("id")
+          .eq("batch_code", batchRefCode);
+
+        const inventoryIds = (inventoryRecords || []).map((inv: { id: string }) => inv.id);
+        console.log("[useDeletePurchaseOrderCascade] Found inventory records:", inventoryIds.length);
+
         // Step 1: Get settlement IDs and transaction IDs for proper FK deletion order
         const { data: settlements } = await (supabase as any)
           .from("inter_site_material_settlements")
@@ -753,12 +1117,29 @@ export function useDeletePurchaseOrderCascade() {
 
         const settlementIds = (settlements || []).map((s: { id: string }) => s.id);
 
-        const { data: transactions } = await (supabase as any)
+        // Get transactions by batch_ref_code
+        const { data: txByBatch } = await (supabase as any)
           .from("group_stock_transactions")
           .select("id")
           .eq("batch_ref_code", batchRefCode);
 
-        const transactionIds = (transactions || []).map((t: { id: string }) => t.id);
+        // Also get transactions by inventory_id (usage transactions may not have batch_ref_code)
+        let txByInventory: { id: string }[] = [];
+        if (inventoryIds.length > 0) {
+          const { data: txByInv } = await (supabase as any)
+            .from("group_stock_transactions")
+            .select("id")
+            .in("inventory_id", inventoryIds);
+          txByInventory = txByInv || [];
+        }
+
+        // Combine all transaction IDs
+        const allTransactionIds = new Set([
+          ...(txByBatch || []).map((t: { id: string }) => t.id),
+          ...txByInventory.map((t: { id: string }) => t.id),
+        ]);
+        const transactionIds = Array.from(allTransactionIds);
+        console.log("[useDeletePurchaseOrderCascade] Found transactions:", transactionIds.length);
 
         // Step 2: Delete inter_site_settlement_items FIRST (FK to transactions and settlements)
         if (settlementIds.length > 0) {
@@ -817,6 +1198,20 @@ export function useDeletePurchaseOrderCascade() {
           console.warn("Warning: Could not delete inter_site_material_settlements:", settlementsError);
         }
 
+        // Step 5b: Get transaction IDs from batch_usage_records BEFORE deleting them
+        // (In case transactions don't have batch_ref_code set - legacy data)
+        const { data: batchUsageWithTx } = await (supabase as any)
+          .from("batch_usage_records")
+          .select("group_stock_transaction_id")
+          .eq("batch_ref_code", batchRefCode)
+          .not("group_stock_transaction_id", "is", null);
+
+        const txIdsFromBatchUsage = (batchUsageWithTx || [])
+          .map((r: { group_stock_transaction_id: string }) => r.group_stock_transaction_id)
+          .filter(Boolean);
+
+        console.log("[useDeletePurchaseOrderCascade] Found transactions via batch_usage_records:", txIdsFromBatchUsage.length);
+
         // Step 6: Delete batch_usage_records
         const { error: usageError } = await (supabase as any)
           .from("batch_usage_records")
@@ -827,14 +1222,42 @@ export function useDeletePurchaseOrderCascade() {
           console.warn("Warning: Could not delete batch_usage_records:", usageError);
         }
 
-        // Step 7: Delete group_stock_transactions (now safe - FK references removed)
+        // Step 6b: Delete transactions found via batch_usage_records (may not have batch_ref_code)
+        if (txIdsFromBatchUsage.length > 0) {
+          const { error: txByBatchUsageError } = await (supabase as any)
+            .from("group_stock_transactions")
+            .delete()
+            .in("id", txIdsFromBatchUsage);
+
+          if (txByBatchUsageError) {
+            console.warn("Warning: Could not delete group_stock_transactions by batch_usage_records:", txByBatchUsageError);
+          } else {
+            console.log("[useDeletePurchaseOrderCascade] Deleted transactions via batch_usage_records:", txIdsFromBatchUsage.length);
+          }
+        }
+
+        // Step 7: Delete group_stock_transactions by batch_ref_code
         const { error: txError } = await (supabase as any)
           .from("group_stock_transactions")
           .delete()
           .eq("batch_ref_code", batchRefCode);
 
         if (txError) {
-          console.warn("Warning: Could not delete group_stock_transactions:", txError);
+          console.warn("Warning: Could not delete group_stock_transactions by batch_ref_code:", txError);
+        }
+
+        // Step 7b: Delete group_stock_transactions by inventory_id (catches usage transactions without batch_ref_code)
+        if (inventoryIds.length > 0) {
+          const { error: txByInvError } = await (supabase as any)
+            .from("group_stock_transactions")
+            .delete()
+            .in("inventory_id", inventoryIds);
+
+          if (txByInvError) {
+            console.warn("Warning: Could not delete group_stock_transactions by inventory_id:", txByInvError);
+          } else {
+            console.log("[useDeletePurchaseOrderCascade] Deleted transactions by inventory_id");
+          }
         }
 
         // Step 8: Delete group_stock_inventory for this batch
@@ -881,7 +1304,7 @@ export function useDeletePurchaseOrderCascade() {
 
       // Delete delivery items for all deliveries
       if (deliveries && deliveries.length > 0) {
-        const deliveryIds = deliveries.map((d) => d.id);
+        const deliveryIds = deliveries.map((d: any) => d.id);
         await supabase
           .from("delivery_items")
           .delete()
@@ -978,7 +1401,7 @@ export function useDeletePurchaseOrderCascade() {
  */
 export function useAddPOItem() {
   const queryClient = useQueryClient();
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useMutation({
     mutationFn: async ({
@@ -991,7 +1414,15 @@ export function useAddPOItem() {
       // Ensure fresh session before mutation
       await ensureFreshSession();
 
-      const itemTotal = item.quantity * item.unit_price;
+      // Calculate item total based on pricing mode (per_piece or per_kg)
+      let itemTotal: number;
+      if (item.pricing_mode === 'per_kg') {
+        // Use actual_weight if available, otherwise calculated_weight
+        const weight = item.actual_weight ?? item.calculated_weight ?? 0;
+        itemTotal = weight * item.unit_price;
+      } else {
+        itemTotal = item.quantity * item.unit_price;
+      }
       const discount = item.discount_percent
         ? (itemTotal * item.discount_percent) / 100
         : 0;
@@ -1007,12 +1438,16 @@ export function useAddPOItem() {
           quantity: item.quantity,
           unit_price: item.unit_price,
           tax_rate: item.tax_rate,
-          tax_amount: itemTax,
+          tax_amount: Math.round(itemTax),
           discount_percent: item.discount_percent,
-          discount_amount: discount,
-          total_amount: taxableAmount + itemTax,
+          discount_amount: Math.round(discount),
+          total_amount: Math.round(taxableAmount + itemTax),
           notes: item.notes,
           received_qty: 0,
+          // Pricing mode and weight tracking
+          pricing_mode: item.pricing_mode || 'per_piece',
+          calculated_weight: item.calculated_weight || null,
+          actual_weight: item.actual_weight || null,
         })
         .select()
         .single();
@@ -1037,7 +1472,7 @@ export function useAddPOItem() {
  */
 export function useUpdatePOItem() {
   const queryClient = useQueryClient();
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useMutation({
     mutationFn: async ({
@@ -1055,7 +1490,15 @@ export function useUpdatePOItem() {
       let updateData: Record<string, unknown> = { ...item };
 
       if (item.quantity !== undefined && item.unit_price !== undefined) {
-        const itemTotal = item.quantity * item.unit_price;
+        // Calculate item total based on pricing mode (per_piece or per_kg)
+        let itemTotal: number;
+        if (item.pricing_mode === 'per_kg') {
+          // Use actual_weight if available, otherwise calculated_weight
+          const weight = item.actual_weight ?? item.calculated_weight ?? 0;
+          itemTotal = weight * item.unit_price;
+        } else {
+          itemTotal = item.quantity * item.unit_price;
+        }
         const discount = item.discount_percent
           ? (itemTotal * item.discount_percent) / 100
           : 0;
@@ -1066,9 +1509,13 @@ export function useUpdatePOItem() {
 
         updateData = {
           ...updateData,
-          discount_amount: discount,
-          tax_amount: itemTax,
-          total_amount: taxableAmount + itemTax,
+          discount_amount: Math.round(discount),
+          tax_amount: Math.round(itemTax),
+          total_amount: Math.round(taxableAmount + itemTax),
+          // Update pricing mode and weight tracking
+          pricing_mode: item.pricing_mode || 'per_piece',
+          calculated_weight: item.calculated_weight || null,
+          actual_weight: item.actual_weight || null,
         };
       }
 
@@ -1099,7 +1546,7 @@ export function useUpdatePOItem() {
  */
 export function useRemovePOItem() {
   const queryClient = useQueryClient();
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useMutation({
     mutationFn: async ({ id, poId }: { id: string; poId: string }) => {
@@ -1137,15 +1584,15 @@ async function updatePOTotals(
     .eq("po_id", poId);
 
   if (items) {
-    const subtotal = items.reduce(
+    const subtotal = Math.round(items.reduce(
       (sum, item) => sum + (item.total_amount - (item.tax_amount || 0)),
       0
-    );
-    const taxAmount = items.reduce(
+    ));
+    const taxAmount = Math.round(items.reduce(
       (sum, item) => sum + (item.tax_amount || 0),
       0
-    );
-    const totalAmount = subtotal + taxAmount;
+    ));
+    const totalAmount = Math.round(subtotal + taxAmount);
 
     await supabase
       .from("purchase_orders")
@@ -1164,7 +1611,7 @@ async function updatePOTotals(
  * Updates the advance_paid field and marks payment details
  */
 export function useRecordAdvancePayment() {
-  const supabase = createClient();
+  const supabase = createClient() as any;
   const queryClient = useQueryClient();
 
   return useMutation({
@@ -1216,7 +1663,7 @@ export function useDeliveries(
   siteId: string | undefined,
   poId?: string | null
 ) {
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useQuery({
     queryKey: ["deliveries", siteId, poId],
@@ -1256,7 +1703,7 @@ export function useDeliveries(
  * Fetch a single delivery by ID
  */
 export function useDelivery(id: string | undefined) {
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useQuery({
     queryKey: ["delivery", id],
@@ -1292,17 +1739,20 @@ export function useDelivery(id: string | undefined) {
  */
 export function useRecordDelivery() {
   const queryClient = useQueryClient();
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useMutation({
+    retry: false, // Not idempotent - creates stock and expenses
     mutationFn: async (data: DeliveryFormData) => {
       // Ensure fresh session before mutation
       await ensureFreshSession();
 
-      // Generate GRN number
-      const timestamp = Date.now().toString(36).toUpperCase();
-      const random = Math.random().toString(36).substring(2, 6).toUpperCase();
-      const grnNumber = `GRN-${timestamp}-${random}`;
+      // Generate GRN number using UUID for collision resistance
+      const generateGrn = () => {
+        const uuid = crypto.randomUUID().replace(/-/g, '').substring(0, 12).toUpperCase();
+        return `GRN-${uuid}`;
+      };
+      let grnNumber = generateGrn();
 
       // Validate and get vendor_id - it's required in the database
       let vendorId = data.vendor_id && data.vendor_id.trim() !== "" ? data.vendor_id : null;
@@ -1329,12 +1779,22 @@ export function useRecordDelivery() {
       const locationId = data.location_id && data.location_id.trim() !== "" ? data.location_id : null;
 
       // Get current user for tracking who recorded the delivery
-      const { data: { user } } = await supabase.auth.getUser();
+      // IMPORTANT: recorded_by references auth.users(id), so use auth user ID directly
+      let authUserId: string | null = null;
+      try {
+        const { data: { user: authUser } } = await supabase.auth.getUser();
+        console.log("[useRecordDelivery] Auth user:", authUser?.id);
+        if (authUser?.id) {
+          authUserId = authUser.id;  // Use auth user ID directly for recorded_by
+        }
+      } catch (userError) {
+        console.warn("[useRecordDelivery] Could not fetch user:", userError);
+      }
 
       // Build the insert payload
-      // Set requires_verification=false and verification_status='verified' to:
-      // 1. Prevent the notification trigger from firing (it has a bug with site_id column)
-      // 2. Mark delivery as already verified since we're recording a completed delivery
+      // Set requires_verification=true and verification_status='pending' to:
+      // 1. Allow deliveries to appear in "Pending Verification" tab for engineer review
+      // 2. Enable the delivery verification workflow before stock is finalized
       const deliveryPayload = {
         po_id: data.po_id || null,
         site_id: data.site_id,
@@ -1343,15 +1803,15 @@ export function useRecordDelivery() {
         grn_number: grnNumber,
         delivery_date: data.delivery_date,
         delivery_status: "delivered",
-        verification_status: "verified",
-        requires_verification: false,
+        verification_status: "pending",
+        requires_verification: true,
         challan_number: data.challan_number || null,
         challan_date: data.challan_date || null,
         vehicle_number: data.vehicle_number || null,
         driver_name: data.driver_name || null,
         driver_phone: data.driver_phone || null,
         delivery_photos: data.delivery_photos && data.delivery_photos.length > 0 ? JSON.stringify(data.delivery_photos) : null,
-        recorded_by: user?.id || null,
+        recorded_by: authUserId,  // References auth.users(id)
         recorded_at: new Date().toISOString(),
         notes: data.notes || null,
       };
@@ -1359,21 +1819,50 @@ export function useRecordDelivery() {
       // Debug logging
       console.log("[useRecordDelivery] Inserting delivery with payload:", deliveryPayload);
 
-      const { data: delivery, error: deliveryError } = await (
-        supabase.from("deliveries") as any
-      )
-        .insert(deliveryPayload)
-        .select()
-        .single();
+      // Insert with retry logic for GRN collision (409 conflict)
+      const MAX_RETRIES = 3;
+      let delivery = null;
+      let lastError = null;
 
-      if (deliveryError) {
-        console.error("[useRecordDelivery] Delivery insert error:", deliveryError);
-        throw deliveryError;
+      for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+        // Regenerate GRN on retry
+        if (attempt > 0) {
+          deliveryPayload.grn_number = generateGrn();
+          console.log(`[useRecordDelivery] Retry ${attempt} with new GRN:`, deliveryPayload.grn_number);
+        }
+
+        const { data, error } = await (
+          supabase.from("deliveries") as any
+        )
+          .insert(deliveryPayload)
+          .select()
+          .single();
+
+        if (!error) {
+          delivery = data;
+          break;
+        }
+
+        // Only retry on unique constraint violation (409/23505)
+        if (error.code === '23505' || error.message?.includes('duplicate') || error.message?.includes('unique')) {
+          console.warn(`[useRecordDelivery] GRN collision on attempt ${attempt + 1}, retrying...`);
+          lastError = error;
+          continue;
+        }
+
+        // For other errors, throw immediately
+        console.error("[useRecordDelivery] Delivery insert error:", error);
+        throw error;
+      }
+
+      if (!delivery) {
+        console.error("[useRecordDelivery] Failed after retries:", lastError);
+        throw lastError || new Error('Failed to create delivery after retries');
       }
 
       // Insert delivery items
       // Handle empty strings as null for UUID fields
-      const deliveryItems = data.items.map((item) => ({
+      const deliveryItems = data.items.map((item: any) => ({
         delivery_id: delivery.id,
         po_item_id: item.po_item_id || null,
         material_id: item.material_id,
@@ -1429,10 +1918,10 @@ export function useRecordDelivery() {
 
         if (poItems) {
           const allDelivered = poItems.every(
-            (item) => (item.received_qty ?? 0) >= item.quantity
+            (item: any) => (item.received_qty ?? 0) >= item.quantity
           );
           const someDelivered = poItems.some(
-            (item) => (item.received_qty ?? 0) > 0
+            (item: any) => (item.received_qty ?? 0) > 0
           );
 
           const newStatus = allDelivered
@@ -1467,6 +1956,17 @@ export function useRecordDelivery() {
                   .single();
 
                 if (po) {
+                  // Check if expense already exists for this PO (prevent duplicates)
+                  const { data: existingExpense } = await (supabase as any)
+                    .from("material_purchase_expenses")
+                    .select("id, ref_code")
+                    .eq("purchase_order_id", data.po_id)
+                    .maybeSingle();
+
+                  if (existingExpense) {
+                    console.log("[useRecordDelivery] Material expense already exists for PO:", existingExpense.ref_code);
+                    // Skip creation, expense already exists
+                  } else {
                   // Check if PO is a group stock purchase
                   // Parse internal_notes if it's a JSON string
                   let parsedNotes: { is_group_stock?: boolean; site_group_id?: string; group_id?: string } | null = null;
@@ -1493,12 +1993,9 @@ export function useRecordDelivery() {
                     "generate_material_purchase_reference"
                   );
 
-                  // Calculate total from ORDERED quantity (user choice)
-                  const itemsTotal = (po.items || []).reduce(
-                    (sum: number, item: any) => sum + (item.quantity * item.unit_price),
-                    0
-                  );
-                  const totalAmount = itemsTotal + (po.transport_cost || 0);
+                  // Use PO's total_amount directly (already includes subtotal + tax + transport)
+                  // This ensures the expense matches the PO amount exactly
+                  const totalAmount = po.total_amount || 0;
 
                   // Calculate total quantity for batch tracking (for group stock)
                   const totalQuantity = (po.items || []).reduce(
@@ -1522,7 +2019,7 @@ export function useRecordDelivery() {
                     transport_cost: po.transport_cost || 0,
                     status: "recorded", // Use "recorded" for both group stock and own site
                     is_paid: false,
-                    created_by: user?.id,
+                    created_by: authUserId,  // References auth.users(id)
                     notes: isGroupStock
                       ? `Group stock batch from PO ${po.po_number}`
                       : `Auto-created from PO ${po.po_number}`,
@@ -1558,6 +2055,33 @@ export function useRecordDelivery() {
                       total_amount: expense.total_amount,
                     });
 
+                    // FIX: Backfill batch_code on stock_inventory for prior verified deliveries
+                    // In the two-step flow, partial deliveries may have been verified and created
+                    // stock records BEFORE this expense existed. Now update them with batch_code.
+                    if (isGroupStock && expense.ref_code) {
+                      try {
+                        for (const item of po.items || []) {
+                          let batchUpdateQuery = (supabase as any)
+                            .from("stock_inventory")
+                            .update({ batch_code: expense.ref_code, updated_at: new Date().toISOString() })
+                            .eq("site_id", po.site_id)
+                            .eq("material_id", item.material_id)
+                            .is("batch_code", null); // Only update if not already set
+
+                          if (item.brand_id) {
+                            batchUpdateQuery = batchUpdateQuery.eq("brand_id", item.brand_id);
+                          } else {
+                            batchUpdateQuery = batchUpdateQuery.is("brand_id", null);
+                          }
+
+                          await batchUpdateQuery;
+                        }
+                        console.log("[useRecordDelivery] Backfilled stock_inventory batch_code:", expense.ref_code);
+                      } catch (batchErr) {
+                        console.warn("[useRecordDelivery] Error backfilling stock batch_code (non-fatal):", batchErr);
+                      }
+                    }
+
                     if (po.items?.length > 0) {
                       // Create expense items from PO items (ordered quantity)
                       const expenseItems = po.items.map((item: any) => ({
@@ -1576,9 +2100,11 @@ export function useRecordDelivery() {
                       console.warn("Failed to create material expense items:", itemsInsertError);
                     }
 
-                    // For group stock, also populate group_stock_inventory for backward compatibility
-                    // with the Weekly Usage Report dialog
+                    // For group stock, also populate group_stock_inventory and group_stock_transactions
+                    // This auto-pushes to Inter-Site Settlement immediately on delivery
                     if (isGroupStock && siteGroupId) {
+                      const transactionsToInsert = [];
+
                       for (const item of po.items) {
                         try {
                           // Check if inventory record exists
@@ -1596,8 +2122,10 @@ export function useRecordDelivery() {
                           }
 
                           const { data: existingInv } = await invQuery.maybeSingle();
+                          let inventoryId: string;
 
                           if (existingInv) {
+                            inventoryId = existingInv.id;
                             // Update existing inventory - add quantity and recalculate avg cost
                             const newQty = Number(existingInv.current_qty) + Number(item.quantity);
                             const newAvgCost = newQty > 0
@@ -1617,7 +2145,7 @@ export function useRecordDelivery() {
                               .eq("id", existingInv.id);
                           } else {
                             // Insert new inventory record
-                            await (supabase as any)
+                            const { data: newInv, error: invInsertError } = await (supabase as any)
                               .from("group_stock_inventory")
                               .insert({
                                 site_group_id: siteGroupId,
@@ -1627,16 +2155,58 @@ export function useRecordDelivery() {
                                 avg_unit_cost: Number(item.unit_price),
                                 last_received_date: new Date().toISOString().split("T")[0],
                                 batch_code: expense.ref_code, // Store batch code for usage tracking
-                              });
+                              })
+                              .select("id")
+                              .single();
+
+                            if (invInsertError) {
+                              console.warn("Failed to insert group_stock_inventory:", invInsertError);
+                              continue;
+                            }
+                            inventoryId = newInv.id;
                           }
+
+                          // Prepare transaction record for this item
+                          const unitCost = Number(item.unit_price) || 0;
+                          const totalCost = Number(item.quantity) * unitCost;
+
+                          transactionsToInsert.push({
+                            site_group_id: siteGroupId,
+                            inventory_id: inventoryId,
+                            transaction_type: "purchase",
+                            transaction_date: po.order_date || new Date().toISOString().split("T")[0],
+                            material_id: item.material_id,
+                            brand_id: item.brand_id || null,
+                            quantity: Number(item.quantity),
+                            unit_cost: unitCost,
+                            total_cost: totalCost,
+                            payment_source_site_id: po.site_id,
+                            batch_ref_code: expense.ref_code,
+                            reference_id: expense.id,
+                            notes: `Auto-created from delivery of PO ${po.po_number}`,
+                          });
                         } catch (invError) {
                           console.warn("Failed to update group_stock_inventory:", invError);
+                        }
+                      }
+
+                      // Insert all purchase transactions
+                      if (transactionsToInsert.length > 0) {
+                        const { error: txInsertError } = await (supabase as any)
+                          .from("group_stock_transactions")
+                          .insert(transactionsToInsert);
+
+                        if (txInsertError) {
+                          console.warn("[useRecordDelivery] Failed to create group_stock_transactions:", txInsertError);
+                        } else {
+                          console.log("[useRecordDelivery] Auto-pushed to Inter-Site Settlement:", transactionsToInsert.length, "transactions");
                         }
                       }
                     }
                   }
                 }
                 }
+                  } // end else (expense doesn't exist)
               } catch (autoCreateError) {
                 // Don't fail the delivery if material expense creation fails
                 console.warn("Failed to auto-create material expense:", autoCreateError);
@@ -1667,12 +2237,551 @@ export function useRecordDelivery() {
       queryClient.invalidateQueries({
         queryKey: queryKeys.batchUsage.all,
       });
+      // Invalidate group stock sync status (for push to settlement button)
+      queryClient.invalidateQueries({
+        queryKey: ["group-stock-pos-sync-status"],
+      });
+      // Invalidate group stock inventory (for inventory page Group Purchases tab)
+      queryClient.invalidateQueries({
+        queryKey: ["group-stock-inventory"],
+      });
       if (variables.po_id) {
         queryClient.invalidateQueries({
           queryKey: ["purchase-orders", "detail", variables.po_id],
         });
         queryClient.invalidateQueries({
           queryKey: queryKeys.purchaseOrders.bySite(variables.site_id),
+        });
+        // Invalidate sync status for this specific PO
+        queryClient.invalidateQueries({
+          queryKey: ["po-batch-sync-status", variables.po_id],
+        });
+      }
+    },
+  });
+}
+
+/**
+ * Record and Verify Delivery in a single step
+ * This hook combines the recording and verification into one operation,
+ * creating delivery + expense + stock in a single step.
+ *
+ * Key differences from useRecordDelivery:
+ * - Sets verification_status to "verified" (or "disputed" if hasIssues)
+ * - Creates stock inventory immediately (no separate verification step needed)
+ * - Requires at least one photo (serves dual purpose)
+ */
+export function useRecordAndVerifyDelivery() {
+  const queryClient = useQueryClient();
+  const supabase = createClient() as any;
+
+  return useMutation({
+    retry: false, // Not idempotent - creates stock and expenses
+    mutationFn: async (data: RecordAndVerifyDeliveryFormData) => {
+      // Ensure fresh session before mutation
+      await ensureFreshSession();
+
+      // Validate photos (required for unified flow, optional in dev for testing)
+      if ((!data.photos || data.photos.length === 0) && process.env.NODE_ENV === "production") {
+        throw new Error("At least one photo is required for Record & Verify");
+      }
+
+      // Generate GRN number using UUID for collision resistance
+      const generateGrn = () => {
+        const uuid = crypto.randomUUID().replace(/-/g, '').substring(0, 12).toUpperCase();
+        return `GRN-${uuid}`;
+      };
+      let grnNumber = generateGrn();
+
+      // Validate and get vendor_id - it's required in the database
+      let vendorId = data.vendor_id && data.vendor_id.trim() !== "" ? data.vendor_id : null;
+
+      // If vendor_id is missing but we have a PO, fetch it from the PO
+      if (!vendorId && data.po_id) {
+        const { data: po } = await supabase
+          .from("purchase_orders")
+          .select("vendor_id")
+          .eq("id", data.po_id)
+          .single();
+
+        if (po?.vendor_id) {
+          vendorId = po.vendor_id;
+        }
+      }
+
+      // vendor_id is required - throw error if still missing
+      if (!vendorId) {
+        throw new Error("Vendor ID is required for delivery. Please ensure the PO has a vendor.");
+      }
+
+      // Handle empty strings as null for optional UUID fields
+      const locationId = data.location_id && data.location_id.trim() !== "" ? data.location_id : null;
+
+      // Get current user for tracking who recorded and verified the delivery
+      // IMPORTANT: recorded_by references auth.users(id), engineer_verified_by references public.users(id)
+      let authUserId: string | null = null;  // For recorded_by (auth.users.id)
+      let publicUserId: string | null = null;  // For engineer_verified_by (public.users.id)
+      try {
+        const { data: { user: authUser } } = await supabase.auth.getUser();
+        console.log("[useRecordAndVerifyDelivery] Auth user:", authUser?.id);
+        if (authUser?.id) {
+          authUserId = authUser.id;  // Use auth user ID for recorded_by
+
+          const { data: dbUser, error: userLookupError } = await supabase
+            .from("users")
+            .select("id")
+            .eq("auth_id", authUser.id)
+            .maybeSingle();
+
+          if (userLookupError) {
+            console.warn("[useRecordAndVerifyDelivery] User lookup error:", userLookupError);
+          }
+
+          // Use public users ID for engineer_verified_by
+          if (dbUser?.id) {
+            publicUserId = dbUser.id;
+            console.log("[useRecordAndVerifyDelivery] Found user in DB:", publicUserId);
+          } else {
+            console.warn("[useRecordAndVerifyDelivery] User not found in users table for auth_id:", authUser.id);
+          }
+        }
+      } catch (userError) {
+        console.warn("[useRecordAndVerifyDelivery] Could not fetch user:", userError);
+      }
+      const now = new Date().toISOString();
+
+      // Determine verification status based on whether issues were flagged
+      const verificationStatus = data.hasIssues ? "disputed" : "verified";
+
+      // Build the insert payload - set both recording AND verification fields
+      const deliveryPayload = {
+        po_id: data.po_id || null,
+        site_id: data.site_id,
+        vendor_id: vendorId,
+        location_id: locationId,
+        grn_number: grnNumber,
+        delivery_date: data.delivery_date,
+        delivery_status: "delivered",
+        // KEY CHANGE: Set verified status immediately (or disputed if issues)
+        verification_status: verificationStatus,
+        requires_verification: false, // Already verified
+        // Recording fields
+        delivery_photos: data.photos.length > 0 ? JSON.stringify(data.photos) : null,
+        recorded_by: authUserId,  // References auth.users(id)
+        recorded_at: now,
+        // Verification fields (set simultaneously)
+        verification_photos: data.photos, // Same photos serve both purposes
+        verification_notes: data.notes || null,
+        engineer_verified_by: publicUserId,  // References public.users(id)
+        engineer_verified_at: now,
+        discrepancies: data.issues && data.issues.length > 0 ? JSON.stringify(data.issues) : null,
+        // Transport details
+        challan_number: data.challan_number || null,
+        challan_date: data.challan_date || null,
+        challan_url: data.challan_url || null,
+        vehicle_number: data.vehicle_number || null,
+        driver_name: data.driver_name || null,
+        driver_phone: data.driver_phone || null,
+        notes: data.notes || null,
+      };
+
+      console.log("[useRecordAndVerifyDelivery] Inserting delivery with payload:", deliveryPayload);
+
+      // Insert with retry logic for GRN collision (409 conflict)
+      const MAX_RETRIES = 3;
+      let delivery = null;
+      let lastError = null;
+
+      for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+        // Regenerate GRN on retry
+        if (attempt > 0) {
+          deliveryPayload.grn_number = generateGrn();
+          console.log(`[useRecordAndVerifyDelivery] Retry ${attempt} with new GRN:`, deliveryPayload.grn_number);
+        }
+
+        const { data, error } = await (
+          supabase.from("deliveries") as any
+        )
+          .insert(deliveryPayload)
+          .select()
+          .single();
+
+        if (!error) {
+          delivery = data;
+          break;
+        }
+
+        // Only retry on unique constraint violation (409/23505)
+        if (error.code === '23505' || error.message?.includes('duplicate') || error.message?.includes('unique')) {
+          console.warn(`[useRecordAndVerifyDelivery] GRN collision on attempt ${attempt + 1}, retrying...`);
+          lastError = error;
+          continue;
+        }
+
+        // For other errors, throw immediately
+        console.error("[useRecordAndVerifyDelivery] Delivery insert error:", error);
+        throw error;
+      }
+
+      if (!delivery) {
+        console.error("[useRecordAndVerifyDelivery] Failed after retries:", lastError);
+        throw lastError || new Error('Failed to create delivery after retries');
+      }
+
+      // Insert delivery items
+      const deliveryItems = data.items.map((item: any) => ({
+        delivery_id: delivery.id,
+        po_item_id: item.po_item_id || null,
+        material_id: item.material_id,
+        brand_id: item.brand_id || null,
+        ordered_qty: item.ordered_qty,
+        received_qty: item.received_qty,
+        accepted_qty: item.accepted_qty ?? item.received_qty,
+        rejected_qty: item.rejected_qty ?? 0,
+        rejection_reason: item.rejection_reason || null,
+        unit_price: item.unit_price,
+        notes: item.notes || null,
+      }));
+
+      console.log("[useRecordAndVerifyDelivery] Inserting delivery items:", deliveryItems);
+
+      const { error: itemsError } = await supabase
+        .from("delivery_items")
+        .insert(deliveryItems);
+
+      if (itemsError) {
+        console.error("[useRecordAndVerifyDelivery] Delivery items insert error:", itemsError);
+        throw itemsError;
+      }
+
+      // Update PO item received quantities (same as useRecordDelivery)
+      if (data.po_id) {
+        for (const item of data.items) {
+          if (item.po_item_id) {
+            const { data: poItem } = await supabase
+              .from("purchase_order_items")
+              .select("received_qty")
+              .eq("id", item.po_item_id)
+              .single();
+
+            if (poItem) {
+              await supabase
+                .from("purchase_order_items")
+                .update({
+                  received_qty:
+                    (poItem.received_qty ?? 0) +
+                    (item.accepted_qty ?? item.received_qty),
+                })
+                .eq("id", item.po_item_id);
+            }
+          }
+        }
+
+        // Check if PO is fully delivered
+        const { data: poItems } = await supabase
+          .from("purchase_order_items")
+          .select("quantity, received_qty")
+          .eq("po_id", data.po_id);
+
+        if (poItems) {
+          const allDelivered = poItems.every(
+            (item: any) => (item.received_qty ?? 0) >= item.quantity
+          );
+          const someDelivered = poItems.some(
+            (item: any) => (item.received_qty ?? 0) > 0
+          );
+
+          const newStatus = allDelivered
+            ? "delivered"
+            : someDelivered
+            ? "partial_delivered"
+            : undefined;
+
+          if (newStatus) {
+            await supabase
+              .from("purchase_orders")
+              .update({
+                status: newStatus,
+                updated_at: now,
+              })
+              .eq("id", data.po_id);
+
+            // When PO becomes "delivered", auto-create Material Purchase Expense
+            if (newStatus === "delivered") {
+              try {
+                // Get full PO details with vendor and items
+                const { data: po } = await supabase
+                  .from("purchase_orders")
+                  .select(`
+                    *,
+                    vendor:vendors(id, name),
+                    items:purchase_order_items(
+                      id, material_id, brand_id, quantity, unit_price, tax_rate
+                    )
+                  `)
+                  .eq("id", data.po_id)
+                  .single();
+
+                if (po) {
+                  // Check if expense already exists for this PO (prevent duplicates)
+                  const { data: existingExpense } = await (supabase as any)
+                    .from("material_purchase_expenses")
+                    .select("id, ref_code")
+                    .eq("purchase_order_id", data.po_id)
+                    .maybeSingle();
+
+                  if (!existingExpense) {
+                    // Parse internal_notes if it's a JSON string
+                    let parsedNotes: { is_group_stock?: boolean; site_group_id?: string; group_id?: string } | null = null;
+                    if (po.internal_notes) {
+                      try {
+                        parsedNotes = typeof po.internal_notes === "string"
+                          ? JSON.parse(po.internal_notes)
+                          : po.internal_notes;
+                      } catch {
+                        // Ignore parse errors
+                      }
+                    }
+
+                    const isGroupStock = parsedNotes?.is_group_stock === true;
+                    const siteGroupId = parsedNotes?.site_group_id || parsedNotes?.group_id || null;
+                    const purchaseType = isGroupStock ? "group_stock" : "own_site";
+
+                    // Generate expense reference code
+                    const { data: generatedRefCode } = await (supabase as any).rpc(
+                      "generate_material_purchase_reference"
+                    );
+                    const refCode = generatedRefCode || `MPE-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 5).toUpperCase()}`;
+
+                    // Calculate total amount from items
+                    let totalAmount = 0;
+                    let totalQuantity = 0;
+                    for (const item of po.items || []) {
+                      const itemSubtotal = (item.quantity || 0) * (item.unit_price || 0);
+                      const itemTax = item.tax_rate ? itemSubtotal * (item.tax_rate / 100) : 0;
+                      totalAmount += itemSubtotal + itemTax;
+                      totalQuantity += Number(item.quantity || 0);
+                    }
+
+                    // Create the expense record with group stock fields if applicable
+                    const { data: expense, error: expenseError } = await (supabase as any)
+                      .from("material_purchase_expenses")
+                      .insert({
+                        ref_code: refCode,
+                        site_id: data.site_id,
+                        vendor_id: vendorId,
+                        purchase_order_id: data.po_id,
+                        purchase_type: purchaseType,
+                        purchase_date: data.delivery_date,
+                        total_amount: totalAmount,
+                        bill_url: data.challan_url || null,
+                        notes: `Auto-created from PO ${po.po_number}`,
+                        created_by: authUserId,
+                        // Group stock specific fields
+                        paying_site_id: isGroupStock ? data.site_id : null,
+                        site_group_id: isGroupStock ? siteGroupId : null,
+                        original_qty: isGroupStock ? totalQuantity : null,
+                        remaining_qty: isGroupStock ? totalQuantity : null,
+                        status: "recorded",
+                      })
+                      .select()
+                      .single();
+
+                    if (expenseError) {
+                      console.error("[useRecordAndVerifyDelivery] Failed to create expense:", expenseError);
+                    } else if (expense) {
+                      console.log("[useRecordAndVerifyDelivery] Material expense created:", refCode);
+
+                      // FIX: Update stock_inventory records (created by DB trigger) with batch_code
+                      // The trigger fires on delivery_items INSERT and creates stock WITHOUT batch_code
+                      // because the expense (which provides the ref_code) doesn't exist yet at trigger time.
+                      if (isGroupStock && refCode) {
+                        try {
+                          for (const item of po.items || []) {
+                            let batchUpdateQuery = (supabase as any)
+                              .from("stock_inventory")
+                              .update({ batch_code: refCode, updated_at: new Date().toISOString() })
+                              .eq("site_id", data.site_id)
+                              .eq("material_id", item.material_id)
+                              .is("batch_code", null); // Only update if not already set
+
+                            if (item.brand_id) {
+                              batchUpdateQuery = batchUpdateQuery.eq("brand_id", item.brand_id);
+                            } else {
+                              batchUpdateQuery = batchUpdateQuery.is("brand_id", null);
+                            }
+
+                            await batchUpdateQuery;
+                          }
+                          console.log("[useRecordAndVerifyDelivery] Updated stock_inventory batch_code:", refCode);
+                        } catch (batchErr) {
+                          console.warn("[useRecordAndVerifyDelivery] Error updating stock batch_code (non-fatal):", batchErr);
+                        }
+                      }
+
+                      // Create expense items
+                      if (po.items?.length > 0) {
+                        const expenseItems = po.items.map((item: any) => ({
+                          purchase_expense_id: expense.id,
+                          material_id: item.material_id,
+                          brand_id: item.brand_id || null,
+                          quantity: item.quantity,
+                          unit_price: item.unit_price,
+                        }));
+
+                        const { error: itemsInsertError } = await (supabase as any)
+                          .from("material_purchase_expense_items")
+                          .insert(expenseItems);
+
+                        if (itemsInsertError) {
+                          console.warn("[useRecordAndVerifyDelivery] Failed to create expense items:", itemsInsertError);
+                        }
+
+                        // For group stock, auto-push to Inter-Site Settlement
+                        if (isGroupStock && siteGroupId) {
+                          const transactionsToInsert = [];
+
+                          for (const item of po.items) {
+                            try {
+                              // Check if inventory record exists
+                              let invQuery = (supabase as any)
+                                .from("group_stock_inventory")
+                                .select("id, current_qty, avg_unit_cost")
+                                .eq("site_group_id", siteGroupId)
+                                .eq("material_id", item.material_id);
+
+                              if (item.brand_id) {
+                                invQuery = invQuery.eq("brand_id", item.brand_id);
+                              } else {
+                                invQuery = invQuery.is("brand_id", null);
+                              }
+
+                              const { data: existingInv } = await invQuery.maybeSingle();
+                              let inventoryId: string;
+
+                              if (existingInv) {
+                                inventoryId = existingInv.id;
+                                const newQty = Number(existingInv.current_qty) + Number(item.quantity);
+                                const newAvgCost = newQty > 0
+                                  ? ((Number(existingInv.current_qty) * Number(existingInv.avg_unit_cost || 0)) +
+                                     (Number(item.quantity) * Number(item.unit_price))) / newQty
+                                  : Number(item.unit_price);
+
+                                await (supabase as any)
+                                  .from("group_stock_inventory")
+                                  .update({
+                                    current_qty: newQty,
+                                    avg_unit_cost: newAvgCost,
+                                    last_received_date: new Date().toISOString().split("T")[0],
+                                    updated_at: new Date().toISOString(),
+                                    batch_code: refCode,
+                                  })
+                                  .eq("id", existingInv.id);
+                              } else {
+                                const { data: newInv, error: invInsertError } = await (supabase as any)
+                                  .from("group_stock_inventory")
+                                  .insert({
+                                    site_group_id: siteGroupId,
+                                    material_id: item.material_id,
+                                    brand_id: item.brand_id || null,
+                                    current_qty: Number(item.quantity),
+                                    avg_unit_cost: Number(item.unit_price),
+                                    last_received_date: new Date().toISOString().split("T")[0],
+                                    batch_code: refCode,
+                                  })
+                                  .select("id")
+                                  .single();
+
+                                if (invInsertError) {
+                                  console.warn("[useRecordAndVerifyDelivery] Failed to insert inventory:", invInsertError);
+                                  continue;
+                                }
+                                inventoryId = newInv.id;
+                              }
+
+                              const unitCost = Number(item.unit_price) || 0;
+                              const totalCost = Number(item.quantity) * unitCost;
+
+                              transactionsToInsert.push({
+                                site_group_id: siteGroupId,
+                                inventory_id: inventoryId,
+                                transaction_type: "purchase",
+                                transaction_date: po.order_date || new Date().toISOString().split("T")[0],
+                                material_id: item.material_id,
+                                brand_id: item.brand_id || null,
+                                quantity: Number(item.quantity),
+                                unit_cost: unitCost,
+                                total_cost: totalCost,
+                                payment_source_site_id: data.site_id,
+                                batch_ref_code: refCode,
+                                reference_id: expense.id,
+                                notes: `Auto-created from delivery of PO ${po.po_number}`,
+                              });
+                            } catch (invError) {
+                              console.warn("[useRecordAndVerifyDelivery] Inventory error:", invError);
+                            }
+                          }
+
+                          if (transactionsToInsert.length > 0) {
+                            const { error: txInsertError } = await (supabase as any)
+                              .from("group_stock_transactions")
+                              .insert(transactionsToInsert);
+
+                            if (txInsertError) {
+                              console.warn("[useRecordAndVerifyDelivery] Failed to create transactions:", txInsertError);
+                            } else {
+                              console.log("[useRecordAndVerifyDelivery] Auto-pushed to Inter-Site Settlement:", transactionsToInsert.length, "transactions");
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              } catch (expenseErr) {
+                console.error("[useRecordAndVerifyDelivery] Error creating expense (non-fatal):", expenseErr);
+                // Don't fail the whole transaction for expense creation failure
+              }
+            }
+          }
+        }
+      }
+
+      // NOTE: Stock creation is handled by database trigger "trg_update_stock_on_delivery"
+      // which fires on delivery_items INSERT when verification_status = 'verified'
+      // or requires_verification = false. DO NOT call createStockFromDeliveryItems() here
+      // as it would cause DUPLICATE stock entries (10 bags becomes 20 bags).
+      if (verificationStatus === "verified") {
+        console.log("[useRecordAndVerifyDelivery] Stock inventory will be created by DB trigger");
+      } else {
+        console.log("[useRecordAndVerifyDelivery] Disputed delivery - stock created by trigger but may need review");
+      }
+
+      return { delivery, grnNumber, verificationStatus };
+    },
+    onSuccess: (result, variables) => {
+      // Invalidate all relevant queries
+      queryClient.invalidateQueries({ queryKey: queryKeys.deliveries.all });
+      queryClient.invalidateQueries({ queryKey: queryKeys.materialStock.all });
+      queryClient.invalidateQueries({ queryKey: queryKeys.purchaseOrders.all });
+      // Invalidate material purchases (for Inter-Site Settlement)
+      queryClient.invalidateQueries({ queryKey: queryKeys.materialPurchases.all });
+      queryClient.invalidateQueries({ queryKey: queryKeys.batchUsage.all });
+      // Invalidate group stock sync status (for push to settlement button)
+      queryClient.invalidateQueries({ queryKey: ["group-stock-pos-sync-status"] });
+      // Invalidate group stock inventory (for inventory page Group Purchases tab)
+      queryClient.invalidateQueries({ queryKey: ["group-stock-inventory"] });
+
+      if (variables.po_id) {
+        queryClient.invalidateQueries({
+          queryKey: ["purchase-orders", "detail", variables.po_id],
+        });
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.purchaseOrders.bySite(variables.site_id),
+        });
+        // Invalidate sync status for this specific PO
+        queryClient.invalidateQueries({
+          queryKey: ["po-batch-sync-status", variables.po_id],
         });
       }
     },
@@ -1684,7 +2793,7 @@ export function useRecordDelivery() {
  */
 export function useVerifyDelivery() {
   const queryClient = useQueryClient();
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useMutation({
     mutationFn: async ({
@@ -1729,7 +2838,7 @@ export function useVerifyDelivery() {
  */
 export function useUpdateDeliveryInvoice() {
   const queryClient = useQueryClient();
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useMutation({
     mutationFn: async ({
@@ -1781,7 +2890,7 @@ export function useUpdateDeliveryInvoice() {
  * Get PO summary counts by status
  */
 export function usePOSummary(siteId: string | undefined) {
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useQuery({
     queryKey: siteId
@@ -1808,7 +2917,7 @@ export function usePOSummary(siteId: string | undefined) {
         total: data.length,
       };
 
-      data.forEach((po) => {
+      data.forEach((po: any) => {
         summary[po.status as POStatus]++;
       });
 
@@ -1822,7 +2931,7 @@ export function usePOSummary(siteId: string | undefined) {
  * Get recent deliveries
  */
 export function useRecentDeliveries(siteId: string | undefined, limit = 5) {
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useQuery({
     queryKey: ["recentDeliveries", siteId, limit],
@@ -1852,7 +2961,7 @@ export function useRecentDeliveries(siteId: string | undefined, limit = 5) {
  * Get pending deliveries count
  */
 export function usePendingDeliveriesCount(siteId: string | undefined) {
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useQuery({
     queryKey: ["pendingDeliveriesCount", siteId],
@@ -1877,51 +2986,84 @@ export function usePendingDeliveriesCount(siteId: string | undefined) {
 // ============================================
 
 /**
- * Batch check sync status for multiple Group Stock POs
- * Returns a map of poId -> sync status
+ * Settlement status info for a Group Stock PO
+ */
+export interface GroupStockSettlementInfo {
+  isSynced: boolean;
+  batchRefCode: string | null;
+  totalAmount: number;
+  settledAmount: number;
+  usedByOthersAmount: number;
+}
+
+/**
+ * Batch check sync status and settlement info for multiple Group Stock POs
+ * Returns a map of poId -> settlement info (sync status, settled amounts, etc.)
  */
 export function useGroupStockPOsSyncStatus(poIds: string[]) {
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useQuery({
     queryKey: ["group-stock-pos-sync-status", poIds.sort().join(",")],
-    queryFn: async () => {
-      if (poIds.length === 0) return new Map<string, boolean>();
+    queryFn: async (): Promise<Map<string, GroupStockSettlementInfo>> => {
+      if (poIds.length === 0) return new Map<string, GroupStockSettlementInfo>();
 
       // Get all group stock expenses for these POs
+      // If a material_purchase_expenses record exists with purchase_type='group_stock',
+      // the batch is already showing in Inter-Site Settlement, so consider it "synced"
       const { data: expenses } = await (supabase as any)
         .from("material_purchase_expenses")
-        .select("id, ref_code, purchase_order_id")
+        .select("id, ref_code, purchase_order_id, total_amount, paying_site_id")
         .in("purchase_order_id", poIds)
         .eq("purchase_type", "group_stock");
 
       if (!expenses || expenses.length === 0) {
-        return new Map<string, boolean>();
+        return new Map<string, GroupStockSettlementInfo>();
       }
 
-      // Get all batch ref codes
-      const batchRefCodes = expenses.map((e: any) => e.ref_code).filter(Boolean);
+      // Get ref codes for batch usage lookup
+      const refCodes = expenses.map((e: any) => e.ref_code).filter(Boolean);
 
-      if (batchRefCodes.length === 0) {
-        return new Map<string, boolean>();
+      // Get batch usage records to calculate "used by others" amount
+      let usageByBatch = new Map<string, { usedByOthersAmount: number; settledAmount: number }>();
+      if (refCodes.length > 0) {
+        const { data: usageRecords } = await (supabase as any)
+          .from("batch_usage_records")
+          .select("batch_ref_code, total_cost, is_self_use, settlement_status")
+          .in("batch_ref_code", refCodes);
+
+        if (usageRecords) {
+          for (const usage of usageRecords) {
+            const existing = usageByBatch.get(usage.batch_ref_code) || { usedByOthersAmount: 0, settledAmount: 0 };
+            const cost = Number(usage.total_cost || 0);
+            // "Used by others" = usage that is NOT self use
+            if (!usage.is_self_use) {
+              existing.usedByOthersAmount += cost;
+              // Settled = usage by others that has settlement_status = 'settled'
+              if (usage.settlement_status === "settled") {
+                existing.settledAmount += cost;
+              }
+            }
+            usageByBatch.set(usage.batch_ref_code, existing);
+          }
+        }
       }
 
-      // Check which batches have transactions
-      const { data: transactions } = await (supabase as any)
-        .from("group_stock_transactions")
-        .select("batch_ref_code")
-        .in("batch_ref_code", batchRefCodes);
+      // Build map of poId -> settlement info
+      const resultMap = new Map<string, GroupStockSettlementInfo>();
 
-      const syncedBatchCodes = new Set(transactions?.map((t: any) => t.batch_ref_code) || []);
-
-      // Build map of poId -> isSynced
-      const syncStatusMap = new Map<string, boolean>();
       for (const expense of expenses) {
-        const isSynced = syncedBatchCodes.has(expense.ref_code);
-        syncStatusMap.set(expense.purchase_order_id, isSynced);
+        const usageInfo = usageByBatch.get(expense.ref_code) || { usedByOthersAmount: 0, settledAmount: 0 };
+        resultMap.set(expense.purchase_order_id, {
+          isSynced: true,
+          batchRefCode: expense.ref_code,
+          totalAmount: Number(expense.total_amount || 0),
+          settledAmount: usageInfo.settledAmount,
+          usedByOthersAmount: usageInfo.usedByOthersAmount,
+        });
       }
 
-      return syncStatusMap;
+      return resultMap;
     },
     enabled: poIds.length > 0,
     staleTime: 30000,
@@ -1933,7 +3075,7 @@ export function useGroupStockPOsSyncStatus(poIds: string[]) {
  * Returns sync status and batch details
  */
 export function usePOBatchSyncStatus(poId: string | undefined) {
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useQuery({
     queryKey: ["po-batch-sync-status", poId],
@@ -1992,11 +3134,22 @@ export function usePOBatchSyncStatus(poId: string | undefined) {
  */
 export function usePushBatchToSettlement() {
   const queryClient = useQueryClient();
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   return useMutation({
     mutationFn: async ({ poId }: { poId: string }) => {
       await ensureFreshSession();
+
+      // Get auth user for created_by field (references auth.users)
+      let authUserId: string | null = null;
+      try {
+        const { data: { user: authUser } } = await supabase.auth.getUser();
+        if (authUser?.id) {
+          authUserId = authUser.id;
+        }
+      } catch (userError) {
+        console.warn("[usePushBatchToSettlement] Could not fetch user:", userError);
+      }
 
       // Get the PO details with items
       const { data: po, error: poError } = await supabase
@@ -2076,12 +3229,8 @@ export function usePushBatchToSettlement() {
           "generate_material_purchase_reference"
         );
 
-        // Calculate totals from PO items
-        const itemsTotal = poItems.reduce(
-          (sum: number, item: any) => sum + (item.quantity * item.unit_price),
-          0
-        );
-        const totalAmount = itemsTotal + (po.transport_cost || 0);
+        // Use PO's total_amount directly (already includes subtotal + tax + transport)
+        const totalAmount = po.total_amount || 0;
         const totalQuantity = poItems.reduce(
           (sum: number, item: any) => sum + Number(item.quantity),
           0
@@ -2103,7 +3252,7 @@ export function usePushBatchToSettlement() {
           transport_cost: po.transport_cost || 0,
           status: "recorded",
           is_paid: false,
-          created_by: user?.id,
+          created_by: authUserId,  // References auth.users(id)
           notes: `Recreated for Push to Settlement from PO ${po.po_number}`,
           paying_site_id: po.site_id,
           site_group_id: siteGroupIdFromNotes,
@@ -2366,5 +3515,118 @@ export function usePushBatchToSettlement() {
     onError: (error) => {
       console.error("Push to settlement error:", error);
     },
+  });
+}
+
+// ============================================
+// PAGINATED QUERIES
+// ============================================
+
+/**
+ * Pagination parameters for server-side pagination
+ */
+export interface POPaginationParams {
+  pageIndex: number;
+  pageSize: number;
+}
+
+/**
+ * Paginated result with total count
+ */
+export interface PaginatedPOResult {
+  data: PurchaseOrderWithDetails[];
+  totalCount: number;
+  pageCount: number;
+}
+
+/**
+ * Fetch purchase orders with server-side pagination and filtering
+ * Use this for large datasets where client-side pagination is not efficient
+ */
+export function usePaginatedPurchaseOrders(
+  siteId: string | undefined,
+  options: {
+    pagination: POPaginationParams;
+    status?: POStatus | null;
+    vendorId?: string;
+    searchTerm?: string;
+  }
+) {
+  const supabase = createClient() as any;
+  const { pagination, status, vendorId, searchTerm } = options;
+  const { pageIndex, pageSize } = pagination;
+  const offset = pageIndex * pageSize;
+
+  return useQuery({
+    queryKey: [
+      ...queryKeys.purchaseOrders.bySite(siteId || ""),
+      "paginated",
+      { pageIndex, pageSize, status, vendorId, searchTerm },
+    ],
+    queryFn: async (): Promise<PaginatedPOResult> => {
+      if (!siteId) return { data: [], totalCount: 0, pageCount: 0 };
+
+      // Build count query with filters
+      let countQuery = supabase
+        .from("purchase_orders")
+        .select("*", { count: "exact", head: true })
+        .eq("site_id", siteId);
+
+      if (status) {
+        countQuery = countQuery.eq("status", status);
+      }
+      if (vendorId) {
+        countQuery = countQuery.eq("vendor_id", vendorId);
+      }
+      if (searchTerm && searchTerm.length >= 2) {
+        countQuery = countQuery.or(
+          `po_number.ilike.%${searchTerm}%,notes.ilike.%${searchTerm}%`
+        );
+      }
+
+      const { count: totalCount, error: countError } = await countQuery;
+      if (countError) throw countError;
+
+      // Build data query with pagination
+      let dataQuery = supabase
+        .from("purchase_orders")
+        .select(
+          `
+          *,
+          vendor:vendors(id, name, phone, email),
+          items:purchase_order_items(
+            *,
+            material:materials(id, name, code, unit, weight_per_unit, weight_unit, length_per_piece, length_unit),
+            brand:material_brands(id, brand_name, variant_name)
+          )
+        `
+        )
+        .eq("site_id", siteId)
+        .range(offset, offset + pageSize - 1)
+        .order("created_at", { ascending: false });
+
+      if (status) {
+        dataQuery = dataQuery.eq("status", status);
+      }
+      if (vendorId) {
+        dataQuery = dataQuery.eq("vendor_id", vendorId);
+      }
+      if (searchTerm && searchTerm.length >= 2) {
+        dataQuery = dataQuery.or(
+          `po_number.ilike.%${searchTerm}%,notes.ilike.%${searchTerm}%`
+        );
+      }
+
+      const { data, error: dataError } = await dataQuery;
+      if (dataError) throw dataError;
+
+      return {
+        data: data as PurchaseOrderWithDetails[],
+        totalCount: totalCount || 0,
+        pageCount: Math.ceil((totalCount || 0) / pageSize),
+      };
+    },
+    enabled: !!siteId,
+    placeholderData: (previousData) => previousData, // Keep previous data while loading
   });
 }

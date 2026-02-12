@@ -165,14 +165,19 @@ class TabCoordinatorImpl implements TabCoordinator {
 
   /**
    * Notify all subscribers of a message
+   * Uses queueMicrotask to avoid blocking the main thread and prevent
+   * "[Violation] 'message' handler took Xms" warnings
    */
   private notifySubscribers(message: TabMessage): void {
-    this.subscribers.forEach((handler) => {
-      try {
-        handler(message);
-      } catch (error) {
-        console.error("[TabCoordinator] Subscriber error:", error);
-      }
+    // Defer notifications to avoid blocking the message event handler
+    queueMicrotask(() => {
+      this.subscribers.forEach((handler) => {
+        try {
+          handler(message);
+        } catch (error) {
+          console.error("[TabCoordinator] Subscriber error:", error);
+        }
+      });
     });
   }
 
@@ -237,9 +242,10 @@ export async function initTabCoordinator(): Promise<TabCoordinator> {
 
     // Wait a short time for initial leader election attempt
     // If we get the lock quickly, we'll know we're the leader
+    // Reduced to 50ms to minimize startup latency
     await Promise.race([
       leadershipPromise,
-      new Promise((resolve) => setTimeout(resolve, 100)),
+      new Promise((resolve) => setTimeout(resolve, 50)),
     ]);
 
     return coordinatorInstance;

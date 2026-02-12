@@ -24,6 +24,7 @@
     "@emotion/cache": "^11.14.0",
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.1",
+    "@google/generative-ai": "^0.24.1",
     "@mui/icons-material": "^7.3.6",
     "@mui/material": "^7.3.6",
     "@mui/material-nextjs": "^7.3.6",
@@ -44,9 +45,11 @@
     "react-date-range": "^2.0.1",
     "react-dom": "^18.3.1",
     "react-easy-crop": "^5.5.6",
+    "react-zoom-pan-pinch": "^3.7.0",
     "recharts": "^3.5.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.58.1",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@types/node": "^20",
@@ -60,6 +63,7 @@
     "husky": "^9.1.7",
     "jsdom": "^27.4.0",
     "lint-staged": "^16.2.7",
+    "playwright": "^1.57.0",
     "postcss": "^8.4.31",
     "supabase": "^2.67.3",
     "tailwindcss": "^3.4.1",

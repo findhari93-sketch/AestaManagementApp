@@ -201,6 +201,8 @@ export default function NotificationBell() {
                       {getNotificationIcon(notification.notification_type)}
                     </ListItemIcon>
                     <ListItemText
+                      primaryTypographyProps={{ component: "div" }}
+                      secondaryTypographyProps={{ component: "div" }}
                       primary={
                         <Box
                           sx={{

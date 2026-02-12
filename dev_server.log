@@ -1,0 +1,31 @@
+
+> aesta-construction-manager@0.1.0 dev
+> next dev
+
+   ▲ Next.js 15.5.9
+   - Local:        http://localhost:3000
+   - Network:      http://172.24.0.1:3000
+   - Environments: .env.development.local, .env.local
+
+ ✓ Starting...
+ ✓ Ready in 2.3s
+ ○ Compiling /middleware ...
+ ✓ Compiled /middleware in 1428ms (200 modules)
+ ○ Compiling /login ...
+<w> [webpack.cache.PackFileCacheStrategy] Serializing big strings (129kiB) impacts deserialization performance (consider using Buffer instead and decode when needed)
+ ✓ Compiled /login in 8.9s (2010 modules)
+ GET /login 200 in 10590ms
+ ✓ Compiled in 1764ms (924 modules)
+ ○ Compiling /site/dashboard ...
+ ✓ Compiled /site/dashboard in 8.2s (4304 modules)
+ GET /site/dashboard 200 in 8849ms
+ GET /site/dashboard 200 in 348ms
+ ○ Compiling /site/inventory ...
+ ✓ Compiled /site/inventory in 4.6s (4916 modules)
+ GET /site/inventory 200 in 4930ms
+ ○ Compiling /site/purchase-orders ...
+ ✓ Compiled /site/purchase-orders in 2.8s (5011 modules)
+ GET /site/purchase-orders 200 in 3075ms
+ ○ Compiling /site/material-requests ...
+ ✓ Compiled /site/material-requests in 3s (5046 modules)
+ GET /site/material-requests 200 in 3399ms

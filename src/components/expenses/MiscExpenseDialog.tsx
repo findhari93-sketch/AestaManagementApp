@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   Dialog,
@@ -24,6 +24,7 @@ import {
   Paper,
   Checkbox,
   Chip,
+  Autocomplete,
 } from "@mui/material";
 import { Close as CloseIcon } from "@mui/icons-material";
 import { createClient } from "@/lib/supabase/client";
@@ -35,6 +36,8 @@ import { useSite } from "@/contexts/SiteContext";
 import { createMiscExpense, updateMiscExpense } from "@/lib/services/miscExpenseService";
 import type { MiscExpense, SubcontractOption, SiteEngineerOption } from "@/types/misc-expense.types";
 import type { PayerSource } from "@/types/settlement.types";
+import { useVendors } from "@/hooks/queries/useVendors";
+import { useLaborers } from "@/hooks/queries/useLaborers";
 import type { Database } from "@/types/database.types";
 
 type PaymentMode = Database["public"]["Enums"]["payment_mode"];
@@ -92,6 +95,25 @@ export default function MiscExpenseDialog({
   const [categories, setCategories] = useState<ExpenseCategory[]>([]);
   const [engineers, setEngineers] = useState<SiteEngineerOption[]>([]);
   const [subcontracts, setSubcontracts] = useState<SubcontractOption[]>([]);
+
+  // Vendor & laborer autocomplete data
+  const { data: vendors = [] } = useVendors();
+  const { data: laborers = [] } = useLaborers();
+
+  const selectedCategory = categories.find((c) => c.id === categoryId);
+
+  const vendorRecipientOptions: string[] = useMemo(() => {
+    const categoryName = selectedCategory?.name || "";
+    if (categoryName === "Material Expenses") {
+      return vendors.map((v) => v.name);
+    }
+    if (categoryName === "Contract Labor Settlement") {
+      return laborers
+        .filter((l) => l.employment_type === "contract")
+        .map((l) => l.name);
+    }
+    return [];
+  }, [selectedCategory, vendors, laborers]);
 
   useEffect(() => {
     if (open) {
@@ -368,7 +390,10 @@ export default function MiscExpenseDialog({
           <InputLabel>Category</InputLabel>
           <Select
             value={categoryId}
-            onChange={(e) => setCategoryId(e.target.value)}
+            onChange={(e) => {
+              setCategoryId(e.target.value);
+              setVendorName("");
+            }}
             label="Category"
           >
             <MenuItem value="">
@@ -383,13 +408,27 @@ export default function MiscExpenseDialog({
         </FormControl>
 
         {/* Vendor/Recipient Name */}
-        <TextField
-          label="Vendor / Recipient"
+        <Autocomplete
+          freeSolo
           value={vendorName}
-          onChange={(e) => setVendorName(e.target.value)}
-          fullWidth
+          onChange={(_, newValue) => setVendorName(typeof newValue === "string" ? newValue : "")}
+          onInputChange={(_, newValue) => setVendorName(newValue)}
+          options={vendorRecipientOptions}
           size="small"
-          placeholder="e.g., Hardware Store, Electrician"
+          slotProps={{ popper: { disablePortal: false } }}
+          renderInput={(params) => (
+            <TextField
+              {...params}
+              label="Vendor / Recipient"
+              placeholder={
+                selectedCategory?.name === "Material Expenses"
+                  ? "Search vendors..."
+                  : selectedCategory?.name === "Contract Labor Settlement"
+                  ? "Search laborers..."
+                  : "e.g., Hardware Store, Electrician"
+              }
+            />
+          )}
           sx={{ mb: 2 }}
         />
 

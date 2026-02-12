@@ -80,9 +80,16 @@ export default function GroupStockBatchCard({
       ? ((originalQty - remainingQty) / originalQty) * 100
       : 0;
 
-  const isEditable = batch.status === "in_stock" || batch.status === "partial_used" || batch.status === "recorded";
-  const canConvert = batch.status === "in_stock" || batch.status === "partial_used" || batch.status === "recorded";
-  const canComplete = batch.status === "in_stock" || batch.status === "partial_used" || batch.status === "recorded";
+  // Compute display status from actual usage data instead of trusting DB status
+  // This handles data inconsistencies (e.g. DB says 'partial_used' but 0% is actually used)
+  const computedStatus: MaterialBatchStatus =
+    batch.status === "completed" ? "completed" :
+    batch.status === "converted" ? "converted" :
+    usagePercent > 0 ? "partial_used" : "recorded";
+
+  const isEditable = computedStatus === "partial_used" || computedStatus === "recorded";
+  const canConvert = computedStatus === "partial_used" || computedStatus === "recorded";
+  const canComplete = computedStatus === "partial_used" || computedStatus === "recorded";
 
   // Get first 2 materials for display
   const displayItems = (batch.items || []).slice(0, 2);
@@ -142,8 +149,8 @@ export default function GroupStockBatchCard({
             )}
           </Box>
           <Chip
-            label={MATERIAL_BATCH_STATUS_LABELS[batch.status]}
-            color={MATERIAL_BATCH_STATUS_COLORS[batch.status]}
+            label={MATERIAL_BATCH_STATUS_LABELS[computedStatus]}
+            color={MATERIAL_BATCH_STATUS_COLORS[computedStatus]}
             size="small"
           />
         </Box>

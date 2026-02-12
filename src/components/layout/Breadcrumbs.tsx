@@ -35,12 +35,12 @@ const routeLabels: Record<string, string> = {
   'tea-shop': 'Tea Shop',
   'client-payments': 'Client Payments',
   'work-log': 'Daily Work Log',
+  'inventory': 'Inventory',
   'stock': 'Stock Inventory',
   'material-usage': 'Daily Usage',
   'material-requests': 'Material Requests',
   'purchase-orders': 'Purchase Orders',
   'delivery-verification': 'Delivery Verification',
-  'local-purchases': 'Local Purchases',
   'inter-site-settlement': 'Inter-Site Settlement',
   'subcontracts': 'Subcontracts',
 }
@@ -51,7 +51,6 @@ const getParentRoute = (path: string): string | null => {
     '/company/material-search': '/company/materials',
     '/site/purchase-orders': '/site/material-requests',
     '/site/delivery-verification': '/site/purchase-orders',
-    '/site/material-usage': '/site/stock',
   }
   return parentMap[path] || null
 }
@@ -97,11 +96,12 @@ export default function Breadcrumbs({ customItems, showHome = false }: Breadcrum
           )}
           {customItems.map((item, index) => {
             const isLast = index === customItems.length - 1
-            return isLast ? (
+            const shouldRenderAsText = isLast || !item.href
+            return shouldRenderAsText ? (
               <Typography
                 key={index}
-                color="text.primary"
-                sx={{ fontSize: '0.75rem', fontWeight: 500 }}
+                color={isLast ? "text.primary" : "inherit"}
+                sx={{ fontSize: '0.75rem', fontWeight: isLast ? 500 : 400 }}
               >
                 {item.label}
               </Typography>
@@ -109,7 +109,8 @@ export default function Breadcrumbs({ customItems, showHome = false }: Breadcrum
               <Link
                 key={index}
                 component={NextLink}
-                href={item.href || '#'}
+                href={item.href!}
+                prefetch={false}
                 color="inherit"
                 sx={{
                   fontSize: '0.75rem',
@@ -132,6 +133,9 @@ export default function Breadcrumbs({ customItems, showHome = false }: Breadcrum
   // Don't show breadcrumbs for top-level pages
   if (segments.length <= 1) return null
 
+  // Top-level categories without actual pages (would cause 404 on prefetch)
+  const categoriesWithoutPages = new Set(['site', 'company'])
+
   const items: BreadcrumbItem[] = []
   let currentPath = ''
 
@@ -139,9 +143,13 @@ export default function Breadcrumbs({ customItems, showHome = false }: Breadcrum
     currentPath += `/${segment}`
     const label = routeLabels[segment] || segment.charAt(0).toUpperCase() + segment.slice(1).replace(/-/g, ' ')
 
+    // Don't create links for top-level categories without pages or the last segment
+    const isLastSegment = index === segments.length - 1
+    const isCategoryWithoutPage = index === 0 && categoriesWithoutPages.has(segment)
+
     items.push({
       label,
-      href: index < segments.length - 1 ? currentPath : undefined
+      href: !isLastSegment && !isCategoryWithoutPage ? currentPath : undefined
     })
   })
 
@@ -156,11 +164,13 @@ export default function Breadcrumbs({ customItems, showHome = false }: Breadcrum
       >
         {items.map((item, index) => {
           const isLast = index === items.length - 1
-          return isLast ? (
+          // Render as Typography if it's the last segment OR if there's no href
+          const shouldRenderAsText = isLast || !item.href
+          return shouldRenderAsText ? (
             <Typography
               key={index}
-              color="text.primary"
-              sx={{ fontSize: '0.75rem', fontWeight: 500 }}
+              color={isLast ? "text.primary" : "inherit"}
+              sx={{ fontSize: '0.75rem', fontWeight: isLast ? 500 : 400 }}
             >
               {item.label}
             </Typography>
@@ -168,7 +178,8 @@ export default function Breadcrumbs({ customItems, showHome = false }: Breadcrum
             <Link
               key={index}
               component={NextLink}
-              href={item.href || '#'}
+              href={item.href!}
+              prefetch={false}
               color="inherit"
               sx={{
                 fontSize: '0.75rem',

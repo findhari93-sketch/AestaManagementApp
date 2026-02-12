@@ -97,6 +97,16 @@ export async function getAvailableBatches(
     .gt("remaining_balance", 0)
     .order("created_at", { ascending: true });
 
+  // Performance optimization: Move site restriction filter to SQL instead of JavaScript
+  // Filter: NOT (site_restricted AND siteId exists AND site_id != siteId)
+  // Equivalent to: site_restricted = false OR site_id = siteId OR siteId is not provided
+  if (siteId) {
+    // If site is specified, only include batches that are either:
+    // 1. Not site-restricted (can be used anywhere)
+    // 2. Restricted to the current site
+    query = query.or(`site_restricted.eq.false,site_id.eq.${siteId}`);
+  }
+
   const { data, error } = await query;
 
   if (error) {
@@ -104,16 +114,8 @@ export async function getAvailableBatches(
     return [];
   }
 
-  // Filter and map results
-  const batches: BatchOption[] = (data || [])
-    .filter((row: any) => {
-      // If batch is site-restricted and we're spending on a different site, exclude it
-      if (row.site_restricted && siteId && row.site_id !== siteId) {
-        return false;
-      }
-      return true;
-    })
-    .map((row: any) => ({
+  // Map results (filter moved to SQL above)
+  const batches: BatchOption[] = (data || []).map((row: any) => ({
       id: row.id,
       batch_code: row.batch_code || `LEGACY-${row.id.slice(0, 8)}`,
       payer_source: row.payer_source || "own_money",

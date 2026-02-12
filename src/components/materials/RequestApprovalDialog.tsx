@@ -54,7 +54,7 @@ export default function RequestApprovalDialog({
   request,
 }: RequestApprovalDialogProps) {
   const isMobile = useIsMobile();
-  const { user } = useAuth();
+  const { userProfile } = useAuth();
 
   const approveRequest = useApproveMaterialRequest();
 
@@ -87,7 +87,7 @@ export default function RequestApprovalDialog({
   };
 
   const handleApprove = async () => {
-    if (!request || !user?.id) return;
+    if (!request || !userProfile?.id) return;
 
     // Validate quantities
     const invalidItem = items.find(
@@ -103,11 +103,12 @@ export default function RequestApprovalDialog({
     try {
       await approveRequest.mutateAsync({
         id: request.id,
-        userId: user.id,
+        userId: userProfile.id,
         approvedItems: items.map((item) => ({
           itemId: item.itemId,
           approved_qty: item.approved_qty,
         })),
+        siteId: request.site_id, // Added for optimistic update
       });
       onClose();
     } catch (err: unknown) {

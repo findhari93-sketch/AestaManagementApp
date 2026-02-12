@@ -153,6 +153,8 @@ export default function RentalItemSelector({
           return (
             <ListItem key={key} {...otherProps} dense>
               <ListItemText
+                primaryTypographyProps={{ component: "div" }}
+                secondaryTypographyProps={{ component: "div" }}
                 primary={
                   <Box display="flex" alignItems="center" gap={1}>
                     <Typography variant="body2">{option.name}</Typography>

@@ -86,6 +86,7 @@ export default function RentalStoreSelector({
                 <StoreIcon fontSize="small" />
               </ListItemIcon>
               <ListItemText
+                secondaryTypographyProps={{ component: "div" }}
                 primary={store.shop_name || store.name}
                 secondary={
                   <Box

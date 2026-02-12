@@ -1031,174 +1031,11 @@ export function useRecordSettlementPayment() {
           console.warn("[RecordSettlementPayment] Non-critical: Failed to update batch_usage_records:", err);
         }
 
-        // Create self-use expense for the creditor site (to_site)
-        // This represents the materials the paying site used for themselves
-        try {
-          // Get the batch_ref_codes from the settlement items
-          const { data: settledUsage, error: settledUsageError } = await (supabase as any)
-            .from("batch_usage_records")
-            .select("batch_ref_code")
-            .eq("settlement_id", data.settlement_id);
-
-          if (settledUsageError) {
-            console.warn("[RecordSettlementPayment] Could not fetch settled usage:", settledUsageError);
-          }
-
-          const batchRefCodes = [...new Set((settledUsage || []).map((u: any) => u.batch_ref_code).filter(Boolean))];
-
-          if (batchRefCodes.length > 0) {
-            console.log("[RecordSettlementPayment] Checking self-use for creditor site. Batches:", batchRefCodes);
-
-            // Get creditor's (from_site) usage for these batches - fetch all and filter client-side
-            // to avoid issues with null filtering in the query
-            // NOTE: from_site_id is the CREDITOR (site that paid for the original purchase)
-            const { data: creditorUsageRecords, error: creditorUsageError } = await (supabase as any)
-              .from("batch_usage_records")
-              .select("id, batch_ref_code, quantity, total_cost, settlement_status, settlement_id")
-              .eq("usage_site_id", settlement.from_site_id)
-              .in("batch_ref_code", batchRefCodes);
-
-            if (creditorUsageError) {
-              console.warn("[RecordSettlementPayment] Could not fetch creditor usage:", creditorUsageError);
-            }
-
-            // Filter for self-use: records without settlement_id (self-use doesn't need settlement)
-            const selfUseRecords = (creditorUsageRecords || []).filter(
-              (r: any) => !r.settlement_id && r.settlement_status !== 'settled'
-            );
-
-            if (selfUseRecords.length > 0) {
-              // Check if self-use expense already exists for this batch
-              // NOTE: from_site_id is the CREDITOR (site that paid for original purchase)
-              const { data: existingSelfUse } = await (supabase as any)
-                .from("material_purchase_expenses")
-                .select("id")
-                .eq("site_id", settlement.from_site_id)
-                .eq("settlement_reference", "SELF-USE")
-                .in("original_batch_code", batchRefCodes)
-                .limit(1);
-
-              if (!existingSelfUse || existingSelfUse.length === 0) {
-                // Calculate total self-use amount
-                const selfUseAmount = selfUseRecords.reduce(
-                  (sum: number, r: any) => sum + Number(r.total_cost || 0), 0
-                );
-
-                if (selfUseAmount > 0) {
-                  console.log("[RecordSettlementPayment] Creating self-use expense for creditor:", {
-                    site_id: settlement.from_site_id,
-                    amount: selfUseAmount,
-                    batches: batchRefCodes,
-                    recordCount: selfUseRecords.length,
-                  });
-
-                  // Generate a reference code for the self-use expense
-                  let selfUseRefCode: string;
-                  try {
-                    const { data: rpcRefCode } = await (supabase as any).rpc(
-                      "generate_material_purchase_reference"
-                    );
-                    selfUseRefCode = rpcRefCode || `SELF-${Date.now()}`;
-                  } catch {
-                    selfUseRefCode = `SELF-${Date.now()}`;
-                  }
-
-                  // Build payload without created_by to avoid FK constraint issues
-                  // NOTE: from_site_id is the CREDITOR - the site that paid for original purchase and uses self-use
-                  const selfUsePayload: Record<string, unknown> = {
-                    site_id: settlement.from_site_id, // Creditor site - the site that paid for and used their own materials
-                    ref_code: selfUseRefCode,
-                    purchase_type: "own_site",
-                    purchase_date: data.payment_date,
-                    total_amount: selfUseAmount,
-                    transport_cost: 0,
-                    status: "completed",
-                    is_paid: true, // Self-use is already paid (original purchase)
-                    paid_date: data.payment_date,
-                    // Mark as self-use for proper categorization
-                    original_batch_code: batchRefCodes[0], // Use first batch code
-                    settlement_reference: "SELF-USE",
-                    settlement_date: data.payment_date,
-                    site_group_id: settlement.site_group_id,
-                    notes: `Self-use portion from group purchase. Materials used by ${settlement.from_site?.name || 'creditor site'} from batches: ${batchRefCodes.join(', ')}`,
-                  };
-
-                  const { data: selfUseExpense, error: selfUseError } = await (supabase as any)
-                    .from("material_purchase_expenses")
-                    .insert(selfUsePayload)
-                    .select()
-                    .single();
-
-                  if (selfUseError) {
-                    console.error("[RecordSettlementPayment] Error creating self-use expense:", selfUseError);
-                  } else {
-                    console.log("[RecordSettlementPayment] Self-use expense created:", selfUseExpense?.id, selfUseExpense?.ref_code);
-
-                    // Fetch full self-use records with material details
-                    try {
-                      const selfUseRecordIds = selfUseRecords.map((r: any) => r.id);
-                      const { data: fullSelfUseRecords, error: fullRecordsError } = await (supabase as any)
-                        .from("batch_usage_records")
-                        .select("id, material_id, brand_id, quantity, unit_cost")
-                        .in("id", selfUseRecordIds);
-
-                      if (fullRecordsError) {
-                        console.warn("[RecordSettlementPayment] Could not fetch self-use material details:", fullRecordsError.message);
-                      } else if (fullSelfUseRecords && fullSelfUseRecords.length > 0) {
-                        // Create expense items from self-use records
-                        const selfUseItems = fullSelfUseRecords.map((r: any) => ({
-                          purchase_expense_id: selfUseExpense.id,
-                          material_id: r.material_id,
-                          brand_id: r.brand_id || null,
-                          quantity: Number(r.quantity || 0),
-                          unit_price: Number(r.unit_cost || 0),
-                          notes: `Self-use from batch ${batchRefCodes.join(', ')}`,
-                        }));
-
-                        const { error: selfUseItemsError } = await (supabase as any)
-                          .from("material_purchase_expense_items")
-                          .insert(selfUseItems);
-
-                        if (selfUseItemsError) {
-                          console.warn("[RecordSettlementPayment] Could not create self-use expense items:", selfUseItemsError.message);
-                        } else {
-                          console.log("[RecordSettlementPayment] Created", selfUseItems.length, "self-use expense items");
-                        }
-                      }
-
-                      // Update the self-use records to mark them as accounted
-                      if (selfUseRecordIds.length > 0) {
-                        await (supabase as any)
-                          .from("batch_usage_records")
-                          .update({ settlement_status: 'settled' })
-                          .in("id", selfUseRecordIds);
-                      }
-                    } catch (itemErr) {
-                      console.warn("[RecordSettlementPayment] Non-critical: Failed to create self-use expense items:", itemErr);
-                      // Still try to mark records as settled
-                      const selfUseRecordIds = selfUseRecords.map((r: any) => r.id);
-                      if (selfUseRecordIds.length > 0) {
-                        await (supabase as any)
-                          .from("batch_usage_records")
-                          .update({ settlement_status: 'settled' })
-                          .in("id", selfUseRecordIds);
-                      }
-                    }
-                  }
-                } else {
-                  console.log("[RecordSettlementPayment] No self-use amount to record for creditor");
-                }
-              } else {
-                console.log("[RecordSettlementPayment] Self-use expense already exists for this batch");
-              }
-            } else {
-              console.log("[RecordSettlementPayment] No self-use records found for creditor site");
-            }
-          }
-        } catch (err) {
-          console.error("[RecordSettlementPayment] Non-critical: Failed to create self-use expense:", err);
-          // Don't throw - payment was already recorded successfully
-        }
+        // NOTE: Self-use expense creation is intentionally NOT done here.
+        // Self-use expenses for the creditor site should only be created when the batch
+        // is explicitly completed (via the "Complete" button or process_batch_settlement RPC).
+        // Creating self-use expenses prematurely during settlement payment can cause
+        // orphaned records if the batch still has remaining materials that haven't been used yet.
       }
 
       console.log("[RecordSettlementPayment] Payment recording completed successfully");
@@ -1248,7 +1085,7 @@ export function useRecordSettlementPayment() {
         queryClient.invalidateQueries({
           queryKey: queryKeys.materialPurchases.all,
         });
-        // Invalidate for creditor site (from_site) - for self-use expense
+        // Invalidate for creditor site (from_site) - refresh batch data
         if (settlement.from_site_id) {
           queryClient.invalidateQueries({
             queryKey: queryKeys.materialPurchases.bySite(settlement.from_site_id),

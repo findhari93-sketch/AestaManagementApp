@@ -16,7 +16,7 @@ import { getTabCoordinator } from "@/lib/tab/coordinator";
 const CACHE_VERSION = 1;
 const CACHE_KEY = `aesta-query-cache-v${CACHE_VERSION}`;
 const MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 days max retention
-const RESTORE_TIMEOUT = 10000; // 10 seconds - proceed without cache if slow (increased from 5s)
+const RESTORE_TIMEOUT = 3000; // 3 seconds - proceed quickly without cache if slow (non-destructive)
 const MAX_RESTORE_RETRIES = 1; // Single retry only
 
 /**
@@ -138,7 +138,10 @@ export function createIDBPersister(): Persister {
       // The cache may finish restoring in background and be available for future persistence
       const timeoutPromise = new Promise<undefined>((resolve) => {
         setTimeout(() => {
-          console.warn("Cache restoration slow - proceeding without cache");
+          // Only log in development to avoid alarming users - this is expected on slow devices
+          if (process.env.NODE_ENV === "development") {
+            console.log("[Cache] IndexedDB slow - proceeding without cache (will restore in background)");
+          }
           resolve(undefined);
         }, RESTORE_TIMEOUT);
       });

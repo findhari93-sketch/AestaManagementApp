@@ -65,7 +65,7 @@ export function useMaterialPurchases(
           .select(`
             *,
             site:sites!site_id(id, name),
-            vendor:vendors(id, name),
+            vendor:vendors(id, name, qr_code_url, upi_id),
             site_group:site_groups(id, name),
             items:material_purchase_expense_items(
               *,
@@ -132,7 +132,7 @@ export function useGroupMaterialPurchases(
           .select(`
             *,
             site:sites!site_id(id, name),
-            vendor:vendors(id, name),
+            vendor:vendors(id, name, qr_code_url, upi_id),
             site_group:site_groups(id, name),
             items:material_purchase_expense_items(
               *,
@@ -191,7 +191,7 @@ export function useMaterialPurchaseById(id: string | undefined) {
         .select(`
           *,
           site:sites!site_id(id, name),
-          vendor:vendors(id, name),
+          vendor:vendors(id, name, qr_code_url, upi_id),
           site_group:site_groups(id, name),
           items:material_purchase_expense_items(
             *,
@@ -227,7 +227,7 @@ export function useMaterialPurchaseByRefCode(refCode: string | undefined) {
         .select(`
           *,
           site:sites!site_id(id, name),
-          vendor:vendors(id, name),
+          vendor:vendors(id, name, qr_code_url, upi_id),
           site_group:site_groups(id, name),
           items:material_purchase_expense_items(
             *,
@@ -274,7 +274,7 @@ export function useGroupStockBatches(
           .select(`
             *,
             site:sites!site_id(id, name),
-            vendor:vendors(id, name),
+            vendor:vendors(id, name, qr_code_url, upi_id),
             items:material_purchase_expense_items(
               *,
               material:materials(id, name, code, unit),
@@ -868,6 +868,7 @@ export interface SettleMaterialPurchaseData {
  * Settle a material purchase expense
  * Generates a settlement reference and marks the purchase as settled
  * For group stock (isVendorPaymentOnly=true), only marks vendor as paid without settlement reference
+ * Also proportionally adjusts inventory values if amount_paid differs from total_amount (bargaining discount)
  */
 export function useSettleMaterialPurchase() {
   const supabase = createClient();
@@ -879,6 +880,26 @@ export function useSettleMaterialPurchase() {
 
       // For vendor-only payment (group stock), don't set settlement_reference
       const settlementRef = data.isVendorPaymentOnly ? null : generateSettlementRef();
+
+      // First, get the expense record to check if we need to adjust inventory values
+      const { data: expense, error: fetchError } = await (supabase as any)
+        .from("material_purchase_expenses")
+        .select(`
+          id,
+          site_id,
+          total_amount,
+          purchase_order_id,
+          items:material_purchase_expense_items(
+            material_id,
+            brand_id,
+            quantity,
+            unit_price
+          )
+        `)
+        .eq("id", data.id)
+        .single();
+
+      if (fetchError) throw fetchError;
 
       const updateData: Record<string, unknown> = {
         payment_mode: data.payment_mode,
@@ -892,13 +913,14 @@ export function useSettleMaterialPurchase() {
         updated_at: new Date().toISOString(),
       };
 
-      // Only set settlement fields for non-vendor-only payments
+      // Only set settlement reference/date for non-vendor-only payments
       if (!data.isVendorPaymentOnly) {
         updateData.settlement_reference = settlementRef;
         updateData.settlement_date = data.settlement_date;
-        updateData.settlement_payer_source = data.payer_source;
-        updateData.settlement_payer_name = data.payer_name || null;
       }
+      // Always store payer source and payer name
+      updateData.settlement_payer_source = data.payer_source;
+      updateData.settlement_payer_name = data.payer_name || null;
 
       const { error } = await (supabase as any)
         .from("material_purchase_expenses")
@@ -906,11 +928,54 @@ export function useSettleMaterialPurchase() {
         .eq("id", data.id);
 
       if (error) throw error;
+
+      // If amount_paid differs from total_amount (bargaining discount), adjust inventory values proportionally
+      if (data.amount_paid && expense?.total_amount && data.amount_paid !== expense.total_amount) {
+        const discountRatio = data.amount_paid / expense.total_amount;
+        const siteId = expense.site_id;
+        const items = expense.items || [];
+
+        // Update avg_unit_cost for each item in stock_inventory
+        for (const item of items) {
+          if (!item.material_id) continue;
+
+          // Find the stock inventory record for this material at this site
+          let stockQuery = supabase
+            .from("stock_inventory")
+            .select("id, avg_unit_cost, current_qty")
+            .eq("site_id", siteId)
+            .eq("material_id", item.material_id);
+
+          if (item.brand_id) {
+            stockQuery = stockQuery.eq("brand_id", item.brand_id);
+          } else {
+            stockQuery = stockQuery.is("brand_id", null);
+          }
+
+          const { data: stockRecords } = await stockQuery;
+
+          // Update each matching stock record with proportionally adjusted unit cost
+          for (const stock of (stockRecords || [])) {
+            if (stock.avg_unit_cost) {
+              const adjustedUnitCost = stock.avg_unit_cost * discountRatio;
+              await supabase
+                .from("stock_inventory")
+                .update({
+                  avg_unit_cost: adjustedUnitCost,
+                  updated_at: new Date().toISOString(),
+                })
+                .eq("id", stock.id);
+            }
+          }
+        }
+      }
+
       return { id: data.id, settlement_reference: settlementRef };
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.materialPurchases.all });
       queryClient.invalidateQueries({ queryKey: queryKeys.expenses.all });
+      queryClient.invalidateQueries({ queryKey: queryKeys.materialStock.all });
     },
   });
 }
@@ -1007,8 +1072,8 @@ export function useSiteMaterialExpenses(siteId: string | undefined) {
           .from("material_purchase_expenses")
           .select(`
             *,
-            vendor:vendors(id, name),
-            purchase_order:purchase_orders(id, po_number),
+            vendor:vendors(id, name, qr_code_url, upi_id),
+            purchase_order:purchase_orders(id, po_number, vendor_bill_url, bill_verified, total_amount),
             paying_site:sites!material_purchase_expenses_paying_site_id_fkey(id, name),
             items:material_purchase_expense_items(
               *,
@@ -1035,7 +1100,7 @@ export function useSiteMaterialExpenses(siteId: string | undefined) {
           .from("purchase_orders")
           .select(`
             *,
-            vendor:vendors(id, name),
+            vendor:vendors(id, name, qr_code_url, upi_id),
             items:purchase_order_items(
               *,
               material:materials(id, name, code, unit),
@@ -1141,6 +1206,7 @@ export function useSiteLevelMaterialExpenses(siteId: string | undefined) {
             ref_code,
             purchase_date,
             total_amount,
+            amount_paid,
             is_paid,
             settlement_reference,
             vendor_name,
@@ -1163,6 +1229,8 @@ export function useSiteLevelMaterialExpenses(siteId: string | undefined) {
         } else {
           for (const purchase of (ownSitePurchases || [])) {
             const firstItem = purchase.items?.[0];
+            // Use amount_paid (settled amount after bargaining) if available, otherwise total_amount
+            const displayAmount = Number(purchase.amount_paid || purchase.total_amount || 0);
             expenses.push({
               id: purchase.id,
               ref_code: purchase.ref_code,
@@ -1173,7 +1241,7 @@ export function useSiteLevelMaterialExpenses(siteId: string | undefined) {
               brand_name: firstItem?.brand?.brand_name || null,
               quantity: purchase.items?.reduce((sum: number, i: any) => sum + Number(i.quantity || 0), 0) || null,
               unit: firstItem?.material?.unit || null,
-              amount: Number(purchase.total_amount || 0),
+              amount: displayAmount,
               source_ref: purchase.purchase_order?.po_number || purchase.ref_code,
               status: purchase.settlement_reference ? "settled" : "paid",
               vendor_name: purchase.vendor_name,
@@ -1193,6 +1261,7 @@ export function useSiteLevelMaterialExpenses(siteId: string | undefined) {
             ref_code,
             purchase_date,
             total_amount,
+            amount_paid,
             original_batch_code,
             settlement_reference,
             vendor_name,
@@ -1214,6 +1283,8 @@ export function useSiteLevelMaterialExpenses(siteId: string | undefined) {
         } else {
           for (const expense of (allocatedExpenses || [])) {
             const firstItem = expense.items?.[0];
+            // Use amount_paid (settled amount after bargaining) if available, otherwise total_amount
+            const displayAmount = Number(expense.amount_paid || expense.total_amount || 0);
             expenses.push({
               id: expense.id,
               ref_code: expense.ref_code,
@@ -1224,7 +1295,7 @@ export function useSiteLevelMaterialExpenses(siteId: string | undefined) {
               brand_name: firstItem?.brand?.brand_name || null,
               quantity: expense.items?.reduce((sum: number, i: any) => sum + Number(i.quantity || 0), 0) || null,
               unit: firstItem?.material?.unit || null,
-              amount: Number(expense.total_amount || 0),
+              amount: displayAmount,
               source_ref: expense.settlement_reference || expense.original_batch_code,
               status: "settled",
               vendor_name: expense.vendor_name,
@@ -1245,6 +1316,7 @@ export function useSiteLevelMaterialExpenses(siteId: string | undefined) {
             ref_code,
             purchase_date,
             total_amount,
+            amount_paid,
             original_batch_code,
             settlement_reference,
             vendor_name,
@@ -1265,6 +1337,8 @@ export function useSiteLevelMaterialExpenses(siteId: string | undefined) {
         } else {
           for (const expense of (selfUseExpenses || [])) {
             const firstItem = expense.items?.[0];
+            // Use amount_paid (settled amount after bargaining) if available, otherwise total_amount
+            const displayAmount = Number(expense.amount_paid || expense.total_amount || 0);
             expenses.push({
               id: expense.id,
               ref_code: expense.ref_code,
@@ -1275,7 +1349,7 @@ export function useSiteLevelMaterialExpenses(siteId: string | undefined) {
               brand_name: firstItem?.brand?.brand_name || null,
               quantity: expense.items?.reduce((sum: number, i: any) => sum + Number(i.quantity || 0), 0) || null,
               unit: firstItem?.material?.unit || null,
-              amount: Number(expense.total_amount || 0),
+              amount: displayAmount,
               source_ref: `Self-use from ${expense.original_batch_code}`,
               status: "settled",
               vendor_name: expense.vendor_name,

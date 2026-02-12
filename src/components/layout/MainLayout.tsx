@@ -25,6 +25,7 @@ import {
   Chip,
   Snackbar,
   Alert,
+  Badge,
 } from "@mui/material";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useSessionRefresh } from "@/hooks/useSessionRefresh";
@@ -72,6 +73,8 @@ import {
   TrendingUp as TrendingUpIcon,
   HomeWork as RentalIcon,
   ReceiptLong as ReceiptLongIcon,
+  Build as BuildIcon,
+  Videocam as VideocamIcon,
 } from "@mui/icons-material";
 import { useRouter, usePathname } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
@@ -82,10 +85,16 @@ import { useSite } from "@/contexts/SiteContext";
 import NotificationBell from "@/components/notifications/NotificationBell";
 import ActiveSectionChip from "@/components/layout/ActiveSectionChip";
 import SettlementDialogManager from "@/components/settlement/SettlementDialogManager";
+import ChatAssistant from "@/components/chat-assistant/ChatAssistant";
 import ThemeToggle from "@/components/common/ThemeToggle";
 import DateRangePicker from "@/components/common/DateRangePicker";
 import ManualRefreshButton from "@/components/common/ManualRefreshButton";
 import { useDateRange } from "@/contexts/DateRangeContext";
+import {
+  useMaterialWorkflowSummary,
+  getBadgeCounts,
+  type MaterialBadgeCounts,
+} from "@/hooks/queries/useMaterialWorkflowSummary";
 
 const drawerWidth = 260;
 const iconBarWidth = 64;
@@ -98,6 +107,7 @@ interface NavItem {
   icon: React.ReactElement;
   path: string;
   adminOnly?: boolean;
+  badgeKey?: string; // maps to MaterialBadgeCounts field for sidebar badge
 }
 
 interface NavCategory {
@@ -182,44 +192,44 @@ const siteNavCategories: NavCategory[] = [
     emoji: "📦",
     items: [
       {
-        text: "Stock Inventory",
-        icon: <InventoryIcon />,
-        path: "/site/stock",
+        text: "Overview",
+        icon: <DashboardIcon />,
+        path: "/site/materials",
       },
       {
-        text: "Daily Usage",
-        icon: <ConstructionIcon />,
-        path: "/site/material-usage",
+        text: "Inventory",
+        icon: <InventoryIcon />,
+        path: "/site/inventory",
       },
       {
         text: "Material Requests",
         icon: <AssignmentIcon />,
         path: "/site/material-requests",
+        badgeKey: "requests",
       },
       {
         text: "Purchase Orders",
         icon: <ShoppingCartIcon />,
         path: "/site/purchase-orders",
+        badgeKey: "purchaseOrders",
       },
       {
         text: "Delivery Verification",
         icon: <DeliveryIcon />,
         path: "/site/delivery-verification",
-      },
-      {
-        text: "Local Purchases",
-        icon: <StoreIcon />,
-        path: "/site/local-purchases",
+        badgeKey: "deliveries",
       },
       {
         text: "Inter-Site Settlement",
         icon: <AccountBalanceIcon />,
         path: "/site/inter-site-settlement",
+        badgeKey: "interSite",
       },
       {
         text: "Material Settlements",
         icon: <PaymentIcon />,
         path: "/site/material-settlements",
+        badgeKey: "settlements",
       },
       {
         text: "Material Expenses",
@@ -265,6 +275,22 @@ const companyNavCategories: NavCategory[] = [
         text: "Market Laborer Rates",
         icon: <PaymentsIcon />,
         path: "/company/market-laborers",
+      },
+    ],
+  },
+  {
+    label: "Equipment & Assets",
+    emoji: "🔧",
+    items: [
+      {
+        text: "Equipment",
+        icon: <BuildIcon />,
+        path: "/company/equipment",
+      },
+      {
+        text: "Cameras",
+        icon: <VideocamIcon />,
+        path: "/company/equipment?tab=surveillance",
       },
     ],
   },
@@ -397,6 +423,12 @@ export default function MainLayout({
   const { mode, toggleTheme } = useThemeMode();
   const syncStatus = useSyncStatus();
   const { selectedSite } = useSite();
+
+  // Material workflow badge counts for sidebar
+  const workflowSummary = useMaterialWorkflowSummary(
+    activeTab === "site" ? selectedSite?.id : undefined
+  );
+  const materialBadges = getBadgeCounts(workflowSummary);
   const {
     startDate,
     endDate,
@@ -596,6 +628,12 @@ export default function MainLayout({
                 ? pathname === item.path
                 : pathname === item.path || pathname.startsWith(`${item.path}/`);
 
+              const badgeCount = item.badgeKey
+                ? materialBadges[
+                    item.badgeKey as keyof MaterialBadgeCounts
+                  ] || 0
+                : 0;
+
               return (
                 <ListItem key={item.text} disablePadding sx={{ mb: 0.5 }}>
                   <Tooltip title={item.text} placement="right">
@@ -612,7 +650,23 @@ export default function MainLayout({
                         },
                       }}
                     >
-                      {item.icon}
+                      {badgeCount > 0 ? (
+                        <Badge
+                          badgeContent={badgeCount}
+                          color="warning"
+                          sx={{
+                            "& .MuiBadge-badge": {
+                              fontSize: "0.55rem",
+                              height: 14,
+                              minWidth: 14,
+                            },
+                          }}
+                        >
+                          {item.icon}
+                        </Badge>
+                      ) : (
+                        item.icon
+                      )}
                     </ListItemButton>
                   </Tooltip>
                 </ListItem>
@@ -862,7 +916,34 @@ export default function MainLayout({
                             minWidth: 40,
                           }}
                         >
-                          {item.icon}
+                          {item.badgeKey ? (
+                            <Badge
+                              badgeContent={
+                                materialBadges[
+                                  item.badgeKey as keyof MaterialBadgeCounts
+                                ] || 0
+                              }
+                              color="warning"
+                              invisible={
+                                !materialBadges[
+                                  item.badgeKey as keyof MaterialBadgeCounts
+                                ]
+                              }
+                              sx={{
+                                "& .MuiBadge-badge": {
+                                  fontSize: "0.6rem",
+                                  height: 16,
+                                  minWidth: 16,
+                                  right: -4,
+                                  top: -2,
+                                },
+                              }}
+                            >
+                              {item.icon}
+                            </Badge>
+                          ) : (
+                            item.icon
+                          )}
                         </ListItemIcon>
                         <ListItemText
                           primary={item.text}
@@ -1264,6 +1345,9 @@ export default function MainLayout({
 
       {/* Settlement Dialogs (managed via NotificationContext) */}
       <SettlementDialogManager />
+
+      {/* Chat Assistant */}
+      <ChatAssistant />
 
       {/* Refresh feedback snackbar */}
       <Snackbar

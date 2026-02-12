@@ -39,7 +39,7 @@ import {
 import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
 import PageHeader from "@/components/layout/PageHeader";
 import Breadcrumbs from "@/components/layout/Breadcrumbs";
-import RelatedPages from "@/components/layout/RelatedPages";
+import MaterialWorkflowBar from "@/components/materials/MaterialWorkflowBar";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSite } from "@/contexts/SiteContext";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -52,8 +52,8 @@ import {
   useGroupStockPOsSyncStatus,
   usePushBatchToSettlement,
 } from "@/hooks/queries/usePurchaseOrders";
-import PurchaseOrderDialog from "@/components/materials/PurchaseOrderDialog";
-import DeliveryDialog from "@/components/materials/DeliveryDialog";
+import UnifiedPurchaseOrderDialog from "@/components/materials/UnifiedPurchaseOrderDialog";
+import RecordAndVerifyDeliveryDialog from "@/components/materials/RecordAndVerifyDeliveryDialog";
 import PODetailsDrawer from "@/components/materials/PODetailsDrawer";
 import PODeleteConfirmationDialog from "@/components/materials/PODeleteConfirmationDialog";
 import type {
@@ -220,7 +220,10 @@ export default function PurchaseOrdersPage() {
       filtered = filtered.filter(
         (po) =>
           po.po_number.toLowerCase().includes(term) ||
-          po.vendor?.name?.toLowerCase().includes(term)
+          po.vendor?.name?.toLowerCase().includes(term) ||
+          po.items?.some((item) =>
+            item.material?.name?.toLowerCase().includes(term)
+          )
       );
     }
 
@@ -397,19 +400,117 @@ export default function PurchaseOrdersPage() {
       {
         accessorKey: "total_amount",
         header: "Amount",
-        size: 120,
+        size: 140,
         Cell: ({ row }) => {
           const itemsTotal = row.original.total_amount || 0;
           const transportCost = row.original.transport_cost || 0;
           const grandTotal = itemsTotal + transportCost;
-          return grandTotal > 0 ? formatCurrency(grandTotal) : "-";
+
+          // Check if this is a Group Stock PO with settlement info
+          let parsedNotes: { is_group_stock?: boolean } | null = null;
+          if (row.original.internal_notes) {
+            try {
+              parsedNotes = typeof row.original.internal_notes === "string"
+                ? JSON.parse(row.original.internal_notes)
+                : row.original.internal_notes;
+            } catch {
+              // Ignore parse errors
+            }
+          }
+          const isGroupStock = parsedNotes?.is_group_stock === true;
+          const settlementInfo = isGroupStock ? syncStatusMap.get(row.original.id) : null;
+
+          if (grandTotal <= 0) return "-";
+
+          return (
+            <Box>
+              <Typography variant="body2" fontWeight={500}>
+                {formatCurrency(grandTotal)}
+              </Typography>
+              {settlementInfo && settlementInfo.usedByOthersAmount > 0 && (
+                <Typography variant="caption" color="text.secondary" display="block">
+                  Used by others: {formatCurrency(settlementInfo.usedByOthersAmount)}
+                </Typography>
+              )}
+              {settlementInfo && settlementInfo.settledAmount > 0 && (
+                <Typography variant="caption" color="success.main" display="block">
+                  Settled: {formatCurrency(settlementInfo.settledAmount)}
+                </Typography>
+              )}
+            </Box>
+          );
         },
       },
       {
         accessorKey: "items",
-        header: "Items",
-        size: 80,
-        Cell: ({ row }) => row.original.items?.length || 0,
+        header: "Materials",
+        size: 200,
+        Cell: ({ row }) => {
+          const items = row.original.items;
+          if (!items || items.length === 0) {
+            return (
+              <Typography variant="caption" color="text.secondary">
+                No items
+              </Typography>
+            );
+          }
+
+          const materialNames = items.map((item) => {
+            const name = item.material?.name || "Unknown";
+            const qty = item.quantity;
+            const unit = item.material?.unit || "";
+            return qty ? `${name} (${qty} ${unit})` : name;
+          });
+
+          const shortNames = items.map((item) => item.material?.name || "Unknown");
+          const MAX_VISIBLE = 2;
+          const visibleNames = shortNames.slice(0, MAX_VISIBLE);
+          const remainingCount = shortNames.length - MAX_VISIBLE;
+
+          return (
+            <Tooltip
+              title={
+                <Box>
+                  {materialNames.map((name, idx) => (
+                    <Typography key={idx} variant="caption" sx={{ display: "block" }}>
+                      {name}
+                    </Typography>
+                  ))}
+                </Box>
+              }
+              arrow
+            >
+              <Box sx={{ display: "flex", gap: 0.5, flexWrap: "wrap", alignItems: "center" }}>
+                {visibleNames.map((name, idx) => (
+                  <Chip
+                    key={idx}
+                    label={name}
+                    size="small"
+                    variant="outlined"
+                    sx={{
+                      maxWidth: 120,
+                      height: 22,
+                      fontSize: "0.7rem",
+                      "& .MuiChip-label": {
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      },
+                    }}
+                  />
+                ))}
+                {remainingCount > 0 && (
+                  <Chip
+                    label={`+${remainingCount}`}
+                    size="small"
+                    color="default"
+                    sx={{ height: 20, fontSize: "0.65rem" }}
+                  />
+                )}
+              </Box>
+            </Tooltip>
+          );
+        },
       },
       {
         accessorKey: "expected_delivery_date",
@@ -421,7 +522,7 @@ export default function PurchaseOrdersPage() {
             : "-",
       },
     ],
-    [handleViewDetails]
+    [handleViewDetails, syncStatusMap]
   );
 
   // Row actions
@@ -465,17 +566,33 @@ export default function PurchaseOrdersPage() {
             </>
           )}
 
-          {/* Ordered or Partial - can record delivery */}
+          {/* Ordered or Partial - can record delivery, edit, or delete */}
           {["ordered", "partial_delivered"].includes(po.status) && canEdit && (
-            <Tooltip title="Record Delivery">
-              <IconButton
-                size="small"
-                color="success"
-                onClick={() => handleOpenDeliveryDialog(po)}
-              >
-                <DeliveryIcon fontSize="small" />
-              </IconButton>
-            </Tooltip>
+            <>
+              <Tooltip title="Edit">
+                <IconButton size="small" onClick={() => handleOpenDialog(po)}>
+                  <EditIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+              <Tooltip title="Record Delivery">
+                <IconButton
+                  size="small"
+                  color="success"
+                  onClick={() => handleOpenDeliveryDialog(po)}
+                >
+                  <DeliveryIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+              <Tooltip title="Delete">
+                <IconButton
+                  size="small"
+                  color="error"
+                  onClick={() => handleDelete(po)}
+                >
+                  <DeleteIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            </>
           )}
 
           {/* Cancelled - can delete */}
@@ -507,7 +624,8 @@ export default function PurchaseOrdersPage() {
                   }
                 }
                 const isGroupStock = parsedNotes?.is_group_stock === true;
-                const isSynced = syncStatusMap.get(po.id) === true;
+                const settlementInfo = syncStatusMap.get(po.id);
+                const isSynced = settlementInfo?.isSynced === true;
 
                 if (isGroupStock && !isSynced) {
                   return (
@@ -584,7 +702,7 @@ export default function PurchaseOrdersPage() {
         }
       />
 
-      <RelatedPages />
+      <MaterialWorkflowBar currentStep="purchaseOrders" />
 
       {/* Show info when coming from material-search */}
       {prefilledData?.source === "material-search" && dialogOpen && (
@@ -705,7 +823,7 @@ export default function PurchaseOrdersPage() {
       )}
 
       {/* Create/Edit PO Dialog */}
-      <PurchaseOrderDialog
+      <UnifiedPurchaseOrderDialog
         open={dialogOpen}
         onClose={handleCloseDialog}
         purchaseOrder={editingPO}
@@ -716,8 +834,8 @@ export default function PurchaseOrdersPage() {
         prefilledUnit={prefilledData?.unit}
       />
 
-      {/* Delivery Dialog */}
-      <DeliveryDialog
+      {/* Record & Verify Delivery Dialog */}
+      <RecordAndVerifyDeliveryDialog
         open={deliveryDialogOpen}
         onClose={handleCloseDeliveryDialog}
         purchaseOrder={selectedPO}

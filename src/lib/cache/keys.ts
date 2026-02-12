@@ -13,7 +13,7 @@
 export const queryKeys = {
   // ==================== REFERENCE DATA (24hr cache) ====================
   // Rarely changes, can be cached for extended periods
-  
+
   sites: {
     all: ['sites'] as const,
     byId: (id: string) => ['sites', id] as const,
@@ -64,6 +64,36 @@ export const queryKeys = {
     profile: (userId: string) => ['users', 'profile', userId] as const,
   },
 
+  // ==================== COMPANY DATA (Multi-tenancy) ====================
+
+  companies: {
+    all: ['companies'] as const,
+    list: () => ['companies', 'list'] as const,
+    byId: (id: string) => ['companies', id] as const,
+    current: () => ['companies', 'current'] as const,
+  },
+
+  companyMembers: {
+    all: ['company-members'] as const,
+    list: (companyId: string) => ['company-members', companyId, 'list'] as const,
+    byId: (memberId: string) => ['company-members', memberId] as const,
+  },
+
+  companyInvites: {
+    all: ['company-invites'] as const,
+    list: (companyId: string) => ['company-invites', companyId, 'list'] as const,
+    pending: (companyId: string) => ['company-invites', companyId, 'pending'] as const,
+    byToken: (token: string) => ['company-invites', 'token', token] as const,
+  },
+
+  companyPrices: {
+    all: ['company-prices'] as const,
+    list: (companyId: string) => ['company-prices', companyId, 'list'] as const,
+    byVendor: (companyId: string, vendorId: string) => ['company-prices', companyId, 'vendor', vendorId] as const,
+    byMaterial: (companyId: string, materialId: string) => ['company-prices', companyId, 'material', materialId] as const,
+    comparison: (companyId: string, location: string) => ['company-prices', companyId, 'comparison', location] as const,
+  },
+
   subcontracts: {
     all: ['subcontracts'] as const,
     bySite: (siteId: string) => ['subcontracts', 'site', siteId] as const,
@@ -73,33 +103,33 @@ export const queryKeys = {
 
   // ==================== TRANSACTIONAL DATA (5min cache) ====================
   // Frequently updated, needs regular refresh
-  
+
   attendance: {
     all: ['attendance'] as const,
-    byDate: (siteId: string, date: string) => 
+    byDate: (siteId: string, date: string) =>
       ['attendance', 'site', siteId, 'date', date] as const,
-    dateRange: (siteId: string, from: string, to: string) => 
+    dateRange: (siteId: string, from: string, to: string) =>
       ['attendance', 'site', siteId, 'range', { from, to }] as const,
-    active: (siteId: string) => 
+    active: (siteId: string) =>
       ['attendance', 'site', siteId, 'active'] as const,
-    today: (siteId: string) => 
+    today: (siteId: string) =>
       ['attendance', 'site', siteId, 'today'] as const,
   },
 
   marketAttendance: {
     all: ['market-attendance'] as const,
-    byDate: (siteId: string, date: string) => 
+    byDate: (siteId: string, date: string) =>
       ['market-attendance', 'site', siteId, 'date', date] as const,
-    dateRange: (siteId: string, from: string, to: string) => 
+    dateRange: (siteId: string, from: string, to: string) =>
       ['market-attendance', 'site', siteId, 'range', { from, to }] as const,
   },
 
   expenses: {
     all: ['expenses'] as const,
     bySite: (siteId: string) => ['expenses', 'site', siteId] as const,
-    byDate: (siteId: string, date: string) => 
+    byDate: (siteId: string, date: string) =>
       ['expenses', 'site', siteId, 'date', date] as const,
-    dateRange: (siteId: string, from: string, to: string) => 
+    dateRange: (siteId: string, from: string, to: string) =>
       ['expenses', 'site', siteId, 'range', { from, to }] as const,
   },
 
@@ -107,16 +137,16 @@ export const queryKeys = {
     all: ['salary-periods'] as const,
     bySite: (siteId: string) => ['salary-periods', 'site', siteId] as const,
     byId: (id: string) => ['salary-periods', id] as const,
-    detailed: (siteId: string) => 
+    detailed: (siteId: string) =>
       ['salary-periods', 'site', siteId, 'detailed'] as const,
-    pending: (siteId: string) => 
+    pending: (siteId: string) =>
       ['salary-periods', 'site', siteId, 'pending'] as const,
   },
 
   clientPayments: {
     all: ['client-payments'] as const,
     bySite: (siteId: string) => ['client-payments', 'site', siteId] as const,
-    pending: (siteId: string) => 
+    pending: (siteId: string) =>
       ['client-payments', 'site', siteId, 'pending'] as const,
   },
 
@@ -162,27 +192,27 @@ export const queryKeys = {
   },
 
   // ==================== INVENTORY DATA (5min cache) ====================
-  
+
   materialStock: {
     all: ['material-stock'] as const,
     bySite: (siteId: string) => ['material-stock', 'site', siteId] as const,
-    summary: (siteId: string) => 
+    summary: (siteId: string) =>
       ['material-stock', 'site', siteId, 'summary'] as const,
-    lowStock: (siteId: string) => 
+    lowStock: (siteId: string) =>
       ['material-stock', 'site', siteId, 'low-stock'] as const,
   },
 
   materialUsage: {
     all: ['material-usage'] as const,
     bySite: (siteId: string) => ['material-usage', 'site', siteId] as const,
-    byDate: (siteId: string, date: string) => 
+    byDate: (siteId: string, date: string) =>
       ['material-usage', 'site', siteId, 'date', date] as const,
   },
 
   materialRequests: {
     all: ['material-requests'] as const,
     bySite: (siteId: string) => ['material-requests', 'site', siteId] as const,
-    pending: (siteId: string) => 
+    pending: (siteId: string) =>
       ['material-requests', 'site', siteId, 'pending'] as const,
   },
 
@@ -252,6 +282,7 @@ export const queryKeys = {
     all: ['vendor-inventory'] as const,
     byVendor: (vendorId: string) => ['vendor-inventory', 'vendor', vendorId] as const,
     byMaterial: (materialId: string) => ['vendor-inventory', 'material', materialId] as const,
+    byVariants: (variantIds: string[]) => ['vendor-inventory', 'variants', variantIds] as const,
     search: (query: string) => ['vendor-inventory', 'search', query] as const,
   },
 
@@ -261,16 +292,6 @@ export const queryKeys = {
       ['price-history', 'vendor', vendorId, 'material', materialId] as const,
     byMaterial: (materialId: string) => ['price-history', 'material', materialId] as const,
     byVendor: (vendorId: string) => ['price-history', 'vendor', vendorId] as const,
-  },
-
-  // ==================== LOCAL PURCHASES ====================
-
-  localPurchases: {
-    all: ['local-purchases'] as const,
-    bySite: (siteId: string) => ['local-purchases', 'site', siteId] as const,
-    byEngineer: (engineerId: string) => ['local-purchases', 'engineer', engineerId] as const,
-    byGroup: (groupId: string) => ['local-purchases', 'group', groupId] as const,
-    pendingReimbursement: () => ['local-purchases', 'pending-reimbursement'] as const,
   },
 
   // ==================== DELIVERIES & VERIFICATION ====================
@@ -294,9 +315,27 @@ export const queryKeys = {
     priceComparison: (materialId: string) => ['store-catalog', 'price-comparison', materialId] as const,
   },
 
+  // ==================== WEIGHT PREDICTION ====================
+
+  weightPrediction: {
+    all: ['weight-prediction'] as const,
+    byVendorMaterialBrand: (vendorId: string | undefined, materialId: string | undefined, brandId: string | null | undefined) =>
+      ['weight-prediction', vendorId, materialId, brandId] as const,
+    history: (vendorId: string, materialId: string, brandId: string | null) =>
+      ['weight-prediction', 'history', vendorId, materialId, brandId] as const,
+  },
+
+  // ==================== BILL VERIFICATION ====================
+
+  billVerification: {
+    all: ['bill-verification'] as const,
+    byPO: (poId: string) => ['bill-verification', 'po', poId] as const,
+    unverified: (siteId: string) => ['bill-verification', 'unverified', siteId] as const,
+  },
+
   // ==================== DASHBOARD / AGGREGATED DATA (2min cache) ====================
   // Frequently viewed, needs to be relatively fresh
-  
+
   dashboard: {
     all: ['dashboard'] as const,
     site: (siteId: string) => ['dashboard', 'site', siteId] as const,
@@ -306,11 +345,11 @@ export const queryKeys = {
 
   reports: {
     all: ['reports'] as const,
-    attendance: (siteId: string, from: string, to: string) => 
+    attendance: (siteId: string, from: string, to: string) =>
       ['reports', 'attendance', siteId, { from, to }] as const,
-    expenses: (siteId: string, from: string, to: string) => 
+    expenses: (siteId: string, from: string, to: string) =>
       ['reports', 'expenses', siteId, { from, to }] as const,
-    payments: (siteId: string, from: string, to: string) => 
+    payments: (siteId: string, from: string, to: string) =>
       ['reports', 'payments', siteId, { from, to }] as const,
   },
 
@@ -327,13 +366,13 @@ export const queryKeys = {
 export const cacheTTL = {
   // Reference data - rarely changes
   reference: 24 * 60 * 60 * 1000, // 24 hours
-  
+
   // Transactional data - frequently updated
   transactional: 5 * 60 * 1000, // 5 minutes
-  
+
   // Dashboard/aggregated data - balance between freshness and performance
   dashboard: 2 * 60 * 1000, // 2 minutes
-  
+
   // Real-time critical data - very short cache
   realtime: 30 * 1000, // 30 seconds
 } as const;
@@ -360,6 +399,10 @@ export function getCacheTTL(queryKey: readonly unknown[]): number {
     'vendors',
     'users',
     'subcontracts',
+    'companies',
+    'company-members',
+    'company-invites',
+    'company-prices',
   ];
 
   // Dashboard/stats entities - 2 minute cache
@@ -403,8 +446,25 @@ export function shouldPersistQuery(queryKey: readonly unknown[]): boolean {
 
   const entity = queryKey[0] as string;
 
-  // Don't persist sensitive or session-specific data
-  const noPersistEntities = ['auth-session', 'temp', 'preview'];
+  // Don't persist sensitive, session-specific, or massive datasets that block main thread
+  // Also exclude queries with "detail" sub-key to prevent hydration issues
+  const noPersistEntities = ['auth-session', 'temp', 'preview', 'purchase-orders', 'vendors', 'group-tea-shop'];
+
+  // Don't persist detail queries (they can cause hydration issues when pending)
+  // Also exclude linked-pos queries that depend on source_request_id column
+  if (queryKey.length > 1 && (queryKey[1] === 'detail' || queryKey[1] === 'for-materials' || queryKey[1] === 'items-for-conversion' || queryKey[1] === 'linked-pos')) {
+    return false;
+  }
 
   return !noPersistEntities.includes(entity);
 }
+
+/**
+ * Alias for backward compatibility and simpler imports
+ */
+export const cacheKeys = {
+  ...queryKeys,
+  // Convenience method for weight prediction
+  weightPrediction: (vendorId: string | undefined, materialId: string | undefined, brandId: string | null | undefined) =>
+    queryKeys.weightPrediction.byVendorMaterialBrand(vendorId, materialId, brandId),
+};

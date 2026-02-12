@@ -23,9 +23,13 @@ import {
   Close as CloseIcon,
   Edit as EditIcon,
   CheckCircle as ApproveIcon,
+  ShoppingCart as ShoppingCartIcon,
+  OpenInNew as OpenInNewIcon,
 } from "@mui/icons-material";
 import { useIsMobile } from "@/hooks/useIsMobile";
-import { useMaterialRequest } from "@/hooks/queries/useMaterialRequests";
+import { useMaterialRequest, useRequestLinkedPOs } from "@/hooks/queries/useMaterialRequests";
+import { formatCurrency } from "@/lib/formatters";
+import { PO_STATUS_LABELS } from "@/types/material.types";
 import type {
   MaterialRequestWithDetails,
   MaterialRequestStatus,
@@ -39,6 +43,7 @@ interface RequestDetailsDrawerProps {
   request: MaterialRequestWithDetails | null;
   onEdit?: (request: MaterialRequestWithDetails) => void;
   onApprove?: (request: MaterialRequestWithDetails) => void;
+  onConvertToPO?: (request: MaterialRequestWithDetails) => void;
   canEdit?: boolean;
   isAdmin?: boolean;
 }
@@ -78,6 +83,7 @@ export default function RequestDetailsDrawer({
   request,
   onEdit,
   onApprove,
+  onConvertToPO,
   canEdit = false,
   isAdmin = false,
 }: RequestDetailsDrawerProps) {
@@ -86,6 +92,9 @@ export default function RequestDetailsDrawer({
   // Fetch full request details
   const { data: fullRequest } = useMaterialRequest(request?.id);
   const req = fullRequest || request;
+
+  // Fetch linked purchase orders
+  const { data: linkedPOs = [] } = useRequestLinkedPOs(request?.id);
 
   if (!req) return null;
 
@@ -97,6 +106,7 @@ export default function RequestDetailsDrawer({
 
   const canEditRequest = ["draft", "pending"].includes(req.status) && canEdit;
   const canApproveRequest = req.status === "pending" && isAdmin;
+  const canConvertToPO = ["approved", "ordered", "partial_fulfilled"].includes(req.status) && isAdmin;
 
   return (
     <Drawer
@@ -277,16 +287,69 @@ export default function RequestDetailsDrawer({
           </Table>
         </Paper>
 
-        {/* Linked PO */}
-        {req.converted_to_po_id && (
-          <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
-            <Typography variant="subtitle2" gutterBottom>
-              Linked Purchase Order
+        {/* Linked Purchase Orders */}
+        {linkedPOs.length > 0 && (
+          <Box sx={{ mb: 2 }}>
+            <Typography variant="subtitle2" sx={{ mb: 1 }}>
+              Linked Purchase Orders
             </Typography>
-            <Typography variant="body2" color="primary">
-              {/* @ts-expect-error - converted_to_po is joined */}
-              {req.converted_to_po?.po_number || req.converted_to_po_id}
+            {linkedPOs.map((po) => (
+              <Paper
+                key={po.id}
+                variant="outlined"
+                sx={{ p: 1.5, mb: 1, cursor: "pointer", "&:hover": { bgcolor: "action.hover" } }}
+                onClick={() => window.open(`/site/purchase-orders?po=${po.id}`, "_blank")}
+              >
+                <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                  <Box>
+                    <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                      <Typography variant="body2" fontWeight={500} color="primary">
+                        {po.po_number}
+                      </Typography>
+                      <Chip
+                        label={PO_STATUS_LABELS[po.status] || po.status}
+                        size="small"
+                        color={po.status === "delivered" ? "success" : po.status === "cancelled" ? "error" : "info"}
+                      />
+                    </Box>
+                    <Typography variant="caption" color="text.secondary">
+                      {po.vendor_name} • {po.item_count} item{po.item_count !== 1 ? "s" : ""}
+                    </Typography>
+                  </Box>
+                  <Box sx={{ textAlign: "right" }}>
+                    <Typography variant="body2" fontWeight={500}>
+                      {po.total_amount ? formatCurrency(po.total_amount) : "-"}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {formatDate(po.order_date)}
+                    </Typography>
+                  </Box>
+                </Box>
+              </Paper>
+            ))}
+          </Box>
+        )}
+
+        {/* Convert to PO Section */}
+        {canConvertToPO && onConvertToPO && linkedPOs.length === 0 && (
+          <Paper variant="outlined" sx={{ p: 2, mb: 2, bgcolor: "primary.50", borderColor: "primary.200" }}>
+            <Typography variant="subtitle2" gutterBottom color="primary">
+              Ready to Order
             </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+              This request has been approved. You can now create a purchase order.
+            </Typography>
+            <Button
+              variant="contained"
+              size="small"
+              startIcon={<ShoppingCartIcon />}
+              onClick={() => {
+                onClose();
+                onConvertToPO(req);
+              }}
+            >
+              Convert to Purchase Order
+            </Button>
           </Paper>
         )}
       </Box>
@@ -300,6 +363,7 @@ export default function RequestDetailsDrawer({
           display: "flex",
           gap: 1,
           justifyContent: "flex-end",
+          flexWrap: "wrap",
         }}
       >
         {canEditRequest && onEdit && (
@@ -325,6 +389,19 @@ export default function RequestDetailsDrawer({
             }}
           >
             Approve
+          </Button>
+        )}
+        {canConvertToPO && onConvertToPO && linkedPOs.length > 0 && (
+          <Button
+            variant="outlined"
+            color="primary"
+            startIcon={<ShoppingCartIcon />}
+            onClick={() => {
+              onClose();
+              onConvertToPO(req);
+            }}
+          >
+            Add More to PO
           </Button>
         )}
       </Box>

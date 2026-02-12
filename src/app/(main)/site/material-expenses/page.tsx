@@ -45,6 +45,7 @@ import {
   MoreVert as MoreIcon,
 } from "@mui/icons-material";
 import PageHeader from "@/components/layout/PageHeader";
+import MaterialWorkflowBar from "@/components/materials/MaterialWorkflowBar";
 import Breadcrumbs from "@/components/layout/Breadcrumbs";
 import { useSite } from "@/contexts/SiteContext";
 import { formatCurrency, formatDate } from "@/lib/formatters";
@@ -224,6 +225,8 @@ export default function MaterialExpensesPage() {
             : "Actual material costs attributed to this site"
         }
       />
+
+      <MaterialWorkflowBar currentStep="expenses" />
 
       {/* Summary Cards */}
       <Grid container spacing={2} sx={{ mb: 3 }}>

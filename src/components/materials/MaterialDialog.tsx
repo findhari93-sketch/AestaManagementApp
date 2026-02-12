@@ -43,6 +43,7 @@ import {
 import CategoryAutocomplete from "@/components/common/CategoryAutocomplete";
 import FileUploader from "@/components/common/FileUploader";
 import { createClient } from "@/lib/supabase/client";
+import { calculatePieceWeight } from "@/lib/weightCalculation";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useFormDraft } from "@/hooks/useFormDraft";
 import {
@@ -56,6 +57,7 @@ import {
   useMaterial,
   useMaterialVariants,
   useCreateMaterialCategory,
+  useAddVariantToMaterial,
 } from "@/hooks/queries/useMaterials";
 import type {
   MaterialWithDetails,
@@ -97,6 +99,7 @@ interface MaterialDialogProps {
   onClose: () => void;
   material: MaterialWithDetails | null;
   categories: MaterialCategory[];
+  onEditVariant?: (variant: MaterialWithDetails) => void;
 }
 
 export default function MaterialDialog({
@@ -104,6 +107,7 @@ export default function MaterialDialog({
   onClose,
   material,
   categories,
+  onEditVariant,
 }: MaterialDialogProps) {
   const isMobile = useIsMobile();
   const isEdit = !!material;
@@ -116,15 +120,16 @@ export default function MaterialDialog({
   const deleteBrand = useDeleteMaterialBrand();
   const { data: parentMaterials = [] } = useParentMaterials();
   const createCategory = useCreateMaterialCategory();
+  const addVariant = useAddVariantToMaterial();
 
   // Fetch fresh material data to get updated brands after mutations
   const { data: freshMaterial } = useMaterial(material?.id);
   // Use fresh data for brands (falls back to prop if query not ready)
   const materialForBrands = freshMaterial || material;
 
-  // Fetch variants when editing a parent material
+  // Fetch variants when editing a parent material (not a variant itself)
   const { data: materialVariants = [] } = useMaterialVariants(
-    material?.variant_count && material.variant_count > 0 ? material.id : undefined
+    isEdit && material && !material.parent_id ? material.id : undefined
   );
 
   const [error, setError] = useState("");
@@ -139,6 +144,11 @@ export default function MaterialDialog({
   const [showDescription, setShowDescription] = useState(false);
   const [showImageUpload, setShowImageUpload] = useState(false);
   const [categoryDialogOpen, setCategoryDialogOpen] = useState(false);
+  const [brandsExpanded, setBrandsExpanded] = useState(false);
+  const [addVariantDialogOpen, setAddVariantDialogOpen] = useState(false);
+  const [newVariantName, setNewVariantName] = useState("");
+  const [newVariantWeight, setNewVariantWeight] = useState<string>("");
+  const [newVariantLength, setNewVariantLength] = useState<string>("");
   const supabase = createClient();
 
   // Memoize initial form data based on material prop
@@ -202,6 +212,9 @@ export default function MaterialDialog({
       setVariants([]);
       setError("");
       setNewBrandName("");
+      // Initialize brands accordion expansion based on whether there are brands
+      const hasBrands = (material?.brands?.filter(b => b.is_active)?.length || 0) > 0;
+      setBrandsExpanded(hasBrands);
     }
   }, [material, open]);
 
@@ -372,6 +385,26 @@ export default function MaterialDialog({
       });
     } catch (err) {
       console.error("Failed to delete brand:", err);
+    }
+  };
+
+  const handleAddVariant = async () => {
+    if (!material?.id || !newVariantName.trim()) return;
+    try {
+      await addVariant.mutateAsync({
+        parentId: material.id,
+        variant: {
+          name: newVariantName.trim(),
+          weight_per_unit: newVariantWeight ? parseFloat(newVariantWeight) : undefined,
+          length_per_piece: newVariantLength ? parseFloat(newVariantLength) : undefined,
+        },
+      });
+      setAddVariantDialogOpen(false);
+      setNewVariantName("");
+      setNewVariantWeight("");
+      setNewVariantLength("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to add variant");
     }
   };
 
@@ -869,7 +902,7 @@ export default function MaterialDialog({
                       e.target.value ? parseFloat(e.target.value) : null
                     )
                   }
-                  helperText="For parent material (optional)"
+                  helperText="Standard weight - actual may vary ±5%"
                   slotProps={{
                     input: {
                       inputProps: { min: 0, step: 0.001 },
@@ -911,56 +944,83 @@ export default function MaterialDialog({
             </Grid>
           )}
 
-          {/* Material Variants Section - Only show for parent materials with variants */}
-          {isEdit && material && material.variant_count && material.variant_count > 0 && (
+          {/* Material Variants Section - Show for all parent materials (not variants themselves) */}
+          {isEdit && material && !material.parent_id && (
             <Grid size={12}>
-              <Accordion defaultExpanded>
+              <Accordion defaultExpanded={materialVariants.length > 0}>
                 <AccordionSummary expandIcon={<ExpandMoreIcon />}>
                   <Typography>
-                    Material Variants ({material.variant_count})
+                    Material Variants ({materialVariants.length})
                   </Typography>
                 </AccordionSummary>
                 <AccordionDetails>
                   <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
-                    {materialVariants.map((variant) => (
-                      <Box
-                        key={variant.id}
-                        sx={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 1,
-                          p: 1,
-                          bgcolor: "grey.50",
-                          borderRadius: 1,
-                        }}
-                      >
-                        <Typography variant="body2" fontWeight={500}>
-                          {variant.name}
+                    {materialVariants.length > 0 ? (
+                      <>
+                        {materialVariants.map((variant) => (
+                          <Box
+                            key={variant.id}
+                            sx={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 1,
+                              p: 1,
+                              bgcolor: "grey.50",
+                              borderRadius: 1,
+                            }}
+                          >
+                            <Typography variant="body2" fontWeight={500} sx={{ flex: 1 }}>
+                              {variant.name}
+                            </Typography>
+                            {variant.code && (
+                              <Typography variant="caption" color="text.secondary">
+                                ({variant.code})
+                              </Typography>
+                            )}
+                            {variant.weight_per_unit && variant.length_per_piece && (
+                              <Chip
+                                label={`~${calculatePieceWeight(variant.weight_per_unit, variant.length_per_piece, variant.length_unit || "ft")?.toFixed(2) || variant.weight_per_unit} kg/pc`}
+                                size="small"
+                                variant="outlined"
+                              />
+                            )}
+                            {variant.length_per_piece && (
+                              <Chip
+                                label={`${variant.length_per_piece} ${variant.length_unit || "ft"}`}
+                                size="small"
+                                variant="outlined"
+                              />
+                            )}
+                            <Tooltip title="Edit variant">
+                              <IconButton
+                                size="small"
+                                onClick={() => {
+                                  onClose();
+                                  onEditVariant?.(variant);
+                                }}
+                              >
+                                <EditIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                          </Box>
+                        ))}
+                        <Typography variant="caption" color="text.secondary" sx={{ mt: 1 }}>
+                          Click the edit icon to modify individual variants.
                         </Typography>
-                        {variant.code && (
-                          <Typography variant="caption" color="text.secondary">
-                            ({variant.code})
-                          </Typography>
-                        )}
-                        {variant.weight_per_unit && (
-                          <Chip
-                            label={`${variant.weight_per_unit} ${variant.weight_unit || "kg"}/pc`}
-                            size="small"
-                            variant="outlined"
-                          />
-                        )}
-                        {variant.length_per_piece && (
-                          <Chip
-                            label={`${variant.length_per_piece} ${variant.length_unit || "ft"}`}
-                            size="small"
-                            variant="outlined"
-                          />
-                        )}
-                      </Box>
-                    ))}
-                    <Typography variant="caption" color="text.secondary" sx={{ mt: 1 }}>
-                      Variants are managed separately. Edit individual variants from the table.
-                    </Typography>
+                      </>
+                    ) : (
+                      <Typography variant="body2" color="text.secondary">
+                        No variants yet. Add variants to track different sizes or specifications.
+                      </Typography>
+                    )}
+                    <Button
+                      startIcon={<AddIcon />}
+                      onClick={() => setAddVariantDialogOpen(true)}
+                      size="small"
+                      sx={{ alignSelf: "flex-start", mt: 1 }}
+                    >
+                      Add Variant
+                    </Button>
                   </Box>
                 </AccordionDetails>
               </Accordion>
@@ -970,7 +1030,10 @@ export default function MaterialDialog({
           {/* Brands Section - Only show for existing materials */}
           {isEdit && material && (
             <Grid size={12}>
-              <Accordion defaultExpanded={activeBrands.length > 0 || fieldVisibility.defaultShowBrands}>
+              <Accordion
+                expanded={brandsExpanded}
+                onChange={(_, isExpanded) => setBrandsExpanded(isExpanded)}
+              >
                 <AccordionSummary expandIcon={<ExpandMoreIcon />}>
                   <Typography>
                     Brands ({activeBrands.length})
@@ -1016,6 +1079,61 @@ export default function MaterialDialog({
         category={null}
         isLoading={createCategory.isPending}
       />
+
+      {/* Add Variant Dialog */}
+      <Dialog
+        open={addVariantDialogOpen}
+        onClose={() => setAddVariantDialogOpen(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Add Variant</DialogTitle>
+        <DialogContent>
+          <Box sx={{ display: "flex", flexDirection: "column", gap: 2, mt: 1 }}>
+            <TextField
+              label="Variant Name"
+              value={newVariantName}
+              onChange={(e) => setNewVariantName(e.target.value)}
+              fullWidth
+              required
+              placeholder="e.g., 8mm, Priya Brick, Chamber Brick"
+              helperText="Enter a name to identify this variant"
+            />
+            <TextField
+              label="Weight per Unit"
+              value={newVariantWeight}
+              onChange={(e) => setNewVariantWeight(e.target.value)}
+              type="number"
+              fullWidth
+              InputProps={{
+                endAdornment: <InputAdornment position="end">kg</InputAdornment>,
+              }}
+              helperText="Optional: Weight per piece/unit"
+            />
+            <TextField
+              label="Length per Piece"
+              value={newVariantLength}
+              onChange={(e) => setNewVariantLength(e.target.value)}
+              type="number"
+              fullWidth
+              InputProps={{
+                endAdornment: <InputAdornment position="end">{material?.length_unit || "ft"}</InputAdornment>,
+              }}
+              helperText="Optional: Standard length per piece"
+            />
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setAddVariantDialogOpen(false)}>Cancel</Button>
+          <Button
+            variant="contained"
+            onClick={handleAddVariant}
+            disabled={!newVariantName.trim() || addVariant.isPending}
+          >
+            {addVariant.isPending ? "Adding..." : "Add Variant"}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Dialog>
   );
 }

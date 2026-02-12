@@ -26,7 +26,7 @@ interface RelatedPage {
 const relatedPagesConfig: Record<string, RelatedPage[]> = {
   // Material Search - related to vendors, stock, POs
   '/company/material-search': [
-    { label: 'Stock Levels', path: '/site/stock', icon: <InventoryIcon fontSize="small" /> },
+    { label: 'Inventory', path: '/site/inventory', icon: <InventoryIcon fontSize="small" /> },
     { label: 'Vendors', path: '/company/vendors', icon: <StoreIcon fontSize="small" /> },
     { label: 'Purchase Orders', path: '/site/purchase-orders', icon: <ShoppingCartIcon fontSize="small" /> },
   ],
@@ -35,7 +35,7 @@ const relatedPagesConfig: Record<string, RelatedPage[]> = {
   '/company/materials': [
     { label: 'Price Comparison', path: '/company/material-search', icon: <TrendingUpIcon fontSize="small" /> },
     { label: 'Vendors', path: '/company/vendors', icon: <StoreIcon fontSize="small" /> },
-    { label: 'Stock Inventory', path: '/site/stock', icon: <InventoryIcon fontSize="small" /> },
+    { label: 'Inventory', path: '/site/inventory', icon: <InventoryIcon fontSize="small" /> },
   ],
 
   // Vendors - related to materials, search
@@ -47,30 +47,23 @@ const relatedPagesConfig: Record<string, RelatedPage[]> = {
 
   // Site Groups - related to stock, settlements
   '/company/site-groups': [
-    { label: 'Stock Inventory', path: '/site/stock', icon: <InventoryIcon fontSize="small" /> },
+    { label: 'Inventory', path: '/site/inventory', icon: <InventoryIcon fontSize="small" /> },
     { label: 'Inter-Site Settlement', path: '/site/inter-site-settlement', icon: <SettlementIcon fontSize="small" /> },
     { label: 'Material Catalog', path: '/company/materials', icon: <CategoryIcon fontSize="small" /> },
   ],
 
-  // Stock - related to usage, requests, deliveries
-  '/site/stock': [
-    { label: 'Daily Usage', path: '/site/material-usage', icon: <ConstructionIcon fontSize="small" /> },
+  // Inventory - unified stock and usage page
+  '/site/inventory': [
     { label: 'Material Requests', path: '/site/material-requests', icon: <AssignmentIcon fontSize="small" /> },
     { label: 'Deliveries', path: '/site/delivery-verification', icon: <DeliveryIcon fontSize="small" /> },
-    { label: 'Price Comparison', path: '/company/material-search', icon: <TrendingUpIcon fontSize="small" /> },
-  ],
-
-  // Material Usage - related to stock, requests
-  '/site/material-usage': [
-    { label: 'Stock Inventory', path: '/site/stock', icon: <InventoryIcon fontSize="small" /> },
-    { label: 'Material Requests', path: '/site/material-requests', icon: <AssignmentIcon fontSize="small" /> },
     { label: 'Inter-Site Settlement', path: '/site/inter-site-settlement', icon: <SettlementIcon fontSize="small" /> },
+    { label: 'Price Comparison', path: '/company/material-search', icon: <TrendingUpIcon fontSize="small" /> },
   ],
 
   // Material Requests - related to POs, stock
   '/site/material-requests': [
     { label: 'Purchase Orders', path: '/site/purchase-orders', icon: <ShoppingCartIcon fontSize="small" /> },
-    { label: 'Stock Inventory', path: '/site/stock', icon: <InventoryIcon fontSize="small" /> },
+    { label: 'Inventory', path: '/site/inventory', icon: <InventoryIcon fontSize="small" /> },
     { label: 'Price Comparison', path: '/company/material-search', icon: <TrendingUpIcon fontSize="small" /> },
   ],
 
@@ -79,26 +72,18 @@ const relatedPagesConfig: Record<string, RelatedPage[]> = {
     { label: 'Deliveries', path: '/site/delivery-verification', icon: <DeliveryIcon fontSize="small" /> },
     { label: 'Requests', path: '/site/material-requests', icon: <AssignmentIcon fontSize="small" /> },
     { label: 'Vendors', path: '/company/vendors', icon: <StoreIcon fontSize="small" /> },
-    { label: 'Stock', path: '/site/stock', icon: <InventoryIcon fontSize="small" /> },
+    { label: 'Inventory', path: '/site/inventory', icon: <InventoryIcon fontSize="small" /> },
   ],
 
   // Delivery Verification - related to POs, stock
   '/site/delivery-verification': [
     { label: 'Purchase Orders', path: '/site/purchase-orders', icon: <ShoppingCartIcon fontSize="small" /> },
-    { label: 'Stock Inventory', path: '/site/stock', icon: <InventoryIcon fontSize="small" /> },
-  ],
-
-  // Local Purchases - related to stock, vendors
-  '/site/local-purchases': [
-    { label: 'Stock Inventory', path: '/site/stock', icon: <InventoryIcon fontSize="small" /> },
-    { label: 'Vendors', path: '/company/vendors', icon: <StoreIcon fontSize="small" /> },
-    { label: 'Inter-Site Settlement', path: '/site/inter-site-settlement', icon: <SettlementIcon fontSize="small" /> },
+    { label: 'Inventory', path: '/site/inventory', icon: <InventoryIcon fontSize="small" /> },
   ],
 
   // Inter-Site Settlement - related to usage, site groups
   '/site/inter-site-settlement': [
-    { label: 'Daily Usage', path: '/site/material-usage', icon: <ConstructionIcon fontSize="small" /> },
-    { label: 'Stock Inventory', path: '/site/stock', icon: <InventoryIcon fontSize="small" /> },
+    { label: 'Inventory', path: '/site/inventory', icon: <InventoryIcon fontSize="small" /> },
     { label: 'Site Groups', path: '/company/site-groups', icon: <GroupsIcon fontSize="small" /> },
   ],
 }

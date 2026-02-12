@@ -48,6 +48,9 @@ export default function BatchCompletionDialog({
   const usedQty = originalQty - remainingQty;
   const siteAllocations = batch.site_allocations || [];
 
+  // Get the unit from the first item (all items in a batch should have the same unit context)
+  const itemUnit = batch.items?.[0]?.unit || batch.material?.unit || "pcs";
+
   // Calculate allocations with amounts
   const allocations = siteAllocations.map((alloc) => {
     const percentage = originalQty > 0 ? (alloc.quantity_used / originalQty) * 100 : 0;
@@ -170,19 +173,19 @@ export default function BatchCompletionDialog({
           <Box display="flex" justifyContent="space-between" mb={1}>
             <Typography variant="body2">Total Quantity:</Typography>
             <Typography variant="body2" fontWeight={600}>
-              {originalQty.toFixed(2)}
+              {originalQty.toFixed(2)} {itemUnit}
             </Typography>
           </Box>
           <Box display="flex" justifyContent="space-between" mb={1}>
             <Typography variant="body2">Used by Others:</Typography>
             <Typography variant="body2" fontWeight={600} color="warning.main">
-              {usedQty.toFixed(2)}
+              {usedQty.toFixed(2)} {itemUnit}
             </Typography>
           </Box>
           <Box display="flex" justifyContent="space-between">
             <Typography variant="body2">Self Use (Paying Site):</Typography>
             <Typography variant="body2" fontWeight={600} color="success.main">
-              {selfUseQty.toFixed(2)}
+              {selfUseQty.toFixed(2)} {itemUnit}
             </Typography>
           </Box>
         </Box>
@@ -208,7 +211,7 @@ export default function BatchCompletionDialog({
               {allocations.map((alloc) => (
                 <TableRow key={alloc.site_id}>
                   <TableCell>{alloc.site_name}</TableCell>
-                  <TableCell align="right">{alloc.quantity_used.toFixed(2)}</TableCell>
+                  <TableCell align="right">{alloc.quantity_used.toFixed(2)} {itemUnit}</TableCell>
                   <TableCell align="right">{alloc.percentage.toFixed(1)}%</TableCell>
                   <TableCell align="right">{formatCurrency(alloc.amount)}</TableCell>
                   <TableCell align="center">

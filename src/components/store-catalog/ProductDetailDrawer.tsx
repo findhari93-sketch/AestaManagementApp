@@ -314,6 +314,7 @@ export default function ProductDetailDrawer({
                     }}
                   >
                     <ListItemText
+                      primaryTypographyProps={{ component: "div" }}
                       primary={
                         <Box display="flex" alignItems="center" gap={1}>
                           <StoreIcon fontSize="small" color="action" />

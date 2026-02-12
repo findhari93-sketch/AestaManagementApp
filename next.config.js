@@ -1,7 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  output: 'standalone',
+  // Only use standalone output in production builds
+  ...(process.env.NODE_ENV === 'production' && { output: 'standalone' }),
   transpilePackages: ['@mui/material', '@mui/system', '@mui/icons-material'],
   eslint: {
     ignoreDuringBuilds: true,

@@ -34,8 +34,11 @@ import {
   Receipt as BillIcon,
   Groups as GroupIcon,
   Store as OwnSiteIcon,
+  Warning as WarningIcon,
+  Remove as NoBillIcon,
 } from "@mui/icons-material";
 import PageHeader from "@/components/layout/PageHeader";
+import MaterialWorkflowBar from "@/components/materials/MaterialWorkflowBar";
 import Breadcrumbs from "@/components/layout/Breadcrumbs";
 import { useSite } from "@/contexts/SiteContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -44,7 +47,10 @@ import { hasEditPermission } from "@/lib/permissions";
 import { useSiteMaterialExpenses, useDeleteMaterialPurchase } from "@/hooks/queries/useMaterialPurchases";
 import type { MaterialPurchaseExpenseWithDetails, PurchaseOrderWithDetails } from "@/types/material.types";
 import ConfirmDialog from "@/components/common/ConfirmDialog";
+import { BillPreviewButton } from "@/components/common/BillViewerDialog";
 import MaterialSettlementDialog from "@/components/materials/MaterialSettlementDialog";
+import BillVerificationDialog from "@/components/materials/BillVerificationDialog";
+import { useVerifyBill } from "@/hooks/queries/useBillVerification";
 import { useRouter } from "next/navigation";
 
 export default function MaterialSettlementsPage() {
@@ -61,17 +67,23 @@ export default function MaterialSettlementsPage() {
   const [settlementPurchase, setSettlementPurchase] = useState<MaterialPurchaseExpenseWithDetails | null>(null);
   const [settlementPO, setSettlementPO] = useState<PurchaseOrderWithDetails | null>(null);
 
+  // Bill verification dialog state (for direct verification from the chip)
+  const [verificationDialogOpen, setVerificationDialogOpen] = useState(false);
+  const [verifyingPO, setVerifyingPO] = useState<PurchaseOrderWithDetails | null>(null);
+  const [verifyingBillUrl, setVerifyingBillUrl] = useState<string | null>(null);
+
   // Hooks
   const { data: materialExpensesData, isLoading } = useSiteMaterialExpenses(selectedSite?.id);
   const deleteMutation = useDeleteMaterialPurchase();
+  const verifyBillMutation = useVerifyBill();
 
   // Auth and permissions
-  const { userProfile } = useAuth();
+  const { userProfile, user } = useAuth();
   const canEdit = hasEditPermission(userProfile?.role);
 
-  // Extract data
-  const allPurchases = materialExpensesData?.expenses || [];
-  const allAdvancePOs = materialExpensesData?.advancePOs || [];
+  // Extract data - memoized to prevent dependency issues
+  const allPurchases = useMemo(() => materialExpensesData?.expenses || [], [materialExpensesData?.expenses]);
+  const allAdvancePOs = useMemo(() => materialExpensesData?.advancePOs || [], [materialExpensesData?.advancePOs]);
   const totalAmount = materialExpensesData?.total || 0;
 
   // Create a unified list with type indicators for filtering and display
@@ -109,6 +121,15 @@ export default function MaterialSettlementsPage() {
     return allItems;
   }, [allItems, statusFilter]);
 
+  // Helper function to get the correct amount for an expense
+  // Uses the linked PO's total_amount (which reflects pricing mode changes) when available
+  const getExpenseAmount = (expense: MaterialPurchaseExpenseWithDetails) => {
+    if (expense.purchase_order?.total_amount) {
+      return Number(expense.purchase_order.total_amount);
+    }
+    return Number(expense.total_amount || 0);
+  };
+
   // Calculate summaries
   const summaries = useMemo(() => {
     const pendingExpenses = allPurchases.filter((p) => !p.settlement_reference);
@@ -116,23 +137,27 @@ export default function MaterialSettlementsPage() {
     const pendingPOs = allAdvancePOs.filter((po) => !po.advance_paid);
     const settledPOs = allAdvancePOs.filter((po) => !!po.advance_paid);
 
+    // Calculate totals using the correct amounts (from linked PO when available)
+    const allExpensesTotal = allPurchases.reduce((sum, p) => sum + getExpenseAmount(p), 0);
+    const allPOsTotal = allAdvancePOs.reduce((sum, po) => sum + Number(po.total_amount || 0), 0);
+
     return {
       total: {
         count: allItems.length,
-        amount: totalAmount,
+        amount: allExpensesTotal + allPOsTotal,
       },
       pending: {
         count: pendingExpenses.length + pendingPOs.length,
-        amount: pendingExpenses.reduce((sum, p) => sum + Number(p.total_amount || 0), 0) +
+        amount: pendingExpenses.reduce((sum, p) => sum + getExpenseAmount(p), 0) +
                 pendingPOs.reduce((sum, po) => sum + Number(po.total_amount || 0), 0),
       },
       settled: {
         count: settledExpenses.length + settledPOs.length,
-        amount: settledExpenses.reduce((sum, p) => sum + Number(p.total_amount || 0), 0) +
+        amount: settledExpenses.reduce((sum, p) => sum + getExpenseAmount(p), 0) +
                 settledPOs.reduce((sum, po) => sum + Number(po.total_amount || 0), 0),
       },
     };
-  }, [allPurchases, allAdvancePOs, allItems.length, totalAmount]);
+  }, [allPurchases, allAdvancePOs, allItems.length]);
 
   // Handle delete
   const handleDeleteClick = (purchase: MaterialPurchaseExpenseWithDetails) => {
@@ -181,6 +206,8 @@ export default function MaterialSettlementsPage() {
             : "Track and settle material purchases"
         }
       />
+
+      <MaterialWorkflowBar currentStep="settlements" />
 
       {/* Action Buttons */}
       <Box sx={{ display: "flex", gap: 2, mb: 3 }}>
@@ -303,6 +330,7 @@ export default function MaterialSettlementsPage() {
                 <TableCell>Materials</TableCell>
                 <TableCell>Vendor</TableCell>
                 <TableCell align="right">Amount</TableCell>
+                <TableCell>Bill</TableCell>
                 <TableCell>Status</TableCell>
                 <TableCell>Actions</TableCell>
               </TableRow>
@@ -311,6 +339,7 @@ export default function MaterialSettlementsPage() {
               {isLoading ? (
                 [...Array(5)].map((_, i) => (
                   <TableRow key={i}>
+                    <TableCell><Skeleton /></TableCell>
                     <TableCell><Skeleton /></TableCell>
                     <TableCell><Skeleton /></TableCell>
                     <TableCell><Skeleton /></TableCell>
@@ -337,7 +366,11 @@ export default function MaterialSettlementsPage() {
                   const refCode = purchase?.ref_code || po?.po_number || '';
                   const dateField = purchase?.purchase_date || po?.order_date || '';
                   const vendorName = item.vendor?.name || (purchase?.vendor_name) || '-';
-                  const amount = Number(item.total_amount || 0);
+                  // For expenses with linked PO, use the PO's total_amount (which is up-to-date with pricing changes)
+                  // For advance POs or expenses without linked PO, use item.total_amount
+                  const amount = purchase?.purchase_order?.total_amount
+                    ? Number(purchase.purchase_order.total_amount)
+                    : Number(item.total_amount || 0);
                   const materialsText = item.items && item.items.length > 0
                     ? item.items.map((i: any) => i.material?.name || "Unknown").join(", ")
                     : "Material purchase";
@@ -446,6 +479,57 @@ export default function MaterialSettlementsPage() {
                         </Typography>
                       )}
                     </TableCell>
+                    {/* Bill Status Cell */}
+                    <TableCell>
+                      {(() => {
+                        // Get the effective PO (either direct PO or through purchase)
+                        const effectivePO = po || purchase?.purchase_order;
+                        const billUrl = effectivePO?.vendor_bill_url || purchase?.bill_url;
+                        const isVerified = effectivePO?.bill_verified;
+
+                        if (!billUrl) {
+                          return (
+                            <Chip
+                              icon={<NoBillIcon sx={{ fontSize: 14 }} />}
+                              label="No Bill"
+                              size="small"
+                              color="default"
+                              variant="outlined"
+                              sx={{ fontSize: "0.7rem" }}
+                            />
+                          );
+                        }
+
+                        return (
+                          <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                            <Chip
+                              icon={isVerified ? <SettledIcon sx={{ fontSize: 14 }} /> : <WarningIcon sx={{ fontSize: 14 }} />}
+                              label={isVerified ? "Verified" : "Unverified"}
+                              size="small"
+                              color={isVerified ? "success" : "warning"}
+                              variant="outlined"
+                              sx={{
+                                fontSize: "0.7rem",
+                                cursor: !isVerified ? "pointer" : "default",
+                              }}
+                              onClick={!isVerified && effectivePO ? (e) => {
+                                e.stopPropagation();
+                                setVerifyingPO(effectivePO as PurchaseOrderWithDetails);
+                                setVerifyingBillUrl(billUrl || null);
+                                setVerificationDialogOpen(true);
+                              } : undefined}
+                            />
+                            <BillPreviewButton
+                              billUrl={billUrl}
+                              label=""
+                              size="small"
+                              variant="text"
+                              showIcon
+                            />
+                          </Box>
+                        );
+                      })()}
+                    </TableCell>
                     <TableCell>
                       {isPO ? (
                         // PO advance payment status
@@ -505,18 +589,6 @@ export default function MaterialSettlementsPage() {
                     </TableCell>
                     <TableCell>
                       <Box sx={{ display: "flex", gap: 0.5, flexWrap: "wrap" }}>
-                        {/* View Bill Button - shown when bill_url exists */}
-                        {purchase?.bill_url && (
-                          <Tooltip title="View Bill">
-                            <IconButton
-                              size="small"
-                              color="primary"
-                              onClick={() => window.open(purchase!.bill_url!, "_blank")}
-                            >
-                              <BillIcon fontSize="small" />
-                            </IconButton>
-                          </Tooltip>
-                        )}
                         {/* Pay Advance button for POs with advance payment timing */}
                         {isPO && !po!.advance_paid && canEdit && (
                           <Tooltip title="Record advance payment">
@@ -604,7 +676,7 @@ export default function MaterialSettlementsPage() {
                 })
               ) : (
                 <TableRow>
-                  <TableCell colSpan={9} align="center" sx={{ py: 4 }}>
+                  <TableCell colSpan={10} align="center" sx={{ py: 4 }}>
                     <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 1 }}>
                       <InventoryIcon sx={{ fontSize: 48, color: "text.disabled" }} />
                       <Typography color="text.secondary">
@@ -671,6 +743,34 @@ export default function MaterialSettlementsPage() {
         purchaseOrder={settlementPO}
         onClose={handleSettlementClose}
         onSuccess={handleSettlementClose}
+      />
+
+      {/* Direct Bill Verification Dialog - triggered by clicking Unverified chip */}
+      <BillVerificationDialog
+        open={verificationDialogOpen}
+        onClose={() => {
+          setVerificationDialogOpen(false);
+          setVerifyingPO(null);
+          setVerifyingBillUrl(null);
+        }}
+        purchaseOrder={verifyingPO}
+        billUrl={verifyingBillUrl}
+        isVerifying={verifyBillMutation.isPending}
+        onVerified={async (notes) => {
+          if (!verifyingPO?.id || !user?.id) return;
+          try {
+            await verifyBillMutation.mutateAsync({
+              poId: verifyingPO.id,
+              userId: user.id,
+              notes,
+            });
+            setVerificationDialogOpen(false);
+            setVerifyingPO(null);
+            setVerifyingBillUrl(null);
+          } catch (error) {
+            console.error("Failed to verify bill:", error);
+          }
+        }}
       />
     </Box>
   );

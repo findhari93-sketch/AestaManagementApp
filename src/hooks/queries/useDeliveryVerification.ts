@@ -48,6 +48,10 @@ export interface POAwaitingDelivery {
     received_qty: number;
     unit: string;
     unit_price: number;
+    pricing_mode: "per_piece" | "per_kg";
+    calculated_weight: number | null;
+    actual_weight: number | null;
+    tax_rate: number | null;
   }>;
 }
 
@@ -88,6 +92,10 @@ export function usePOsAwaitingDelivery(siteId: string | undefined) {
             quantity,
             received_qty,
             unit_price,
+            pricing_mode,
+            calculated_weight,
+            actual_weight,
+            tax_rate,
             material:materials(id, name, code, unit),
             brand:material_brands(id, brand_name)
           )
@@ -138,6 +146,10 @@ export function usePOsAwaitingDelivery(siteId: string | undefined) {
             received_qty: Number(item.received_qty || 0),
             unit: item.material?.unit || "nos",
             unit_price: Number(item.unit_price || 0),
+            pricing_mode: item.pricing_mode || "per_piece",
+            calculated_weight: item.calculated_weight ? Number(item.calculated_weight) : null,
+            actual_weight: item.actual_weight ? Number(item.actual_weight) : null,
+            tax_rate: item.tax_rate ? Number(item.tax_rate) : null,
           })),
         };
       });
@@ -171,11 +183,13 @@ export function usePendingDeliveryVerifications(siteId: string | undefined) {
           delivery_date,
           vehicle_number,
           driver_name,
+          verification_status,
           po:purchase_orders(po_number),
           vendor:vendors(name)
         `)
         .eq("site_id", siteId)
-        .eq("status", "delivered")
+        .eq("delivery_status", "delivered")
+        .eq("verification_status", "pending")
         .order("delivery_date", { ascending: false });
 
       if (error) throw error;
@@ -218,10 +232,12 @@ export function useAllPendingVerifications() {
           delivery_date,
           vehicle_number,
           driver_name,
+          verification_status,
           po:purchase_orders(po_number),
           vendor:vendors(name)
         `)
-        .eq("status", "delivered")
+        .eq("delivery_status", "delivered")
+        .eq("verification_status", "pending")
         .order("delivery_date", { ascending: false });
 
       if (error) throw error;
@@ -324,6 +340,7 @@ export function useDeliveriesWithVerification(
           delivery_date,
           vehicle_number,
           driver_name,
+          verification_status,
           po:purchase_orders(po_number),
           vendor:vendors(name)
         `)
@@ -345,6 +362,7 @@ export function useDeliveriesWithVerification(
         delivery_date: string;
         vehicle_number: string | null;
         driver_name: string | null;
+        verification_status: string | null;
         po: { po_number: string } | null;
         vendor: { name: string } | null;
       }>).map((d) => ({
@@ -354,7 +372,7 @@ export function useDeliveriesWithVerification(
         vendor_name: d.vendor?.name || null,
         site_id: d.site_id,
         delivery_date: d.delivery_date,
-        verification_status: "pending" as const,
+        verification_status: d.verification_status || "pending",
         total_value: null,
         item_count: 0,
         vehicle_number: d.vehicle_number,
@@ -365,6 +383,174 @@ export function useDeliveriesWithVerification(
     },
     enabled: !!siteId,
   });
+}
+
+/**
+ * Helper function to create/update stock inventory from delivery items
+ * This is needed because the database trigger only fires on INSERT,
+ * but delivery isn't verified at INSERT time
+ *
+ * Exported for use by useRecordAndVerifyDelivery hook
+ */
+export async function createStockFromDeliveryItems(
+  supabase: ReturnType<typeof createClient>,
+  deliveryId: string
+) {
+  console.log("[Stock Creation] Starting for delivery:", deliveryId);
+
+  // Get delivery details including PO info for group stock detection
+  const { data: delivery, error: deliveryError } = await supabase
+    .from("deliveries")
+    .select("id, site_id, location_id, delivery_date, po_id, purchase_orders(internal_notes)")
+    .eq("id", deliveryId)
+    .single();
+
+  if (deliveryError || !delivery) {
+    const errorMsg = `Failed to fetch delivery for stock creation: ${deliveryError?.message || "Delivery not found"}`;
+    console.error("[Stock Creation]", errorMsg);
+    throw new Error(errorMsg);
+  }
+
+  console.log("[Stock Creation] Delivery found:", { site_id: delivery.site_id, location_id: delivery.location_id });
+
+  // Get delivery items with tax rate from purchase order items
+  const { data: items, error: itemsError } = await supabase
+    .from("delivery_items")
+    .select(`
+      id, material_id, brand_id, received_qty, accepted_qty, unit_price, po_item_id,
+      purchase_order_item:purchase_order_items!po_item_id(tax_rate)
+    `)
+    .eq("delivery_id", deliveryId);
+
+  if (itemsError || !items) {
+    const errorMsg = `Failed to fetch delivery items for stock creation: ${itemsError?.message || "No items found"}`;
+    console.error("[Stock Creation]", errorMsg);
+    throw new Error(errorMsg);
+  }
+
+  console.log("[Stock Creation] Found", items.length, "delivery items");
+
+  if (items.length === 0) {
+    throw new Error("No delivery items found to create stock from");
+  }
+
+  // Check if this is a group stock PO and get batch_code
+  let batchCode: string | null = null;
+
+  if (delivery.po_id) {
+    const internalNotes = (delivery.purchase_orders as { internal_notes: Record<string, unknown> } | null)?.internal_notes;
+    const isGroupStock = internalNotes?.is_group_stock === true;
+
+    if (isGroupStock) {
+      // Look up the batch ref_code from material_purchase_expenses
+      const { data: expenseData } = await supabase
+        .from("material_purchase_expenses")
+        .select("ref_code")
+        .eq("purchase_order_id", delivery.po_id)
+        .eq("purchase_type", "group_stock")
+        .maybeSingle();
+
+      if (expenseData?.ref_code) {
+        batchCode = expenseData.ref_code;
+        console.log("[Stock Creation] Group stock batch detected:", batchCode);
+      }
+    }
+  }
+
+  let stockCreatedCount = 0;
+  let stockUpdatedCount = 0;
+
+  // Create/update stock for each item
+  for (const item of items) {
+    const qty = item.accepted_qty ?? item.received_qty;
+    if (!qty || qty <= 0) {
+      console.log("[Stock Creation] Skipping item with zero/null qty:", item.id);
+      continue;
+    }
+
+    // Get tax rate from purchase order item (GST)
+    const taxRate = (item.purchase_order_item as { tax_rate: number | null } | null)?.tax_rate || 0;
+    // Calculate unit price including GST
+    const unitPriceWithGst = (item.unit_price || 0) * (1 + taxRate / 100);
+
+    // Check if stock inventory exists
+    let stockQuery = supabase
+      .from("stock_inventory")
+      .select("id, current_qty, avg_unit_cost, batch_code")
+      .eq("site_id", delivery.site_id)
+      .eq("material_id", item.material_id);
+
+    if (delivery.location_id) {
+      stockQuery = stockQuery.eq("location_id", delivery.location_id);
+    } else {
+      stockQuery = stockQuery.is("location_id", null);
+    }
+
+    if (item.brand_id) {
+      stockQuery = stockQuery.eq("brand_id", item.brand_id);
+    } else {
+      stockQuery = stockQuery.is("brand_id", null);
+    }
+
+    const { data: existingStock, error: stockQueryError } = await stockQuery.maybeSingle();
+
+    if (stockQueryError) {
+      console.error("[Stock Creation] Error checking existing stock:", stockQueryError);
+      throw new Error(`Failed to check existing stock: ${stockQueryError.message}`);
+    }
+
+    if (existingStock) {
+      // Update existing stock with weighted average cost (including GST)
+      const newQty = existingStock.current_qty + qty;
+      const existingValue = existingStock.current_qty * (existingStock.avg_unit_cost || 0);
+      const newValue = qty * unitPriceWithGst;
+      const newAvgCost = newQty > 0 ? (existingValue + newValue) / newQty : 0;
+
+      const { error: updateError } = await supabase
+        .from("stock_inventory")
+        .update({
+          current_qty: newQty,
+          avg_unit_cost: newAvgCost,
+          last_received_date: delivery.delivery_date,
+          updated_at: new Date().toISOString(),
+          // Set batch_code if this is a group stock delivery and existing stock doesn't have one
+          ...(batchCode && !existingStock.batch_code ? { batch_code: batchCode } : {}),
+        })
+        .eq("id", existingStock.id);
+
+      if (updateError) {
+        console.error("[Stock Creation] Error updating stock:", updateError);
+        throw new Error(`Failed to update stock inventory: ${updateError.message}`);
+      }
+      stockUpdatedCount++;
+      console.log("[Stock Creation] Updated existing stock:", existingStock.id, "new qty:", newQty);
+    } else {
+      // Create new stock inventory record (with unit cost including GST)
+      const { error: insertError } = await supabase.from("stock_inventory").insert({
+        site_id: delivery.site_id,
+        location_id: delivery.location_id,
+        material_id: item.material_id,
+        brand_id: item.brand_id,
+        current_qty: qty,
+        avg_unit_cost: unitPriceWithGst,
+        last_received_date: delivery.delivery_date,
+        batch_code: batchCode,  // Link to group stock batch if applicable
+      });
+
+      if (insertError) {
+        console.error("[Stock Creation] Error inserting stock:", insertError);
+        throw new Error(`Failed to create stock inventory: ${insertError.message}`);
+      }
+      stockCreatedCount++;
+      console.log("[Stock Creation] Created new stock for material:", item.material_id, "qty:", qty);
+    }
+  }
+
+  console.log("[Stock Creation] Complete. Created:", stockCreatedCount, "Updated:", stockUpdatedCount);
+
+  if (stockCreatedCount === 0 && stockUpdatedCount === 0) {
+    throw new Error("No stock records were created or updated - all items may have zero quantity");
+  }
 }
 
 /**
@@ -393,12 +579,15 @@ export function useVerifyDelivery() {
       // Ensure fresh session before mutation
       await ensureFreshSession();
 
-      // Update delivery status directly since RPC may not exist yet
+      // Update delivery verification status
       const { error } = await supabase
         .from("deliveries")
         .update({
-          status: verificationStatus === "verified" ? "delivered" : "rejected",
-          notes: verificationNotes || null,
+          verification_status: verificationStatus,
+          verification_notes: verificationNotes || null,
+          verification_photos: verificationPhotos.length > 0 ? verificationPhotos : null,
+          engineer_verified_by: userId,
+          engineer_verified_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         })
         .eq("id", deliveryId);
@@ -416,6 +605,12 @@ export function useVerifyDelivery() {
             })
             .eq("id", d.item_id);
         }
+      }
+
+      // Create stock inventory if verified
+      // Note: DB trigger only fires on INSERT, so we need to create stock manually here
+      if (verificationStatus === "verified") {
+        await createStockFromDeliveryItems(supabase, deliveryId);
       }
 
       return { success: true };
@@ -473,17 +668,25 @@ export function useQuickVerifyDelivery() {
           .eq("id", item.id);
       }
 
-      // Update delivery status directly
+      // Update delivery verification status
       const { error } = await supabase
         .from("deliveries")
         .update({
-          status: "delivered",
-          notes: notes || null,
+          verification_status: "verified",
+          verification_notes: notes || null,
+          verification_photos: photos.length > 0 ? photos : null,
+          engineer_verified_by: userId,
+          engineer_verified_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         })
         .eq("id", deliveryId);
 
       if (error) throw error;
+
+      // Create stock inventory now that delivery is verified
+      // Note: DB trigger only fires on INSERT, so we need to create stock manually here
+      await createStockFromDeliveryItems(supabase, deliveryId);
+
       return { success: true };
     },
     onSuccess: () => {
@@ -640,7 +843,7 @@ export function useVerificationStats(siteId?: string) {
     queryFn: async () => {
       let query = supabase
         .from("deliveries")
-        .select("status");
+        .select("verification_status");
 
       if (siteId) {
         query = query.eq("site_id", siteId);
@@ -658,13 +861,15 @@ export function useVerificationStats(siteId?: string) {
       };
 
       // Type the data properly
-      const typedData = data as Array<{ status?: string }> | null;
+      const typedData = data as Array<{ verification_status?: string }> | null;
       for (const d of typedData || []) {
-        const status = d.status || "pending";
-        if (status === "delivered") {
+        const status = d.verification_status || "pending";
+        if (status === "verified") {
           stats.verified++;
         } else if (status === "rejected") {
           stats.rejected++;
+        } else if (status === "disputed") {
+          stats.disputed++;
         } else {
           stats.pending++;
         }
@@ -687,7 +892,8 @@ export function usePendingVerificationCount(siteId?: string) {
       let query = supabase
         .from("deliveries")
         .select("*", { count: "exact", head: true })
-        .eq("status", "in_transit"); // Count in-transit deliveries as pending verification
+        .eq("delivery_status", "delivered")
+        .eq("verification_status", "pending");
 
       if (siteId) {
         query = query.eq("site_id", siteId);

@@ -40,9 +40,36 @@ export async function updateSession(request: NextRequest) {
     request.nextUrl.pathname.startsWith("/login") ||
     request.nextUrl.pathname.startsWith("/debug");
 
+  // Check if this is an RSC (React Server Component) request
+  // RSC requests have special headers that indicate client-side navigation
+  const isRSCRequest =
+    request.headers.get("RSC") === "1" ||
+    request.headers.get("Next-Router-State-Tree") !== null;
+
   if (!user && !isPublicRoute) {
+    // For RSC requests, return 401 JSON instead of redirect
+    // This allows client-side to handle the session expiry gracefully
+    // HTML redirects don't work properly for RSC requests (causes 404)
+    if (isRSCRequest) {
+      return new NextResponse(
+        JSON.stringify({
+          error: "Session expired",
+          redirect: "/login?session_expired=true",
+        }),
+        {
+          status: 401,
+          headers: {
+            "Content-Type": "application/json",
+            "X-Session-Expired": "true",
+          },
+        }
+      );
+    }
+
+    // For regular requests, redirect as before
     const url = request.nextUrl.clone();
     url.pathname = "/login";
+    url.searchParams.set("session_expired", "true");
     return NextResponse.redirect(url);
   }
 

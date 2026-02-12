@@ -139,6 +139,7 @@ export default function PODeleteConfirmationDialog({
                     <DeliveryIcon color="action" fontSize="small" />
                   </ListItemIcon>
                   <ListItemText
+                    primaryTypographyProps={{ component: "div" }}
                     primary={
                       <Box
                         sx={{
@@ -172,6 +173,7 @@ export default function PODeleteConfirmationDialog({
                     <ExpenseIcon color="action" fontSize="small" />
                   </ListItemIcon>
                   <ListItemText
+                    primaryTypographyProps={{ component: "div" }}
                     primary={
                       <Box
                         sx={{
@@ -250,6 +252,7 @@ export default function PODeleteConfirmationDialog({
                         <SettlementIcon color="action" fontSize="small" />
                       </ListItemIcon>
                       <ListItemText
+                        primaryTypographyProps={{ component: "div" }}
                         primary={
                           <Box
                             sx={{
@@ -287,6 +290,7 @@ export default function PODeleteConfirmationDialog({
                         <ExpenseIcon color="action" fontSize="small" />
                       </ListItemIcon>
                       <ListItemText
+                        primaryTypographyProps={{ component: "div" }}
                         primary={
                           <Box
                             sx={{

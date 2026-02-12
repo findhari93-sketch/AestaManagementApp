@@ -736,6 +736,7 @@ export default function DateViewDetailsDialog({
                         }
                       >
                         <ListItemText
+                          primaryTypographyProps={{ component: "div" }}
                           primary={
                             <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
                               <Chip
@@ -789,6 +790,7 @@ export default function DateViewDetailsDialog({
                         }
                       >
                         <ListItemText
+                          primaryTypographyProps={{ component: "div" }}
                           primary={
                             <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
                               <Chip

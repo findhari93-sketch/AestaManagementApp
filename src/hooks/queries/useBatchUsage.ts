@@ -228,6 +228,7 @@ export function useRecordBatchUsage() {
   const supabase = createClient();
 
   return useMutation({
+    retry: false, // Not idempotent - modifies stock and usage records
     mutationFn: async (data: RecordBatchUsageFormData & { created_by?: string }) => {
       // Call the database function
       const { data: result, error } = await (supabase as any).rpc("record_batch_usage", {
@@ -447,7 +448,7 @@ export function useBatchesWithUsage(groupId: string | undefined) {
             vendor:vendors(id, name),
             items:material_purchase_expense_items(
               *,
-              material:materials(id, name, code, unit),
+              material:materials(id, name, code, unit, weight_per_unit),
               brand:material_brands(id, brand_name)
             )
           `)

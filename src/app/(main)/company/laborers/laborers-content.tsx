@@ -20,18 +20,23 @@ import {
   Grid,
   Alert,
   Fab,
+  CircularProgress,
+  alpha,
+  useTheme,
 } from "@mui/material";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import {
   Add as AddIcon,
   Edit as EditIcon,
   Block as BlockIcon,
+  Warning as WarningIcon,
 } from "@mui/icons-material";
 import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import PageHeader from "@/components/layout/PageHeader";
 import { hasEditPermission } from "@/lib/permissions";
+import { useSelectedCompany } from "@/contexts/CompanyContext/SelectedCompanyContext";
 import type { Tables } from "@/types/database.types";
 import type { LaborersPageData, LaborerWithDetails } from "@/lib/data/laborers";
 import LaborerPhotoUploader from "@/components/laborers/LaborerPhotoUploader";
@@ -61,9 +66,15 @@ export default function LaborersContent({ initialData }: LaborersContentProps) {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
+  const [deactivatingLaborer, setDeactivatingLaborer] =
+    useState<LaborerWithDetails | null>(null);
+  const [deactivateLoading, setDeactivateLoading] = useState(false);
+
   const { userProfile } = useAuth();
+  const { selectedCompany } = useSelectedCompany();
   const supabase = useMemo(() => createClient(), []);
   const isMobile = useIsMobile();
+  const theme = useTheme();
 
   const [formData, setFormData] = useState({
     name: "",
@@ -152,6 +163,10 @@ export default function LaborersContent({ initialData }: LaborersContentProps) {
       setError("Please fill all required fields");
       return;
     }
+    if (!selectedCompany?.id) {
+      setError("No company selected");
+      return;
+    }
     try {
       setLoading(true);
       const payload = {
@@ -159,6 +174,7 @@ export default function LaborersContent({ initialData }: LaborersContentProps) {
         team_id: formData.team_id || null,
         associated_team_id: formData.associated_team_id || null,
         phone: formData.phone || null,
+        company_id: selectedCompany.id,
       };
 
       if (editingLaborer) {
@@ -183,23 +199,39 @@ export default function LaborersContent({ initialData }: LaborersContentProps) {
     }
   };
 
-  const handleDeactivate = useCallback(
-    async (id: string) => {
-      if (!confirm("Deactivate this laborer?")) return;
-      try {
-        setLoading(true);
-        await (supabase.from("laborers") as any)
-          .update({ status: "inactive" })
-          .eq("id", id);
-        await fetchLaborers();
-      } catch (err: any) {
-        setError(err.message);
-      } finally {
-        setLoading(false);
-      }
+  const handleDeactivateClick = useCallback(
+    (laborer: LaborerWithDetails) => {
+      setDeactivatingLaborer(laborer);
     },
-    [supabase, fetchLaborers]
+    []
   );
+
+  const handleDeactivateConfirm = useCallback(async () => {
+    if (!deactivatingLaborer) return;
+    try {
+      setDeactivateLoading(true);
+      const { error } = await (supabase.from("laborers") as any)
+        .update({
+          status: "inactive",
+          deactivation_date: new Date().toISOString().split("T")[0],
+        })
+        .eq("id", deactivatingLaborer.id);
+      if (error) throw error;
+      setSuccess(`${deactivatingLaborer.name} has been deactivated`);
+      setDeactivatingLaborer(null);
+      await fetchLaborers();
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setDeactivateLoading(false);
+    }
+  }, [deactivatingLaborer, supabase, fetchLaborers]);
+
+  const handleDeactivateCancel = useCallback(() => {
+    if (!deactivateLoading) {
+      setDeactivatingLaborer(null);
+    }
+  }, [deactivateLoading]);
 
   const canEdit = hasEditPermission(userProfile?.role);
   const filteredRoles = roles.filter(
@@ -405,7 +437,7 @@ export default function LaborersContent({ initialData }: LaborersContentProps) {
               <IconButton
                 size="small"
                 color="warning"
-                onClick={() => handleDeactivate(row.original.id)}
+                onClick={() => handleDeactivateClick(row.original)}
                 disabled={!canEdit}
               >
                 <BlockIcon fontSize="small" />
@@ -415,7 +447,7 @@ export default function LaborersContent({ initialData }: LaborersContentProps) {
         ),
       },
     ],
-    [canEdit, handleDeactivate, isMobile, categories, roles, teams]
+    [canEdit, handleDeactivateClick, isMobile, categories, roles, teams]
   );
 
   return (
@@ -735,6 +767,171 @@ export default function LaborersContent({ initialData }: LaborersContentProps) {
           <Button onClick={() => setOpenDialog(false)}>Cancel</Button>
           <Button onClick={handleSubmit} variant="contained" disabled={loading}>
             {editingLaborer ? "Update" : "Add"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Deactivation Confirmation Dialog */}
+      <Dialog
+        open={!!deactivatingLaborer}
+        onClose={handleDeactivateCancel}
+        maxWidth="xs"
+        fullWidth
+        PaperProps={{
+          sx: { borderTop: 4, borderColor: "warning.main" },
+        }}
+      >
+        <DialogTitle
+          sx={{
+            display: "flex",
+            alignItems: "center",
+            gap: 1,
+            pb: 1,
+          }}
+        >
+          <WarningIcon color="warning" />
+          Deactivate Laborer
+        </DialogTitle>
+
+        <DialogContent>
+          {deactivatingLaborer && (
+            <>
+              <Box
+                sx={{
+                  p: 2,
+                  bgcolor: alpha(theme.palette.grey[500], 0.06),
+                  borderRadius: 1,
+                  mb: 2,
+                  mt: 1,
+                }}
+              >
+                <Box
+                  sx={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 1.5,
+                    mb: 2,
+                  }}
+                >
+                  <Avatar
+                    src={deactivatingLaborer.photo_url || undefined}
+                    sx={{ width: 48, height: 48, bgcolor: "primary.light" }}
+                  >
+                    {deactivatingLaborer.name.charAt(0).toUpperCase()}
+                  </Avatar>
+                  <Box>
+                    <Typography variant="subtitle1" fontWeight={600}>
+                      {deactivatingLaborer.name}
+                    </Typography>
+                    {deactivatingLaborer.phone && (
+                      <Typography variant="caption" color="text.secondary">
+                        {deactivatingLaborer.phone}
+                      </Typography>
+                    )}
+                  </Box>
+                </Box>
+
+                <Box
+                  sx={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr",
+                    gap: 1.5,
+                  }}
+                >
+                  <Box>
+                    <Typography variant="caption" color="text.secondary">
+                      Category
+                    </Typography>
+                    <Typography variant="body2" fontWeight={500}>
+                      {deactivatingLaborer.category_name}
+                    </Typography>
+                  </Box>
+                  <Box>
+                    <Typography variant="caption" color="text.secondary">
+                      Role
+                    </Typography>
+                    <Typography variant="body2" fontWeight={500}>
+                      {deactivatingLaborer.role_name}
+                    </Typography>
+                  </Box>
+                  <Box>
+                    <Typography variant="caption" color="text.secondary">
+                      Daily Rate
+                    </Typography>
+                    <Typography variant="body2" fontWeight={600}>
+                      ₹{deactivatingLaborer.daily_rate}
+                    </Typography>
+                  </Box>
+                  <Box>
+                    <Typography variant="caption" color="text.secondary">
+                      Type
+                    </Typography>
+                    <Box sx={{ mt: 0.25 }}>
+                      <Chip
+                        label={
+                          deactivatingLaborer.laborer_type === "contract"
+                            ? "Contract"
+                            : "Daily Market"
+                        }
+                        size="small"
+                        color={
+                          deactivatingLaborer.laborer_type === "contract"
+                            ? "primary"
+                            : "warning"
+                        }
+                        variant="outlined"
+                      />
+                    </Box>
+                  </Box>
+                  {deactivatingLaborer.associated_team_name && (
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">
+                        Mesthri Team
+                      </Typography>
+                      <Typography variant="body2">
+                        {deactivatingLaborer.associated_team_name}
+                      </Typography>
+                    </Box>
+                  )}
+                  {deactivatingLaborer.team_name && (
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">
+                        Work Team
+                      </Typography>
+                      <Typography variant="body2">
+                        {deactivatingLaborer.team_name}
+                      </Typography>
+                    </Box>
+                  )}
+                </Box>
+              </Box>
+
+              <Alert severity="warning" icon={<WarningIcon />}>
+                This laborer will be marked as <strong>inactive</strong> and will
+                no longer appear in attendance sheets or payment processing.
+              </Alert>
+            </>
+          )}
+        </DialogContent>
+
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={handleDeactivateCancel} disabled={deactivateLoading}>
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            color="warning"
+            onClick={handleDeactivateConfirm}
+            disabled={deactivateLoading}
+            startIcon={
+              deactivateLoading ? (
+                <CircularProgress size={16} color="inherit" />
+              ) : (
+                <BlockIcon />
+              )
+            }
+          >
+            {deactivateLoading ? "Deactivating..." : "Deactivate"}
           </Button>
         </DialogActions>
       </Dialog>

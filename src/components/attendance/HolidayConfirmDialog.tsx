@@ -432,6 +432,7 @@ export default function HolidayConfirmDialog({
                         {index > 0 && <Divider />}
                         <ListItem>
                           <ListItemText
+                            primaryTypographyProps={{ component: "div" }}
                             primary={
                               <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
                                 <Typography variant="body2" fontWeight={500}>

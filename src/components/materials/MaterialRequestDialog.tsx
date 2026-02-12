@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import {
   Dialog,
   DialogTitle,
@@ -30,14 +30,18 @@ import {
   Close as CloseIcon,
   Add as AddIcon,
   Delete as DeleteIcon,
+  Warning as WarningIcon,
 } from "@mui/icons-material";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useAuth } from "@/contexts/AuthContext";
+import { useToast } from "@/contexts/ToastContext";
 import { useMaterials } from "@/hooks/queries/useMaterials";
 import { useSiteStock } from "@/hooks/queries/useStockInventory";
 import {
   useCreateMaterialRequest,
   useUpdateMaterialRequest,
+  useLinkedPOsCount,
+  useRevertLinkedPOsToDraft,
 } from "@/hooks/queries/useMaterialRequests";
 import { useQuery } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase/client";
@@ -76,7 +80,8 @@ export default function MaterialRequestDialog({
   siteId,
 }: MaterialRequestDialogProps) {
   const isMobile = useIsMobile();
-  const { user } = useAuth();
+  const { userProfile } = useAuth();
+  const { showError: showToastError } = useToast();
   const isEdit = !!request;
 
   const { data: materials = [] } = useMaterials();
@@ -101,6 +106,13 @@ export default function MaterialRequestDialog({
 
   const createRequest = useCreateMaterialRequest();
   const updateRequest = useUpdateMaterialRequest();
+  const revertPOsToDraft = useRevertLinkedPOsToDraft();
+
+  // Check if this request has linked POs (only relevant for edit mode)
+  const { data: linkedPOsData } = useLinkedPOsCount(
+    isEdit ? request?.id : undefined
+  );
+  const linkedPOsCount = linkedPOsData?.total || 0;
 
   const [error, setError] = useState("");
   const [sectionId, setSectionId] = useState("");
@@ -114,13 +126,18 @@ export default function MaterialRequestDialog({
   const [newItemQty, setNewItemQty] = useState("");
   const [newItemNotes, setNewItemNotes] = useState("");
 
+  // Ref to prevent double submissions (more reliable than state)
+  const isSubmittingRef = useRef(false);
+
   // Get available stock for a material
   const getAvailableStock = (materialId: string) => {
     const stockItem = stockItems.find((s) => s.material_id === materialId);
     return stockItem?.available_qty || 0;
   };
 
-  // Reset form when request changes
+  // Reset form when dialog opens/closes or request changes
+  // Note: stockItems intentionally excluded to prevent infinite loops
+  // availableStock will be 0 initially but updates aren't critical for form reset
   useEffect(() => {
     if (request) {
       setSectionId(request.section_id || "");
@@ -152,7 +169,10 @@ export default function MaterialRequestDialog({
     setSelectedMaterial(null);
     setNewItemQty("");
     setNewItemNotes("");
-  }, [request, open, stockItems]);
+    // Reset submission guard when dialog opens/closes
+    isSubmittingRef.current = false;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [request, open]);
 
   const handleAddItem = () => {
     if (!selectedMaterial) {
@@ -193,12 +213,20 @@ export default function MaterialRequestDialog({
   };
 
   const handleSubmit = async () => {
-    if (!user?.id) {
+    // Prevent double submissions using ref (synchronous check)
+    if (isSubmittingRef.current) {
+      return;
+    }
+    isSubmittingRef.current = true;
+
+    if (!userProfile?.id) {
       setError("User not authenticated");
+      isSubmittingRef.current = false;
       return;
     }
     if (items.length === 0) {
       setError("Please add at least one item");
+      isSubmittingRef.current = false;
       return;
     }
 
@@ -213,11 +241,21 @@ export default function MaterialRequestDialog({
             notes: notes || undefined,
           },
         });
+
+        // Revert linked POs to draft status if any exist
+        if (linkedPOsCount > 0) {
+          try {
+            await revertPOsToDraft.mutateAsync({ requestId: request.id, siteId });
+          } catch (revertError) {
+            console.warn("Failed to revert linked POs to draft:", revertError);
+            // Don't fail the whole operation, the request was already updated
+          }
+        }
       } else {
         await createRequest.mutateAsync({
           site_id: siteId,
           section_id: sectionId || undefined,
-          requested_by: user.id,
+          requested_by: userProfile.id,
           required_by_date: requiredByDate || undefined,
           priority,
           notes: notes || undefined,
@@ -231,13 +269,28 @@ export default function MaterialRequestDialog({
       }
       onClose();
     } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : "Failed to save request";
+      console.error("[MaterialRequestDialog] Submit error:", err);
+      // Extract error details
+      let message = "Failed to save request";
+      if (err instanceof Error) {
+        message = err.message;
+      }
+      // Check for 409 Conflict (duplicate/already exists)
+      const errObj = err as Record<string, unknown>;
+      if (errObj?.code === "23505" || errObj?.status === 409 || message.includes("409")) {
+        message = "A request with this number already exists. Please try again.";
+      }
+      // Check for timeout errors
+      if (message.includes("timed out")) {
+        showToastError("Request timed out. Please check your connection and try again.", 8000);
+      }
       setError(message);
+    } finally {
+      isSubmittingRef.current = false;
     }
   };
 
-  const isSubmitting = createRequest.isPending || updateRequest.isPending;
+  const isSubmitting = createRequest.isPending || updateRequest.isPending || revertPOsToDraft.isPending;
 
   return (
     <Dialog
@@ -254,11 +307,9 @@ export default function MaterialRequestDialog({
           alignItems: "center",
         }}
       >
-        <Typography variant="h6">
-          {isEdit
-            ? `Edit Request ${request.request_number}`
-            : "New Material Request"}
-        </Typography>
+        {isEdit
+          ? `Edit Request ${request.request_number}`
+          : "New Material Request"}
         <IconButton onClick={onClose} size="small">
           <CloseIcon />
         </IconButton>
@@ -268,6 +319,19 @@ export default function MaterialRequestDialog({
         {error && (
           <Alert severity="error" sx={{ mb: 2 }}>
             {error}
+          </Alert>
+        )}
+
+        {/* Warning for edit mode with linked POs */}
+        {isEdit && linkedPOsCount > 0 && (
+          <Alert
+            severity="warning"
+            icon={<WarningIcon />}
+            sx={{ mb: 2 }}
+          >
+            This request has <strong>{linkedPOsCount}</strong> linked Purchase Order
+            {linkedPOsCount !== 1 ? "s" : ""}. Saving changes will revert non-delivered POs
+            back to <strong>draft</strong> status for re-processing.
           </Alert>
         )}
 
