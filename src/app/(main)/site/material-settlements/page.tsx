@@ -95,15 +95,22 @@ export default function MaterialSettlementsPage() {
     return [...expenses, ...pos];
   }, [allPurchases, allAdvancePOs]);
 
+  // Determine if a purchase expense is settled
+  // Group stock purchases are settled when vendor is paid (is_paid = true)
+  // Own site purchases are settled when settlement_reference exists
+  const isExpenseSettled = (p: MaterialPurchaseExpenseWithDetails) => {
+    if (p.purchase_type === "group_stock") return !!p.is_paid;
+    return !!p.settlement_reference;
+  };
+
   // Filter items by settlement status
   const filteredItems = useMemo(() => {
     if (statusFilter === "all") return allItems;
     if (statusFilter === "pending") {
       return allItems.filter((item) => {
         if (item.itemType === 'expense') {
-          return !item.settlement_reference;
+          return !isExpenseSettled(item as MaterialPurchaseExpenseWithDetails);
         } else {
-          // POs are pending if advance_paid is null
           return !item.advance_paid;
         }
       });
@@ -111,9 +118,8 @@ export default function MaterialSettlementsPage() {
     if (statusFilter === "settled") {
       return allItems.filter((item) => {
         if (item.itemType === 'expense') {
-          return !!item.settlement_reference;
+          return isExpenseSettled(item as MaterialPurchaseExpenseWithDetails);
         } else {
-          // POs are settled if advance_paid exists
           return !!item.advance_paid;
         }
       });
@@ -132,8 +138,8 @@ export default function MaterialSettlementsPage() {
 
   // Calculate summaries
   const summaries = useMemo(() => {
-    const pendingExpenses = allPurchases.filter((p) => !p.settlement_reference);
-    const settledExpenses = allPurchases.filter((p) => !!p.settlement_reference);
+    const pendingExpenses = allPurchases.filter((p) => !isExpenseSettled(p));
+    const settledExpenses = allPurchases.filter((p) => isExpenseSettled(p));
     const pendingPOs = allAdvancePOs.filter((po) => !po.advance_paid);
     const settledPOs = allAdvancePOs.filter((po) => !!po.advance_paid);
 
