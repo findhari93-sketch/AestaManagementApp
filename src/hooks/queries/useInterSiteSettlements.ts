@@ -1185,6 +1185,10 @@ export function useCancelSettlement() {
       queryClient.invalidateQueries({
         queryKey: queryKeys.interSiteSettlements.balances(settlement.site_group_id),
       });
+      // Invalidate stock inventory and low stock alerts (prevents stale summary cards)
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.materialStock.all,
+      });
     },
   });
 }
@@ -1297,6 +1301,10 @@ export function useCancelCompletedSettlement() {
       // Invalidate material purchases to refresh site-level expenses
       queryClient.invalidateQueries({
         queryKey: ["material-purchases"],
+      });
+      // Invalidate stock inventory and low stock alerts (prevents stale summary cards)
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.materialStock.all,
       });
     },
   });
@@ -1428,6 +1436,10 @@ export function useCancelPendingSettlement() {
       // Invalidate material purchases to refresh site-level expenses
       queryClient.invalidateQueries({
         queryKey: ["material-purchases"],
+      });
+      // Invalidate stock inventory and low stock alerts (prevents stale summary cards)
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.materialStock.all,
       });
     },
   });

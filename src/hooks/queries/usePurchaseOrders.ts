@@ -1341,6 +1341,15 @@ export function useDeletePurchaseOrderCascade() {
         .eq("id", id);
 
       if (error) throw error;
+
+      // Safety cleanup: remove any orphan zero-qty stock_inventory records for this site
+      // (e.g., trigger set qty to 0 but record wasn't explicitly deleted)
+      await supabase
+        .from("stock_inventory")
+        .delete()
+        .eq("site_id", siteId)
+        .lte("current_qty", 0);
+
       return { id, siteId };
     },
     onSuccess: (result) => {
@@ -1387,6 +1396,10 @@ export function useDeletePurchaseOrderCascade() {
       });
       queryClient.invalidateQueries({
         queryKey: ["group-stock-transactions"],
+      });
+      // Invalidate stock inventory and low stock alerts (prevents stale summary cards)
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.materialStock.all,
       });
     },
   });
