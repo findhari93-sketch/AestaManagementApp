@@ -35,7 +35,7 @@ export interface BatchAllocation {
  * Represents a consolidated material grouping multiple batches.
  */
 export interface ConsolidatedStockItem {
-  /** Composite key: material_id */
+  /** Composite key: material_id (or material_id__brand_id when grouped by brand) */
   key: string;
   material_id: string;
   material_name: string;
@@ -177,13 +177,16 @@ export function allocateFIFO(
  * Groups multiple batch rows into single consolidated items.
  */
 export function consolidateStock(
-  stock: ExtendedStockInventory[]
+  stock: ExtendedStockInventory[],
+  groupByBrand: boolean = false
 ): ConsolidatedStockItem[] {
   const map = new Map<string, ConsolidatedStockItem>();
 
   for (const item of stock) {
-    // Group by material_id only — all brands of the same material consolidate
-    const key = item.material_id;
+    // Group by material_id only, or material_id + brand_id when splitting by brand
+    const key = groupByBrand
+      ? `${item.material_id}__${item.brand_id || "no-brand"}`
+      : item.material_id;
 
     if (!map.has(key)) {
       map.set(key, {

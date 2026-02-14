@@ -24,6 +24,8 @@ import {
   useTheme,
   CircularProgress,
   Slide,
+  FormControlLabel,
+  Switch,
 } from "@mui/material";
 import type { TransitionProps } from "@mui/material/transitions";
 import {
@@ -37,6 +39,7 @@ import {
   Groups as SharedIcon,
   ViewList as ViewListIcon,
   ViewModule as ViewModuleIcon,
+  CallSplit as SplitBrandIcon,
 } from "@mui/icons-material";
 import ToggleButton from "@mui/material/ToggleButton";
 import ToggleButtonGroup from "@mui/material/ToggleButtonGroup";
@@ -123,6 +126,7 @@ export default function BulkUsageEntryDialog({
 
   // View mode: "material" (consolidated) vs "batch"
   const [viewMode, setViewMode] = useState<BulkViewMode>("material");
+  const [splitByBrand, setSplitByBrand] = useState(false);
 
   // Form state
   const [usageDate, setUsageDate] = useState(dayjs().format("YYYY-MM-DD"));
@@ -149,10 +153,17 @@ export default function BulkUsageEntryDialog({
       setEntries(new Map());
       setConsolidatedEntries(new Map());
       setViewMode("material");
+      setSplitByBrand(false);
       setShowReview(false);
       setSubmitError(null);
     }
   }, [open]);
+
+  // Clear consolidated entries when splitByBrand changes (keys change)
+  useEffect(() => {
+    setConsolidatedEntries(new Map());
+    inputRefs.current = new Map();
+  }, [splitByBrand]);
 
   // Filter stock by category and search
   const filteredStock = useMemo(() => {
@@ -186,10 +197,10 @@ export default function BulkUsageEntryDialog({
     return filtered;
   }, [stock, categoryFilter, searchTerm, categories]);
 
-  // Consolidated stock (grouped by material+brand)
+  // Consolidated stock (grouped by material, or material+brand when split)
   const consolidatedStock = useMemo(
-    () => consolidateStock(filteredStock),
-    [filteredStock]
+    () => consolidateStock(filteredStock, splitByBrand),
+    [filteredStock, splitByBrand]
   );
 
   // Validate consolidated entry against total available
@@ -589,6 +600,27 @@ export default function BulkUsageEntryDialog({
             </ToggleButton>
           </ToggleButtonGroup>
 
+          {viewMode === "material" && (
+            <FormControlLabel
+              control={
+                <Switch
+                  size="small"
+                  checked={splitByBrand}
+                  onChange={(e) => setSplitByBrand(e.target.checked)}
+                />
+              }
+              label={
+                <Box component="span" sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                  <SplitBrandIcon fontSize="small" />
+                  <Typography variant="body2" component="span">
+                    {isMobile ? "By Brand" : "Split by Brand"}
+                  </Typography>
+                </Box>
+              }
+              sx={{ ml: 0, mr: 1 }}
+            />
+          )}
+
           <FormControl size="small" sx={{ minWidth: 150 }}>
             <InputLabel>Category</InputLabel>
             <Select
@@ -631,7 +663,9 @@ export default function BulkUsageEntryDialog({
 
           <Typography variant="body2" color="text.secondary">
             {viewMode === "material"
-              ? `${consolidatedStock.length} materials`
+              ? splitByBrand
+                ? `${consolidatedStock.length} material-brands`
+                : `${consolidatedStock.length} materials`
               : `${filteredStock.length} items`}
           </Typography>
         </Box>
@@ -716,6 +750,11 @@ export default function BulkUsageEntryDialog({
                             >
                               <Typography variant="body2" fontWeight={500}>
                                 {item.material_name}
+                                {splitByBrand && item.brand_names.length > 0 && (
+                                  <Typography component="span" variant="body2" color="text.secondary" sx={{ ml: 0.5 }}>
+                                    ({item.brand_names[0]})
+                                  </Typography>
+                                )}
                               </Typography>
                               {item.batch_count > 1 && (
                                 <Chip
@@ -744,7 +783,7 @@ export default function BulkUsageEntryDialog({
                                 flexWrap: "wrap",
                               }}
                             >
-                              {item.brand_names.map((bn) => (
+                              {!splitByBrand && item.brand_names.map((bn) => (
                                 <Chip
                                   key={bn}
                                   label={bn}
@@ -824,8 +863,13 @@ export default function BulkUsageEntryDialog({
                           <Box>
                             <Typography variant="body2" fontWeight={500}>
                               {item.material_name}
+                              {splitByBrand && item.brand_names.length > 0 && (
+                                <Typography component="span" variant="body2" color="text.secondary" sx={{ ml: 0.5 }}>
+                                  ({item.brand_names[0]})
+                                </Typography>
+                              )}
                             </Typography>
-                            {item.brand_names.map((bn) => (
+                            {!splitByBrand && item.brand_names.map((bn) => (
                               <Chip
                                 key={bn}
                                 label={bn}

@@ -78,7 +78,8 @@
       "WebFetch(domain:docs.htmlto.design)",
       "WebFetch(domain:cursor.directory)",
       "WebFetch(domain:html.to.design)",
-      "mcp__supabase__get_advisors"
+      "mcp__supabase__get_advisors",
+      "Bash(wmic process where \"CommandLine like ''%start-server%'' and Name=''node.exe''\" call terminate)"
     ],
     "deny": [],
     "ask": []

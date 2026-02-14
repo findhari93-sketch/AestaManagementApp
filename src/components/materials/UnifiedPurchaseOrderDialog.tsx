@@ -410,6 +410,24 @@ export default function UnifiedPurchaseOrderDialog({
       setNotes(purchaseOrder.notes || "");
       setVendorBillUrl(purchaseOrder.vendor_bill_url || "");
 
+      // Restore group stock state from internal_notes
+      try {
+        const notes = purchaseOrder.internal_notes;
+        const parsed = notes
+          ? typeof notes === "string" ? JSON.parse(notes) : notes
+          : null;
+        if (parsed?.is_group_stock) {
+          setIsGroupStock(true);
+          setPayingSiteId(parsed.payment_source_site_id || siteId);
+        } else {
+          setIsGroupStock(false);
+          setPayingSiteId(siteId);
+        }
+      } catch {
+        setIsGroupStock(false);
+        setPayingSiteId(siteId);
+      }
+
       const existingItems: POItemRow[] =
         purchaseOrder.items?.map((item) => {
           let standardPieceWeight: number | null = null;
@@ -998,6 +1016,13 @@ export default function UnifiedPurchaseOrderDialog({
             transport_cost: transportCost ? parseFloat(transportCost) : undefined,
             notes: notes || undefined,
             vendor_bill_url: vendorBillUrl || undefined,
+            internal_notes: isGroupStock
+              ? JSON.stringify({
+                  is_group_stock: true,
+                  site_group_id: groupMembership?.groupId,
+                  payment_source_site_id: payingSiteId,
+                })
+              : "",
           },
           siteId, // Added for optimistic update
         });
@@ -1511,7 +1536,7 @@ export default function UnifiedPurchaseOrderDialog({
           {/* Section 4: Group Stock Toggle */}
           {/* ================================================================ */}
 
-          {groupMembership?.isInGroup && !isEdit && (
+          {groupMembership?.isInGroup && (
             <Grid size={12}>
               <Paper
                 variant="outlined"
