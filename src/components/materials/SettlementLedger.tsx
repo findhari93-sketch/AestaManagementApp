@@ -7,6 +7,7 @@ import {
   Chip,
   Paper,
   Skeleton,
+  Tooltip,
   Typography,
 } from '@mui/material'
 import {
@@ -310,21 +311,35 @@ export default function SettlementLedger({
                   variant={isCreditor ? 'filled' : 'outlined'}
                 />
 
-                {/* Amount */}
-                <Typography
-                  variant="body2"
-                  fontWeight={700}
-                  sx={{ ml: 'auto' }}
-                  color={isCreditor ? 'success.main' : isDebtor ? 'error.main' : 'text.primary'}
+                {/* Amount - show remaining (pending) amount, not total */}
+                <Tooltip
+                  title={
+                    (settlement.paid_amount || 0) > 0
+                      ? `Total: ${formatCurrency(settlement.total_amount)} | Paid: ${formatCurrency(settlement.paid_amount || 0)} | Remaining: ${formatCurrency(settlement.total_amount - (settlement.paid_amount || 0))}`
+                      : `Total: ${formatCurrency(settlement.total_amount)}`
+                  }
                 >
-                  {formatCurrency(settlement.total_amount)}
-                </Typography>
+                  <Typography
+                    variant="body2"
+                    fontWeight={700}
+                    sx={{ ml: 'auto' }}
+                    color={isCreditor ? 'success.main' : isDebtor ? 'error.main' : 'text.primary'}
+                  >
+                    {formatCurrency(settlement.total_amount - (settlement.paid_amount || 0))}
+                  </Typography>
+                </Tooltip>
 
-                {/* Status badge */}
+                {/* Status badge - show Partially Paid when offset has been applied */}
                 <Chip
-                  label={settlement.status === 'pending' ? 'Pending' : 'Approved'}
+                  label={
+                    settlement.status === 'pending' && (settlement.paid_amount || 0) > 0
+                      ? 'Partially Paid'
+                      : settlement.status === 'pending'
+                        ? 'Pending'
+                        : 'Approved'
+                  }
                   size="small"
-                  color="info"
+                  color={settlement.status === 'pending' && (settlement.paid_amount || 0) > 0 ? 'warning' : 'info'}
                   variant="outlined"
                   sx={{ fontSize: '0.7rem', height: 22 }}
                 />

@@ -690,6 +690,9 @@ export function useRecordGroupStockUsageFIFO() {
       queryClient.invalidateQueries({ queryKey: ["expenses"] });
       queryClient.invalidateQueries({ queryKey: ["inter-site-settlements"] });
       queryClient.invalidateQueries({ queryKey: queryKeys.batchUsage.all });
+      // Invalidate stock inventory - record_batch_usage now decrements stock_inventory.current_qty
+      queryClient.invalidateQueries({ queryKey: queryKeys.materialStock.all });
+      queryClient.invalidateQueries({ queryKey: ["stock-inventory"] });
     },
   });
 }

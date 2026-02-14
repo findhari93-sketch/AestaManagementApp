@@ -1690,6 +1690,16 @@ export function useNetSettlement() {
       balanceA: InterSiteBalance; // One direction
       balanceB: InterSiteBalance; // Reverse direction
       userId?: string;
+      /** Payment details for the net remaining amount (fully settles both directions) */
+      paymentDetails?: {
+        amount: number;
+        payment_mode: string;
+        payment_date: string;
+        reference_number?: string;
+        notes?: string;
+        proof_url?: string;
+        subcontract_id?: string;
+      };
     }) => {
       await ensureFreshSession();
 
@@ -1842,7 +1852,7 @@ export function useNetSettlement() {
       }
 
       // Helper: complete a settled settlement (create expense, mark records)
-      async function completeSettlement(settlement: any) {
+      async function completeSettlement(settlement: any, paymentInfo?: { payment_mode: string; payment_date?: string; reference_number?: string }) {
         // Fetch settlement with site info
         const { data: fullSettlement } = await (supabase as any)
           .from("inter_site_material_settlements")
@@ -1880,13 +1890,13 @@ export function useNetSettlement() {
             status: "completed",
             is_paid: true,
             paid_date: today,
-            payment_mode: "adjustment",
+            payment_mode: paymentInfo?.payment_mode || "adjustment",
             original_batch_code: settlementCode,
             settlement_reference: settlementCode,
-            settlement_date: today,
+            settlement_date: paymentInfo?.payment_date || today,
             settlement_payer_source: "own",
             site_group_id: fullSettlement.site_group_id,
-            notes: `Net settlement offset. ${fullSettlement.to_site?.name || "debtor"} to ${fullSettlement.from_site?.name || "creditor"}. Settlement: ${settlementCode}`,
+            notes: `Net settlement${paymentInfo ? " with payment" : " offset"}. ${fullSettlement.to_site?.name || "debtor"} to ${fullSettlement.from_site?.name || "creditor"}. Settlement: ${settlementCode}`,
           })
           .select()
           .single();
@@ -2021,9 +2031,50 @@ export function useNetSettlement() {
           await completeSettlement(largerSettlement);
         }
 
+        // Step 7: If payment details provided, fully settle the larger settlement too
+        if (data.paymentDetails && netRemaining > 0) {
+          const pd = data.paymentDetails;
+          console.log("[NetSettlement] Recording payment for net remaining:", pd.amount);
+
+          // Record the real payment for the net remaining amount
+          await (supabase as any)
+            .from("inter_site_settlement_payments")
+            .insert({
+              settlement_id: largerSettlement.id,
+              payment_date: pd.payment_date,
+              amount: netRemaining,
+              payment_mode: pd.payment_mode,
+              reference_number: pd.reference_number || null,
+              notes: pd.notes || null,
+              recorded_by: data.userId || null,
+            });
+
+          // Update larger settlement to fully settled
+          await (supabase as any)
+            .from("inter_site_material_settlements")
+            .update({
+              paid_amount: largerSettlement.total_amount,
+              status: "settled",
+              settled_by: data.userId || null,
+              settled_at: now.toISOString(),
+            })
+            .eq("id", largerSettlement.id);
+
+          // Complete the larger settlement (create expense, mark batch records as settled)
+          await completeSettlement(largerSettlement, {
+            payment_mode: pd.payment_mode,
+            payment_date: pd.payment_date,
+            reference_number: pd.reference_number,
+          });
+
+          console.log("[NetSettlement] Larger settlement fully settled with payment:", largerSettlement.settlement_code);
+        }
+
         console.log("[NetSettlement] Netting complete:", {
           smallerSettled: smallerSettlement.settlement_code,
-          largerPending: netRemaining > 0 ? `${largerSettlement.settlement_code} (${netRemaining} remaining)` : "also settled",
+          largerStatus: netRemaining > 0
+            ? (data.paymentDetails ? `${largerSettlement.settlement_code} (fully settled with payment)` : `${largerSettlement.settlement_code} (${netRemaining} remaining)`)
+            : "also settled (equal amounts)",
         });
 
         return {

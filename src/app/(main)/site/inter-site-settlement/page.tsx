@@ -634,6 +634,11 @@ export default function InterSiteSettlementPage() {
             setNetSettleDialogOpen(false)
             setNetSettlePair(null)
           }}
+          debtorSiteId={
+            netSettlePair.balanceA.total_amount_owed > netSettlePair.balanceB.total_amount_owed
+              ? netSettlePair.balanceA.debtor_site_id
+              : netSettlePair.balanceB.debtor_site_id
+          }
         />
       )}
     </Box>
