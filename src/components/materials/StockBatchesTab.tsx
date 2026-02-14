@@ -3,6 +3,7 @@
 import { useState, useMemo } from 'react'
 import {
   Box,
+  Button,
   Grid,
   Skeleton,
   Typography,
@@ -24,6 +25,7 @@ import {
   ViewModule as CardViewIcon,
   ViewList as ListViewIcon,
   Inventory as BatchesIcon,
+  AddCircleOutline as RecordUsageIcon,
 } from '@mui/icons-material'
 import GroupStockBatchCard from '@/components/materials/GroupStockBatchCard'
 import PurchaseBatchRow from '@/components/materials/PurchaseBatchRow'
@@ -52,6 +54,7 @@ interface StockBatchesTabProps {
   onViewTransaction: (tx: GroupStockTransaction) => void
   onEditTransaction: (tx: GroupStockTransaction) => void
   onDeleteTransaction: (tx: GroupStockTransaction) => void
+  onRecordGroupUsage?: (materialId?: string) => void
 }
 
 export default function StockBatchesTab({
@@ -69,6 +72,7 @@ export default function StockBatchesTab({
   onViewTransaction,
   onEditTransaction,
   onDeleteTransaction,
+  onRecordGroupUsage,
 }: StockBatchesTabProps) {
   const [viewMode, setViewMode] = useState<'card' | 'list'>('card')
   const [statusFilter, setStatusFilter] = useState<'all' | 'in_stock' | 'partial_used' | 'completed'>('all')
@@ -178,6 +182,17 @@ export default function StockBatchesTab({
         </TextField>
 
         <Box sx={{ ml: 'auto', display: 'flex', alignItems: 'center', gap: 1 }}>
+          {onRecordGroupUsage && (
+            <Button
+              variant="outlined"
+              size="small"
+              startIcon={<RecordUsageIcon />}
+              onClick={() => onRecordGroupUsage()}
+            >
+              Record Usage
+            </Button>
+          )}
+
           <Typography variant="body2" color="text.secondary">
             {filteredBatches.length} of {sourceBatches.length} batches
           </Typography>
@@ -222,6 +237,10 @@ export default function StockBatchesTab({
                     onConvertToOwnSite={() => onConvertToOwnSite(batch)}
                     onComplete={() => onCompleteBatch(batch)}
                     onSettleUsage={handleSettleUsage(batch)}
+                    onRecordUsage={onRecordGroupUsage ? () => {
+                      const materialId = batch.items?.[0]?.material_id
+                      onRecordGroupUsage(materialId)
+                    } : undefined}
                     currentSiteId={currentSiteId}
                     showActions
                   />

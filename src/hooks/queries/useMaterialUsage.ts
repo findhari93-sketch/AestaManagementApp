@@ -1037,10 +1037,10 @@ export function useDeleteMaterialUsage() {
         usageRecord = data;
         fetchError = error;
       } else {
-        // Fetch from daily_material_usage
+        // Fetch from daily_material_usage (include inventory_id for precise stock lookup)
         const { data, error } = await supabase
           .from("daily_material_usage")
-          .select("material_id, brand_id, quantity, unit_cost, usage_date")
+          .select("material_id, brand_id, quantity, unit_cost, usage_date, inventory_id")
           .eq("id", id)
           .single();
         usageRecord = data;
@@ -1052,20 +1052,45 @@ export function useDeleteMaterialUsage() {
       }
 
       // 2. Find the stock inventory record to restore quantity
-      // Also fetch batch_code to check if we need to delete batch_usage_record
-      let inventoryQuery = supabase
-        .from("stock_inventory")
-        .select("id, current_qty, batch_code, pricing_mode, total_weight")
-        .eq("site_id", siteId)
-        .eq("material_id", usageRecord.material_id) as any;
+      // Use precise identifiers to avoid .maybeSingle() errors when multiple records exist
+      let inventory: { id: string; current_qty: number; batch_code: string | null; pricing_mode: string | null; total_weight: number | null } | null = null;
 
-      if (usageRecord.brand_id) {
-        inventoryQuery = inventoryQuery.eq("brand_id", usageRecord.brand_id);
+      if (is_shared_usage && usageRecord.batch_ref_code) {
+        // Shared usage: match by batch_code for the exact batch inventory record
+        const { data } = await (supabase
+          .from("stock_inventory")
+          .select("id, current_qty, batch_code, pricing_mode, total_weight")
+          .eq("site_id", siteId)
+          .eq("material_id", usageRecord.material_id)
+          .eq("batch_code", usageRecord.batch_ref_code) as any)
+          .maybeSingle();
+        inventory = data;
+      } else if (!is_shared_usage && usageRecord.inventory_id) {
+        // Non-shared with FIFO inventory_id: direct lookup by ID
+        const { data } = await (supabase
+          .from("stock_inventory")
+          .select("id, current_qty, batch_code, pricing_mode, total_weight")
+          .eq("id", usageRecord.inventory_id) as any)
+          .maybeSingle();
+        inventory = data;
       } else {
-        inventoryQuery = inventoryQuery.is("brand_id", null);
-      }
+        // Legacy fallback: material + brand + site
+        // Use array query with limit(1) instead of maybeSingle() to avoid error on multiple matches
+        let inventoryQuery = supabase
+          .from("stock_inventory")
+          .select("id, current_qty, batch_code, pricing_mode, total_weight")
+          .eq("site_id", siteId)
+          .eq("material_id", usageRecord.material_id) as any;
 
-      const { data: inventory } = await inventoryQuery.maybeSingle();
+        if (usageRecord.brand_id) {
+          inventoryQuery = inventoryQuery.eq("brand_id", usageRecord.brand_id);
+        } else {
+          inventoryQuery = inventoryQuery.is("brand_id", null);
+        }
+
+        const { data } = await inventoryQuery.order("created_at", { ascending: true }).limit(1);
+        inventory = data?.[0] || null;
+      }
 
       if (inventory) {
         // 3. Restore quantity to inventory
@@ -1258,11 +1283,10 @@ export function useDeleteMaterialUsage() {
       }
 
       // Also invalidate stock queries since we restored quantity
+      // This covers useSiteStock, useCompletedStock, lowStock, transactions, etc.
       queryClient.invalidateQueries({
-        queryKey: queryKeys.materialStock.lowStock(result.siteId),
-      });
-      queryClient.invalidateQueries({
-        queryKey: [...queryKeys.materialStock.bySite(result.siteId), "transactions"],
+        queryKey: queryKeys.materialStock.bySite(result.siteId),
+        exact: false,
       });
       // Invalidate batch usage and inter-site settlement queries
       queryClient.invalidateQueries({

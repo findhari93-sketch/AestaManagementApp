@@ -40,6 +40,7 @@ import EditGroupStockTransactionDialog from '@/components/materials/EditGroupSto
 import InitiateBatchSettlementDialog from '@/components/materials/InitiateBatchSettlementDialog'
 import RecordInterSitePaymentDialog from '@/components/materials/RecordInterSitePaymentDialog'
 import BatchCompletionDialog from '@/components/materials/BatchCompletionDialog'
+import GroupStockUsageDialog from '@/components/materials/GroupStockUsageDialog'
 import ConfirmDialog from '@/components/common/ConfirmDialog'
 import SettlementSummaryCards from '@/components/materials/SettlementSummaryCards'
 import SettlementLedger from '@/components/materials/SettlementLedger'
@@ -104,6 +105,10 @@ export default function InterSiteSettlementPage() {
   // Delete unsettled balance states
   const [deleteUnsettledBalance, setDeleteUnsettledBalance] = useState<InterSiteBalance | null>(null)
   const [deleteUnsettledConfirmOpen, setDeleteUnsettledConfirmOpen] = useState(false)
+
+  // Group stock usage dialog states
+  const [groupUsageDialogOpen, setGroupUsageDialogOpen] = useState(false)
+  const [preSelectedMaterialId, setPreSelectedMaterialId] = useState<string | null>(null)
 
   // Net settlement dialog states
   const [netSettleDialogOpen, setNetSettleDialogOpen] = useState(false)
@@ -310,6 +315,11 @@ export default function InterSiteSettlementPage() {
     }
   }
 
+  const handleRecordGroupUsage = (materialId?: string) => {
+    setPreSelectedMaterialId(materialId ?? null)
+    setGroupUsageDialogOpen(true)
+  }
+
   const handleNetSettle = (balanceA: InterSiteBalance, balanceB: InterSiteBalance) => {
     setNetSettlePair({ balanceA, balanceB })
     setNetSettleDialogOpen(true)
@@ -397,6 +407,7 @@ export default function InterSiteSettlementPage() {
             onViewTransaction={handleViewTransaction}
             onEditTransaction={handleEditTransaction}
             onDeleteTransaction={handleDeleteTransaction}
+            onRecordGroupUsage={handleRecordGroupUsage}
           />
         </TabPanel>
 
@@ -595,6 +606,19 @@ export default function InterSiteSettlementPage() {
         batch={selectedBatch}
         onComplete={handleConfirmBatchCompletion}
       />
+
+      {selectedSite?.id && (
+        <GroupStockUsageDialog
+          open={groupUsageDialogOpen}
+          onClose={() => {
+            setGroupUsageDialogOpen(false)
+            setPreSelectedMaterialId(null)
+          }}
+          siteId={selectedSite.id}
+          batchesWithUsage={batchesWithUsage}
+          preSelectedMaterialId={preSelectedMaterialId}
+        />
+      )}
 
       {netSettlePair && groupMembership?.groupId && (
         <NetSettlementDialog

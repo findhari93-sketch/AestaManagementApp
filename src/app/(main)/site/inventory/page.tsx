@@ -37,7 +37,6 @@ import {
   Lock as DedicatedIcon,
   LockOpen as SharedIcon,
   Inventory as InventoryIcon,
-  Groups as GroupsIcon,
   Domain as SiteIcon,
   History as HistoryIcon,
   PlayArrow as UseIcon,
@@ -46,6 +45,8 @@ import {
   ViewList as ViewListIcon,
   ViewModule as ViewModuleIcon,
   ExpandMore as ExpandMoreIcon,
+  Store as OwnStockIcon,
+  Groups as GroupsIcon,
 } from "@mui/icons-material";
 import ToggleButton from "@mui/material/ToggleButton";
 import ToggleButtonGroup from "@mui/material/ToggleButtonGroup";
@@ -64,10 +65,8 @@ import {
   useStockAdjustment,
   useAddInitialStock,
   useCompletedStock,
-  useGroupStockInventory,
   type ExtendedStockInventory,
   type CompletedStockItem,
-  type GroupStockItem,
 } from "@/hooks/queries/useStockInventory";
 import { consolidateStock, type ConsolidatedStockItem } from "@/lib/utils/fifoAllocator";
 import { useSiteGroupMembership } from "@/hooks/queries/useSiteGroups";
@@ -77,10 +76,6 @@ import {
   useDeleteMaterialUsage,
   useUpdateMaterialUsage,
 } from "@/hooks/queries/useMaterialUsage";
-import { useGroupMaterialPurchases } from "@/hooks/queries/useMaterialPurchases";
-import { useRecordBatchUsage } from "@/hooks/queries/useBatchUsage";
-import BatchUsageDialog from "@/components/inventory/BatchUsageDialog";
-import type { MaterialPurchaseExpenseWithDetails } from "@/types/material.types";
 import { useMaterials, useMaterialCategories } from "@/hooks/queries/useMaterials";
 import type {
   StockInventoryWithDetails,
@@ -114,7 +109,7 @@ const UNIT_LABELS: Record<MaterialUnit, string> = {
 };
 
 type MainTabType = "stock" | "usage";
-type StockTabType = "all" | "site" | "shared" | "group" | "completed";
+type StockTabType = "all" | "own" | "group" | "completed";
 type StockViewMode = "consolidated" | "batch";
 
 export default function InventoryPage() {
@@ -156,12 +151,6 @@ export default function InventoryPage() {
 
   // Bulk usage dialog state
   const [bulkUsageDialogOpen, setBulkUsageDialogOpen] = useState(false);
-
-  // Batch usage dialog state (for Group Purchases)
-  const [batchUsageDialog, setBatchUsageDialog] = useState<{
-    open: boolean;
-    batch: MaterialPurchaseExpenseWithDetails | null;
-  }>({ open: false, batch: null });
 
   // Usage delete/edit dialog state
   const [usageDeleteDialog, setUsageDeleteDialog] = useState<{
@@ -206,21 +195,20 @@ export default function InventoryPage() {
   });
   const { data: todaySummary } = useTodayUsageSummary(selectedSite?.id);
 
-  // Group stock queries (for Group Purchases tab)
-  const { data: groupStock = [], isLoading: groupStockLoading } = useGroupStockInventory(
-    groupMembership?.groupId
-  );
-
-  // Group material purchases (batches from material_purchase_expenses)
-  const { data: groupBatches = [], isLoading: groupBatchesLoading } = useGroupMaterialPurchases(
-    groupMembership?.groupId
-  );
-  const recordBatchUsage = useRecordBatchUsage();
-
   const stockAdjustment = useStockAdjustment();
   const addInitialStock = useAddInitialStock();
   const deleteUsage = useDeleteMaterialUsage();
   const updateUsage = useUpdateMaterialUsage();
+
+  // Count own vs group stock for tab badges
+  const ownStockCount = useMemo(
+    () => (stock as ExtendedStockInventory[]).filter((s) => !s.is_shared).length,
+    [stock]
+  );
+  const groupStockCount = useMemo(
+    () => (stock as ExtendedStockInventory[]).filter((s) => s.is_shared).length,
+    [stock]
+  );
 
   // Filter stock by search term and tab
   const filteredStock = useMemo(() => {
@@ -231,9 +219,10 @@ export default function InventoryPage() {
 
     let filtered = stock as ExtendedStockInventory[];
 
-    if (stockTab === "site") {
+    // Filter by own/group tab
+    if (stockTab === "own") {
       filtered = filtered.filter((s) => !s.is_shared);
-    } else if (stockTab === "shared") {
+    } else if (stockTab === "group") {
       filtered = filtered.filter((s) => s.is_shared);
     }
 
@@ -272,15 +261,6 @@ export default function InventoryPage() {
   );
 
   // Calculate stats
-  const sharedStockCount = useMemo(() => {
-    return (stock as ExtendedStockInventory[]).filter((s) => s.is_shared).length;
-  }, [stock]);
-
-  const groupStockCount = useMemo(() => {
-    // Count batches (material_purchase_expenses) instead of group_stock_inventory
-    return groupBatches.length;
-  }, [groupBatches]);
-
   const totalStockValue = useMemo(() => {
     return stock.reduce((sum, s) => {
       const extendedStock = s as ExtendedStockInventory;
@@ -291,36 +271,6 @@ export default function InventoryPage() {
       return sum + s.current_qty * (s.avg_unit_cost || 0);
     }, 0);
   }, [stock]);
-
-  // Filter group stock by search term
-  const filteredGroupStock = useMemo(() => {
-    if (!searchTerm) return groupStock;
-
-    const term = searchTerm.toLowerCase();
-    return groupStock.filter(
-      (s) =>
-        s.material?.name?.toLowerCase().includes(term) ||
-        s.material?.code?.toLowerCase().includes(term) ||
-        s.brand?.brand_name?.toLowerCase().includes(term) ||
-        s.batch_code?.toLowerCase().includes(term)
-    );
-  }, [groupStock, searchTerm]);
-
-  // Filter group batches by search term
-  const filteredGroupBatches = useMemo(() => {
-    if (!searchTerm) return groupBatches;
-
-    const term = searchTerm.toLowerCase();
-    return groupBatches.filter(
-      (b) =>
-        b.ref_code?.toLowerCase().includes(term) ||
-        b.items?.some((item) =>
-          item.material?.name?.toLowerCase().includes(term) ||
-          item.material?.code?.toLowerCase().includes(term) ||
-          item.brand?.brand_name?.toLowerCase().includes(term)
-        )
-    );
-  }, [groupBatches, searchTerm]);
 
   // Use the extended stock type from the hook
   type ExtendedStock = ExtendedStockInventory;
@@ -805,6 +755,15 @@ export default function InventoryPage() {
         Cell: ({ row }) => row.original.batch_code || "-",
       },
       {
+        accessorKey: "original_qty",
+        header: "Original Qty",
+        size: 110,
+        Cell: ({ row }) =>
+          row.original.original_qty > 0
+            ? `${row.original.original_qty} ${row.original.unit}`
+            : "-",
+      },
+      {
         accessorKey: "avg_unit_cost",
         header: "Avg Cost",
         size: 100,
@@ -1188,6 +1147,8 @@ export default function InventoryPage() {
             <Tabs
               value={stockTab}
               onChange={(_, newValue) => setStockTab(newValue as StockTabType)}
+              variant={isMobile ? "scrollable" : "standard"}
+              scrollButtons={isMobile ? "auto" : false}
               sx={{ borderBottom: 1, borderColor: "divider" }}
             >
               <Tab
@@ -1197,23 +1158,16 @@ export default function InventoryPage() {
                 iconPosition="start"
               />
               <Tab
-                label="Site Stock"
-                value="site"
-                icon={<SiteIcon />}
+                label={`Own Purchases${ownStockCount > 0 ? ` (${ownStockCount})` : ""}`}
+                value="own"
+                icon={<OwnStockIcon />}
                 iconPosition="start"
               />
               <Tab
-                label={`Shared Stock${sharedStockCount > 0 ? ` (${sharedStockCount})` : ""}`}
-                value="shared"
-                icon={<GroupsIcon />}
-                iconPosition="start"
-              />
-              <Tab
-                label={`Group Purchases${groupStockCount > 0 ? ` (${groupStockCount})` : ""}`}
+                label={`Group Stock${groupStockCount > 0 ? ` (${groupStockCount})` : ""}`}
                 value="group"
                 icon={<GroupsIcon />}
                 iconPosition="start"
-                disabled={!groupMembership?.groupId}
               />
               <Tab
                 label={`Completed${completedStock.length > 0 ? ` (${completedStock.length})` : ""}`}
@@ -1242,7 +1196,7 @@ export default function InventoryPage() {
               }}
               sx={{ minWidth: 300 }}
             />
-            {stockTab !== "completed" && stockTab !== "group" && (
+            {stockTab !== "completed" && (
               <ToggleButtonGroup
                 value={stockViewMode}
                 exclusive
@@ -1264,7 +1218,7 @@ export default function InventoryPage() {
           </Box>
 
           {/* Stock Table - Active Stock (All, Site, Shared) */}
-          {stockTab !== "completed" && stockTab !== "group" && stockViewMode === "consolidated" && (
+          {stockTab !== "completed" && stockViewMode === "consolidated" && (
             <DataTable
               columns={consolidatedColumns}
               data={consolidatedStock}
@@ -1281,7 +1235,7 @@ export default function InventoryPage() {
             />
           )}
 
-          {stockTab !== "completed" && stockTab !== "group" && stockViewMode === "batch" && (
+          {stockTab !== "completed" && stockViewMode === "batch" && (
             <DataTable
               columns={stockColumns}
               data={filteredStock}
@@ -1293,176 +1247,6 @@ export default function InventoryPage() {
                 sorting: [{ id: "material.name", desc: false }],
               }}
             />
-          )}
-
-          {/* Stock Table - Group Purchases (Batches) */}
-          {stockTab === "group" && (
-            <>
-              <Alert severity="info" sx={{ mb: 2 }}>
-                Showing group purchase batches for your site group. Record daily usage per site below.
-                Settlements are processed in <strong>Inter-Site Settlement</strong>.
-              </Alert>
-              {!groupMembership?.groupId ? (
-                <Alert severity="warning">
-                  This site is not part of a site group. Group purchases are only available for sites in a group.
-                </Alert>
-              ) : (
-                <DataTable
-                  columns={[
-                    {
-                      accessorKey: "ref_code",
-                      header: "Batch Code",
-                      size: 150,
-                      Cell: ({ row }) => (
-                        <Typography
-                          variant="caption"
-                          sx={{
-                            fontFamily: "monospace",
-                            bgcolor: "primary.lighter",
-                            px: 1,
-                            py: 0.5,
-                            borderRadius: 1,
-                          }}
-                        >
-                          {row.original.ref_code}
-                        </Typography>
-                      ),
-                    },
-                    {
-                      id: "materials",
-                      header: "Materials",
-                      size: 250,
-                      Cell: ({ row }) => {
-                        const items = row.original.items || [];
-                        if (items.length === 0) return <Typography variant="body2">-</Typography>;
-                        const firstItem = items[0];
-                        return (
-                          <Box>
-                            <Typography variant="body2" fontWeight={500}>
-                              {firstItem.material?.name || "Unknown"}
-                            </Typography>
-                            {firstItem.brand && (
-                              <Chip
-                                label={firstItem.brand.brand_name}
-                                size="small"
-                                variant="outlined"
-                                sx={{ mr: 0.5 }}
-                              />
-                            )}
-                            {items.length > 1 && (
-                              <Typography variant="caption" color="text.secondary">
-                                +{items.length - 1} more
-                              </Typography>
-                            )}
-                          </Box>
-                        );
-                      },
-                    },
-                    {
-                      id: "stock_progress",
-                      header: "Stock",
-                      size: 150,
-                      Cell: ({ row }) => {
-                        const original = row.original.original_qty ?? 0;
-                        const remaining = row.original.remaining_qty ?? original;
-                        const used = original - remaining;
-                        const usedPercent = original > 0 ? Math.round((used / original) * 100) : 0;
-                        return (
-                          <Box>
-                            <Typography variant="body2" fontWeight={600}>
-                              {remaining.toLocaleString()} / {original.toLocaleString()}
-                            </Typography>
-                            <Typography variant="caption" color={usedPercent > 80 ? "error.main" : "text.secondary"}>
-                              {usedPercent}% used
-                            </Typography>
-                          </Box>
-                        );
-                      },
-                    },
-                    {
-                      accessorKey: "total_amount",
-                      header: "Amount",
-                      size: 120,
-                      Cell: ({ row }) => (
-                        <Typography variant="body2">
-                          ₹{Number(row.original.total_amount || 0).toLocaleString("en-IN", {
-                            minimumFractionDigits: 2,
-                            maximumFractionDigits: 2,
-                          })}
-                        </Typography>
-                      ),
-                    },
-                    {
-                      accessorKey: "status",
-                      header: "Status",
-                      size: 100,
-                      Cell: ({ row }) => {
-                        // Calculate status based on actual quantities, not just database status
-                        const original = row.original.original_qty ?? 0;
-                        const remaining = row.original.remaining_qty ?? original;
-                        const dbStatus = row.original.status;
-
-                        // Determine correct status based on quantities
-                        let calculatedStatus: string;
-                        if (dbStatus === "completed") {
-                          calculatedStatus = "completed";
-                        } else if (remaining <= 0) {
-                          calculatedStatus = "partial_used"; // Fully used but not completed yet
-                        } else if (remaining < original) {
-                          calculatedStatus = "partial_used"; // Partially used
-                        } else {
-                          calculatedStatus = "recorded"; // No usage yet
-                        }
-
-                        const statusColors: Record<string, "default" | "primary" | "success" | "warning"> = {
-                          recorded: "primary",
-                          in_stock: "primary",
-                          partial_used: "warning",
-                          completed: "success",
-                        };
-                        return (
-                          <Chip
-                            label={calculatedStatus.replace("_", " ")}
-                            size="small"
-                            color={statusColors[calculatedStatus] || "default"}
-                            sx={{ textTransform: "capitalize" }}
-                          />
-                        );
-                      },
-                    },
-                    {
-                      accessorKey: "purchase_date",
-                      header: "Date",
-                      size: 100,
-                      Cell: ({ row }) =>
-                        row.original.purchase_date
-                          ? dayjs(row.original.purchase_date).format("DD MMM YYYY")
-                          : "-",
-                    },
-                  ] as MRT_ColumnDef<MaterialPurchaseExpenseWithDetails>[]}
-                  data={filteredGroupBatches}
-                  isLoading={groupBatchesLoading}
-                  enableRowActions={canEdit}
-                  renderRowActions={({ row }) => (
-                    <Box sx={{ display: "flex", gap: 1 }}>
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        startIcon={<UseIcon />}
-                        onClick={() => setBatchUsageDialog({ open: true, batch: row.original })}
-                        disabled={(row.original.remaining_qty ?? 0) <= 0}
-                      >
-                        Record Usage
-                      </Button>
-                    </Box>
-                  )}
-                  mobileHiddenColumns={["total_amount", "purchase_date"]}
-                  initialState={{
-                    sorting: [{ id: "purchase_date", desc: true }],
-                  }}
-                />
-              )}
-            </>
           )}
 
           {/* Stock Table - Completed Stock */}
@@ -1534,26 +1318,6 @@ export default function InventoryPage() {
         stock={stock}
         siteGroupId={groupMembership?.groupId}
         siteName={selectedSite?.name}
-      />
-
-      {/* Batch Usage Dialog (for Group Purchases) */}
-      <BatchUsageDialog
-        open={batchUsageDialog.open}
-        onClose={() => setBatchUsageDialog({ open: false, batch: null })}
-        batch={batchUsageDialog.batch}
-        currentSiteId={selectedSite?.id || ""}
-        sitesInGroup={groupMembership?.allSites || []}
-        onSubmit={async (data) => {
-          await recordBatchUsage.mutateAsync({
-            batch_ref_code: data.batch_ref_code,
-            usage_site_id: data.usage_site_id,
-            quantity: data.quantity,
-            usage_date: data.usage_date,
-            work_description: data.work_description,
-            created_by: user?.id,
-          });
-        }}
-        isSubmitting={recordBatchUsage.isPending}
       />
 
       {/* Usage Delete Confirmation Dialog */}
