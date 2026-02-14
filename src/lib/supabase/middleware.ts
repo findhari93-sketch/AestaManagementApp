@@ -38,6 +38,7 @@ export async function updateSession(request: NextRequest) {
   // Protected routes - allow access to login and debug pages without authentication
   const isPublicRoute =
     request.nextUrl.pathname.startsWith("/login") ||
+    request.nextUrl.pathname.startsWith("/dev-login") ||
     request.nextUrl.pathname.startsWith("/debug");
 
   // Check if this is an RSC (React Server Component) request

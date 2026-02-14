@@ -554,13 +554,15 @@ export default function PurchaseOrdersPage() {
                   <SendIcon fontSize="small" />
                 </IconButton>
               </Tooltip>
-              <Tooltip title="Delete">
-                <IconButton
-                  size="small"
-                  color="error"
-                  onClick={() => handleDelete(po)}
-                >
-                  <DeleteIcon fontSize="small" />
+            </>
+          )}
+
+          {/* Pending Approval / Approved - can delete */}
+          {["pending_approval", "approved"].includes(po.status) && canEdit && (
+            <>
+              <Tooltip title="Edit">
+                <IconButton size="small" onClick={() => handleOpenDialog(po)}>
+                  <EditIcon fontSize="small" />
                 </IconButton>
               </Tooltip>
             </>
@@ -583,32 +585,10 @@ export default function PurchaseOrdersPage() {
                   <DeliveryIcon fontSize="small" />
                 </IconButton>
               </Tooltip>
-              <Tooltip title="Delete">
-                <IconButton
-                  size="small"
-                  color="error"
-                  onClick={() => handleDelete(po)}
-                >
-                  <DeleteIcon fontSize="small" />
-                </IconButton>
-              </Tooltip>
             </>
           )}
 
-          {/* Cancelled - can delete */}
-          {po.status === "cancelled" && canEdit && (
-            <Tooltip title="Delete">
-              <IconButton
-                size="small"
-                color="error"
-                onClick={() => handleDelete(po)}
-              >
-                <DeleteIcon fontSize="small" />
-              </IconButton>
-            </Tooltip>
-          )}
-
-          {/* Delivered - can edit, delete, and push to settlement if Group Stock */}
+          {/* Delivered - can edit and push to settlement if Group Stock */}
           {po.status === "delivered" && canEdit && (
             <>
               {/* Push to Settlement - only for Group Stock POs that aren't synced */}
@@ -647,16 +627,20 @@ export default function PurchaseOrdersPage() {
                   <EditIcon fontSize="small" />
                 </IconButton>
               </Tooltip>
-              <Tooltip title="Delete">
-                <IconButton
-                  size="small"
-                  color="error"
-                  onClick={() => handleDelete(po)}
-                >
-                  <DeleteIcon fontSize="small" />
-                </IconButton>
-              </Tooltip>
             </>
+          )}
+
+          {/* Delete - available for all statuses */}
+          {canEdit && (
+            <Tooltip title="Delete">
+              <IconButton
+                size="small"
+                color="error"
+                onClick={() => handleDelete(po)}
+              >
+                <DeleteIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
           )}
         </Box>
       );

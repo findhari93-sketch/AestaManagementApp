@@ -80,11 +80,11 @@ export default function GroupStockBatchCard({
       ? ((originalQty - remainingQty) / originalQty) * 100
       : 0;
 
-  // Compute display status from actual usage data instead of trusting DB status
-  // This handles data inconsistencies (e.g. DB says 'partial_used' but 0% is actually used)
+  // Compute display status from actual quantities (not DB status) to handle stale data
+  // e.g. DB may say 'completed' but remaining_qty > 0 after usage deletion
   const computedStatus: MaterialBatchStatus =
-    batch.status === "completed" ? "completed" :
     batch.status === "converted" ? "converted" :
+    (remainingQty <= 0 && originalQty > 0) ? "completed" :
     usagePercent > 0 ? "partial_used" : "recorded";
 
   const isEditable = computedStatus === "partial_used" || computedStatus === "recorded";

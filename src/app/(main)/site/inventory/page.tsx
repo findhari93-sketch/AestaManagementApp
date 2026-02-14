@@ -43,7 +43,12 @@ import {
   PlayArrow as UseIcon,
   Edit as EditIcon,
   Delete as DeleteIcon,
+  ViewList as ViewListIcon,
+  ViewModule as ViewModuleIcon,
+  ExpandMore as ExpandMoreIcon,
 } from "@mui/icons-material";
+import ToggleButton from "@mui/material/ToggleButton";
+import ToggleButtonGroup from "@mui/material/ToggleButtonGroup";
 import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
 import PageHeader from "@/components/layout/PageHeader";
 import Breadcrumbs from "@/components/layout/Breadcrumbs";
@@ -64,6 +69,7 @@ import {
   type CompletedStockItem,
   type GroupStockItem,
 } from "@/hooks/queries/useStockInventory";
+import { consolidateStock, type ConsolidatedStockItem } from "@/lib/utils/fifoAllocator";
 import { useSiteGroupMembership } from "@/hooks/queries/useSiteGroups";
 import {
   useMaterialUsage,
@@ -109,6 +115,7 @@ const UNIT_LABELS: Record<MaterialUnit, string> = {
 
 type MainTabType = "stock" | "usage";
 type StockTabType = "all" | "site" | "shared" | "group" | "completed";
+type StockViewMode = "consolidated" | "batch";
 
 export default function InventoryPage() {
   const { selectedSite } = useSite();
@@ -134,6 +141,7 @@ export default function InventoryPage() {
   // Stock view state
   const [searchTerm, setSearchTerm] = useState("");
   const [stockTab, setStockTab] = useState<StockTabType>("all");
+  const [stockViewMode, setStockViewMode] = useState<StockViewMode>("consolidated");
   const [adjustmentDialog, setAdjustmentDialog] = useState<{
     open: boolean;
     stock: StockInventoryWithDetails | null;
@@ -144,6 +152,7 @@ export default function InventoryPage() {
   // Usage entry drawer state
   const [usageDrawerOpen, setUsageDrawerOpen] = useState(false);
   const [preSelectedStock, setPreSelectedStock] = useState<ExtendedStockInventory | null>(null);
+  const [preSelectedConsolidated, setPreSelectedConsolidated] = useState<ConsolidatedStockItem | null>(null);
 
   // Bulk usage dialog state
   const [bulkUsageDialogOpen, setBulkUsageDialogOpen] = useState(false);
@@ -256,6 +265,12 @@ export default function InventoryPage() {
     );
   }, [completedStock, searchTerm]);
 
+  // Consolidated stock view (group by material)
+  const consolidatedStock = useMemo(
+    () => consolidateStock(filteredStock),
+    [filteredStock]
+  );
+
   // Calculate stats
   const sharedStockCount = useMemo(() => {
     return (stock as ExtendedStockInventory[]).filter((s) => s.is_shared).length;
@@ -310,9 +325,17 @@ export default function InventoryPage() {
   // Use the extended stock type from the hook
   type ExtendedStock = ExtendedStockInventory;
 
-  // Handle opening usage drawer with pre-selected stock
+  // Handle opening usage drawer with pre-selected stock (batch mode)
   const handleRecordUsage = (stockItem?: ExtendedStockInventory) => {
+    setPreSelectedConsolidated(null);
     setPreSelectedStock(stockItem || null);
+    setUsageDrawerOpen(true);
+  };
+
+  // Handle opening usage drawer with consolidated material (material-level mode)
+  const handleRecordConsolidatedUsage = (consolidated: ConsolidatedStockItem) => {
+    setPreSelectedStock(null);
+    setPreSelectedConsolidated(consolidated);
     setUsageDrawerOpen(true);
   };
 
@@ -579,6 +602,175 @@ export default function InventoryPage() {
       },
     ],
     [lowStockAlerts, selectedSite?.name]
+  );
+
+  // Consolidated stock table columns (grouped by material+brand)
+  const consolidatedColumns = useMemo<MRT_ColumnDef<ConsolidatedStockItem>[]>(
+    () => [
+      {
+        accessorKey: "material_name",
+        header: "Material",
+        size: 220,
+        Cell: ({ row }) => (
+          <Box>
+            <Typography variant="body2" fontWeight={500}>
+              {row.original.material_name}
+            </Typography>
+            {row.original.material_code && (
+              <Typography variant="caption" color="text.secondary">
+                {row.original.material_code}
+              </Typography>
+            )}
+            {row.original.brand_names.length > 0 &&
+              row.original.brand_names.map((bn) => (
+                <Chip
+                  key={bn}
+                  label={bn}
+                  size="small"
+                  variant="outlined"
+                  sx={{ ml: 0.5 }}
+                />
+              ))}
+          </Box>
+        ),
+      },
+      {
+        accessorKey: "total_qty",
+        header: "Total Stock",
+        size: 130,
+        Cell: ({ row }) => {
+          const unit = row.original.unit || "piece";
+          return (
+            <Typography variant="body2" fontWeight={600}>
+              {row.original.total_qty.toLocaleString()}{" "}
+              {UNIT_LABELS[unit as MaterialUnit] || unit}
+            </Typography>
+          );
+        },
+      },
+      {
+        id: "batches",
+        header: "Batches",
+        size: 90,
+        Cell: ({ row }) => (
+          <Chip
+            label={`${row.original.batch_count} batch${row.original.batch_count > 1 ? "es" : ""}`}
+            size="small"
+            variant="outlined"
+            color={row.original.batch_count > 1 ? "primary" : "default"}
+          />
+        ),
+      },
+      {
+        accessorKey: "weighted_avg_cost",
+        header: "Avg Cost",
+        size: 110,
+        Cell: ({ row }) =>
+          row.original.weighted_avg_cost
+            ? `₹${row.original.weighted_avg_cost.toLocaleString("en-IN", {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              })}`
+            : "-",
+      },
+      {
+        accessorKey: "total_value",
+        header: "Total Value",
+        size: 130,
+        Cell: ({ row }) => (
+          <Typography variant="body2" fontWeight={500}>
+            ₹{row.original.total_value.toLocaleString("en-IN", {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })}
+          </Typography>
+        ),
+      },
+      {
+        id: "stock_type",
+        header: "Type",
+        size: 100,
+        Cell: ({ row }) => {
+          if (row.original.has_shared_batches && row.original.has_own_batches) {
+            return <Chip label="Mixed" size="small" color="warning" variant="outlined" />;
+          }
+          if (row.original.has_shared_batches) {
+            return (
+              <Chip icon={<SharedIcon />} label="Shared" size="small" color="info" variant="outlined" />
+            );
+          }
+          return <Chip label="Site" size="small" variant="outlined" />;
+        },
+      },
+    ],
+    []
+  );
+
+  // Row actions for consolidated view
+  const renderConsolidatedRowActions = useCallback(
+    ({ row }: { row: { original: ConsolidatedStockItem } }) => (
+      <Box sx={{ display: "flex", gap: 0.5 }}>
+        <Tooltip title="Record Usage">
+          <IconButton
+            size="small"
+            color="primary"
+            onClick={() => handleRecordConsolidatedUsage(row.original)}
+            disabled={!canEdit || row.original.total_available_qty <= 0}
+          >
+            <UseIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
+      </Box>
+    ),
+    [canEdit]
+  );
+
+  // Detail panel for consolidated rows — shows individual batches
+  const renderConsolidatedDetailPanel = useCallback(
+    ({ row }: { row: { original: ConsolidatedStockItem } }) => {
+      const batches = row.original.batches;
+      if (batches.length <= 1) return null;
+      return (
+        <Box sx={{ p: 2, bgcolor: "action.hover", width: "100%" }}>
+          <Typography variant="subtitle2" sx={{ mb: 1 }}>
+            Batch Details ({batches.length} batches)
+          </Typography>
+          <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
+            {batches.map((batch) => (
+              <Paper key={batch.id} variant="outlined" sx={{ p: 1.5, minWidth: 220, maxWidth: 280, flex: "1 1 220px" }}>
+                <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 0.5 }}>
+                  <Typography variant="caption" sx={{ fontFamily: "monospace", bgcolor: "action.selected", px: 0.5, borderRadius: 0.5 }}>
+                    {batch.batch_code || "Own Stock"}
+                  </Typography>
+                  {batch.is_shared ? (
+                    <Chip label="Shared" size="small" color="info" variant="outlined" sx={{ height: 20, fontSize: "0.65rem" }} />
+                  ) : (
+                    <Chip label="Own" size="small" variant="outlined" sx={{ height: 20, fontSize: "0.65rem" }} />
+                  )}
+                </Box>
+                <Typography variant="body2" fontWeight={600}>
+                  {batch.current_qty.toLocaleString()} {UNIT_LABELS[(batch.material?.unit || "piece") as MaterialUnit] || batch.material?.unit}
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  @ ₹{(batch.avg_unit_cost || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}/unit
+                </Typography>
+                {batch.last_received_date && (
+                  <Typography variant="caption" color="text.secondary" display="block">
+                    Received: {dayjs(batch.last_received_date).format("DD MMM YYYY")}
+                  </Typography>
+                )}
+                {batch.paid_by_site_name && (
+                  <Typography variant="caption" color="info.main" display="block">
+                    Paid by: {batch.paid_by_site_name}
+                  </Typography>
+                )}
+              </Paper>
+            ))}
+          </Box>
+        </Box>
+      );
+    },
+    []
   );
 
   // Completed stock table columns
@@ -1032,8 +1224,8 @@ export default function InventoryPage() {
             </Tabs>
           </Paper>
 
-          {/* Search */}
-          <Box sx={{ mb: 2 }}>
+          {/* Search + View Mode Toggle */}
+          <Box sx={{ mb: 2, display: "flex", gap: 2, alignItems: "center", flexWrap: "wrap" }}>
             <TextField
               size="small"
               placeholder="Search materials, batch codes..."
@@ -1050,10 +1242,46 @@ export default function InventoryPage() {
               }}
               sx={{ minWidth: 300 }}
             />
+            {stockTab !== "completed" && stockTab !== "group" && (
+              <ToggleButtonGroup
+                value={stockViewMode}
+                exclusive
+                onChange={(_, value) => value && setStockViewMode(value)}
+                size="small"
+              >
+                <ToggleButton value="consolidated">
+                  <Tooltip title="By Material (consolidated)">
+                    <ViewListIcon fontSize="small" />
+                  </Tooltip>
+                </ToggleButton>
+                <ToggleButton value="batch">
+                  <Tooltip title="By Batch (detailed)">
+                    <ViewModuleIcon fontSize="small" />
+                  </Tooltip>
+                </ToggleButton>
+              </ToggleButtonGroup>
+            )}
           </Box>
 
           {/* Stock Table - Active Stock (All, Site, Shared) */}
-          {stockTab !== "completed" && stockTab !== "group" && (
+          {stockTab !== "completed" && stockTab !== "group" && stockViewMode === "consolidated" && (
+            <DataTable
+              columns={consolidatedColumns}
+              data={consolidatedStock}
+              isLoading={stockLoading}
+              enableRowActions={canEdit}
+              renderRowActions={renderConsolidatedRowActions}
+              enableExpanding
+              renderDetailPanel={renderConsolidatedDetailPanel}
+              muiDetailPanelProps={{ sx: { "& > td": { width: "100%" } } }}
+              mobileHiddenColumns={["batches", "weighted_avg_cost", "total_value", "stock_type"]}
+              initialState={{
+                sorting: [{ id: "material_name", desc: false }],
+              }}
+            />
+          )}
+
+          {stockTab !== "completed" && stockTab !== "group" && stockViewMode === "batch" && (
             <DataTable
               columns={stockColumns}
               data={filteredStock}
@@ -1290,10 +1518,12 @@ export default function InventoryPage() {
         onClose={() => {
           setUsageDrawerOpen(false);
           setPreSelectedStock(null);
+          setPreSelectedConsolidated(null);
         }}
         siteId={selectedSite?.id || ""}
         stock={stock}
         preSelectedStock={preSelectedStock}
+        preSelectedConsolidated={preSelectedConsolidated}
       />
 
       {/* Bulk Usage Entry Dialog */}

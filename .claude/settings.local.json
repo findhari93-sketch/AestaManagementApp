@@ -77,7 +77,8 @@
       "WebFetch(domain:mui.com)",
       "WebFetch(domain:docs.htmlto.design)",
       "WebFetch(domain:cursor.directory)",
-      "WebFetch(domain:html.to.design)"
+      "WebFetch(domain:html.to.design)",
+      "mcp__supabase__get_advisors"
     ],
     "deny": [],
     "ask": []

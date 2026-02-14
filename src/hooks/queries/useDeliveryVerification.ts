@@ -473,59 +473,10 @@ export async function createStockFromDeliveryItems(
     // Calculate unit price including GST
     const unitPriceWithGst = (item.unit_price || 0) * (1 + taxRate / 100);
 
-    // Check if stock inventory exists
-    let stockQuery = supabase
-      .from("stock_inventory")
-      .select("id, current_qty, avg_unit_cost, batch_code")
-      .eq("site_id", delivery.site_id)
-      .eq("material_id", item.material_id);
-
-    if (delivery.location_id) {
-      stockQuery = stockQuery.eq("location_id", delivery.location_id);
-    } else {
-      stockQuery = stockQuery.is("location_id", null);
-    }
-
-    if (item.brand_id) {
-      stockQuery = stockQuery.eq("brand_id", item.brand_id);
-    } else {
-      stockQuery = stockQuery.is("brand_id", null);
-    }
-
-    const { data: existingStock, error: stockQueryError } = await stockQuery.maybeSingle();
-
-    if (stockQueryError) {
-      console.error("[Stock Creation] Error checking existing stock:", stockQueryError);
-      throw new Error(`Failed to check existing stock: ${stockQueryError.message}`);
-    }
-
-    if (existingStock) {
-      // Update existing stock with weighted average cost (including GST)
-      const newQty = existingStock.current_qty + qty;
-      const existingValue = existingStock.current_qty * (existingStock.avg_unit_cost || 0);
-      const newValue = qty * unitPriceWithGst;
-      const newAvgCost = newQty > 0 ? (existingValue + newValue) / newQty : 0;
-
-      const { error: updateError } = await supabase
-        .from("stock_inventory")
-        .update({
-          current_qty: newQty,
-          avg_unit_cost: newAvgCost,
-          last_received_date: delivery.delivery_date,
-          updated_at: new Date().toISOString(),
-          // Set batch_code if this is a group stock delivery and existing stock doesn't have one
-          ...(batchCode && !existingStock.batch_code ? { batch_code: batchCode } : {}),
-        })
-        .eq("id", existingStock.id);
-
-      if (updateError) {
-        console.error("[Stock Creation] Error updating stock:", updateError);
-        throw new Error(`Failed to update stock inventory: ${updateError.message}`);
-      }
-      stockUpdatedCount++;
-      console.log("[Stock Creation] Updated existing stock:", existingStock.id, "new qty:", newQty);
-    } else {
-      // Create new stock inventory record (with unit cost including GST)
+    // Group stock with batch_code: ALWAYS create a new stock_inventory row per batch.
+    // This prevents multiple Group PO deliveries for the same material from merging
+    // into a single row. Each batch must stay separate for FIFO allocation and settlement.
+    if (batchCode) {
       const { error: insertError } = await supabase.from("stock_inventory").insert({
         site_id: delivery.site_id,
         location_id: delivery.location_id,
@@ -534,15 +485,84 @@ export async function createStockFromDeliveryItems(
         current_qty: qty,
         avg_unit_cost: unitPriceWithGst,
         last_received_date: delivery.delivery_date,
-        batch_code: batchCode,  // Link to group stock batch if applicable
+        batch_code: batchCode,
       });
 
       if (insertError) {
-        console.error("[Stock Creation] Error inserting stock:", insertError);
-        throw new Error(`Failed to create stock inventory: ${insertError.message}`);
+        console.error("[Stock Creation] Error inserting group stock batch:", insertError);
+        throw new Error(`Failed to create group stock inventory: ${insertError.message}`);
       }
       stockCreatedCount++;
-      console.log("[Stock Creation] Created new stock for material:", item.material_id, "qty:", qty);
+      console.log("[Stock Creation] Created new group stock batch:", batchCode, "material:", item.material_id, "qty:", qty);
+    } else {
+      // Non-group stock: check if inventory exists, update or insert
+      let stockQuery = supabase
+        .from("stock_inventory")
+        .select("id, current_qty, avg_unit_cost, batch_code")
+        .eq("site_id", delivery.site_id)
+        .eq("material_id", item.material_id);
+
+      if (delivery.location_id) {
+        stockQuery = stockQuery.eq("location_id", delivery.location_id);
+      } else {
+        stockQuery = stockQuery.is("location_id", null);
+      }
+
+      if (item.brand_id) {
+        stockQuery = stockQuery.eq("brand_id", item.brand_id);
+      } else {
+        stockQuery = stockQuery.is("brand_id", null);
+      }
+
+      const { data: existingStock, error: stockQueryError } = await stockQuery.maybeSingle();
+
+      if (stockQueryError) {
+        console.error("[Stock Creation] Error checking existing stock:", stockQueryError);
+        throw new Error(`Failed to check existing stock: ${stockQueryError.message}`);
+      }
+
+      if (existingStock) {
+        // Update existing stock with weighted average cost (including GST)
+        const newQty = existingStock.current_qty + qty;
+        const existingValue = existingStock.current_qty * (existingStock.avg_unit_cost || 0);
+        const newValue = qty * unitPriceWithGst;
+        const newAvgCost = newQty > 0 ? (existingValue + newValue) / newQty : 0;
+
+        const { error: updateError } = await supabase
+          .from("stock_inventory")
+          .update({
+            current_qty: newQty,
+            avg_unit_cost: newAvgCost,
+            last_received_date: delivery.delivery_date,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", existingStock.id);
+
+        if (updateError) {
+          console.error("[Stock Creation] Error updating stock:", updateError);
+          throw new Error(`Failed to update stock inventory: ${updateError.message}`);
+        }
+        stockUpdatedCount++;
+        console.log("[Stock Creation] Updated existing stock:", existingStock.id, "new qty:", newQty);
+      } else {
+        // Create new stock inventory record (with unit cost including GST)
+        const { error: insertError } = await supabase.from("stock_inventory").insert({
+          site_id: delivery.site_id,
+          location_id: delivery.location_id,
+          material_id: item.material_id,
+          brand_id: item.brand_id,
+          current_qty: qty,
+          avg_unit_cost: unitPriceWithGst,
+          last_received_date: delivery.delivery_date,
+        });
+
+        if (insertError) {
+          console.error("[Stock Creation] Error inserting stock:", insertError);
+          throw new Error(`Failed to create stock inventory: ${insertError.message}`);
+        }
+        stockCreatedCount++;
+        console.log("[Stock Creation] Created new stock for material:", item.material_id, "qty:", qty);
+      }
     }
   }
 

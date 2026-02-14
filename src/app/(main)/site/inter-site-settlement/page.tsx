@@ -33,6 +33,7 @@ import {
 } from '@/hooks/queries/useInterSiteSettlements'
 import { useDeleteBatchCascade } from '@/hooks/queries/useMaterialPurchases'
 import { useBatchesWithUsage, useCompleteBatch } from '@/hooks/queries/useBatchUsage'
+import NetSettlementDialog from '@/components/materials/NetSettlementDialog'
 import ConvertToOwnSiteDialog from '@/components/materials/ConvertToOwnSiteDialog'
 import GroupStockTransactionDrawer from '@/components/materials/GroupStockTransactionDrawer'
 import EditGroupStockTransactionDialog from '@/components/materials/EditGroupStockTransactionDialog'
@@ -103,6 +104,10 @@ export default function InterSiteSettlementPage() {
   // Delete unsettled balance states
   const [deleteUnsettledBalance, setDeleteUnsettledBalance] = useState<InterSiteBalance | null>(null)
   const [deleteUnsettledConfirmOpen, setDeleteUnsettledConfirmOpen] = useState(false)
+
+  // Net settlement dialog states
+  const [netSettleDialogOpen, setNetSettleDialogOpen] = useState(false)
+  const [netSettlePair, setNetSettlePair] = useState<{ balanceA: InterSiteBalance; balanceB: InterSiteBalance } | null>(null)
 
   // Data hooks
   const { data: groupMembership, isLoading: membershipLoading } = useSiteGroupMembership(
@@ -305,6 +310,11 @@ export default function InterSiteSettlementPage() {
     }
   }
 
+  const handleNetSettle = (balanceA: InterSiteBalance, balanceB: InterSiteBalance) => {
+    setNetSettlePair({ balanceA, balanceB })
+    setNetSettleDialogOpen(true)
+  }
+
   // Not in a group - show message
   if (!membershipLoading && !groupMembership?.isInGroup) {
     return (
@@ -353,6 +363,7 @@ export default function InterSiteSettlementPage() {
         isLoading={balancesLoading || settlementsLoading}
         onGenerateSettlement={handleGenerateSettlement}
         onSettlePayment={handleSettlePayment}
+        onNetSettle={handleNetSettle}
         generatePending={generateSettlement.isPending}
       />
 
@@ -584,6 +595,23 @@ export default function InterSiteSettlementPage() {
         batch={selectedBatch}
         onComplete={handleConfirmBatchCompletion}
       />
+
+      {netSettlePair && groupMembership?.groupId && (
+        <NetSettlementDialog
+          open={netSettleDialogOpen}
+          onClose={() => {
+            setNetSettleDialogOpen(false)
+            setNetSettlePair(null)
+          }}
+          balanceA={netSettlePair.balanceA}
+          balanceB={netSettlePair.balanceB}
+          groupId={groupMembership.groupId}
+          onSuccess={() => {
+            setNetSettleDialogOpen(false)
+            setNetSettlePair(null)
+          }}
+        />
+      )}
     </Box>
   )
 }

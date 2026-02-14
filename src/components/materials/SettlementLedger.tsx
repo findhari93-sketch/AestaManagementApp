@@ -1,5 +1,6 @@
 'use client'
 
+import { useMemo } from 'react'
 import {
   Box,
   Button,
@@ -12,9 +13,19 @@ import {
   ArrowForward as ArrowForwardIcon,
   CheckCircle as CheckCircleIcon,
   AccountBalance as SettlementIcon,
+  CompareArrows as CompareArrowsIcon,
 } from '@mui/icons-material'
 import { formatCurrency } from '@/lib/formatters'
 import type { InterSiteBalance, InterSiteSettlementWithDetails } from '@/types/material.types'
+
+interface ReciprocalPair {
+  balanceA: InterSiteBalance
+  balanceB: InterSiteBalance
+  offsetAmount: number
+  netRemaining: number
+  netPayerName: string
+  netReceiverName: string
+}
 
 interface SettlementLedgerProps {
   balances: InterSiteBalance[]
@@ -23,6 +34,7 @@ interface SettlementLedgerProps {
   isLoading: boolean
   onGenerateSettlement: (balance: InterSiteBalance) => void
   onSettlePayment: (settlement: InterSiteSettlementWithDetails) => void
+  onNetSettle?: (balanceA: InterSiteBalance, balanceB: InterSiteBalance) => void
   generatePending?: boolean
 }
 
@@ -33,9 +45,48 @@ export default function SettlementLedger({
   isLoading,
   onGenerateSettlement,
   onSettlePayment,
+  onNetSettle,
   generatePending,
 }: SettlementLedgerProps) {
   const hasItems = balances.length > 0 || pendingSettlements.length > 0
+
+  // Detect reciprocal balance pairs (A owes B and B owes A)
+  const { reciprocalPairs, nonReciprocalBalances } = useMemo(() => {
+    const pairs: ReciprocalPair[] = []
+    const matched = new Set<number>()
+
+    for (let i = 0; i < balances.length; i++) {
+      if (matched.has(i)) continue
+      for (let j = i + 1; j < balances.length; j++) {
+        if (matched.has(j)) continue
+        const a = balances[i]
+        const b = balances[j]
+        // Check if A's debtor is B's creditor and vice versa
+        if (
+          a.debtor_site_id === b.creditor_site_id &&
+          a.creditor_site_id === b.debtor_site_id
+        ) {
+          const offsetAmount = Math.min(a.total_amount_owed, b.total_amount_owed)
+          const netRemaining = Math.round(Math.abs(a.total_amount_owed - b.total_amount_owed) * 100) / 100
+          const largerIsA = a.total_amount_owed > b.total_amount_owed
+          pairs.push({
+            balanceA: a,
+            balanceB: b,
+            offsetAmount,
+            netRemaining,
+            netPayerName: largerIsA ? a.debtor_site_name : b.debtor_site_name,
+            netReceiverName: largerIsA ? a.creditor_site_name : b.creditor_site_name,
+          })
+          matched.add(i)
+          matched.add(j)
+          break
+        }
+      }
+    }
+
+    const remaining = balances.filter((_, idx) => !matched.has(idx))
+    return { reciprocalPairs: pairs, nonReciprocalBalances: remaining }
+  }, [balances])
 
   return (
     <Paper variant="outlined" sx={{ p: 2, mb: 3 }}>
@@ -61,8 +112,93 @@ export default function SettlementLedger({
         </Box>
       ) : (
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-          {/* Unsettled balances */}
-          {balances.map((balance, index) => {
+          {/* Reciprocal Pairs - Net Settlement */}
+          {reciprocalPairs.length > 0 && (
+            <Box sx={{ mb: 1 }}>
+              {reciprocalPairs.map((pair, pairIdx) => (
+                <Box
+                  key={`pair-${pairIdx}`}
+                  sx={{
+                    p: 1.5,
+                    borderRadius: 1,
+                    bgcolor: 'primary.50',
+                    border: '1px solid',
+                    borderColor: 'primary.200',
+                    mb: 1,
+                  }}
+                >
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
+                    <CompareArrowsIcon fontSize="small" color="primary" />
+                    <Typography variant="caption" fontWeight={600} color="primary.main">
+                      Reciprocal Debts — Can be Net Settled
+                    </Typography>
+                  </Box>
+
+                  {/* Balance A row */}
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 0.5, flexWrap: 'wrap' }}>
+                    <Chip label={pair.balanceA.debtor_site_name} size="small" color="error" variant="outlined" />
+                    <Typography variant="caption" color="text.secondary">owes</Typography>
+                    <ArrowForwardIcon sx={{ fontSize: 16 }} color="action" />
+                    <Chip label={pair.balanceA.creditor_site_name} size="small" color="success" variant="outlined" />
+                    <Typography variant="body2" fontWeight={700} sx={{ ml: 'auto' }}>
+                      {formatCurrency(pair.balanceA.total_amount_owed)}
+                    </Typography>
+                  </Box>
+
+                  {/* Balance B row */}
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 0.5, flexWrap: 'wrap' }}>
+                    <Chip label={pair.balanceB.debtor_site_name} size="small" color="error" variant="outlined" />
+                    <Typography variant="caption" color="text.secondary">owes</Typography>
+                    <ArrowForwardIcon sx={{ fontSize: 16 }} color="action" />
+                    <Chip label={pair.balanceB.creditor_site_name} size="small" color="success" variant="outlined" />
+                    <Typography variant="body2" fontWeight={700} sx={{ ml: 'auto' }}>
+                      {formatCurrency(pair.balanceB.total_amount_owed)}
+                    </Typography>
+                  </Box>
+
+                  {/* Net calculation summary */}
+                  <Box
+                    sx={{
+                      mt: 1,
+                      pt: 1,
+                      borderTop: '1px dashed',
+                      borderColor: 'primary.200',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 1,
+                      flexWrap: 'wrap',
+                    }}
+                  >
+                    <Typography variant="caption" color="text.secondary">
+                      Offset: {formatCurrency(pair.offsetAmount)}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">•</Typography>
+                    <Typography variant="caption" fontWeight={600} color={pair.netRemaining > 0 ? 'warning.main' : 'success.main'}>
+                      {pair.netRemaining > 0
+                        ? `Net: ${pair.netPayerName} pays ${formatCurrency(pair.netRemaining)}`
+                        : 'Fully settles (equal amounts)'}
+                    </Typography>
+                    {onNetSettle && (
+                      <Button
+                        size="small"
+                        variant="contained"
+                        color="primary"
+                        startIcon={<CompareArrowsIcon />}
+                        onClick={() => onNetSettle(pair.balanceA, pair.balanceB)}
+                        disabled={generatePending}
+                        sx={{ ml: 'auto', minWidth: 'auto', px: 1.5 }}
+                      >
+                        Net Settle
+                      </Button>
+                    )}
+                  </Box>
+                </Box>
+              ))}
+            </Box>
+          )}
+
+          {/* Non-reciprocal unsettled balances */}
+          {nonReciprocalBalances.map((balance, index) => {
             const isCreditor = balance.creditor_site_id === currentSiteId
             const isDebtor = balance.debtor_site_id === currentSiteId
 

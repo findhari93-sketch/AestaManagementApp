@@ -86,10 +86,10 @@ export default function StockBatchesTab({
         const remainingQty = batch.remaining_quantity ?? 0
         const usagePercent = originalQty > 0 ? ((originalQty - remainingQty) / originalQty) * 100 : 0
 
-        // Compute status from actual usage data
+        // Compute status from actual quantities (not DB status) to handle stale data
         const computedStatus =
-          batch.status === 'completed' ? 'completed' :
           batch.status === 'converted' ? 'completed' :
+          (remainingQty <= 0 && originalQty > 0) ? 'completed' :
           usagePercent > 0 ? 'partial_used' : 'in_stock'
 
         return computedStatus === statusFilter

@@ -264,6 +264,16 @@ export function useRecordBatchUsage() {
       queryClient.invalidateQueries({
         queryKey: ["material-purchases", "batches"],
       });
+      // Auto-complete may create self-use expense, so invalidate expenses
+      queryClient.invalidateQueries({
+        queryKey: ["material-purchases"],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["all-expenses"],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["expenses"],
+      });
     },
   });
 }
@@ -374,7 +384,18 @@ export function useDeleteBatchUsage() {
         throw new Error("Cannot delete settled usage record");
       }
 
-      // Delete the record
+      // Check batch status BEFORE deleting (needed for self-use cleanup)
+      const { data: batchBefore } = await (supabase as any)
+        .from("material_purchase_expenses")
+        .select("status, remaining_qty, paying_site_id, site_id")
+        .eq("ref_code", data.batchRefCode)
+        .single();
+
+      const wasCompleted = batchBefore?.status === "completed";
+
+      // Delete the record — the DB trigger (update_batch_quantities_on_usage_change)
+      // will automatically recalculate used_qty, remaining_qty, self_used_qty,
+      // self_used_amount, and status from remaining batch_usage_records
       const { error: deleteError } = await (supabase as any)
         .from("batch_usage_records")
         .delete()
@@ -382,23 +403,47 @@ export function useDeleteBatchUsage() {
 
       if (deleteError) throw new Error(deleteError.message);
 
-      // Update the batch quantities
-      const { error: updateError } = await (supabase as any).rpc("sql", {
-        query: `
-          UPDATE material_purchase_expenses
-          SET
-            used_qty = COALESCE(used_qty, 0) - $1,
-            remaining_qty = COALESCE(remaining_qty, 0) + $1,
-            self_used_qty = CASE WHEN $2 THEN COALESCE(self_used_qty, 0) - $1 ELSE self_used_qty END,
-            self_used_amount = CASE WHEN $2 THEN COALESCE(self_used_amount, 0) - ($1 * $3) ELSE self_used_amount END,
-            updated_at = now()
-          WHERE ref_code = $4
-        `,
-        params: [record.quantity, record.is_self_use, record.unit_cost, data.batchRefCode],
-      });
+      // If batch was completed and now the trigger has re-opened it,
+      // clean up auto-created self-use expenses
+      if (wasCompleted) {
+        // Re-fetch batch to see new status after trigger
+        const { data: batchAfter } = await (supabase as any)
+          .from("material_purchase_expenses")
+          .select("status")
+          .eq("ref_code", data.batchRefCode)
+          .single();
 
-      // Note: If the above doesn't work due to RPC restrictions, we might need to handle this differently
-      // For now, we'll rely on the UI to refresh the data
+        if (batchAfter && batchAfter.status !== "completed") {
+          const payingSiteId = batchBefore.paying_site_id || batchBefore.site_id;
+
+          // Delete auto-created self-use expense
+          const { data: selfUseExpenses } = await (supabase as any)
+            .from("material_purchase_expenses")
+            .select("id")
+            .eq("original_batch_code", data.batchRefCode)
+            .eq("settlement_reference", "SELF-USE")
+            .eq("site_id", payingSiteId);
+
+          if (selfUseExpenses && selfUseExpenses.length > 0) {
+            for (const exp of selfUseExpenses) {
+              // Items cascade-delete due to FK constraint
+              await (supabase as any)
+                .from("material_purchase_expenses")
+                .delete()
+                .eq("id", exp.id);
+            }
+          }
+
+          // Delete auto-created self-use batch_usage_records
+          // (trigger will fire again and recalculate)
+          await (supabase as any)
+            .from("batch_usage_records")
+            .delete()
+            .eq("batch_ref_code", data.batchRefCode)
+            .eq("is_self_use", true)
+            .eq("work_description", "Self-use (batch completion)");
+        }
+      }
 
       return { success: true };
     },
@@ -417,6 +462,20 @@ export function useDeleteBatchUsage() {
       });
       queryClient.invalidateQueries({
         queryKey: ["material-purchases", "batches"],
+      });
+      // Undo of auto-complete may delete self-use expense, so invalidate expenses
+      queryClient.invalidateQueries({
+        queryKey: ["material-purchases"],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["all-expenses"],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["expenses"],
+      });
+      // Also invalidate settlements since batch status affects settlement display
+      queryClient.invalidateQueries({
+        queryKey: ["inter-site-settlements"],
       });
     },
   });

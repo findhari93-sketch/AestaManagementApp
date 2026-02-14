@@ -799,12 +799,11 @@ export function useDeletePurchaseOrder() {
 
       if (itemsError) throw itemsError;
 
-      // Delete PO (only draft, cancelled, or delivered status allowed)
+      // Delete PO
       const { error } = await supabase
         .from("purchase_orders")
         .delete()
-        .eq("id", id)
-        .in("status", ["draft", "cancelled", "delivered"]);
+        .eq("id", id);
 
       if (error) throw error;
       return { id, siteId };

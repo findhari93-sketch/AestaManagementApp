@@ -37,8 +37,8 @@ When the user says **"move to prod"** or similar (e.g., "push to production", "d
 After making any frontend/UI changes, I must verify and fix issues automatically:
 
 ### Visual Verification
-1. **Open the app** using Playwright MCP to navigate to localhost:3000 or localhost:3001 (whichever is running)
-2. **Login** using the test credentials above if not already logged in
+1. **Auto-login** using Playwright MCP: navigate to `http://localhost:3000/dev-login` (or 3001). This page auto-authenticates with test credentials and redirects to the dashboard — no manual form filling needed.
+2. **Navigate to the target page** to verify the changes
 3. **Take a screenshot** to verify the changes rendered correctly
 4. **Check for visual issues** - look for broken layouts, missing elements, or styling problems
 

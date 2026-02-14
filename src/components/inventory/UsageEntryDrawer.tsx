@@ -17,6 +17,7 @@ import {
   Chip,
   Alert,
   Autocomplete,
+  Paper,
 } from "@mui/material";
 import {
   Close as CloseIcon,
@@ -25,12 +26,19 @@ import {
 } from "@mui/icons-material";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useMaterialCategories } from "@/hooks/queries/useMaterials";
-import { useCreateMaterialUsage } from "@/hooks/queries/useMaterialUsage";
+import {
+  useCreateMaterialUsage,
+  useCreateMaterialUsageFIFO,
+} from "@/hooks/queries/useMaterialUsage";
 import type { ExtendedStockInventory } from "@/hooks/queries/useStockInventory";
+import {
+  allocateFIFO,
+  type BatchAllocation,
+  type ConsolidatedStockItem,
+} from "@/lib/utils/fifoAllocator";
 import type {
   MaterialUnit,
   UsageEntryFormData,
-  MaterialCategory,
 } from "@/types/material.types";
 import dayjs from "dayjs";
 
@@ -59,6 +67,7 @@ interface UsageEntryDrawerProps {
   siteId: string;
   stock: ExtendedStockInventory[];
   preSelectedStock?: ExtendedStockInventory | null;
+  preSelectedConsolidated?: ConsolidatedStockItem | null;
 }
 
 export default function UsageEntryDrawer({
@@ -67,10 +76,12 @@ export default function UsageEntryDrawer({
   siteId,
   stock,
   preSelectedStock,
+  preSelectedConsolidated,
 }: UsageEntryDrawerProps) {
   const isMobile = useIsMobile();
   const { data: categories = [] } = useMaterialCategories();
   const createUsage = useCreateMaterialUsage();
+  const createUsageFIFO = useCreateMaterialUsageFIFO();
   const quantityInputRef = useRef<HTMLInputElement>(null);
 
   const [categoryFilter, setCategoryFilter] = useState("");
@@ -84,21 +95,39 @@ export default function UsageEntryDrawer({
     work_description: "",
   });
 
-  // Handle pre-selected stock
+  // Determine mode
+  const isConsolidatedMode = !!preSelectedConsolidated;
+  const isBatchMode = !!preSelectedStock;
+  const isPreSelected = isBatchMode || isConsolidatedMode;
+
+  // Handle pre-selected stock (batch mode)
   useEffect(() => {
-    if (open && preSelectedStock) {
+    if (open && preSelectedStock && !preSelectedConsolidated) {
       setSelectedStockId(preSelectedStock.id);
       setForm((prev) => ({
         ...prev,
         site_id: siteId,
         material_id: preSelectedStock.material?.id || "",
       }));
-      // Focus quantity input after drawer opens
       setTimeout(() => {
         quantityInputRef.current?.focus();
       }, 300);
     }
-  }, [open, preSelectedStock, siteId]);
+  }, [open, preSelectedStock, preSelectedConsolidated, siteId]);
+
+  // Handle pre-selected consolidated material
+  useEffect(() => {
+    if (open && preSelectedConsolidated) {
+      setForm((prev) => ({
+        ...prev,
+        site_id: siteId,
+        material_id: preSelectedConsolidated.material_id,
+      }));
+      setTimeout(() => {
+        quantityInputRef.current?.focus();
+      }, 300);
+    }
+  }, [open, preSelectedConsolidated, siteId]);
 
   // Reset form when drawer closes
   useEffect(() => {
@@ -116,16 +145,13 @@ export default function UsageEntryDrawer({
     }
   }, [open, siteId]);
 
-  // Filter stock by category
+  // Filter stock by category (for non-preselected mode)
   const filteredStock = useMemo(() => {
     if (!categoryFilter) return stock;
-
     const childCategoryIds = categories
       .filter((c) => c.parent_id === categoryFilter)
       .map((c) => c.id);
-
     const validCategoryIds = [categoryFilter, ...childCategoryIds];
-
     return stock.filter(
       (s) =>
         validCategoryIds.includes(s.material?.category_id || "") ||
@@ -133,33 +159,54 @@ export default function UsageEntryDrawer({
     );
   }, [stock, categoryFilter, categories]);
 
-  // Find selected stock
+  // Consolidated mode: compute FIFO allocation preview
+  const fifoAllocations = useMemo<BatchAllocation[]>(() => {
+    if (!isConsolidatedMode || !preSelectedConsolidated || form.quantity <= 0) {
+      return [];
+    }
+    try {
+      return allocateFIFO(preSelectedConsolidated.batches, form.quantity);
+    } catch {
+      return [];
+    }
+  }, [isConsolidatedMode, preSelectedConsolidated, form.quantity]);
+
+  const fifoTotalCost = fifoAllocations.reduce((sum, a) => sum + a.total_cost, 0);
+
+  // Batch mode: find selected stock
   const selectedStock = stock.find((s) => s.id === selectedStockId);
-  const selectedMaterial = selectedStock?.material;
-  const unit = selectedMaterial?.unit || "piece";
+  const selectedMaterial = isConsolidatedMode
+    ? { unit: preSelectedConsolidated?.unit as MaterialUnit || "piece" as MaterialUnit }
+    : selectedStock?.material;
+  const unit = (isConsolidatedMode
+    ? preSelectedConsolidated?.unit
+    : selectedMaterial?.unit) as MaterialUnit || "piece";
 
-  // Calculate effective cost per piece (handles per-kg pricing and shared stock)
+  // Batch mode: Calculate effective cost per piece
   const getEffectiveCostPerPiece = () => {
-    // Both avg_unit_cost (from DB) and batch_unit_cost (computed with GST) are already GST-inclusive.
-    // Use batch_unit_cost for shared stock to ensure consistent pricing across sites.
-    const baseCost = (selectedStock?.is_shared && selectedStock?.batch_unit_cost)
-      ? selectedStock.batch_unit_cost
-      : selectedStock?.avg_unit_cost;
-
+    const baseCost =
+      selectedStock?.is_shared && selectedStock?.batch_unit_cost
+        ? selectedStock.batch_unit_cost
+        : selectedStock?.avg_unit_cost;
     if (!baseCost) return 0;
-
-    // For per-kg pricing, convert per-kg rate to per-piece cost
-    if (selectedStock?.pricing_mode === "per_kg" && selectedStock?.total_weight && selectedStock?.current_qty > 0) {
+    if (
+      selectedStock?.pricing_mode === "per_kg" &&
+      selectedStock?.total_weight &&
+      selectedStock?.current_qty > 0
+    ) {
       const weightPerPiece = selectedStock.total_weight / selectedStock.current_qty;
       return weightPerPiece * baseCost;
     }
-
     return baseCost;
   };
 
   const effectiveCostPerPiece = getEffectiveCostPerPiece();
-  const estimatedCost = effectiveCostPerPiece * form.quantity;
+  const estimatedCost = isConsolidatedMode ? fifoTotalCost : effectiveCostPerPiece * form.quantity;
   const isPerKgPricing = selectedStock?.pricing_mode === "per_kg";
+
+  const totalAvailable = isConsolidatedMode
+    ? preSelectedConsolidated?.total_available_qty || 0
+    : selectedStock?.available_qty || 0;
 
   const handleSubmit = async () => {
     setError(null);
@@ -169,23 +216,34 @@ export default function UsageEntryDrawer({
       return;
     }
 
-    if (selectedStock && form.quantity > selectedStock.available_qty) {
+    if (form.quantity > totalAvailable) {
       setError(
-        `Insufficient stock. Available: ${selectedStock.available_qty} ${UNIT_LABELS[unit] || unit}`
+        `Insufficient stock. Available: ${totalAvailable} ${UNIT_LABELS[unit] || unit}`
       );
       return;
     }
 
     try {
-      await createUsage.mutateAsync({
-        ...form,
-        site_id: siteId,
-        brand_id: selectedStock?.brand_id || undefined,
-        inventory_id: selectedStock?.id,
-        unit_cost: effectiveCostPerPiece,
-        total_cost: estimatedCost,
-      });
-
+      if (isConsolidatedMode && fifoAllocations.length > 0) {
+        // FIFO mode: distribute across batches
+        await createUsageFIFO.mutateAsync({
+          siteId,
+          usageDate: form.usage_date,
+          workDescription: form.work_description || undefined,
+          sectionId: form.section_id || undefined,
+          allocations: fifoAllocations,
+        });
+      } else {
+        // Batch mode: single stock item
+        await createUsage.mutateAsync({
+          ...form,
+          site_id: siteId,
+          brand_id: selectedStock?.brand_id || undefined,
+          inventory_id: selectedStock?.id,
+          unit_cost: effectiveCostPerPiece,
+          total_cost: estimatedCost,
+        });
+      }
       onClose();
     } catch (err: unknown) {
       console.error("Failed to record usage:", err);
@@ -197,7 +255,8 @@ export default function UsageEntryDrawer({
         if (error.code === "23503") {
           message = "Database constraint error. Please contact support.";
         } else if (error.code === "409" || error.status === 409) {
-          message = "A conflict occurred. The stock may have been modified. Please refresh and try again.";
+          message =
+            "A conflict occurred. The stock may have been modified. Please refresh and try again.";
         } else if (error.message) {
           message = String(error.message);
         }
@@ -206,7 +265,7 @@ export default function UsageEntryDrawer({
     }
   };
 
-  const isPreSelected = !!preSelectedStock;
+  const isPending = createUsage.isPending || createUsageFIFO.isPending;
 
   return (
     <Drawer
@@ -239,28 +298,38 @@ export default function UsageEntryDrawer({
       <Box sx={{ p: 2, display: "flex", flexDirection: "column", gap: 2 }}>
         {/* Error Alert */}
         {error && (
-          <Alert
-            severity="error"
-            onClose={() => setError(null)}
-            sx={{ mb: 1 }}
-          >
+          <Alert severity="error" onClose={() => setError(null)} sx={{ mb: 1 }}>
             {error}
           </Alert>
         )}
 
-        {/* Pre-selected Material Info */}
-        {isPreSelected && selectedStock && (
-          <Alert
-            severity="info"
-            icon={<InventoryIcon />}
-            sx={{ mb: 1 }}
-          >
+        {/* Consolidated Material Info (material-level mode) */}
+        {isConsolidatedMode && preSelectedConsolidated && (
+          <Alert severity="info" icon={<InventoryIcon />} sx={{ mb: 1 }}>
+            <Typography variant="body2" fontWeight={500}>
+              {preSelectedConsolidated.material_name}
+              {preSelectedConsolidated.brand_names.length > 0 &&
+                ` - ${preSelectedConsolidated.brand_names.join(", ")}`}
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              Total Available: {preSelectedConsolidated.total_available_qty}{" "}
+              {UNIT_LABELS[unit] || unit} (across{" "}
+              {preSelectedConsolidated.batch_count} batch
+              {preSelectedConsolidated.batch_count > 1 ? "es" : ""})
+            </Typography>
+          </Alert>
+        )}
+
+        {/* Pre-selected Batch Info (batch mode) */}
+        {isBatchMode && selectedStock && (
+          <Alert severity="info" icon={<InventoryIcon />} sx={{ mb: 1 }}>
             <Typography variant="body2" fontWeight={500}>
               {selectedStock.material?.name}
               {selectedStock.brand && ` - ${selectedStock.brand.brand_name}`}
             </Typography>
             <Typography variant="caption" color="text.secondary">
-              Available: {selectedStock.available_qty} {UNIT_LABELS[unit] || unit}
+              Available: {selectedStock.available_qty}{" "}
+              {UNIT_LABELS[unit] || unit}
             </Typography>
           </Alert>
         )}
@@ -296,7 +365,7 @@ export default function UsageEntryDrawer({
           </FormControl>
         )}
 
-        {/* Material Selection - Disabled when pre-selected */}
+        {/* Material Selection - Hidden when pre-selected */}
         {!isPreSelected && (
           <Autocomplete
             options={filteredStock}
@@ -309,7 +378,7 @@ export default function UsageEntryDrawer({
               setForm({ ...form, material_id: value?.material?.id || "" });
             }}
             slotProps={{
-              popper: { disablePortal: false }, // Required inside Drawer to prevent aria-hidden conflict
+              popper: { disablePortal: false },
             }}
             renderInput={(params) => (
               <TextField
@@ -322,7 +391,9 @@ export default function UsageEntryDrawer({
             renderOption={(props, option) => (
               <Box component="li" {...props} key={option.id}>
                 <Box sx={{ flex: 1 }}>
-                  <Typography variant="body2">{option.material?.name}</Typography>
+                  <Typography variant="body2">
+                    {option.material?.name}
+                  </Typography>
                   <Typography variant="caption" color="text.secondary">
                     Available: {option.available_qty}{" "}
                     {UNIT_LABELS[option.material?.unit || "piece"]}
@@ -335,7 +406,7 @@ export default function UsageEntryDrawer({
         )}
 
         {/* Quantity with available stock info */}
-        {selectedMaterial && (
+        {(selectedMaterial || isConsolidatedMode) && (
           <>
             <Grid container spacing={2}>
               <Grid size={6}>
@@ -346,13 +417,16 @@ export default function UsageEntryDrawer({
                   type="number"
                   value={form.quantity || ""}
                   onChange={(e) =>
-                    setForm({ ...form, quantity: parseFloat(e.target.value) || 0 })
+                    setForm({
+                      ...form,
+                      quantity: parseFloat(e.target.value) || 0,
+                    })
                   }
                   slotProps={{
                     input: {
                       inputProps: {
                         min: 0,
-                        max: selectedStock?.available_qty || 9999,
+                        max: totalAvailable || 9999,
                         step: 0.001,
                       },
                     },
@@ -376,40 +450,142 @@ export default function UsageEntryDrawer({
                     variant="h6"
                     fontWeight={600}
                     color={
-                      form.quantity > (selectedStock?.available_qty || 0)
+                      form.quantity > totalAvailable
                         ? "error.main"
                         : "text.primary"
                     }
                   >
-                    {selectedStock?.available_qty || 0} {UNIT_LABELS[unit] || unit}
+                    {totalAvailable} {UNIT_LABELS[unit] || unit}
                   </Typography>
                 </Box>
               </Grid>
             </Grid>
 
-            {/* Estimated Cost */}
-            {selectedStock?.avg_unit_cost && form.quantity > 0 && (
-              <Alert severity="info" sx={{ py: 0.5 }}>
-                <Box>
-                  <Typography variant="body2" fontWeight={500}>
-                    Estimated cost: ₹{estimatedCost.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            {/* FIFO Allocation Preview (consolidated mode) */}
+            {isConsolidatedMode &&
+              fifoAllocations.length > 0 &&
+              form.quantity > 0 && (
+                <Paper variant="outlined" sx={{ p: 1.5 }}>
+                  <Typography
+                    variant="subtitle2"
+                    sx={{ mb: 1, color: "text.secondary" }}
+                  >
+                    Batch Allocation (FIFO - oldest first)
                   </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    {isPerKgPricing ? (
-                      <>
-                        @ ₹{selectedStock.avg_unit_cost.toLocaleString()}/kg × {((selectedStock.total_weight || 0) / selectedStock.current_qty).toFixed(2)} kg/pc
-                      </>
-                    ) : (
-                      <>
-                        @ ₹{selectedStock.avg_unit_cost.toLocaleString()}/{UNIT_LABELS[unit] || unit}
-                      </>
-                    )}
-                    {" (avg. rate)"}
-                    {selectedStock.brand && ` | ${selectedStock.brand.brand_name}`}
-                  </Typography>
-                </Box>
-              </Alert>
-            )}
+                  {fifoAllocations.map((alloc, idx) => (
+                    <Box
+                      key={alloc.inventory_id}
+                      sx={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        py: 0.5,
+                        borderBottom:
+                          idx < fifoAllocations.length - 1
+                            ? "1px solid"
+                            : "none",
+                        borderColor: "divider",
+                      }}
+                    >
+                      <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                        <Typography variant="body2" component="span">
+                          {alloc.quantity} {UNIT_LABELS[unit] || unit}
+                        </Typography>
+                        {alloc.batch_code ? (
+                          <Chip
+                            label={alloc.batch_code}
+                            size="small"
+                            variant="outlined"
+                            sx={{
+                              height: 18,
+                              fontSize: "0.65rem",
+                              fontFamily: "monospace",
+                            }}
+                          />
+                        ) : (
+                          <Chip
+                            label="Own Stock"
+                            size="small"
+                            variant="outlined"
+                            sx={{
+                              height: 18,
+                              fontSize: "0.65rem",
+                            }}
+                          />
+                        )}
+                      </Box>
+                      <Typography
+                        variant="body2"
+                        color="text.secondary"
+                        fontWeight={500}
+                      >
+                        ₹
+                        {alloc.total_cost.toLocaleString("en-IN", {
+                          minimumFractionDigits: 2,
+                        })}
+                      </Typography>
+                    </Box>
+                  ))}
+                  <Box
+                    sx={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      mt: 1,
+                      pt: 1,
+                      borderTop: "2px solid",
+                      borderColor: "divider",
+                    }}
+                  >
+                    <Typography variant="body2" fontWeight={600}>
+                      Total
+                    </Typography>
+                    <Typography variant="body2" fontWeight={600}>
+                      ₹
+                      {fifoTotalCost.toLocaleString("en-IN", {
+                        minimumFractionDigits: 2,
+                      })}
+                    </Typography>
+                  </Box>
+                </Paper>
+              )}
+
+            {/* Estimated Cost (batch mode) */}
+            {!isConsolidatedMode &&
+              selectedStock?.avg_unit_cost &&
+              form.quantity > 0 && (
+                <Alert severity="info" sx={{ py: 0.5 }}>
+                  <Box>
+                    <Typography variant="body2" fontWeight={500}>
+                      Estimated cost: ₹
+                      {estimatedCost.toLocaleString("en-IN", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {isPerKgPricing ? (
+                        <>
+                          @ ₹{selectedStock.avg_unit_cost.toLocaleString()}/kg
+                          ×{" "}
+                          {(
+                            (selectedStock.total_weight || 0) /
+                            selectedStock.current_qty
+                          ).toFixed(2)}{" "}
+                          kg/pc
+                        </>
+                      ) : (
+                        <>
+                          @ ₹{selectedStock.avg_unit_cost.toLocaleString()}/
+                          {UNIT_LABELS[unit] || unit}
+                        </>
+                      )}
+                      {" (avg. rate)"}
+                      {selectedStock.brand &&
+                        ` | ${selectedStock.brand.brand_name}`}
+                    </Typography>
+                  </Box>
+                </Alert>
+              )}
           </>
         )}
 
@@ -418,7 +594,9 @@ export default function UsageEntryDrawer({
           fullWidth
           label="Work Description"
           value={form.work_description}
-          onChange={(e) => setForm({ ...form, work_description: e.target.value })}
+          onChange={(e) =>
+            setForm({ ...form, work_description: e.target.value })
+          }
           multiline
           rows={isMobile ? 2 : 3}
           placeholder="What was the material used for?"
@@ -432,11 +610,11 @@ export default function UsageEntryDrawer({
           size="large"
           startIcon={<SaveIcon />}
           onClick={handleSubmit}
-          disabled={createUsage.isPending || !form.material_id || form.quantity <= 0}
+          disabled={isPending || !form.material_id || form.quantity <= 0}
           fullWidth
           sx={{ py: 1.5 }}
         >
-          {createUsage.isPending ? "Saving..." : "Record Usage"}
+          {isPending ? "Saving..." : "Record Usage"}
         </Button>
       </Box>
     </Drawer>

@@ -54,7 +54,7 @@ const mainFlowSteps: WorkflowStepConfig[] = [
     shortLabel: "Req",
     path: "/site/material-requests",
     icon: <RequestIcon sx={{ fontSize: 16 }} />,
-    getBadge: (s) => s.requests.pending + s.requests.approved,
+    getBadge: (s) => s.requests.pending,
   },
   {
     key: "purchaseOrders",
