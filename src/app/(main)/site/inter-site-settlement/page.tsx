@@ -8,6 +8,7 @@ import {
   Alert,
   Tabs,
   Tab,
+  Snackbar,
 } from '@mui/material'
 import {
   Inventory as BatchesIcon,
@@ -113,6 +114,9 @@ export default function InterSiteSettlementPage() {
   // Net settlement dialog states
   const [netSettleDialogOpen, setNetSettleDialogOpen] = useState(false)
   const [netSettlePair, setNetSettlePair] = useState<{ balanceA: InterSiteBalance; balanceB: InterSiteBalance } | null>(null)
+
+  // Snackbar for error messages
+  const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: 'error' | 'warning' | 'success' | 'info' }>({ open: false, message: '', severity: 'error' })
 
   // Data hooks
   const { data: groupMembership, isLoading: membershipLoading } = useSiteGroupMembership(
@@ -239,7 +243,21 @@ export default function InterSiteSettlementPage() {
         year: balance.year,
         weekNumber: balance.week_number,
       })
-    } catch (error) {
+    } catch (error: any) {
+      const errorMessage = error?.message || 'Failed to generate settlement'
+      if (errorMessage.startsWith('VENDOR_UNPAID:')) {
+        setSnackbar({
+          open: true,
+          message: errorMessage.replace('VENDOR_UNPAID:', ''),
+          severity: 'warning',
+        })
+      } else {
+        setSnackbar({
+          open: true,
+          message: errorMessage,
+          severity: 'error',
+        })
+      }
       console.error('Failed to generate settlement:', error)
     }
   }
@@ -641,6 +659,23 @@ export default function InterSiteSettlementPage() {
           }
         />
       )}
+
+      {/* Error/Warning Snackbar */}
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={8000}
+        onClose={() => setSnackbar(prev => ({ ...prev, open: false }))}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert
+          onClose={() => setSnackbar(prev => ({ ...prev, open: false }))}
+          severity={snackbar.severity}
+          variant="filled"
+          sx={{ width: '100%' }}
+        >
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </Box>
   )
 }

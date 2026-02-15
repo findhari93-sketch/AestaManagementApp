@@ -1085,11 +1085,13 @@ export function useSiteMaterialExpenses(siteId: string | undefined) {
           .order("purchase_date", { ascending: false });
 
         // Apply OR filter for purchase types - must be within the site filter
-        // Exclude allocated expenses (original_batch_code IS NOT NULL) - they belong to Material Expenses page
-        // Material Settlements page should only show vendor settlements (own_site and group_stock)
+        // Include:
+        // - own_site purchases with no batch code (direct purchases)
+        // - group_stock purchases (parent batches for vendor payment tracking)
+        // - own_site purchases WITH original_batch_code (allocated from inter-site settlements)
+        //   These represent debtor-side expenses when inter-site settlement is paid
         const { data: expensesData, error: expensesError } = await expensesQuery
-          .or("purchase_type.eq.own_site,purchase_type.eq.group_stock")
-          .is("original_batch_code", null);
+          .or("purchase_type.eq.group_stock,and(purchase_type.eq.own_site)");
 
         if (expensesError && !isQueryError(expensesError)) {
           throw expensesError;

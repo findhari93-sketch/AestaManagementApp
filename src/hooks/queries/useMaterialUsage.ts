@@ -7,6 +7,7 @@ import type {
   DailyMaterialUsage,
   DailyMaterialUsageWithDetails,
   UsageEntryFormData,
+  GroupedUsageRecord,
 } from "@/types/material.types";
 import type { BatchAllocation } from "@/lib/utils/fifoAllocator";
 import dayjs from "dayjs";
@@ -176,6 +177,7 @@ export function useMaterialUsage(
           created_at: item.created_at || new Date().toISOString(),
           updated_at: item.updated_at || new Date().toISOString(),
           created_by: item.created_by,
+          usage_group_id: item.usage_group_id || null,
           // Include related data
           material: item.material,
           brand: item.brand,
@@ -199,6 +201,100 @@ export function useMaterialUsage(
     },
     enabled: !!siteId,
   });
+}
+
+/**
+ * Groups flat usage records by usage_group_id.
+ * Records without a usage_group_id are treated as standalone (ungrouped) entries.
+ * Records with the same usage_group_id are combined into a single GroupedUsageRecord
+ * with aggregated totals.
+ */
+export function groupUsageRecords(
+  records: DailyMaterialUsageWithDetails[]
+): GroupedUsageRecord[] {
+  const groupMap = new Map<string, DailyMaterialUsageWithDetails[]>();
+  const ungrouped: DailyMaterialUsageWithDetails[] = [];
+
+  for (const record of records) {
+    const groupId = record.usage_group_id;
+    if (groupId) {
+      const existing = groupMap.get(groupId);
+      if (existing) {
+        existing.push(record);
+      } else {
+        groupMap.set(groupId, [record]);
+      }
+    } else {
+      ungrouped.push(record);
+    }
+  }
+
+  const result: GroupedUsageRecord[] = [];
+
+  // Process grouped records
+  for (const [groupId, children] of groupMap) {
+    const rep = children[0];
+    result.push({
+      group_id: groupId,
+      is_grouped: children.length > 1,
+      child_count: children.length,
+      representative: rep,
+      children,
+      total_quantity: children.reduce((sum, c) => sum + c.quantity, 0),
+      total_cost: children.reduce((sum, c) => sum + (c.total_cost || 0), 0),
+      usage_date: rep.usage_date,
+      material_id: rep.material_id,
+      material: rep.material,
+      brand: rep.brand,
+      brand_id: rep.brand_id,
+      work_description: rep.work_description,
+      section: rep.section,
+      section_id: rep.section_id,
+      is_shared_usage: rep.is_shared_usage || false,
+      paid_by_site_name: rep.paid_by_site_name || null,
+      site_id: rep.site_id,
+      created_by: rep.created_by,
+      created_at: rep.created_at,
+    });
+  }
+
+  // Process ungrouped records (each becomes its own "group" of 1)
+  for (const record of ungrouped) {
+    result.push({
+      group_id: record.id,
+      is_grouped: false,
+      child_count: 1,
+      representative: record,
+      children: [record],
+      total_quantity: record.quantity,
+      total_cost: record.total_cost || 0,
+      usage_date: record.usage_date,
+      material_id: record.material_id,
+      material: record.material,
+      brand: record.brand,
+      brand_id: record.brand_id,
+      work_description: record.work_description,
+      section: record.section,
+      section_id: record.section_id,
+      is_shared_usage: record.is_shared_usage || false,
+      paid_by_site_name: record.paid_by_site_name || null,
+      site_id: record.site_id,
+      created_by: record.created_by,
+      created_at: record.created_at,
+    });
+  }
+
+  // Sort by date (newest first), then by created_at
+  result.sort((a, b) => {
+    const dateCompare =
+      new Date(b.usage_date).getTime() - new Date(a.usage_date).getTime();
+    if (dateCompare !== 0) return dateCompare;
+    return (
+      new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    );
+  });
+
+  return result;
 }
 
 /**
@@ -478,6 +574,7 @@ export function useBulkCreateMaterialUsage() {
         unit_cost?: number;
         total_cost?: number;
         work_description?: string;
+        usage_group_id?: string; // Links FIFO-split records from same user action
       }>
     ) => {
       // Ensure fresh session before mutation
@@ -597,6 +694,7 @@ export function useBulkCreateMaterialUsage() {
                 work_description: entry.work_description || null,
                 is_self_use: isSelfUse,
                 settlement_status: isSelfUse ? "self_use" : "pending",
+                usage_group_id: entry.usage_group_id || null,
               };
               if (authUserId) {
                 insertData.created_by = authUserId;
@@ -671,6 +769,7 @@ export function useBulkCreateMaterialUsage() {
                   total_cost: totalCost,
                   work_description: entry.work_description || null,
                   created_by: userId,
+                  usage_group_id: entry.usage_group_id || null,
                 })
                 .select()
                 .single(),
@@ -1385,6 +1484,9 @@ export function useCreateMaterialUsageFIFO() {
       const errors: { inventoryId: string; message: string }[] = [];
       const batchSyncWarnings: string[] = [];
 
+      // Generate a single group ID for all FIFO allocations from this user action
+      const usageGroupId = crypto.randomUUID();
+
       for (const alloc of data.allocations) {
         try {
           // Fetch fresh inventory state for validation
@@ -1466,6 +1568,7 @@ export function useCreateMaterialUsageFIFO() {
               work_description: data.workDescription || null,
               is_self_use: isSelfUse,
               settlement_status: isSelfUse ? "self_use" : "pending",
+              usage_group_id: usageGroupId,
             };
             if (authUserId) {
               insertData.created_by = authUserId;
@@ -1565,6 +1668,7 @@ export function useCreateMaterialUsageFIFO() {
                   work_description: data.workDescription || null,
                   inventory_id: alloc.inventory_id,
                   created_by: userId,
+                  usage_group_id: usageGroupId,
                 })
                 .select()
                 .single(),

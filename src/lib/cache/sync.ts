@@ -9,6 +9,7 @@ import { QueryClient } from "@tanstack/react-query";
 import { queryKeys, cacheTTL } from "./keys";
 import { cleanupPersistedCache } from "./persistor";
 import { getTabCoordinator, TabMessage } from "@/lib/tab/coordinator";
+import { isUserIdle } from "@/lib/auth/sessionManager";
 
 type SyncConfig = {
   enabled: boolean;
@@ -183,6 +184,7 @@ export class BackgroundSyncOrchestrator {
 
   private scheduleReferenceSync(): void {
     const interval = setInterval(() => {
+      if (isUserIdle()) return; // Skip sync during idle
       this.syncReferenceData();
     }, this.config.intervals.reference);
 
@@ -191,6 +193,7 @@ export class BackgroundSyncOrchestrator {
 
   private scheduleTransactionalSync(): void {
     const interval = setInterval(() => {
+      if (isUserIdle()) return; // Skip sync during idle to reduce network contention
       if (this.currentSiteId) {
         this.syncTransactionalData(this.currentSiteId);
       }
@@ -201,6 +204,7 @@ export class BackgroundSyncOrchestrator {
 
   private scheduleDashboardSync(): void {
     const interval = setInterval(() => {
+      if (isUserIdle()) return; // Skip sync during idle
       this.syncDashboardData();
     }, this.config.intervals.dashboard);
 
@@ -209,6 +213,7 @@ export class BackgroundSyncOrchestrator {
 
   private scheduleCompanySync(): void {
     const interval = setInterval(() => {
+      if (isUserIdle()) return; // Skip sync during idle
       this.syncCompanyData();
     }, this.config.intervals.reference); // Same interval as reference data
 

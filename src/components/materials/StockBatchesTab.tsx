@@ -24,11 +24,16 @@ import {
 import {
   ViewModule as CardViewIcon,
   ViewList as ListViewIcon,
+  Segment as GroupedViewIcon,
   Inventory as BatchesIcon,
   AddCircleOutline as RecordUsageIcon,
+  UnfoldMore as ExpandAllIcon,
+  UnfoldLess as CollapseAllIcon,
 } from '@mui/icons-material'
 import GroupStockBatchCard from '@/components/materials/GroupStockBatchCard'
 import PurchaseBatchRow from '@/components/materials/PurchaseBatchRow'
+import MaterialGroupSection from '@/components/materials/MaterialGroupSection'
+import type { MaterialGroup } from '@/components/materials/MaterialGroupSection'
 import type { GroupStockBatch } from '@/types/material.types'
 import type { GroupStockTransaction } from '@/hooks/queries/useInterSiteSettlements'
 
@@ -74,9 +79,10 @@ export default function StockBatchesTab({
   onDeleteTransaction,
   onRecordGroupUsage,
 }: StockBatchesTabProps) {
-  const [viewMode, setViewMode] = useState<'card' | 'list'>('card')
+  const [viewMode, setViewMode] = useState<'grouped' | 'card' | 'list'>('grouped')
   const [statusFilter, setStatusFilter] = useState<'all' | 'in_stock' | 'partial_used' | 'completed'>('all')
   const [siteFilter, setSiteFilter] = useState<string>('all')
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
 
   const sourceBatches = batchesWithUsage.length > 0 ? batchesWithUsage : batches
 
@@ -133,6 +139,66 @@ export default function StockBatchesTab({
     }))
   }, [filteredBatches, transactions, viewMode])
 
+  // Group batches by material for grouped view
+  const materialGroups = useMemo((): MaterialGroup[] => {
+    if (viewMode !== 'grouped') return []
+
+    const groupMap = new Map<string, MaterialGroup>()
+
+    filteredBatches.forEach((batch: any) => {
+      const items = batch.items || []
+      // Use primary material (highest quantity item)
+      const primaryItem = items.length > 0
+        ? items.reduce((best: any, item: any) =>
+            (item.quantity || 0) > (best.quantity || 0) ? item : best,
+            items[0]
+          )
+        : null
+
+      const materialName = primaryItem?.material_name
+        || primaryItem?.material?.name
+        || batch.material?.name
+        || 'Other Materials'
+      const materialId = primaryItem?.material_id || batch.material_id || 'unknown'
+      const unit = primaryItem?.unit || primaryItem?.material?.unit || 'nos'
+
+      if (!groupMap.has(materialName)) {
+        groupMap.set(materialName, {
+          materialName,
+          materialId,
+          unit,
+          batches: [],
+          totalAmount: 0,
+          totalOriginalQty: 0,
+          totalRemainingQty: 0,
+          batchCount: 0,
+          statusBreakdown: { in_stock: 0, partial_used: 0, completed: 0 },
+        })
+      }
+
+      const group = groupMap.get(materialName)!
+      group.batches.push(batch)
+      group.totalAmount += batch.total_amount || 0
+      group.totalOriginalQty += batch.original_quantity || 0
+      group.totalRemainingQty += batch.remaining_quantity || 0
+      group.batchCount += 1
+
+      // Compute status for breakdown
+      const originalQty = batch.original_quantity ?? 0
+      const remainingQty = batch.remaining_quantity ?? 0
+      const usagePercent = originalQty > 0 ? ((originalQty - remainingQty) / originalQty) * 100 : 0
+      const computedStatus =
+        batch.status === 'converted' ? 'completed' :
+        (remainingQty <= 0 && originalQty > 0) ? 'completed' :
+        usagePercent > 0 ? 'partial_used' : 'in_stock'
+      group.statusBreakdown[computedStatus as keyof typeof group.statusBreakdown] += 1
+    })
+
+    return Array.from(groupMap.values()).sort((a, b) =>
+      a.materialName.localeCompare(b.materialName)
+    )
+  }, [filteredBatches, viewMode])
+
   const handleSettleUsage = (batch: any) => (
     siteId: string,
     siteName: string,
@@ -146,6 +212,28 @@ export default function StockBatchesTab({
       siteName,
       amount
     )
+  }
+
+  const handleToggleGroup = (materialName: string) => {
+    setExpandedGroups(prev => {
+      const next = new Set(prev)
+      if (next.has(materialName)) {
+        next.delete(materialName)
+      } else {
+        next.add(materialName)
+      }
+      return next
+    })
+  }
+
+  const allExpanded = materialGroups.length > 0 && expandedGroups.size === materialGroups.length
+
+  const handleExpandCollapseAll = () => {
+    if (allExpanded) {
+      setExpandedGroups(new Set())
+    } else {
+      setExpandedGroups(new Set(materialGroups.map(g => g.materialName)))
+    }
   }
 
   return (
@@ -193,6 +281,14 @@ export default function StockBatchesTab({
             </Button>
           )}
 
+          {viewMode === 'grouped' && materialGroups.length > 1 && (
+            <Tooltip title={allExpanded ? 'Collapse All' : 'Expand All'}>
+              <IconButton size="small" onClick={handleExpandCollapseAll}>
+                {allExpanded ? <CollapseAllIcon fontSize="small" /> : <ExpandAllIcon fontSize="small" />}
+              </IconButton>
+            </Tooltip>
+          )}
+
           <Typography variant="body2" color="text.secondary">
             {filteredBatches.length} of {sourceBatches.length} batches
           </Typography>
@@ -203,6 +299,11 @@ export default function StockBatchesTab({
             onChange={(_, value) => value && setViewMode(value)}
             size="small"
           >
+            <ToggleButton value="grouped">
+              <Tooltip title="Grouped by Material">
+                <GroupedViewIcon fontSize="small" />
+              </Tooltip>
+            </ToggleButton>
             <ToggleButton value="card">
               <Tooltip title="Card View">
                 <CardViewIcon fontSize="small" />
@@ -216,6 +317,37 @@ export default function StockBatchesTab({
           </ToggleButtonGroup>
         </Box>
       </Box>
+
+      {/* Grouped View */}
+      {viewMode === 'grouped' && (
+        <>
+          {isLoading ? (
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+              {[...Array(4)].map((_, i) => (
+                <Skeleton key={i} variant="rectangular" height={56} sx={{ borderRadius: 1 }} />
+              ))}
+            </Box>
+          ) : materialGroups.length > 0 ? (
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+              {materialGroups.map((group) => (
+                <MaterialGroupSection
+                  key={group.materialName}
+                  group={group}
+                  expanded={expandedGroups.has(group.materialName)}
+                  onToggle={() => handleToggleGroup(group.materialName)}
+                  currentSiteId={currentSiteId}
+                  onConvertToOwnSite={onConvertToOwnSite}
+                  onCompleteBatch={onCompleteBatch}
+                  onSettleUsage={handleSettleUsage}
+                  onRecordGroupUsage={onRecordGroupUsage}
+                />
+              ))}
+            </Box>
+          ) : (
+            <EmptyState groupName={groupName} batchCount={sourceBatches.length} />
+          )}
+        </>
+      )}
 
       {/* Card View */}
       {viewMode === 'card' && (

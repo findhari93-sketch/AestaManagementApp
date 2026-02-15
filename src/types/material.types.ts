@@ -275,6 +275,8 @@ export interface InterSiteBalance {
   settlement_id?: string;
   settlement_status?: InterSiteSettlementStatus;
   is_settled: boolean;
+  /** True if any batch in this balance has vendor unpaid (creditor hasn't settled with vendor) */
+  has_unpaid_vendor?: boolean;
 }
 
 // Site settlement summary (aggregated view)
@@ -743,6 +745,7 @@ export interface DailyMaterialUsage {
   created_at: string;
   updated_at: string;
   created_by: string | null;
+  usage_group_id?: string | null;
 }
 
 export interface MaterialRequest {
@@ -1022,6 +1025,37 @@ export interface DailyMaterialUsageWithDetails extends DailyMaterialUsage {
   // Added for shared stock usage tracking
   is_shared_usage?: boolean; // True when using material from another site's stock
   paid_by_site_name?: string | null; // Name of site that paid for the material
+}
+
+/** A grouped usage row that aggregates 1-N FIFO-split records from a single user action */
+export interface GroupedUsageRecord {
+  /** The usage_group_id (or the single record's id if ungrouped) */
+  group_id: string;
+  /** True if this group contains 2+ records (FIFO was split across batches) */
+  is_grouped: boolean;
+  /** Number of child records in this group */
+  child_count: number;
+  /** The first child record (used as the "representative" for metadata) */
+  representative: DailyMaterialUsageWithDetails;
+  /** All child records in this group */
+  children: DailyMaterialUsageWithDetails[];
+  /** Aggregated totals */
+  total_quantity: number;
+  total_cost: number;
+  /** Common fields from representative (same across all children) */
+  usage_date: string;
+  material_id: string;
+  material?: Material;
+  brand?: MaterialBrand | null;
+  brand_id: string | null;
+  work_description: string | null;
+  section?: { name: string } | null;
+  section_id: string | null;
+  is_shared_usage: boolean;
+  paid_by_site_name: string | null;
+  site_id: string;
+  created_by: string | null;
+  created_at: string;
 }
 
 export interface StockTransferWithDetails extends StockTransfer {
@@ -1473,6 +1507,7 @@ export interface SettlementPaymentFormData {
   amount: number;
   payment_date: string;
   payment_mode: SettlementPaymentMode;
+  payment_source?: string;
   reference_number?: string;
   notes?: string;
 }

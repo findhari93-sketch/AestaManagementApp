@@ -15,6 +15,7 @@ import {
   CheckCircle as CheckCircleIcon,
   AccountBalance as SettlementIcon,
   CompareArrows as CompareArrowsIcon,
+  Warning as WarningIcon,
 } from '@mui/icons-material'
 import { formatCurrency } from '@/lib/formatters'
 import type { InterSiteBalance, InterSiteSettlementWithDetails } from '@/types/material.types'
@@ -248,6 +249,20 @@ export default function SettlementLedger({
                   {formatCurrency(balance.total_amount_owed)}
                 </Typography>
 
+                {/* Vendor unpaid warning */}
+                {balance.has_unpaid_vendor && (
+                  <Tooltip title="Creditor site has not yet settled with the vendor. Vendor payment should be completed in Material Settlements before generating inter-site settlement.">
+                    <Chip
+                      icon={<WarningIcon sx={{ fontSize: 14 }} />}
+                      label="Vendor Unpaid"
+                      size="small"
+                      color="error"
+                      variant="outlined"
+                      sx={{ fontSize: '0.7rem', height: 22 }}
+                    />
+                  </Tooltip>
+                )}
+
                 {/* Unsettled badge */}
                 <Chip
                   label="Unsettled"
@@ -258,15 +273,19 @@ export default function SettlementLedger({
                 />
 
                 {/* Action */}
-                <Button
-                  size="small"
-                  variant="outlined"
-                  onClick={() => onGenerateSettlement(balance)}
-                  disabled={generatePending}
-                  sx={{ minWidth: 'auto', px: 1.5 }}
-                >
-                  Generate
-                </Button>
+                <Tooltip title={balance.has_unpaid_vendor ? "Vendor must be paid first. Go to Material Settlements to mark vendor as paid." : ""}>
+                  <span>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      onClick={() => onGenerateSettlement(balance)}
+                      disabled={generatePending || !!balance.has_unpaid_vendor}
+                      sx={{ minWidth: 'auto', px: 1.5 }}
+                    >
+                      Generate
+                    </Button>
+                  </span>
+                </Tooltip>
               </Box>
             )
           })}

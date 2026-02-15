@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import React, { useState, useMemo } from "react";
 import {
   Box,
   Typography,
@@ -8,6 +8,7 @@ import {
   CardContent,
   Button,
   Chip,
+  Collapse,
   Table,
   TableBody,
   TableCell,
@@ -36,6 +37,9 @@ import {
   Store as OwnSiteIcon,
   Warning as WarningIcon,
   Remove as NoBillIcon,
+  SwapHoriz as InterSiteIcon,
+  KeyboardArrowDown as ArrowDownIcon,
+  KeyboardArrowUp as ArrowUpIcon,
 } from "@mui/icons-material";
 import PageHeader from "@/components/layout/PageHeader";
 import MaterialWorkflowBar from "@/components/materials/MaterialWorkflowBar";
@@ -57,6 +61,16 @@ export default function MaterialSettlementsPage() {
   const { selectedSite } = useSite();
   const router = useRouter();
   const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "settled">("all");
+  const [typeFilter, setTypeFilter] = useState<"all" | "vendor" | "intersite" | "advance">("vendor");
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+
+  const toggleRow = (id: string) => {
+    setExpandedRows(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
 
   // Delete confirmation state
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -96,39 +110,27 @@ export default function MaterialSettlementsPage() {
   }, [allPurchases, allAdvancePOs]);
 
   // Determine if a purchase expense is settled
-  // Group stock purchases are settled when vendor is paid (is_paid = true)
-  // Own site purchases are settled when settlement_reference exists
   const isExpenseSettled = (p: MaterialPurchaseExpenseWithDetails) => {
     if (p.purchase_type === "group_stock") return !!p.is_paid;
+    if (p.original_batch_code && p.settlement_reference && p.settlement_reference !== "SELF-USE") return true;
     return !!p.settlement_reference;
   };
 
-  // Filter items by settlement status
-  const filteredItems = useMemo(() => {
-    if (statusFilter === "all") return allItems;
-    if (statusFilter === "pending") {
-      return allItems.filter((item) => {
-        if (item.itemType === 'expense') {
-          return !isExpenseSettled(item as MaterialPurchaseExpenseWithDetails);
-        } else {
-          return !item.advance_paid;
-        }
-      });
-    }
-    if (statusFilter === "settled") {
-      return allItems.filter((item) => {
-        if (item.itemType === 'expense') {
-          return isExpenseSettled(item as MaterialPurchaseExpenseWithDetails);
-        } else {
-          return !!item.advance_paid;
-        }
-      });
-    }
-    return allItems;
-  }, [allItems, statusFilter]);
+  // Classify settlement item type
+  // Self-use records (settlement_reference === "SELF-USE") are grouped under "intersite"
+  // since they're part of the group stock settlement flow, NOT vendor payments
+  const getSettlementType = (item: SettlementItem): "own_site" | "group_po" | "intersite" | "advance" => {
+    if (item.itemType === 'po') return 'advance';
+    const purchase = item as MaterialPurchaseExpenseWithDetails;
+    // Self-use from group stock → group settlement related, not a vendor payment
+    if (purchase.original_batch_code && purchase.settlement_reference === "SELF-USE") return 'intersite';
+    // Inter-site allocated expenses (debtor side)
+    if (purchase.original_batch_code && purchase.settlement_reference && purchase.settlement_reference !== "SELF-USE") return 'intersite';
+    if (purchase.purchase_type === "group_stock") return 'group_po';
+    return 'own_site';
+  };
 
   // Helper function to get the correct amount for an expense
-  // Uses the linked PO's total_amount (which reflects pricing mode changes) when available
   const getExpenseAmount = (expense: MaterialPurchaseExpenseWithDetails) => {
     if (expense.purchase_order?.total_amount) {
       return Number(expense.purchase_order.total_amount);
@@ -136,20 +138,54 @@ export default function MaterialSettlementsPage() {
     return Number(expense.total_amount || 0);
   };
 
-  // Calculate summaries
-  const summaries = useMemo(() => {
-    const pendingExpenses = allPurchases.filter((p) => !isExpenseSettled(p));
-    const settledExpenses = allPurchases.filter((p) => isExpenseSettled(p));
-    const pendingPOs = allAdvancePOs.filter((po) => !po.advance_paid);
-    const settledPOs = allAdvancePOs.filter((po) => !!po.advance_paid);
+  // Step 1: Apply type filter
+  const typeFilteredItems = useMemo(() => {
+    if (typeFilter === "all") return allItems;
+    if (typeFilter === "vendor") {
+      return allItems.filter(item => {
+        const t = getSettlementType(item);
+        return t === "own_site" || t === "group_po";
+      });
+    }
+    if (typeFilter === "intersite") return allItems.filter(item => getSettlementType(item) === "intersite");
+    if (typeFilter === "advance") return allItems.filter(item => getSettlementType(item) === "advance");
+    return allItems;
+  }, [allItems, typeFilter]);
 
-    // Calculate totals using the correct amounts (from linked PO when available)
-    const allExpensesTotal = allPurchases.reduce((sum, p) => sum + getExpenseAmount(p), 0);
-    const allPOsTotal = allAdvancePOs.reduce((sum, po) => sum + Number(po.total_amount || 0), 0);
+  // Step 2: Apply status filter on top of type filter
+  const filteredItems = useMemo(() => {
+    if (statusFilter === "all") return typeFilteredItems;
+    if (statusFilter === "pending") {
+      return typeFilteredItems.filter((item) => {
+        if (item.itemType === 'expense') return !isExpenseSettled(item as MaterialPurchaseExpenseWithDetails);
+        return !item.advance_paid;
+      });
+    }
+    if (statusFilter === "settled") {
+      return typeFilteredItems.filter((item) => {
+        if (item.itemType === 'expense') return isExpenseSettled(item as MaterialPurchaseExpenseWithDetails);
+        return !!item.advance_paid;
+      });
+    }
+    return typeFilteredItems;
+  }, [typeFilteredItems, statusFilter]);
+
+  // Calculate summaries from type-filtered items (so counts reflect active type)
+  const summaries = useMemo(() => {
+    const expenses = typeFilteredItems.filter(i => i.itemType === 'expense') as MaterialPurchaseExpenseWithDetails[];
+    const pos = typeFilteredItems.filter(i => i.itemType === 'po') as PurchaseOrderWithDetails[];
+
+    const pendingExpenses = expenses.filter(p => !isExpenseSettled(p));
+    const settledExpenses = expenses.filter(p => isExpenseSettled(p));
+    const pendingPOs = pos.filter(po => !po.advance_paid);
+    const settledPOs = pos.filter(po => !!po.advance_paid);
+
+    const allExpensesTotal = expenses.reduce((sum, p) => sum + getExpenseAmount(p), 0);
+    const allPOsTotal = pos.reduce((sum, po) => sum + Number(po.total_amount || 0), 0);
 
     return {
       total: {
-        count: allItems.length,
+        count: typeFilteredItems.length,
         amount: allExpensesTotal + allPOsTotal,
       },
       pending: {
@@ -163,7 +199,7 @@ export default function MaterialSettlementsPage() {
                 settledPOs.reduce((sum, po) => sum + Number(po.total_amount || 0), 0),
       },
     };
-  }, [allPurchases, allAdvancePOs, allItems.length]);
+  }, [typeFilteredItems]);
 
   // Handle delete
   const handleDeleteClick = (purchase: MaterialPurchaseExpenseWithDetails) => {
@@ -304,9 +340,34 @@ export default function MaterialSettlementsPage() {
 
       {/* Filters */}
       <Paper sx={{ mb: 2 }}>
+        {/* Type Filter */}
+        <Box sx={{ p: 2, pb: 0, display: "flex", alignItems: "center", gap: 2 }}>
+          <Typography variant="subtitle2" color="text.secondary">
+            Type:
+          </Typography>
+          <ToggleButtonGroup
+            value={typeFilter}
+            exclusive
+            onChange={(_, value) => value && setTypeFilter(value)}
+            size="small"
+          >
+            <ToggleButton value="all">All Types</ToggleButton>
+            <ToggleButton value="vendor">
+              <OwnSiteIcon sx={{ mr: 0.5, fontSize: 18 }} /> Vendor Payments
+            </ToggleButton>
+            <ToggleButton value="intersite" sx={{ color: "info.main" }}>
+              <InterSiteIcon sx={{ mr: 0.5, fontSize: 18 }} /> Inter-Site
+            </ToggleButton>
+            <ToggleButton value="advance" sx={{ color: "warning.main" }}>
+              <PaymentIcon sx={{ mr: 0.5, fontSize: 18 }} /> Advance PO
+            </ToggleButton>
+          </ToggleButtonGroup>
+        </Box>
+
+        {/* Status Filter */}
         <Box sx={{ p: 2, display: "flex", alignItems: "center", gap: 2 }}>
           <Typography variant="subtitle2" color="text.secondary">
-            Filter:
+            Status:
           </Typography>
           <ToggleButtonGroup
             value={statusFilter}
@@ -329,6 +390,7 @@ export default function MaterialSettlementsPage() {
           <Table>
             <TableHead>
               <TableRow>
+                <TableCell sx={{ width: 48 }} />
                 <TableCell>Ref Code</TableCell>
                 <TableCell>Type</TableCell>
                 <TableCell>PO Number</TableCell>
@@ -345,6 +407,7 @@ export default function MaterialSettlementsPage() {
               {isLoading ? (
                 [...Array(5)].map((_, i) => (
                   <TableRow key={i}>
+                    <TableCell><Skeleton variant="circular" width={24} height={24} /></TableCell>
                     <TableCell><Skeleton /></TableCell>
                     <TableCell><Skeleton /></TableCell>
                     <TableCell><Skeleton /></TableCell>
@@ -365,8 +428,9 @@ export default function MaterialSettlementsPage() {
                   const po = isPO ? (item as PurchaseOrderWithDetails) : null;
 
                   // Check if this is a group stock parent purchase (paying site's batch)
-                  // Note: Allocated expenses (inter-site) are no longer shown here - they go to Material Expenses page
                   const isGroupStockParent = purchase ? purchase.purchase_type === "group_stock" : false;
+                  // Check if this is an allocated expense from inter-site settlement (debtor side)
+                  const isInterSiteAllocated = purchase ? (!!purchase.original_batch_code && !!purchase.settlement_reference && purchase.settlement_reference !== "SELF-USE") : false;
 
                   // Extract common display fields
                   const refCode = purchase?.ref_code || po?.po_number || '';
@@ -381,8 +445,21 @@ export default function MaterialSettlementsPage() {
                     ? item.items.map((i: any) => i.material?.name || "Unknown").join(", ")
                     : "Material purchase";
 
+                  const isExpanded = expandedRows.has(item.id);
+                  const hasItems = item.items && item.items.length > 0;
+
                   return (
-                  <TableRow key={item.id} hover>
+                  <React.Fragment key={item.id}>
+                  <TableRow hover sx={{ '& > *': { borderBottom: isExpanded ? 'none !important' : undefined } }}>
+                    <TableCell sx={{ width: 48 }}>
+                      <IconButton
+                        size="small"
+                        onClick={() => toggleRow(item.id)}
+                        disabled={!hasItems}
+                      >
+                        {isExpanded ? <ArrowUpIcon /> : <ArrowDownIcon />}
+                      </IconButton>
+                    </TableCell>
                     <TableCell>
                       <Typography variant="body2" fontWeight={500} sx={{ fontFamily: "monospace" }}>
                         {refCode}
@@ -396,6 +473,17 @@ export default function MaterialSettlementsPage() {
                             label="Advance PO"
                             size="small"
                             color="warning"
+                            variant="outlined"
+                            sx={{ fontSize: "0.75rem" }}
+                          />
+                        </Tooltip>
+                      ) : isInterSiteAllocated ? (
+                        <Tooltip title="Debtor expense from inter-site settlement - paid to creditor site">
+                          <Chip
+                            icon={<InterSiteIcon sx={{ fontSize: 16 }} />}
+                            label="Inter-Site"
+                            size="small"
+                            color="info"
                             variant="outlined"
                             sx={{ fontSize: "0.75rem" }}
                           />
@@ -556,6 +644,15 @@ export default function MaterialSettlementsPage() {
                             variant="outlined"
                           />
                         )
+                      ) : isInterSiteAllocated ? (
+                        // Inter-site allocated: always settled (created on payment)
+                        <Chip
+                          icon={<SettledIcon />}
+                          label="Paid to Creditor"
+                          size="small"
+                          color="success"
+                          variant="outlined"
+                        />
                       ) : isGroupStockParent ? (
                         // Group stock parent: show vendor payment status
                         purchase!.is_paid ? (
@@ -623,8 +720,8 @@ export default function MaterialSettlementsPage() {
                             </Button>
                           </Tooltip>
                         )}
-                        {/* Settle button for own site purchases */}
-                        {!isPO && !isGroupStockParent && !purchase!.settlement_reference && canEdit && (
+                        {/* Settle button for own site purchases (not inter-site allocated) */}
+                        {!isPO && !isGroupStockParent && !isInterSiteAllocated && !purchase!.settlement_reference && canEdit && (
                           <Tooltip title="Settle">
                             <Button
                               size="small"
@@ -664,7 +761,7 @@ export default function MaterialSettlementsPage() {
                             </IconButton>
                           </Tooltip>
                         )}
-                        {canEdit && purchase && !purchase.settlement_reference && !isGroupStockParent && (
+                        {canEdit && purchase && !purchase.settlement_reference && !isGroupStockParent && !isInterSiteAllocated && (
                           <Tooltip title="Delete">
                             <IconButton
                               size="small"
@@ -678,11 +775,71 @@ export default function MaterialSettlementsPage() {
                       </Box>
                     </TableCell>
                   </TableRow>
+                  {/* Collapsible Detail Row */}
+                  <TableRow>
+                    <TableCell style={{ paddingBottom: 0, paddingTop: 0 }} colSpan={11}>
+                      <Collapse in={isExpanded} timeout="auto" unmountOnExit>
+                        <Box sx={{ py: 2, px: 2, bgcolor: 'grey.50' }}>
+                          <Typography variant="subtitle2" fontWeight={600} sx={{ mb: 1 }}>
+                            Material Details
+                          </Typography>
+                          {isInterSiteAllocated && purchase?.original_batch_code && (
+                            <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block' }}>
+                              Source Batch: {purchase.original_batch_code}
+                            </Typography>
+                          )}
+                          <Table size="small">
+                            <TableHead>
+                              <TableRow>
+                                <TableCell>Material</TableCell>
+                                <TableCell>Brand</TableCell>
+                                <TableCell align="right">Quantity</TableCell>
+                                <TableCell align="right">Unit Price</TableCell>
+                                <TableCell align="right">Total</TableCell>
+                              </TableRow>
+                            </TableHead>
+                            <TableBody>
+                              {item.items?.map((lineItem: any, idx: number) => (
+                                <TableRow key={lineItem.id || idx}>
+                                  <TableCell>
+                                    <Typography variant="body2">
+                                      {lineItem.material?.name || 'Unknown'}
+                                    </Typography>
+                                  </TableCell>
+                                  <TableCell>
+                                    <Typography variant="body2" color="text.secondary">
+                                      {lineItem.brand?.brand_name || '-'}
+                                    </Typography>
+                                  </TableCell>
+                                  <TableCell align="right">
+                                    <Typography variant="body2">
+                                      {lineItem.quantity} {lineItem.material?.unit || ''}
+                                    </Typography>
+                                  </TableCell>
+                                  <TableCell align="right">
+                                    <Typography variant="body2">
+                                      {formatCurrency(lineItem.unit_price || 0)}
+                                    </Typography>
+                                  </TableCell>
+                                  <TableCell align="right">
+                                    <Typography variant="body2" fontWeight={500}>
+                                      {formatCurrency(lineItem.total_price || 0)}
+                                    </Typography>
+                                  </TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </Box>
+                      </Collapse>
+                    </TableCell>
+                  </TableRow>
+                  </React.Fragment>
                   );
                 })
               ) : (
                 <TableRow>
-                  <TableCell colSpan={10} align="center" sx={{ py: 4 }}>
+                  <TableCell colSpan={11} align="center" sx={{ py: 4 }}>
                     <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 1 }}>
                       <InventoryIcon sx={{ fontSize: 48, color: "text.disabled" }} />
                       <Typography color="text.secondary">
@@ -716,7 +873,12 @@ export default function MaterialSettlementsPage() {
           </li>
           <li>
             <Typography variant="body2">
-              <strong>Group Settlement:</strong> Your share from inter-site batch settlement - automatically settled when batch is completed
+              <strong>Group PO:</strong> Group stock purchase where this site paid the vendor - mark as &quot;Vendor Paid&quot; after payment
+            </Typography>
+          </li>
+          <li>
+            <Typography variant="body2">
+              <strong>Inter-Site:</strong> Amount paid to creditor site via inter-site settlement - automatically created when settlement is paid
             </Typography>
           </li>
           <li>

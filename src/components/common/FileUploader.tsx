@@ -481,6 +481,14 @@ export default function FileUploader({
           const delay = UPLOAD_CONSTANTS.INITIAL_RETRY_DELAY * Math.pow(2, attempt - 1);
           console.log(`[FileUploader] Waiting ${delay}ms before retry ${attempt}`);
           await new Promise((resolve) => setTimeout(resolve, delay));
+
+          // Re-check session before retry - previous attempt may have failed due to stale token
+          try {
+            console.log(`[FileUploader] Re-checking session before retry ${attempt}`);
+            await ensureFreshSession();
+          } catch {
+            console.warn("[FileUploader] Session re-check failed before retry, continuing anyway");
+          }
         }
 
         console.log(`[FileUploader] Upload attempt ${attempt + 1}/${maxRetries + 1}`);

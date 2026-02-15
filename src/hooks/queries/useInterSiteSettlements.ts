@@ -197,6 +197,7 @@ export function useInterSiteBalances(groupId: string | undefined) {
               ref_code,
               paying_site_id,
               site_id,
+              is_paid,
               paying_site:sites!material_purchase_expenses_paying_site_id_fkey(id, name)
             )
           `)
@@ -229,12 +230,17 @@ export function useInterSiteBalances(groupId: string | undefined) {
 
           const key = `${paymentSourceSiteId}-${record.usage_site_id}`;
           const amount = record.total_cost || 0;
+          const vendorPaid = record.batch?.is_paid ?? false;
 
           if (balanceMap.has(key)) {
             const existing = balanceMap.get(key)!;
             existing.total_amount_owed += amount;
             existing.transaction_count += 1;
             existing.total_quantity += record.quantity || 0;
+            // If any batch in this balance is vendor-unpaid, mark the whole balance as having unpaid vendors
+            if (!vendorPaid) {
+              existing.has_unpaid_vendor = true;
+            }
           } else {
             balanceMap.set(key, {
               site_group_id: groupId,
@@ -252,6 +258,7 @@ export function useInterSiteBalances(groupId: string | undefined) {
               total_quantity: record.quantity || 0,
               total_amount_owed: amount,
               is_settled: false,
+              has_unpaid_vendor: !vendorPaid,
             });
           }
         }
@@ -441,6 +448,7 @@ export function useGenerateSettlement() {
       year?: number;
       weekNumber?: number;
       userId?: string;
+      skipVendorCheck?: boolean; // Override: allow generation even if vendor is unpaid
     }) => {
       await ensureFreshSession();
 
@@ -449,13 +457,15 @@ export function useGenerateSettlement() {
 
       // Get unsettled batch_usage_records - this is the SOURCE OF TRUTH
       // Must match the query in useInterSiteBalances to ensure consistency
+      // Also fetch is_paid from parent batch to check vendor settlement status
       const { data: batchRecords, error: batchError } = await (supabase as any)
         .from("batch_usage_records")
         .select(`
           *,
           batch:material_purchase_expenses!batch_usage_records_batch_ref_code_fkey(
             paying_site_id,
-            site_id
+            site_id,
+            is_paid
           )
         `)
         .eq("site_group_id", data.siteGroupId)
@@ -473,6 +483,22 @@ export function useGenerateSettlement() {
 
       if (matchingRecords.length === 0) {
         throw new Error("No unsettled transactions found between these sites");
+      }
+
+      // VENDOR SETTLEMENT GATE: Check if all parent batches have vendor paid
+      // If skipVendorCheck is not set, block generation for unpaid vendor batches
+      if (!data.skipVendorCheck) {
+        const unpaidBatches = matchingRecords.filter(
+          (record: any) => record.batch && record.batch.is_paid === false
+        );
+        if (unpaidBatches.length > 0) {
+          const unpaidBatchCodes = [...new Set(unpaidBatches.map((r: any) => r.batch_ref_code))];
+          throw new Error(
+            `VENDOR_UNPAID:Vendor settlement must be completed before generating inter-site settlement. ` +
+            `The following batch(es) have not been settled with the vendor: ${unpaidBatchCodes.join(", ")}. ` +
+            `Please go to Material Settlements and mark the vendor as paid first.`
+          );
+        }
       }
 
       // Get the corresponding group_stock_transactions for these records
@@ -851,6 +877,7 @@ export function useRecordSettlementPayment() {
           payment_date: data.payment_date,
           amount: data.amount,
           payment_mode: data.payment_mode,
+          payment_source: data.payment_source || null,
           reference_number: data.reference_number || null,
           notes: data.notes || null,
           recorded_by: data.userId || null,
@@ -923,6 +950,11 @@ export function useRecordSettlementPayment() {
           // Use the settlement code as the batch reference to link this expense to the settlement
           const settlementCode = settlement.settlement_code || `SET-${settlement.id.slice(0, 8)}`;
 
+          // Map payment mode - material_purchase_expenses allows: cash, upi, bank_transfer, cheque, credit
+          // inter_site_settlement_payments allows: cash, bank_transfer, upi, adjustment
+          const validExpenseModes = ["cash", "upi", "bank_transfer", "cheque", "credit"];
+          const expensePaymentMode = validExpenseModes.includes(data.payment_mode) ? data.payment_mode : "cash";
+
           // Build expense payload without created_by to avoid FK constraint issues
           // The FK constraint on created_by expects the user to be in public.users table
           // but auth.users IDs may not always sync to public.users
@@ -938,7 +970,7 @@ export function useRecordSettlementPayment() {
             status: "completed",
             is_paid: true,
             paid_date: data.payment_date,
-            payment_mode: data.payment_mode,
+            payment_mode: expensePaymentMode,
             payment_reference: data.reference_number || null,
             // Set original_batch_code and settlement_reference to make it appear as "allocated" type
             // in Material Expenses page (From Group category)
@@ -1694,6 +1726,7 @@ export function useNetSettlement() {
       paymentDetails?: {
         amount: number;
         payment_mode: string;
+        payment_source?: string;
         payment_date: string;
         reference_number?: string;
         notes?: string;
@@ -1767,14 +1800,16 @@ export function useNetSettlement() {
 
         const batchRefCode = matchingRecords[0]?.batch_ref_code || null;
 
-        // Check for existing pending settlement
+        // Check for existing pending settlement for this week/direction
         const { data: existingSettlements } = await (supabase as any)
           .from("inter_site_material_settlements")
           .select("*")
           .eq("site_group_id", siteGroupId)
           .eq("from_site_id", balance.creditor_site_id)
           .eq("to_site_id", balance.debtor_site_id)
-          .eq("status", "pending")
+          .eq("year", year)
+          .eq("week_number", weekNumber)
+          .in("status", ["draft", "pending"])
           .order("created_at", { ascending: false })
           .limit(1);
 
@@ -2044,6 +2079,7 @@ export function useNetSettlement() {
               payment_date: pd.payment_date,
               amount: netRemaining,
               payment_mode: pd.payment_mode,
+              payment_source: pd.payment_source || null,
               reference_number: pd.reference_number || null,
               notes: pd.notes || null,
               recorded_by: data.userId || null,
