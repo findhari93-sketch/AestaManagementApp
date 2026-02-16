@@ -26,14 +26,11 @@ import {
   Visibility,
 } from "@mui/icons-material";
 import { SupabaseClient } from "@supabase/supabase-js";
-import { ensureFreshSession } from "@/lib/auth/sessionManager";
-import { TIMEOUTS } from "@/lib/utils/timeout";
 
 // Upload status type for better UX feedback
 type UploadStatus =
   | "idle"
   | "compressing"
-  | "checking_session"
   | "uploading"
   | "retrying"
   | "success"
@@ -41,27 +38,26 @@ type UploadStatus =
 
 // Upload configuration constants
 const UPLOAD_CONSTANTS = {
-  // Use centralized timeout from timeout.ts (3 minutes)
-  GLOBAL_TIMEOUT: TIMEOUTS.FILE_UPLOAD,
+  // Global timeout safety net (2 minutes)
+  GLOBAL_TIMEOUT: 120000,
 
-  // Per-attempt timeout (shorter to allow retries within global timeout)
-  ATTEMPT_TIMEOUT: 45000, // 45 seconds per attempt
+  // Dynamic per-attempt timeout: min 15s, +5s per 100KB
+  MIN_ATTEMPT_TIMEOUT: 15000,
+  TIMEOUT_PER_100KB: 5000,
 
   // Retry configuration
-  MAX_RETRIES: 2, // Total 3 attempts (1 initial + 2 retries)
-  INITIAL_RETRY_DELAY: 1000, // 1 second base delay
-
-  // Progress simulation - more realistic phases
-  PROGRESS_PHASES: {
-    START: 0,
-    COMPRESSION_START: 5,
-    COMPRESSION_END: 20,
-    SESSION_CHECK: 25,
-    UPLOAD_START: 30,
-    UPLOAD_PROGRESS_MAX: 90, // Cap simulated progress here (was 85)
-    COMPLETE: 100,
-  },
+  MAX_RETRIES: 1, // Total 2 attempts (1 initial + 1 retry) - fail fast
+  INITIAL_RETRY_DELAY: 500, // 500ms base delay (reduced from 1s)
 } as const;
+
+// Calculate dynamic timeout based on file size
+const getAttemptTimeout = (fileSizeBytes: number): number => {
+  const sizeKB = fileSizeBytes / 1024;
+  return Math.max(
+    UPLOAD_CONSTANTS.MIN_ATTEMPT_TIMEOUT,
+    Math.ceil(sizeKB / 100) * UPLOAD_CONSTANTS.TIMEOUT_PER_100KB
+  );
+};
 
 export type FileType = "pdf" | "image" | "all";
 export type UploadedFile = {
@@ -112,11 +108,11 @@ export type FileUploaderProps = {
   compact?: boolean;
   /** Enable image compression before upload (default: true for images) */
   compressImages?: boolean;
-  /** Max compressed size in KB (default: 500KB) */
+  /** Max compressed size in KB (default: 200KB) */
   maxCompressedSizeKB?: number;
-  /** Max width for compressed images (default: 1920px) */
+  /** Max width for compressed images (default: 1280px) */
   maxImageWidth?: number;
-  /** Max height for compressed images (default: 1920px) */
+  /** Max height for compressed images (default: 1280px) */
   maxImageHeight?: number;
 };
 
@@ -191,10 +187,10 @@ const sanitizeFilename = (filename: string): string => {
 // Image compression utility with timeout
 const compressImage = (
   file: File,
-  maxSizeKB: number = 500,
-  maxWidth: number = 1920,
-  maxHeight: number = 1920,
-  quality: number = 0.8
+  maxSizeKB: number = 200,
+  maxWidth: number = 1280,
+  maxHeight: number = 1280,
+  quality: number = 0.7
 ): Promise<File> => {
   return new Promise((resolve, reject) => {
     const effectiveMime = getEffectiveMimeType(file);
@@ -213,8 +209,8 @@ const compressImage = (
       return;
     }
 
-    // Skip if already small enough (under maxSizeKB)
-    if (file.size <= maxSizeKB * 1024) {
+    // Skip if already very small (under 50KB - no point compressing further)
+    if (file.size <= 50 * 1024) {
       resolve(file);
       return;
     }
@@ -348,9 +344,9 @@ export default function FileUploader({
   onView,
   compact = false,
   compressImages = true,
-  maxCompressedSizeKB = 500,
-  maxImageWidth = 1920,
-  maxImageHeight = 1920,
+  maxCompressedSizeKB = 200,
+  maxImageWidth = 1280,
+  maxImageHeight = 1280,
 }: FileUploaderProps) {
   const theme = useTheme();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -372,6 +368,7 @@ export default function FileUploader({
   // Refs for abort handling and cleanup
   const abortControllerRef = useRef<AbortController | null>(null);
   const globalTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const xhrRef = useRef<XMLHttpRequest | null>(null);
   const isMountedRef = useRef(true);
 
   const acceptMime = acceptString || FILE_TYPE_CONFIG[accept].accept;
@@ -383,11 +380,13 @@ export default function FileUploader({
     isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;
-      // Abort any in-progress upload on unmount
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
       }
-      // Clear global timeout
+      if (xhrRef.current) {
+        xhrRef.current.abort();
+        xhrRef.current = null;
+      }
       if (globalTimeoutRef.current) {
         clearTimeout(globalTimeoutRef.current);
       }
@@ -396,6 +395,10 @@ export default function FileUploader({
 
   // Cancel handler for user-initiated cancellation
   const handleCancel = useCallback(() => {
+    if (xhrRef.current) {
+      xhrRef.current.abort();
+      xhrRef.current = null;
+    }
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
@@ -420,10 +423,8 @@ export default function FileUploader({
     switch (status) {
       case "compressing":
         return "Compressing image...";
-      case "checking_session":
-        return "Verifying session...";
       case "uploading":
-        return "Uploading file...";
+        return "Uploading...";
       case "retrying":
         return `Retrying (${currentRetry}/${UPLOAD_CONSTANTS.MAX_RETRIES})...`;
       case "success":
@@ -456,14 +457,105 @@ export default function FileUploader({
     [acceptMime, acceptLabel, maxSizeBytes, maxSizeMB]
   );
 
-  // Upload with automatic retry and exponential backoff
+  // Direct XHR upload with real progress tracking
+  const uploadViaXHR = useCallback(
+    (
+      filePath: string,
+      fileToUpload: File,
+      accessToken: string,
+      onProgress: (percent: number) => void,
+      timeoutMs: number
+    ): Promise<{ path: string }> => {
+      return new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhrRef.current = xhr;
+
+        // Get Supabase URL from the client
+        // @ts-expect-error - accessing internal supabaseUrl
+        const supabaseUrl = supabase.supabaseUrl || supabase.storageUrl?.replace('/storage/v1', '');
+        if (!supabaseUrl) {
+          // Fallback: extract from environment
+          const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+          if (!url) {
+            reject(new Error("Cannot determine Supabase URL"));
+            return;
+          }
+        }
+
+        const baseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+        const uploadUrl = `${baseUrl}/storage/v1/object/${bucketName}/${filePath}`;
+
+        // Set up timeout
+        xhr.timeout = timeoutMs;
+
+        // Real progress tracking
+        xhr.upload.onprogress = (event) => {
+          if (event.lengthComputable) {
+            const percent = Math.round((event.loaded / event.total) * 100);
+            onProgress(percent);
+          }
+        };
+
+        xhr.onload = () => {
+          xhrRef.current = null;
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try {
+              const response = JSON.parse(xhr.responseText);
+              resolve({ path: response.Key || filePath });
+            } catch {
+              // If response parsing fails but status is OK, use the filePath
+              resolve({ path: filePath });
+            }
+          } else {
+            let errorMsg = `Upload failed (${xhr.status})`;
+            try {
+              const errResponse = JSON.parse(xhr.responseText);
+              errorMsg = errResponse.message || errResponse.error || errorMsg;
+            } catch {
+              // ignore parse error
+            }
+            reject(new Error(errorMsg));
+          }
+        };
+
+        xhr.onerror = () => {
+          xhrRef.current = null;
+          reject(new Error("Network error during upload"));
+        };
+
+        xhr.ontimeout = () => {
+          xhrRef.current = null;
+          reject(new Error(`Upload timed out after ${Math.round(timeoutMs / 1000)}s`));
+        };
+
+        xhr.onabort = () => {
+          xhrRef.current = null;
+          reject(new Error("Upload cancelled"));
+        };
+
+        xhr.open("POST", uploadUrl);
+        xhr.setRequestHeader("Authorization", `Bearer ${accessToken}`);
+        xhr.setRequestHeader("x-upsert", "true");
+        xhr.setRequestHeader("cache-control", "3600");
+        // Let browser set Content-Type with boundary for FormData, or set it for raw file
+        xhr.setRequestHeader("Content-Type", fileToUpload.type || "application/octet-stream");
+        xhr.send(fileToUpload);
+      });
+    },
+    [supabase, bucketName]
+  );
+
+  // Upload with retry using XHR
   const uploadWithRetry = useCallback(
     async (
       filePath: string,
       fileToUpload: File,
+      accessToken: string,
+      onProgress: (percent: number) => void,
       maxRetries: number = UPLOAD_CONSTANTS.MAX_RETRIES
     ): Promise<{ data: { path: string } | null; error: Error | null }> => {
       let lastError: Error | null = null;
+      const timeoutMs = getAttemptTimeout(fileToUpload.size);
 
       for (let attempt = 0; attempt <= maxRetries; attempt++) {
         // Check if cancelled
@@ -477,48 +569,27 @@ export default function FileUploader({
             setUploadStatus("retrying");
             setRetryCount(attempt);
           }
-          // Exponential backoff delay
           const delay = UPLOAD_CONSTANTS.INITIAL_RETRY_DELAY * Math.pow(2, attempt - 1);
           console.log(`[FileUploader] Waiting ${delay}ms before retry ${attempt}`);
           await new Promise((resolve) => setTimeout(resolve, delay));
         }
 
-        console.log(`[FileUploader] Upload attempt ${attempt + 1}/${maxRetries + 1}`);
+        console.log(
+          `[FileUploader] Upload attempt ${attempt + 1}/${maxRetries + 1} (timeout: ${Math.round(timeoutMs / 1000)}s, size: ${formatFileSize(fileToUpload.size)})`
+        );
 
         try {
-          // Create timeout promise for this attempt
-          const attemptTimeoutPromise = new Promise<never>((_, reject) => {
-            setTimeout(() => {
-              reject(
-                new Error(
-                  `Upload attempt timed out after ${UPLOAD_CONSTANTS.ATTEMPT_TIMEOUT / 1000}s`
-                )
-              );
-            }, UPLOAD_CONSTANTS.ATTEMPT_TIMEOUT);
-          });
-
-          // Actual upload
-          const uploadPromise = supabase.storage
-            .from(bucketName)
-            .upload(filePath, fileToUpload, {
-              cacheControl: "3600",
-              upsert: true,
-            });
-
-          const result = (await Promise.race([
-            uploadPromise,
-            attemptTimeoutPromise,
-          ])) as { data: { path: string } | null; error: { message: string } | null };
-
-          if (!result.error && result.data?.path) {
-            return { data: result.data, error: null };
-          }
-
-          lastError = new Error(result.error?.message || "Upload failed");
-          console.warn(`[FileUploader] Attempt ${attempt + 1} failed:`, lastError.message);
+          const result = await uploadViaXHR(
+            filePath,
+            fileToUpload,
+            accessToken,
+            onProgress,
+            timeoutMs
+          );
+          return { data: result, error: null };
         } catch (err) {
           lastError = err instanceof Error ? err : new Error(String(err));
-          console.warn(`[FileUploader] Attempt ${attempt + 1} exception:`, lastError.message);
+          console.warn(`[FileUploader] Attempt ${attempt + 1} failed:`, lastError.message);
 
           // Don't retry on explicit cancellation
           if (
@@ -532,7 +603,7 @@ export default function FileUploader({
 
       return { data: null, error: lastError };
     },
-    [supabase, bucketName]
+    [uploadViaXHR]
   );
 
   const uploadFile = useCallback(
@@ -546,7 +617,7 @@ export default function FileUploader({
 
       // Initialize upload state
       setUploading(true);
-      setUploadProgress(UPLOAD_CONSTANTS.PROGRESS_PHASES.START);
+      setUploadProgress(0);
       setUploadSuccess(false);
       setUploadStatus("idle");
       setRetryCount(0);
@@ -555,20 +626,21 @@ export default function FileUploader({
       // Create abort controller for this upload
       abortControllerRef.current = new AbortController();
 
-      let progressInterval: NodeJS.Timeout | null = null;
-
       // Cleanup helper
       const cleanup = () => {
-        if (progressInterval) clearInterval(progressInterval);
         if (globalTimeoutRef.current) {
           clearTimeout(globalTimeoutRef.current);
           globalTimeoutRef.current = null;
         }
       };
 
-      // Global timeout safety net - use centralized TIMEOUTS.FILE_UPLOAD (3 minutes)
+      // Global timeout safety net (2 minutes)
       globalTimeoutRef.current = setTimeout(() => {
         console.warn("[FileUploader] Global timeout reached");
+        if (xhrRef.current) {
+          xhrRef.current.abort();
+          xhrRef.current = null;
+        }
         if (abortControllerRef.current) {
           abortControllerRef.current.abort();
         }
@@ -577,20 +649,18 @@ export default function FileUploader({
           setUploading(false);
           setUploadProgress(0);
           setUploadStatus("error");
-          setError(
-            "Upload timed out. Please check your internet connection and try again."
-          );
+          setError("Upload timed out. Please check your internet connection and try again.");
         }
       }, UPLOAD_CONSTANTS.GLOBAL_TIMEOUT);
 
       try {
-        // === PHASE 1: Image Compression ===
+        // === PHASE 1: Image Compression (quick, runs locally) ===
         let fileToUpload = file;
         const effectiveMime = getEffectiveMimeType(file);
 
         if (compressImages && effectiveMime.startsWith("image/")) {
           setUploadStatus("compressing");
-          setUploadProgress(UPLOAD_CONSTANTS.PROGRESS_PHASES.COMPRESSION_START);
+          setUploadProgress(5);
 
           try {
             fileToUpload = await compressImage(
@@ -599,16 +669,11 @@ export default function FileUploader({
               maxImageWidth,
               maxImageHeight
             );
-            if (isMountedRef.current) {
-              console.log(
-                `[FileUploader] Image compressed: ${formatFileSize(file.size)} -> ${formatFileSize(fileToUpload.size)}`
-              );
-            }
+            console.log(
+              `[FileUploader] Image compressed: ${formatFileSize(file.size)} -> ${formatFileSize(fileToUpload.size)}`
+            );
           } catch (compressionError) {
-            console.warn(
-              "[FileUploader] Image compression failed, uploading original:",
-              compressionError
-            );
+            console.warn("[FileUploader] Compression failed, uploading original:", compressionError);
           }
         }
 
@@ -617,38 +682,15 @@ export default function FileUploader({
           throw new Error("Upload cancelled");
         }
 
-        setUploadProgress(UPLOAD_CONSTANTS.PROGRESS_PHASES.COMPRESSION_END);
-
-        // === PHASE 2: Session Check ===
-        setUploadStatus("checking_session");
-
-        await ensureFreshSession();
-
-        // Check if cancelled
-        if (abortControllerRef.current?.signal.aborted) {
-          throw new Error("Upload cancelled");
+        // === PHASE 2: Get auth token (instant - from cached session) ===
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.access_token) {
+          throw new Error("Session expired. Please log in again.");
         }
 
-        setUploadProgress(UPLOAD_CONSTANTS.PROGRESS_PHASES.SESSION_CHECK);
-
-        // === PHASE 3: Upload with retry ===
+        // === PHASE 3: Upload with real XHR progress ===
         setUploadStatus("uploading");
-
-        // Start progress simulation for upload phase (30% to 90%)
-        let simulatedProgress: number = UPLOAD_CONSTANTS.PROGRESS_PHASES.UPLOAD_START;
-        progressInterval = setInterval(() => {
-          if (simulatedProgress < UPLOAD_CONSTANTS.PROGRESS_PHASES.UPLOAD_PROGRESS_MAX) {
-            // Slower, more realistic progress increments (1-6% per 500ms)
-            const increment = Math.random() * 5 + 1;
-            simulatedProgress = Math.min(
-              simulatedProgress + increment,
-              UPLOAD_CONSTANTS.PROGRESS_PHASES.UPLOAD_PROGRESS_MAX
-            );
-            if (isMountedRef.current) {
-              setUploadProgress(simulatedProgress);
-            }
-          }
-        }, 500);
+        setUploadProgress(10);
 
         const ext = file.name.split(".").pop() || "file";
         const timestamp = Date.now();
@@ -657,14 +699,15 @@ export default function FileUploader({
 
         const { data, error: uploadError } = await uploadWithRetry(
           filePath,
-          fileToUpload
+          fileToUpload,
+          session.access_token,
+          (percent) => {
+            // Map XHR progress (0-100) to our UI range (10-95)
+            if (isMountedRef.current) {
+              setUploadProgress(10 + (percent * 0.85));
+            }
+          }
         );
-
-        // Stop progress simulation
-        if (progressInterval) {
-          clearInterval(progressInterval);
-          progressInterval = null;
-        }
 
         // Check if cancelled
         if (abortControllerRef.current?.signal.aborted) {
@@ -681,18 +724,18 @@ export default function FileUploader({
 
         // === PHASE 4: Success ===
         cleanup();
-        setUploadProgress(UPLOAD_CONSTANTS.PROGRESS_PHASES.COMPLETE);
+        setUploadProgress(100);
         setUploadSuccess(true);
         setUploadStatus("success");
 
-        // Get public URL (bucket must be public in Supabase)
+        // Get public URL
         const {
           data: { publicUrl },
         } = supabase.storage.from(bucketName).getPublicUrl(data.path);
 
         const uploadedFile: UploadedFile = {
           name: file.name,
-          size: fileToUpload.size, // Use compressed size
+          size: fileToUpload.size,
           url: publicUrl,
           type: file.type,
         };
@@ -710,7 +753,7 @@ export default function FileUploader({
             setUploadStatus("idle");
             setRetryCount(0);
           }
-        }, 2000);
+        }, 1500);
 
         return uploadedFile;
       } catch (err: unknown) {
@@ -719,7 +762,6 @@ export default function FileUploader({
         setUploadStatus("error");
         setRetryCount(0);
 
-        // User-friendly error messages
         const error = err instanceof Error ? err : new Error(String(err));
         let errorMsg = error.message || "Upload failed";
         if (errorMsg.includes("timed out")) {

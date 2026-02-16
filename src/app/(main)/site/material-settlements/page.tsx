@@ -36,6 +36,7 @@ import {
   Store as OwnSiteIcon,
   Warning as WarningIcon,
   Remove as NoBillIcon,
+  Edit as EditIcon,
 } from "@mui/icons-material";
 import PageHeader from "@/components/layout/PageHeader";
 import MaterialWorkflowBar from "@/components/materials/MaterialWorkflowBar";
@@ -51,6 +52,7 @@ import { BillPreviewButton } from "@/components/common/BillViewerDialog";
 import MaterialSettlementDialog from "@/components/materials/MaterialSettlementDialog";
 import BillVerificationDialog from "@/components/materials/BillVerificationDialog";
 import { useVerifyBill } from "@/hooks/queries/useBillVerification";
+import EditMaterialPurchaseDialog from "@/components/materials/EditMaterialPurchaseDialog";
 import { useRouter } from "next/navigation";
 
 export default function MaterialSettlementsPage() {
@@ -66,6 +68,10 @@ export default function MaterialSettlementsPage() {
   const [settlementDialogOpen, setSettlementDialogOpen] = useState(false);
   const [settlementPurchase, setSettlementPurchase] = useState<MaterialPurchaseExpenseWithDetails | null>(null);
   const [settlementPO, setSettlementPO] = useState<PurchaseOrderWithDetails | null>(null);
+
+  // Edit dialog state
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [editingPurchase, setEditingPurchase] = useState<MaterialPurchaseExpenseWithDetails | null>(null);
 
   // Bill verification dialog state (for direct verification from the chip)
   const [verificationDialogOpen, setVerificationDialogOpen] = useState(false);
@@ -594,7 +600,7 @@ export default function MaterialSettlementsPage() {
                       )}
                     </TableCell>
                     <TableCell>
-                      <Box sx={{ display: "flex", gap: 0.5, flexWrap: "wrap" }}>
+                      <Box sx={{ display: "flex", gap: 0.5, alignItems: "center" }}>
                         {/* Pay Advance button for POs with advance payment timing */}
                         {isPO && !po!.advance_paid && canEdit && (
                           <Tooltip title="Record advance payment">
@@ -637,34 +643,23 @@ export default function MaterialSettlementsPage() {
                             </Button>
                           </Tooltip>
                         )}
-                        {/* Advance Paid indicator for POs */}
-                        {isPO && po!.advance_paid && (
-                          <Chip
-                            icon={<SettledIcon />}
-                            label="Advance Paid"
-                            size="small"
-                            color="success"
-                            variant="outlined"
-                          />
-                        )}
-                        {/* Vendor Paid indicator for group stock */}
-                        {isGroupStockParent && purchase!.is_paid && (
-                          <Chip
-                            icon={<SettledIcon />}
-                            label="Vendor Paid"
-                            size="small"
-                            color="success"
-                            variant="outlined"
-                          />
-                        )}
-                        {purchase && purchase.settlement_reference && !isGroupStockParent && (
-                          <Tooltip title="View Settlement">
-                            <IconButton size="small">
-                              <ViewIcon fontSize="small" />
+                        {/* Edit button for all purchase rows */}
+                        {canEdit && purchase && (
+                          <Tooltip title="Edit">
+                            <IconButton
+                              size="small"
+                              color="primary"
+                              onClick={() => {
+                                setEditingPurchase(purchase);
+                                setEditDialogOpen(true);
+                              }}
+                            >
+                              <EditIcon fontSize="small" />
                             </IconButton>
                           </Tooltip>
                         )}
-                        {canEdit && purchase && !purchase.settlement_reference && !isGroupStockParent && (
+                        {/* Delete button for all purchase rows */}
+                        {canEdit && purchase && (
                           <Tooltip title="Delete">
                             <IconButton
                               size="small"
@@ -740,6 +735,16 @@ export default function MaterialSettlementsPage() {
           setDeleteConfirmOpen(false);
           setSelectedPurchase(null);
         }}
+      />
+
+      {/* Edit Material Purchase Dialog */}
+      <EditMaterialPurchaseDialog
+        open={editDialogOpen}
+        onClose={() => {
+          setEditDialogOpen(false);
+          setEditingPurchase(null);
+        }}
+        purchase={editingPurchase}
       />
 
       {/* Settlement Dialog */}
