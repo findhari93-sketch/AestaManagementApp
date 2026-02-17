@@ -52,6 +52,7 @@ interface ContractPaymentHistoryDialogProps {
   open: boolean;
   onClose: () => void;
   onViewPayment?: (reference: string) => void;
+  onDataChange?: () => void;
 }
 
 // Settlement record type
@@ -264,6 +265,7 @@ export default function ContractPaymentHistoryDialog({
   open,
   onClose,
   onViewPayment,
+  onDataChange,
 }: ContractPaymentHistoryDialogProps) {
   const supabase = createClient();
   const { selectedSite } = useSite();
@@ -496,7 +498,8 @@ export default function ContractPaymentHistoryDialog({
 
   const handleDeleteSuccess = useCallback(() => {
     fetchSettlements();
-  }, [fetchSettlements]);
+    onDataChange?.();
+  }, [fetchSettlements, onDataChange]);
 
   const handleViewSettlement = (settlement: SettlementRecord) => {
     if (settlement.settlementReference && onViewPayment) {
@@ -977,6 +980,7 @@ export default function ContractPaymentHistoryDialog({
           setEditDialogOpen(false);
           setSettlementToEdit(null);
           fetchSettlements();
+          onDataChange?.();
         }}
       />
     </Dialog>

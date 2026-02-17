@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   Box,
   FormControl,
@@ -57,120 +57,135 @@ export default function SubcontractLinkSelector({
   }, []);
 
   // Fetch active subcontracts for the site
-  useEffect(() => {
-    const fetchSubcontracts = async () => {
-      if (!selectedSite?.id) return;
+  const fetchSubcontracts = useCallback(async () => {
+    if (!selectedSite?.id) return;
 
-      setLoading(true);
-      setError(null);
+    setLoading(true);
+    setError(null);
 
-      try {
-        // Fetch teams (optional - used only for display)
-        // Note: teams table is global, not site-specific
-        // Use shorter timeout since this is non-critical
-        const teamsMap = new Map<string, string>();
-        try {
-          const { data: teamsData } = await supabaseQueryWithTimeout(
-            supabase.from("teams").select("id, name"),
-            10000 // 10 second timeout for non-critical teams lookup
-          );
-          if (teamsData) {
-            teamsData.forEach((t: any) => teamsMap.set(t.id, t.name));
-          }
-        } catch {
-          // Teams lookup is optional, continue without it
-          console.log("Teams lookup skipped - will show without team names");
-        }
-
-        if (!isMountedRef.current) return;
-
-        const { data: subcontractsData, error: fetchError } = await supabaseQueryWithTimeout(
+    try {
+      // Run all queries in parallel: teams, subcontracts, and all payment data
+      const [teamsResult, subcontractsResult] = await Promise.all([
+        // Teams lookup (optional, non-critical)
+        supabaseQueryWithTimeout(
+          supabase.from("teams").select("id, name"),
+          15000
+        ),
+        // Subcontracts for this site
+        supabaseQueryWithTimeout(
           supabase
             .from("subcontracts")
-            .select(
-              `
-              id,
-              title,
-              total_value,
-              status,
-              team_id
-            `
-            )
+            .select("id, title, total_value, status, team_id")
             .eq("site_id", selectedSite.id)
             .in("status", ["active", "on_hold"])
-            .order("title")
-        );
+            .order("title"),
+          30000
+        ),
+      ]);
 
-        if (!isMountedRef.current) return;
-        if (fetchError) throw fetchError;
+      if (!isMountedRef.current) return;
 
-        // For each subcontract, calculate total paid from all sources
-        const subcontractsWithPayments: SubcontractOption[] = await Promise.all(
-          (subcontractsData || []).map(async (sc: any) => {
-            // Get sum of subcontract_payments
-            const { data: paymentsData } = await supabaseQueryWithTimeout(
-              supabase
-                .from("subcontract_payments")
-                .select("amount")
-                .eq("contract_id", sc.id)
-            );
-
-            const totalPaid =
-              paymentsData?.reduce((sum, p) => sum + (p.amount || 0), 0) || 0;
-
-            // Also get labor_payments linked to this subcontract
-            const { data: laborPaymentsData } = await supabaseQueryWithTimeout(
-              supabase
-                .from("labor_payments")
-                .select("amount")
-                .eq("subcontract_id", sc.id)
-            );
-
-            const laborPaid =
-              laborPaymentsData?.reduce((sum, p) => sum + (p.amount || 0), 0) ||
-              0;
-
-            // Also get expenses linked to this subcontract (via contract_id)
-            const { data: expensesData } = await supabaseQueryWithTimeout(
-              supabase
-                .from("expenses")
-                .select("amount")
-                .eq("contract_id", sc.id)
-            );
-
-            const expensesPaid =
-              expensesData?.reduce((sum, e) => sum + (e.amount || 0), 0) || 0;
-
-            const totalAllPaid = totalPaid + laborPaid + expensesPaid;
-
-            return {
-              id: sc.id,
-              title: sc.title,
-              totalValue: sc.total_value || 0,
-              totalPaid: totalAllPaid,
-              balanceDue: (sc.total_value || 0) - totalAllPaid,
-              status: sc.status,
-              teamName: sc.team_id ? teamsMap.get(sc.team_id) : undefined,
-            };
-          })
-        );
-
-        if (!isMountedRef.current) return;
-        setSubcontracts(subcontractsWithPayments);
-      } catch (err) {
-        if (!isMountedRef.current) return;
-        console.error("Error fetching subcontracts:", err);
-        setError("Failed to load subcontracts");
-      } finally {
-        if (isMountedRef.current) {
-          setLoading(false);
-        }
+      const teamsMap = new Map<string, string>();
+      if (teamsResult.data) {
+        teamsResult.data.forEach((t: any) => teamsMap.set(t.id, t.name));
       }
-    };
 
+      if (subcontractsResult.error) throw subcontractsResult.error;
+      const subcontractsData = subcontractsResult.data || [];
+
+      if (subcontractsData.length === 0) {
+        setSubcontracts([]);
+        return;
+      }
+
+      // Get all subcontract IDs for bulk queries
+      const scIds = subcontractsData.map((sc: any) => sc.id);
+
+      // Fetch ALL payment data in 3 bulk parallel queries instead of N*3 sequential
+      const [scPaymentsResult, laborPaymentsResult, expensesResult] =
+        await Promise.all([
+          supabaseQueryWithTimeout(
+            supabase
+              .from("subcontract_payments")
+              .select("contract_id, amount")
+              .in("contract_id", scIds),
+            30000
+          ),
+          supabaseQueryWithTimeout(
+            supabase
+              .from("labor_payments")
+              .select("subcontract_id, amount")
+              .in("subcontract_id", scIds),
+            30000
+          ),
+          supabaseQueryWithTimeout(
+            supabase
+              .from("expenses")
+              .select("contract_id, amount")
+              .in("contract_id", scIds),
+            30000
+          ),
+        ]);
+
+      if (!isMountedRef.current) return;
+
+      // Build payment totals per subcontract from bulk data
+      const scPaymentTotals = new Map<string, number>();
+      const laborPaymentTotals = new Map<string, number>();
+      const expenseTotals = new Map<string, number>();
+
+      (scPaymentsResult.data || []).forEach((p: any) => {
+        const current = scPaymentTotals.get(p.contract_id) || 0;
+        scPaymentTotals.set(p.contract_id, current + (p.amount || 0));
+      });
+
+      (laborPaymentsResult.data || []).forEach((p: any) => {
+        const current = laborPaymentTotals.get(p.subcontract_id) || 0;
+        laborPaymentTotals.set(p.subcontract_id, current + (p.amount || 0));
+      });
+
+      (expensesResult.data || []).forEach((e: any) => {
+        const current = expenseTotals.get(e.contract_id) || 0;
+        expenseTotals.set(e.contract_id, current + (e.amount || 0));
+      });
+
+      // Build final subcontract options
+      const subcontractsWithPayments: SubcontractOption[] = subcontractsData.map(
+        (sc: any) => {
+          const totalPaid =
+            (scPaymentTotals.get(sc.id) || 0) +
+            (laborPaymentTotals.get(sc.id) || 0) +
+            (expenseTotals.get(sc.id) || 0);
+
+          return {
+            id: sc.id,
+            title: sc.title,
+            totalValue: sc.total_value || 0,
+            totalPaid,
+            balanceDue: (sc.total_value || 0) - totalPaid,
+            status: sc.status,
+            teamName: sc.team_id ? teamsMap.get(sc.team_id) : undefined,
+          };
+        }
+      );
+
+      if (!isMountedRef.current) return;
+      setSubcontracts(subcontractsWithPayments);
+    } catch (err) {
+      if (!isMountedRef.current) return;
+      console.error("Error fetching subcontracts:", err);
+      setError("Failed to load subcontracts. Tap to retry.");
+    } finally {
+      if (isMountedRef.current) {
+        setLoading(false);
+      }
+    }
+  }, [selectedSite?.id, supabase]);
+
+  // Fetch on mount and when site changes
+  useEffect(() => {
     fetchSubcontracts();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedSite?.id]);
+  }, [fetchSubcontracts]);
 
   const selectedSubcontract = subcontracts.find(
     (sc) => sc.id === selectedSubcontractId
@@ -205,10 +220,14 @@ export default function SubcontractLinkSelector({
     );
   }
 
-  // Show error state
+  // Show error state with retry
   if (error) {
     return (
-      <Alert severity="error" sx={{ py: 0.5 }}>
+      <Alert
+        severity="error"
+        sx={{ py: 0.5, cursor: "pointer" }}
+        onClick={fetchSubcontracts}
+      >
         {error}
       </Alert>
     );

@@ -22,14 +22,12 @@ import {
   useTheme,
   alpha,
   Tooltip,
-  IconButton,
 } from "@mui/material";
 import {
   Refresh as RefreshIcon,
   Payment as PaymentIcon,
   History as HistoryIcon,
   Receipt as ReceiptIcon,
-  Edit as EditIcon,
 } from "@mui/icons-material";
 import { createClient } from "@/lib/supabase/client";
 import { useSite } from "@/contexts/SiteContext";
@@ -224,93 +222,125 @@ export default function ContractWeeklyPaymentsTab({
 
     try {
       const { fromDate, toDate } = dateRange;
+      const financialYearStart = "2025-04-01"; // FY 2025-26 start
 
-      // Fetch teams first (teams table is global, not site-specific)
-      const { data: teamsLookup, error: teamsLookupError } = await supabaseQueryWithTimeout(
-        supabase
-          .from("teams")
-          .select("id, name")
-      );
+      // Run all independent queries in parallel to avoid sequential timeout accumulation
+      const [
+        teamsLookupResult,
+        attendanceResult,
+        paymentsResult,
+        allocationsResult,
+        contractPaymentsResult,
+        subcontractsResult,
+        teamsFilterResult,
+      ] = await Promise.all([
+        // Teams lookup (global)
+        supabaseQueryWithTimeout(
+          supabase.from("teams").select("id, name"),
+          45000
+        ),
+        // Attendance (heavy query - 90s timeout)
+        supabaseQueryWithTimeout(
+          supabase
+            .from("daily_attendance")
+            .select(
+              `
+              id,
+              date,
+              laborer_id,
+              daily_earnings,
+              work_days,
+              is_paid,
+              payment_id,
+              subcontract_id,
+              laborers!inner(
+                id,
+                name,
+                laborer_type,
+                team_id,
+                labor_roles(name)
+              ),
+              subcontracts(id, title)
+            `
+            )
+            .eq("site_id", selectedSite.id)
+            .eq("laborers.laborer_type", "contract")
+            .gte("date", financialYearStart)
+            .order("date", { ascending: true }),
+          90000
+        ),
+        // Labor payments
+        supabaseQueryWithTimeout(
+          supabase
+            .from("labor_payments")
+            .select("*")
+            .eq("site_id", selectedSite.id)
+            .eq("is_under_contract", true),
+          45000
+        ),
+        // Payment week allocations
+        supabaseQueryWithTimeout<any[]>(
+          (supabase as any)
+            .from("payment_week_allocations")
+            .select("*")
+            .eq("site_id", selectedSite.id),
+          45000
+        ),
+        // Contract payment settlement IDs
+        supabaseQueryWithTimeout(
+          supabase
+            .from("labor_payments")
+            .select("settlement_group_id")
+            .eq("site_id", selectedSite.id)
+            .eq("is_under_contract", true)
+            .not("settlement_group_id", "is", null),
+          45000
+        ),
+        // Subcontracts (filter options)
+        supabaseQueryWithTimeout(
+          supabase
+            .from("subcontracts")
+            .select("id, title")
+            .eq("site_id", selectedSite.id)
+            .in("status", ["active", "on_hold"]),
+          45000
+        ),
+        // Teams (filter options, global)
+        supabaseQueryWithTimeout(
+          supabase
+            .from("teams")
+            .select("id, name")
+            .eq("status", "active"),
+          45000
+        ),
+      ]);
 
       if (!isMountedRef.current) return;
-      if (teamsLookupError) {
-        console.error("Error fetching teams lookup:", teamsLookupError);
-      }
+
+      // Extract results
+      const { data: teamsLookup, error: teamsLookupError } = teamsLookupResult;
+      const { data: allAttendanceData, error: allAttendanceError } = attendanceResult;
+      const { data: paymentsData, error: paymentsError } = paymentsResult;
+      const { data: allocationsData, error: allocationsError } = allocationsResult;
+      const { data: contractPaymentsForIds, error: contractPaymentsError } = contractPaymentsResult;
+      const { data: subcontractsData, error: subcontractsError } = subcontractsResult;
+      const { data: teamsData, error: teamsError } = teamsFilterResult;
+
+      if (teamsLookupError) console.error("Error fetching teams lookup:", teamsLookupError);
+      if (allAttendanceError) throw allAttendanceError;
+      if (paymentsError) console.error("Error fetching payments:", paymentsError);
+      if (allocationsError) console.error("Error fetching allocations:", allocationsError);
+      if (contractPaymentsError) console.error("Error fetching contract payments:", contractPaymentsError);
+      if (subcontractsError) console.error("Error fetching subcontracts:", subcontractsError);
+      if (teamsError) console.error("Error fetching teams:", teamsError);
 
       const teamsMap = new Map<string, string>();
       (teamsLookup || []).forEach((t: any) => teamsMap.set(t.id, t.name));
-
-      // Fetch contract laborers' attendance from financial year start
-      // Limited to current FY (April onwards) for performance while maintaining waterfall accuracy
-      // Using 60s timeout as this is a heavy query that can be slow with concurrent tabs
-      const financialYearStart = "2025-04-01"; // FY 2025-26 start
-      const { data: allAttendanceData, error: allAttendanceError } = await supabaseQueryWithTimeout(
-        supabase
-          .from("daily_attendance")
-          .select(
-            `
-            id,
-            date,
-            laborer_id,
-            daily_earnings,
-            work_days,
-            is_paid,
-            payment_id,
-            subcontract_id,
-            laborers!inner(
-              id,
-              name,
-              laborer_type,
-              team_id,
-              labor_roles(name)
-            ),
-            subcontracts(id, title)
-          `
-          )
-          .eq("site_id", selectedSite.id)
-          .eq("laborers.laborer_type", "contract")
-          .gte("date", financialYearStart)
-          .order("date", { ascending: true }),
-        60000 // 60 second timeout for heavy query
-      );
-
-      if (!isMountedRef.current) return;
-      if (allAttendanceError) {
-        throw allAttendanceError;
-      }
 
       // Filter attendance for display (within date range)
       const attendanceData = (allAttendanceData || []).filter((att: any) => {
         return att.date >= fromDate && att.date <= toDate;
       });
-
-      // Fetch labor payments
-      const { data: paymentsData, error: paymentsError } = await supabaseQueryWithTimeout(
-        supabase
-          .from("labor_payments")
-          .select("*")
-          .eq("site_id", selectedSite.id)
-          .eq("is_under_contract", true)
-      );
-
-      if (!isMountedRef.current) return;
-      if (paymentsError) {
-        console.error("Error fetching payments:", paymentsError);
-      }
-
-      // Fetch payment week allocations
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data: allocationsData, error: allocationsError } = await supabaseQueryWithTimeout<any[]>(
-        (supabase as any)
-          .from("payment_week_allocations")
-          .select("*")
-          .eq("site_id", selectedSite.id)
-      );
-
-      if (!isMountedRef.current) return;
-      if (allocationsError) {
-        console.error("Error fetching allocations:", allocationsError);
-      }
 
       // Group by laborer
       const laborerMap = new Map<
@@ -563,22 +593,7 @@ export default function ContractWeeklyPaymentsTab({
         });
       });
 
-      // Step 1: Get settlement_group_ids that have contract labor_payments
-      // This ensures we only include settlements with contract laborers (is_under_contract = true)
-      const { data: contractPaymentsForIds, error: contractPaymentsError } = await supabaseQueryWithTimeout(
-        supabase
-          .from("labor_payments")
-          .select("settlement_group_id")
-          .eq("site_id", selectedSite.id)
-          .eq("is_under_contract", true)
-          .not("settlement_group_id", "is", null)
-      );
-
-      if (!isMountedRef.current) return;
-      if (contractPaymentsError) {
-        console.error("Error fetching contract payments:", contractPaymentsError);
-      }
-
+      // contractPaymentsForIds was already fetched in parallel above
       const contractSettlementIds =
         contractPaymentsForIds && contractPaymentsForIds.length > 0
           ? [
@@ -608,31 +623,33 @@ export default function ContractWeeklyPaymentsTab({
       let sgError: any = null;
 
       if (contractSettlementIds.length > 0) {
-        // Query salary settlements by IDs
-        const { data: salaryData, error: salaryError } = await supabaseQueryWithTimeout<any[]>(
-          sgQuery.in("id", contractSettlementIds)
-        );
+        // Query salary settlements and advance/other/excess in parallel
+        const [salaryResult, otherResult] = await Promise.all([
+          supabaseQueryWithTimeout<any[]>(
+            sgQuery.in("id", contractSettlementIds),
+            45000
+          ),
+          supabaseQueryWithTimeout<any[]>(
+            (supabase as any)
+              .from("settlement_groups")
+              .select("id, settlement_reference, settlement_date, total_amount, week_allocations, payment_type")
+              .eq("site_id", selectedSite.id)
+              .eq("is_cancelled", false)
+              .in("payment_type", ["advance", "other", "excess"]),
+            45000
+          ),
+        ]);
 
-        if (salaryError) {
-          sgError = salaryError;
+        if (salaryResult.error) {
+          sgError = salaryResult.error;
         } else {
-          sgData = salaryData || [];
+          sgData = salaryResult.data || [];
         }
 
-        // Query advance/other/excess settlements separately
-        const { data: otherData, error: otherError } = await supabaseQueryWithTimeout<any[]>(
-          (supabase as any)
-            .from("settlement_groups")
-            .select("id, settlement_reference, settlement_date, total_amount, week_allocations, payment_type")
-            .eq("site_id", selectedSite.id)
-            .eq("is_cancelled", false)
-            .in("payment_type", ["advance", "other", "excess"])
-        );
-
-        if (!otherError && otherData) {
+        if (!otherResult.error && otherResult.data) {
           // Merge results, avoiding duplicates
           const existingIds = new Set(sgData.map((s: any) => s.id));
-          otherData.forEach((s: any) => {
+          otherResult.data.forEach((s: any) => {
             if (!existingIds.has(s.id)) {
               sgData.push(s);
             }
@@ -641,7 +658,8 @@ export default function ContractWeeklyPaymentsTab({
       } else {
         // No salary settlements, just fetch advances/other/excess
         const { data: otherData, error: otherError } = await supabaseQueryWithTimeout<any[]>(
-          sgQuery.in("payment_type", ["advance", "other", "excess"])
+          sgQuery.in("payment_type", ["advance", "other", "excess"]),
+          45000
         );
         sgData = otherData || [];
         sgError = otherError;
@@ -803,33 +821,7 @@ export default function ContractWeeklyPaymentsTab({
         }
       });
 
-      // Fetch filter options
-      const { data: subcontractsData, error: subcontractsError } = await supabaseQueryWithTimeout(
-        supabase
-          .from("subcontracts")
-          .select("id, title")
-          .eq("site_id", selectedSite.id)
-          .in("status", ["active", "on_hold"])
-      );
-
-      if (!isMountedRef.current) return;
-      if (subcontractsError) {
-        console.error("Error fetching subcontracts:", subcontractsError);
-      }
-
-      // Note: teams table is global, not site-specific
-      const { data: teamsData, error: teamsError } = await supabaseQueryWithTimeout(
-        supabase
-          .from("teams")
-          .select("id, name")
-          .eq("status", "active")
-      );
-
-      if (!isMountedRef.current) return;
-      if (teamsError) {
-        console.error("Error fetching teams:", teamsError);
-      }
-
+      // subcontractsData and teamsData were already fetched in parallel above
       // Update all state together (only if still mounted)
       setTotalAdvancesGiven(advanceTotal);
       setAdvanceRecordCount(advanceSettlementCount);
@@ -1210,37 +1202,6 @@ export default function ContractWeeklyPaymentsTab({
           );
         },
       },
-      {
-        id: "actions",
-        header: "Actions",
-        size: 80,
-        Cell: ({ row }) => {
-          const refs = row.original.settlementReferences;
-          const hasPayments = refs && refs.length > 0;
-
-          if (!hasPayments || !canEdit) {
-            return null;
-          }
-
-          return (
-            <Box sx={{ display: "flex", gap: 0.5 }}>
-              <Tooltip title="Edit/Delete settlements">
-                <IconButton
-                  size="small"
-                  color="info"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setSelectedWeekForDetails(row.original);
-                    setWeekDetailsDialogOpen(true);
-                  }}
-                >
-                  <EditIcon fontSize="small" />
-                </IconButton>
-              </Tooltip>
-            </Box>
-          );
-        },
-      },
     ],
     []
   );
@@ -1463,6 +1424,7 @@ export default function ContractWeeklyPaymentsTab({
         open={historyDialogOpen}
         onClose={() => setHistoryDialogOpen(false)}
         onViewPayment={handleViewReference}
+        onDataChange={handlePaymentSuccess}
       />
 
       {/* Payment Ref Dialog - For PAY-* references */}

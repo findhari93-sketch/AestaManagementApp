@@ -39,16 +39,16 @@ type UploadStatus =
 
 // Upload configuration constants
 const UPLOAD_CONSTANTS = {
-  // Global timeout safety net (2 minutes)
-  GLOBAL_TIMEOUT: 120000,
+  // Global timeout safety net (3 minutes)
+  GLOBAL_TIMEOUT: 180000,
 
-  // Dynamic per-attempt timeout: min 15s, +5s per 100KB
-  MIN_ATTEMPT_TIMEOUT: 15000,
+  // Dynamic per-attempt timeout: min 30s, +5s per 100KB
+  MIN_ATTEMPT_TIMEOUT: 30000,
   TIMEOUT_PER_100KB: 5000,
 
   // Retry configuration
-  MAX_RETRIES: 1, // Total 2 attempts (1 initial + 1 retry) - fail fast
-  INITIAL_RETRY_DELAY: 500, // 500ms base delay (reduced from 1s)
+  MAX_RETRIES: 2, // Total 3 attempts (1 initial + 2 retries)
+  INITIAL_RETRY_DELAY: 1000, // 1s base delay
 } as const;
 
 // Calculate dynamic timeout based on file size
@@ -185,15 +185,14 @@ const sanitizeFilename = (filename: string): string => {
   return sanitized + ext;
 };
 
-// Image compression utility with timeout
+// Image compression utility using createObjectURL (fast, no base64 encoding)
 const compressImage = (
   file: File,
   maxSizeKB: number = 200,
   maxWidth: number = 1280,
   maxHeight: number = 1280,
-  quality: number = 0.7
 ): Promise<File> => {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     const effectiveMime = getEffectiveMimeType(file);
 
     // Skip compression for non-image files
@@ -203,114 +202,130 @@ const compressImage = (
     }
 
     // Skip HEIC/HEIF - browser Canvas API can't process these (except Safari)
-    // These formats will be uploaded as-is
     if (effectiveMime === 'image/heic' || effectiveMime === 'image/heif') {
-      console.log('Skipping compression for HEIC/HEIF - not supported in browser');
+      console.log('[Compress] Skipping HEIC/HEIF - not supported in browser');
       resolve(file);
       return;
     }
 
-    // Skip if already very small (under 50KB - no point compressing further)
-    if (file.size <= 50 * 1024) {
+    // Skip if already small enough
+    if (file.size <= maxSizeKB * 1024) {
       resolve(file);
       return;
     }
 
-    // Add timeout to prevent hanging (reduced to 5 seconds)
+    let resolved = false;
+    const safeResolve = (result: File) => {
+      if (resolved) return;
+      resolved = true;
+      resolve(result);
+    };
+
+    // Global timeout - if compression takes more than 8s, skip and upload original
     const timeout = setTimeout(() => {
-      console.warn("Image compression timed out, using original file");
-      resolve(file);
-    }, 5000); // 5 second timeout
+      console.warn("[Compress] Timed out after 8s, uploading original file");
+      safeResolve(file);
+    }, 8000);
 
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = (event) => {
-      const img = new Image();
-      img.crossOrigin = "anonymous"; // Help with CORS issues
-      img.src = event.target?.result as string;
-      img.onload = () => {
-        try {
-          // Calculate new dimensions while maintaining aspect ratio
-          let { width, height } = img;
+    // Use createObjectURL instead of readAsDataURL (instant, no base64 encoding overhead)
+    const objectUrl = URL.createObjectURL(file);
+    const img = new Image();
 
-          if (width > maxWidth) {
-            height = Math.round((height * maxWidth) / width);
-            width = maxWidth;
-          }
-          if (height > maxHeight) {
-            width = Math.round((width * maxHeight) / height);
-            height = maxHeight;
-          }
+    img.onload = () => {
+      try {
+        // Calculate new dimensions maintaining aspect ratio
+        let { width, height } = img;
 
-          // Ensure minimum dimensions
-          width = Math.max(1, width);
-          height = Math.max(1, height);
+        if (width > maxWidth) {
+          height = Math.round((height * maxWidth) / width);
+          width = maxWidth;
+        }
+        if (height > maxHeight) {
+          width = Math.round((width * maxHeight) / height);
+          height = maxHeight;
+        }
+        width = Math.max(1, width);
+        height = Math.max(1, height);
 
-          // Create canvas and draw image
-          const canvas = document.createElement("canvas");
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext("2d");
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
 
-          if (!ctx) {
-            clearTimeout(timeout);
-            console.warn("Failed to get canvas context, using original file");
-            resolve(file);
-            return;
-          }
+        if (!ctx) {
+          clearTimeout(timeout);
+          URL.revokeObjectURL(objectUrl);
+          console.warn("[Compress] No canvas context, using original");
+          safeResolve(file);
+          return;
+        }
 
-          ctx.drawImage(img, 0, 0, width, height);
+        ctx.drawImage(img, 0, 0, width, height);
+        URL.revokeObjectURL(objectUrl);
 
-          // Determine output type - always use JPEG for better compression
-          const outputType = file.type === "image/png" ? "image/png" : "image/jpeg";
+        // Output as JPEG for best compression (PNG only if input is PNG)
+        const outputType = effectiveMime === "image/png" ? "image/png" : "image/jpeg";
+        const sanitizedName = sanitizeFilename(file.name);
 
-          // Convert to blob with compression
+        // Try quality levels in a single pass: 0.6 → 0.4 → 0.2
+        const tryQualities = [0.6, 0.4, 0.2];
+        let qualityIndex = 0;
+
+        const tryCompress = () => {
+          if (resolved) return;
+          const quality = tryQualities[qualityIndex];
+
           canvas.toBlob(
             (blob) => {
-              clearTimeout(timeout);
+              if (resolved) return;
 
               if (!blob) {
-                console.warn("Failed to create blob, using original file");
-                resolve(file);
+                clearTimeout(timeout);
+                console.warn("[Compress] toBlob failed, using original");
+                safeResolve(file);
                 return;
               }
 
-              // Sanitize filename and create new file
-              const sanitizedName = sanitizeFilename(file.name);
               const compressedFile = new File([blob], sanitizedName, {
                 type: outputType,
                 lastModified: Date.now(),
               });
 
-              // If still too large, try with lower quality
-              if (compressedFile.size > maxSizeKB * 1024 && quality > 0.3) {
-                compressImage(file, maxSizeKB, maxWidth, maxHeight, quality - 0.1)
-                  .then(resolve)
-                  .catch(() => resolve(file)); // On error, use original
+              console.log(
+                `[Compress] quality=${quality}: ${formatFileSize(file.size)} → ${formatFileSize(compressedFile.size)}`
+              );
+
+              // Accept if small enough or we've tried all qualities
+              if (compressedFile.size <= maxSizeKB * 1024 || qualityIndex >= tryQualities.length - 1) {
+                clearTimeout(timeout);
+                safeResolve(compressedFile);
               } else {
-                resolve(compressedFile);
+                qualityIndex++;
+                tryCompress();
               }
             },
             outputType,
             quality
           );
-        } catch (err) {
-          clearTimeout(timeout);
-          console.warn("Error during compression, using original file:", err);
-          resolve(file);
-        }
-      };
-      img.onerror = () => {
+        };
+
+        tryCompress();
+      } catch (err) {
         clearTimeout(timeout);
-        console.warn("Failed to load image for compression, using original file");
-        resolve(file); // Don't reject, just use original
-      };
+        URL.revokeObjectURL(objectUrl);
+        console.warn("[Compress] Error:", err);
+        safeResolve(file);
+      }
     };
-    reader.onerror = () => {
+
+    img.onerror = () => {
       clearTimeout(timeout);
-      console.warn("Failed to read file for compression, using original file");
-      resolve(file); // Don't reject, just use original
+      URL.revokeObjectURL(objectUrl);
+      console.warn("[Compress] Image load failed, using original");
+      safeResolve(file);
     };
+
+    img.src = objectUrl;
   });
 };
 

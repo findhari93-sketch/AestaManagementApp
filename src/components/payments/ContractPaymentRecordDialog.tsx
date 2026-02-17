@@ -668,6 +668,7 @@ export default function ContractPaymentRecordDialog({
             Link to Subcontract
           </Typography>
           <SubcontractLinkSelector
+            key={open ? "open" : "closed"}
             selectedSubcontractId={subcontractId}
             onSelect={setSubcontractId}
             paymentAmount={amount}
