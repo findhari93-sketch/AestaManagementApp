@@ -1,4 +1,5 @@
 import type { ExtendedStockInventory } from "@/hooks/queries/useStockInventory";
+import type { GroupStockBatch } from "@/types/material.types";
 
 /**
  * Represents a single batch allocation from FIFO distribution.
@@ -34,7 +35,7 @@ export interface BatchAllocation {
  * Represents a consolidated material grouping multiple batches.
  */
 export interface ConsolidatedStockItem {
-  /** Composite key: material_id */
+  /** Composite key: material_id (or material_id__brand_id when grouped by brand) */
   key: string;
   material_id: string;
   material_name: string;
@@ -176,13 +177,16 @@ export function allocateFIFO(
  * Groups multiple batch rows into single consolidated items.
  */
 export function consolidateStock(
-  stock: ExtendedStockInventory[]
+  stock: ExtendedStockInventory[],
+  groupByBrand: boolean = false
 ): ConsolidatedStockItem[] {
   const map = new Map<string, ConsolidatedStockItem>();
 
   for (const item of stock) {
-    // Group by material_id only — all brands of the same material consolidate
-    const key = item.material_id;
+    // Group by material_id only, or material_id + brand_id when splitting by brand
+    const key = groupByBrand
+      ? `${item.material_id}__${item.brand_id || "no-brand"}`
+      : item.material_id;
 
     if (!map.has(key)) {
       map.set(key, {
@@ -260,4 +264,183 @@ export function consolidateStock(
   }
 
   return Array.from(map.values());
+}
+
+// ============================================
+// GROUP STOCK BATCH FIFO ALLOCATION
+// ============================================
+
+/**
+ * Represents a single FIFO allocation from a group stock batch.
+ */
+export interface GroupStockBatchAllocation {
+  batch_ref_code: string;
+  material_name: string;
+  brand_name: string | null;
+  unit: string;
+  quantity: number;
+  unit_cost: number;
+  total_cost: number;
+  remaining_after: number;
+  will_complete: boolean;
+  purchase_date: string;
+  paying_site_name: string | null;
+  paying_site_id: string | null;
+}
+
+/**
+ * Represents a consolidated material from group stock batches.
+ */
+export interface ConsolidatedGroupStockMaterial {
+  material_id: string;
+  material_name: string;
+  material_code: string | null;
+  brand_names: string[];
+  unit: string;
+  total_remaining: number;
+  batch_count: number;
+  weighted_avg_cost: number;
+  total_value: number;
+}
+
+/**
+ * Consolidates group stock batches by material for the usage dialog.
+ * Groups multiple batches of the same material into a single summary.
+ */
+export function consolidateGroupStockByMaterial(
+  batches: GroupStockBatch[]
+): ConsolidatedGroupStockMaterial[] {
+  const map = new Map<string, ConsolidatedGroupStockMaterial>();
+
+  for (const batch of batches) {
+    const remainingQty = batch.remaining_quantity ?? 0;
+    if (remainingQty <= 0) continue;
+
+    for (const item of batch.items) {
+      const key = item.material_id;
+      // Proportional remaining for this item
+      const totalBatchQty = batch.original_quantity ?? 0;
+      const itemProportion = totalBatchQty > 0 ? item.quantity / totalBatchQty : 0;
+      const itemRemaining = remainingQty * itemProportion;
+
+      if (itemRemaining <= 0) continue;
+
+      // Handle both flat (GroupStockBatch type) and nested (raw Supabase) formats
+      const materialName = item.material_name || (item as any).material?.name || "Unknown";
+      const materialCode = item.material_code ?? (item as any).material?.code ?? null;
+      const brandName = item.brand_name || (item as any).brand?.brand_name || null;
+      const unit = item.unit || (item as any).material?.unit || "piece";
+
+      if (!map.has(key)) {
+        map.set(key, {
+          material_id: item.material_id,
+          material_name: materialName,
+          material_code: materialCode,
+          brand_names: [],
+          unit,
+          total_remaining: 0,
+          batch_count: 0,
+          weighted_avg_cost: 0,
+          total_value: 0,
+        });
+      }
+
+      const consolidated = map.get(key)!;
+      if (brandName && !consolidated.brand_names.includes(brandName)) {
+        consolidated.brand_names.push(brandName);
+      }
+      consolidated.total_remaining += itemRemaining;
+      consolidated.batch_count += 1;
+      consolidated.total_value += item.unit_price * itemRemaining;
+    }
+  }
+
+  // Finalize weighted averages
+  for (const item of map.values()) {
+    item.weighted_avg_cost =
+      item.total_remaining > 0
+        ? Math.round((item.total_value / item.total_remaining) * 100) / 100
+        : 0;
+  }
+
+  return Array.from(map.values());
+}
+
+/**
+ * Allocates a requested quantity across group stock batches using FIFO.
+ * Batches are sorted by purchase_date ascending (oldest first).
+ *
+ * Uses batch-level remaining_quantity (not per-item) since each batch
+ * can contain only one material type for group stock.
+ */
+export function allocateGroupStockFIFO(
+  batches: GroupStockBatch[],
+  materialId: string,
+  requestedQty: number
+): GroupStockBatchAllocation[] {
+  if (requestedQty <= 0) {
+    throw new Error("Quantity must be greater than 0");
+  }
+
+  // Filter to batches containing this material with remaining quantity
+  const eligible = batches.filter((b) => {
+    if ((b.remaining_quantity ?? 0) <= 0) return false;
+    if (b.status === "completed" || b.status === "converted") return false;
+    return b.items.some((item) => item.material_id === materialId);
+  });
+
+  // Sort by purchase_date ascending (oldest first)
+  const sorted = [...eligible].sort((a, b) =>
+    (a.purchase_date || "").localeCompare(b.purchase_date || "")
+  );
+
+  const totalAvailable = sorted.reduce(
+    (sum, b) => sum + (b.remaining_quantity ?? 0),
+    0
+  );
+
+  if (requestedQty > totalAvailable) {
+    throw new Error(
+      `Insufficient stock. Available: ${totalAvailable}, Requested: ${requestedQty}`
+    );
+  }
+
+  const allocations: GroupStockBatchAllocation[] = [];
+  let remaining = requestedQty;
+
+  for (const batch of sorted) {
+    if (remaining <= 0) break;
+
+    const available = batch.remaining_quantity ?? 0;
+    if (available <= 0) continue;
+
+    const qty = Math.min(remaining, available);
+    const remainingAfter = available - qty;
+
+    // Get unit cost from batch item (handle both flat and nested formats)
+    const batchItem = batch.items.find((i) => i.material_id === materialId);
+    const unitCost = batchItem?.unit_price ?? 0;
+    const itemMaterialName = batchItem?.material_name || (batchItem as any)?.material?.name || "Unknown";
+    const itemBrandName = batchItem?.brand_name || (batchItem as any)?.brand?.brand_name || null;
+    const itemUnit = batchItem?.unit || (batchItem as any)?.material?.unit || "piece";
+
+    allocations.push({
+      batch_ref_code: batch.ref_code,
+      material_name: itemMaterialName,
+      brand_name: itemBrandName,
+      unit: itemUnit,
+      quantity: qty,
+      unit_cost: unitCost,
+      total_cost: Math.round(unitCost * qty * 100) / 100,
+      remaining_after: remainingAfter,
+      will_complete: remainingAfter <= 0,
+      purchase_date: batch.purchase_date,
+      paying_site_name: batch.payment_source_site_name ?? batch.paying_site?.name ?? null,
+      paying_site_id: batch.payment_source_site_id ?? null,
+    });
+
+    remaining -= qty;
+  }
+
+  return allocations;
 }

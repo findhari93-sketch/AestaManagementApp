@@ -7,6 +7,7 @@ import {
   Chip,
   Paper,
   Skeleton,
+  Tooltip,
   Typography,
 } from '@mui/material'
 import {
@@ -14,6 +15,7 @@ import {
   CheckCircle as CheckCircleIcon,
   AccountBalance as SettlementIcon,
   CompareArrows as CompareArrowsIcon,
+  Warning as WarningIcon,
 } from '@mui/icons-material'
 import { formatCurrency } from '@/lib/formatters'
 import type { InterSiteBalance, InterSiteSettlementWithDetails } from '@/types/material.types'
@@ -247,6 +249,20 @@ export default function SettlementLedger({
                   {formatCurrency(balance.total_amount_owed)}
                 </Typography>
 
+                {/* Vendor unpaid warning */}
+                {balance.has_unpaid_vendor && (
+                  <Tooltip title="Creditor site has not yet settled with the vendor. Vendor payment should be completed in Material Settlements before generating inter-site settlement.">
+                    <Chip
+                      icon={<WarningIcon sx={{ fontSize: 14 }} />}
+                      label="Vendor Unpaid"
+                      size="small"
+                      color="error"
+                      variant="outlined"
+                      sx={{ fontSize: '0.7rem', height: 22 }}
+                    />
+                  </Tooltip>
+                )}
+
                 {/* Unsettled badge */}
                 <Chip
                   label="Unsettled"
@@ -257,15 +273,19 @@ export default function SettlementLedger({
                 />
 
                 {/* Action */}
-                <Button
-                  size="small"
-                  variant="outlined"
-                  onClick={() => onGenerateSettlement(balance)}
-                  disabled={generatePending}
-                  sx={{ minWidth: 'auto', px: 1.5 }}
-                >
-                  Generate
-                </Button>
+                <Tooltip title={balance.has_unpaid_vendor ? "Vendor must be paid first. Go to Material Settlements to mark vendor as paid." : ""}>
+                  <span>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      onClick={() => onGenerateSettlement(balance)}
+                      disabled={generatePending || !!balance.has_unpaid_vendor}
+                      sx={{ minWidth: 'auto', px: 1.5 }}
+                    >
+                      Generate
+                    </Button>
+                  </span>
+                </Tooltip>
               </Box>
             )
           })}
@@ -310,21 +330,35 @@ export default function SettlementLedger({
                   variant={isCreditor ? 'filled' : 'outlined'}
                 />
 
-                {/* Amount */}
-                <Typography
-                  variant="body2"
-                  fontWeight={700}
-                  sx={{ ml: 'auto' }}
-                  color={isCreditor ? 'success.main' : isDebtor ? 'error.main' : 'text.primary'}
+                {/* Amount - show remaining (pending) amount, not total */}
+                <Tooltip
+                  title={
+                    (settlement.paid_amount || 0) > 0
+                      ? `Total: ${formatCurrency(settlement.total_amount)} | Paid: ${formatCurrency(settlement.paid_amount || 0)} | Remaining: ${formatCurrency(settlement.total_amount - (settlement.paid_amount || 0))}`
+                      : `Total: ${formatCurrency(settlement.total_amount)}`
+                  }
                 >
-                  {formatCurrency(settlement.total_amount)}
-                </Typography>
+                  <Typography
+                    variant="body2"
+                    fontWeight={700}
+                    sx={{ ml: 'auto' }}
+                    color={isCreditor ? 'success.main' : isDebtor ? 'error.main' : 'text.primary'}
+                  >
+                    {formatCurrency(settlement.total_amount - (settlement.paid_amount || 0))}
+                  </Typography>
+                </Tooltip>
 
-                {/* Status badge */}
+                {/* Status badge - show Partially Paid when offset has been applied */}
                 <Chip
-                  label={settlement.status === 'pending' ? 'Pending' : 'Approved'}
+                  label={
+                    settlement.status === 'pending' && (settlement.paid_amount || 0) > 0
+                      ? 'Partially Paid'
+                      : settlement.status === 'pending'
+                        ? 'Pending'
+                        : 'Approved'
+                  }
                   size="small"
-                  color="info"
+                  color={settlement.status === 'pending' && (settlement.paid_amount || 0) > 0 ? 'warning' : 'info'}
                   variant="outlined"
                   sx={{ fontSize: '0.7rem', height: 22 }}
                 />

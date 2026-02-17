@@ -1,6 +1,6 @@
 "use client";
 
-import { QueryClient } from "@tanstack/react-query";
+import { QueryClient, QueryCache } from "@tanstack/react-query";
 import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
 import { useState, useEffect, useRef } from "react";
 import { createIDBPersister } from "@/lib/cache/persistor";
@@ -8,7 +8,7 @@ import { shouldPersistQuery } from "@/lib/cache/keys";
 import { initBackgroundSync, stopBackgroundSync } from "@/lib/cache/sync";
 import { useSite } from "@/contexts/SiteContext";
 import { useTab } from "@/providers/TabProvider";
-import { SessionExpiredError } from "@/lib/supabase/client";
+import { SessionExpiredError, createClient } from "@/lib/supabase/client";
 
 /**
  * Checks if an error is a session/auth related error that should redirect to login.
@@ -52,70 +52,175 @@ function redirectToLogin(): void {
   }
 }
 
+// Module-level dedup flag for token refresh from QueryCache.onError
+let _isRefreshingToken = false;
+let _refreshTokenPromise: Promise<boolean> | null = null;
+
 export default function QueryProvider({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const [queryClient] = useState(
-    () =>
-      new QueryClient({
-        defaultOptions: {
-          queries: {
-            staleTime: 5 * 60 * 1000, // 5 minutes - data considered fresh (increased to reduce refetches)
-            gcTime: 30 * 60 * 1000, // 30 minutes - cache garbage collection
-            retry: (failureCount, error: any) => {
-              // Don't retry on 400 Bad Request - these are programming errors
-              if (error?.status === 400 || error?.message?.includes("400")) {
-                console.error("[QueryClient] 400 Bad Request - not retrying:", error);
+  const [queryClient] = useState(() => {
+    // Late-binding ref so QueryCache.onError can reference the QueryClient
+    const clientRef: { current: QueryClient | null } = { current: null };
+
+    // Global query error handler: catches auth errors from ANY query,
+    // refreshes the session, and retries the specific failed query.
+    // This is the TanStack Query v5 replacement for defaultOptions.queries.onError.
+    const queryCache = new QueryCache({
+      onError: async (error: any, query) => {
+        if (!isSessionError(error)) return;
+
+        console.warn(
+          "[QueryCache] Auth error on query:",
+          JSON.stringify(query.queryKey).substring(0, 100),
+          "- attempting session refresh"
+        );
+
+        // Deduplicate: if a refresh is already in progress, wait for it
+        if (!_isRefreshingToken) {
+          _isRefreshingToken = true;
+          _refreshTokenPromise = (async () => {
+            try {
+              const supabase = createClient();
+              const { error: refreshError } =
+                await supabase.auth.refreshSession();
+              if (refreshError) {
+                console.error(
+                  "[QueryCache] Session refresh failed:",
+                  refreshError
+                );
+                // Permanent failure - redirect to login
+                const msg = refreshError.message?.toLowerCase() || "";
+                if (
+                  msg.includes("invalid refresh token") ||
+                  msg.includes("refresh token not found") ||
+                  msg.includes("expired")
+                ) {
+                  redirectToLogin();
+                }
                 return false;
               }
-              // Don't retry on 401/403 - auth issues
-              if (error?.status === 401 || error?.status === 403) {
-                return false;
+              console.log(
+                "[QueryCache] Session refreshed successfully after query auth error"
+              );
+              return true;
+            } catch (err) {
+              console.error("[QueryCache] Session refresh threw:", err);
+              return false;
+            } finally {
+              _isRefreshingToken = false;
+              _refreshTokenPromise = null;
+            }
+          })();
+        }
+
+        const refreshed = await _refreshTokenPromise;
+
+        if (refreshed && clientRef.current) {
+          // Re-trigger just this failed query after token is ready
+          setTimeout(() => {
+            clientRef.current!.invalidateQueries({
+              queryKey: query.queryKey,
+              refetchType: "active",
+            });
+          }, 500);
+        }
+      },
+    });
+
+    const client = new QueryClient({
+      queryCache,
+      defaultOptions: {
+        queries: {
+          staleTime: 5 * 60 * 1000, // 5 minutes - data considered fresh (increased to reduce refetches)
+          gcTime: 30 * 60 * 1000, // 30 minutes - cache garbage collection
+          retry: (failureCount, error: any) => {
+            // Don't retry on 400 Bad Request - these are programming errors
+            if (error?.status === 400 || error?.message?.includes("400")) {
+              console.error(
+                "[QueryClient] 400 Bad Request - not retrying:",
+                error
+              );
+              return false;
+            }
+            // Allow ONE retry on 401/403 - session may have been refreshed
+            // by SessionManager's idle-recovery or QueryCache.onError handler.
+            // If retry also fails, QueryCache.onError handles the final attempt.
+            if (error?.status === 401 || error?.status === 403) {
+              if (failureCount < 1) {
+                console.warn(
+                  "[QueryClient] Auth error - will retry once after delay"
+                );
+                return true;
               }
-              return failureCount < 3;
-            },
-            retryDelay: (attemptIndex) =>
-              Math.min(1000 * 2 ** attemptIndex, 30000), // Exponential backoff
-            // Smart window focus refetch: only refetch if data is older than default staleTime
-            // This prevents refetch cascade on tab focus while still refreshing stale data
-            refetchOnWindowFocus: (query) => {
-              const age = Date.now() - (query.state.dataUpdatedAt || 0);
-              const defaultStaleTime = 5 * 60 * 1000; // 5 minutes
-              return age > defaultStaleTime;
-            },
-            refetchOnReconnect: true, // Refetch when network reconnects
-            refetchOnMount: true, // Refetch if data is stale
-            networkMode: "online", // Online mode to prevent showing stale data from wrong site
+              return false;
+            }
+            return failureCount < 3;
           },
-          mutations: {
-            retry: (failureCount, error: any) => {
-              // Don't retry on client errors (4xx) - these won't succeed on retry
-              // 400 = Bad Request (invalid data)
-              // 401/403 = Auth issues
-              // 409 = Conflict (unique constraint violation, already exists)
-              // 422 = Validation error
-              const status = error?.status || error?.code;
-              if (status === 400 || status === 401 || status === 403 || status === 409 || status === 422) {
-                console.warn(`[QueryClient] Mutation failed with ${status} - not retrying`);
-                return false;
-              }
-              // Only retry server errors (5xx) and network errors once
-              return failureCount < 1;
-            },
-            networkMode: "online",
-            onError: (error) => {
-              // Redirect to login on session/auth errors
-              if (isSessionError(error)) {
-                console.warn("[QueryClient] Session error detected, redirecting to login");
-                redirectToLogin();
-              }
-            },
+          retryDelay: (attemptIndex, error: any) => {
+            // For auth errors, use a longer delay to allow session refresh to complete
+            if (error?.status === 401 || error?.status === 403) {
+              return 2000; // 2 seconds - enough time for token refresh
+            }
+            return Math.min(1000 * 2 ** attemptIndex, 30000); // Exponential backoff
+          },
+          // Smart window focus refetch: only refetch if data is older than default staleTime
+          // This prevents refetch cascade on tab focus while still refreshing stale data
+          refetchOnWindowFocus: (query) => {
+            const age = Date.now() - (query.state.dataUpdatedAt || 0);
+            const defaultStaleTime = 5 * 60 * 1000; // 5 minutes
+            return age > defaultStaleTime;
+          },
+          refetchOnReconnect: true, // Refetch when network reconnects
+          refetchOnMount: true, // Refetch if data is stale
+          // "always" mode - queries execute regardless of navigator.onLine status.
+          // Previous "online" mode caused queries to silently pause after browser sleep/idle
+          // when navigator.onLine transiently returned false. Site-switching stale data
+          // prevention is handled by SyncInitializer's cache clearing logic below.
+          networkMode: "always",
+        },
+        mutations: {
+          retry: (failureCount, error: any) => {
+            // Don't retry on client errors (4xx) - these won't succeed on retry
+            // 400 = Bad Request (invalid data)
+            // 401/403 = Auth issues
+            // 409 = Conflict (unique constraint violation, already exists)
+            // 422 = Validation error
+            const status = error?.status || error?.code;
+            if (
+              status === 400 ||
+              status === 401 ||
+              status === 403 ||
+              status === 409 ||
+              status === 422
+            ) {
+              console.warn(
+                `[QueryClient] Mutation failed with ${status} - not retrying`
+              );
+              return false;
+            }
+            // Only retry server errors (5xx) and network errors once
+            return failureCount < 1;
+          },
+          networkMode: "always",
+          onError: (error) => {
+            // Redirect to login on session/auth errors
+            if (isSessionError(error)) {
+              console.warn(
+                "[QueryClient] Session error detected, redirecting to login"
+              );
+              redirectToLogin();
+            }
           },
         },
-      })
-  );
+      },
+    });
+
+    clientRef.current = client;
+    return client;
+  });
 
   const [persister] = useState(() => createIDBPersister());
 
@@ -147,6 +252,7 @@ export default function QueryProvider({
       }}
     >
       <SyncInitializer queryClient={queryClient} />
+      <IdleRecoveryHandler queryClient={queryClient} />
       {children}
     </PersistQueryClientProvider>
   );
@@ -156,7 +262,13 @@ export default function QueryProvider({
  * Queries that should be preserved across site changes
  * (user profile, auth, sites list, etc.)
  */
-const PRESERVED_QUERY_PREFIXES = ["user", "auth", "sites", "profile", "notifications"];
+const PRESERVED_QUERY_PREFIXES = [
+  "user",
+  "auth",
+  "sites",
+  "profile",
+  "notifications",
+];
 
 /**
  * Component to initialize background sync
@@ -181,7 +293,9 @@ function SyncInitializer({ queryClient }: { queryClient: QueryClient }) {
     // Only clear when switching from one valid site to another (not on initial load)
     // This prevents stale data from appearing when navigating between sites
     if (currentSiteId && previousSiteId && previousSiteId !== currentSiteId) {
-      console.log(`Site changed from ${previousSiteId} to ${currentSiteId}, clearing site-specific cache`);
+      console.log(
+        `Site changed from ${previousSiteId} to ${currentSiteId}, clearing site-specific cache`
+      );
 
       // Cancel any in-flight queries first
       queryClient.cancelQueries();
@@ -197,7 +311,11 @@ function SyncInitializer({ queryClient }: { queryClient: QueryClient }) {
           const firstKey = String(queryKey[0]);
 
           // Keep preserved queries (user profile, auth, sites list)
-          if (PRESERVED_QUERY_PREFIXES.some(prefix => firstKey.startsWith(prefix))) {
+          if (
+            PRESERVED_QUERY_PREFIXES.some((prefix) =>
+              firstKey.startsWith(prefix)
+            )
+          ) {
             return false;
           }
 
@@ -214,7 +332,9 @@ function SyncInitializer({ queryClient }: { queryClient: QueryClient }) {
             return false;
           }
           const firstKey = String(queryKey[0]);
-          return !PRESERVED_QUERY_PREFIXES.some(prefix => firstKey.startsWith(prefix));
+          return !PRESERVED_QUERY_PREFIXES.some((prefix) =>
+            firstKey.startsWith(prefix)
+          );
         },
       });
     }
@@ -226,13 +346,51 @@ function SyncInitializer({ queryClient }: { queryClient: QueryClient }) {
     // The sync module will handle leader/follower behavior internally
     initBackgroundSync(queryClient, currentSiteId);
 
-    console.log(`[SyncInitializer] Initialized - isLeader: ${isLeader}, siteId: ${currentSiteId}`);
+    console.log(
+      `[SyncInitializer] Initialized - isLeader: ${isLeader}, siteId: ${currentSiteId}`
+    );
 
     // Cleanup on unmount
     return () => {
       stopBackgroundSync();
     };
   }, [queryClient, selectedSite?.id, isTabReady, isLeader]);
+
+  return null;
+}
+
+/**
+ * Listens for session restoration after idle periods.
+ * When SessionManager detects wake-from-idle and successfully refreshes the token,
+ * it dispatches a "session-restored-after-idle" event. This component catches it
+ * and invalidates all active queries so they refetch with the fresh token.
+ */
+function IdleRecoveryHandler({ queryClient }: { queryClient: QueryClient }) {
+  useEffect(() => {
+    const handleSessionRestored = () => {
+      console.log(
+        "[IdleRecoveryHandler] Session restored after idle - invalidating active queries"
+      );
+      // Delay to ensure the refreshed JWT has propagated to the Supabase client singleton
+      setTimeout(() => {
+        queryClient.invalidateQueries({
+          refetchType: "active", // Only refetch queries currently being observed by components
+        });
+      }, 1000);
+    };
+
+    window.addEventListener(
+      "session-restored-after-idle",
+      handleSessionRestored
+    );
+
+    return () => {
+      window.removeEventListener(
+        "session-restored-after-idle",
+        handleSessionRestored
+      );
+    };
+  }, [queryClient]);
 
   return null;
 }

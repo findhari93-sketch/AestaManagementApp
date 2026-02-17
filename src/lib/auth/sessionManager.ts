@@ -20,7 +20,8 @@ const PROACTIVE_REFRESH_INTERVAL = 10 * 60 * 1000; // 10 minutes - check if refr
 const EXPIRY_BUFFER = 15 * 60; // 15 minutes in seconds - refresh if token expires within this time
 const ACTIVITY_DEBOUNCE = 2000; // 2 seconds
 const SESSION_CHECK_DEBOUNCE = 5000; // 5 seconds - skip session check if done recently
-const SESSION_CHECK_TIMEOUT = 8000; // 8 seconds - balanced timeout (was 15s)
+const SESSION_CHECK_TIMEOUT = 8000; // 8 seconds - normal timeout
+const SESSION_CHECK_TIMEOUT_POST_IDLE = 15000; // 15 seconds - longer timeout after idle (cold connection)
 
 type SessionManagerState = {
   isInitialized: boolean;
@@ -149,16 +150,44 @@ class SessionManager {
    *
    * Includes debouncing: if called multiple times within 5 seconds (e.g., batch
    * upserts), only the first call actually checks the session.
+   *
+   * After idle periods (15+ min), forces a token refresh instead of just
+   * checking the cached session, since the token may have expired.
    */
   async ensureFreshSession(): Promise<void> {
-    // Skip if we just checked the session recently (within 5 seconds)
     const now = Date.now();
-    if (now - this.state.lastSessionCheckTime < SESSION_CHECK_DEBOUNCE) {
+    const wasIdle = this.isUserIdle();
+
+    // If waking from idle, skip debounce - always do a fresh check
+    if (!wasIdle && now - this.state.lastSessionCheckTime < SESSION_CHECK_DEBOUNCE) {
       return; // Session was verified recently, skip check
+    }
+
+    // Use longer timeout after idle (cold connections need more time)
+    const timeout = wasIdle ? SESSION_CHECK_TIMEOUT_POST_IDLE : SESSION_CHECK_TIMEOUT;
+
+    if (wasIdle) {
+      console.log("[SessionManager] Waking from idle - forcing session refresh");
+      // Update activity so subsequent checks know we're active
+      this.state.lastActivity = Date.now();
     }
 
     const sessionCheckPromise = async (): Promise<void> => {
       const supabase = createClient();
+
+      // After idle: force a full token refresh (not just cached getSession)
+      if (wasIdle) {
+        const { error: refreshError } = await supabase.auth.refreshSession();
+        if (refreshError) {
+          console.error("[SessionManager] Post-idle refresh failed:", refreshError);
+          throw new Error("Session expired. Please log in again.");
+        }
+        console.log("[SessionManager] Post-idle session refresh successful");
+        this.state.lastSessionCheckTime = Date.now();
+        return;
+      }
+
+      // Normal flow: check cached session first
       const { data: { session }, error } = await supabase.auth.getSession();
 
       if (error) {
@@ -194,14 +223,13 @@ class SessionManager {
     // If session is truly expired, Supabase will return 401/403
     const timeoutPromise = new Promise<void>((resolve) => {
       setTimeout(() => {
-        console.warn("[SessionManager] ensureFreshSession check slow - proceeding anyway");
-        this.state.lastSessionCheckTime = Date.now(); // Still mark as checked to avoid repeated timeouts
-        resolve(); // Resolve instead of reject - let mutation proceed
-      }, SESSION_CHECK_TIMEOUT);
+        console.warn(`[SessionManager] ensureFreshSession check slow (${timeout / 1000}s) - proceeding anyway`);
+        this.state.lastSessionCheckTime = Date.now();
+        resolve();
+      }, timeout);
     });
 
     // Race: first to complete wins
-    // If timeout wins, we proceed without error (mutation will fail at Supabase if session invalid)
     await Promise.race([sessionCheckPromise(), timeoutPromise]);
   }
 
@@ -287,8 +315,24 @@ class SessionManager {
       clearTimeout(this.state.activityTimer);
     }
 
+    // Check if waking from idle BEFORE updating lastActivity
+    const wasIdle = this.isUserIdle();
+
     this.state.activityTimer = setTimeout(() => {
       this.state.lastActivity = Date.now();
+
+      // Proactively refresh session on wake from idle
+      // This runs in the background so it's ready by the time user does an upload/mutation
+      if (wasIdle) {
+        console.log("[SessionManager] Activity detected after idle - pre-refreshing session");
+        this.refreshSession().then((success) => {
+          if (success) {
+            this.dispatchSessionRestoredEvent();
+          }
+        }).catch(() => {
+          // Non-critical - ensureFreshSession will handle it if needed
+        });
+      }
     }, ACTIVITY_DEBOUNCE);
   };
 
@@ -299,6 +343,13 @@ class SessionManager {
           detail: { error: errorMessage },
         })
       );
+    }
+  }
+
+  private dispatchSessionRestoredEvent(): void {
+    if (typeof window !== "undefined") {
+      console.log("[SessionManager] Dispatching session-restored-after-idle event");
+      window.dispatchEvent(new CustomEvent("session-restored-after-idle"));
     }
   }
 }

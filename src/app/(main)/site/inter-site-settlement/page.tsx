@@ -8,6 +8,7 @@ import {
   Alert,
   Tabs,
   Tab,
+  Snackbar,
 } from '@mui/material'
 import {
   Inventory as BatchesIcon,
@@ -40,6 +41,7 @@ import EditGroupStockTransactionDialog from '@/components/materials/EditGroupSto
 import InitiateBatchSettlementDialog from '@/components/materials/InitiateBatchSettlementDialog'
 import RecordInterSitePaymentDialog from '@/components/materials/RecordInterSitePaymentDialog'
 import BatchCompletionDialog from '@/components/materials/BatchCompletionDialog'
+import GroupStockUsageDialog from '@/components/materials/GroupStockUsageDialog'
 import ConfirmDialog from '@/components/common/ConfirmDialog'
 import SettlementSummaryCards from '@/components/materials/SettlementSummaryCards'
 import SettlementLedger from '@/components/materials/SettlementLedger'
@@ -105,9 +107,16 @@ export default function InterSiteSettlementPage() {
   const [deleteUnsettledBalance, setDeleteUnsettledBalance] = useState<InterSiteBalance | null>(null)
   const [deleteUnsettledConfirmOpen, setDeleteUnsettledConfirmOpen] = useState(false)
 
+  // Group stock usage dialog states
+  const [groupUsageDialogOpen, setGroupUsageDialogOpen] = useState(false)
+  const [preSelectedMaterialId, setPreSelectedMaterialId] = useState<string | null>(null)
+
   // Net settlement dialog states
   const [netSettleDialogOpen, setNetSettleDialogOpen] = useState(false)
   const [netSettlePair, setNetSettlePair] = useState<{ balanceA: InterSiteBalance; balanceB: InterSiteBalance } | null>(null)
+
+  // Snackbar for error messages
+  const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: 'error' | 'warning' | 'success' | 'info' }>({ open: false, message: '', severity: 'error' })
 
   // Data hooks
   const { data: groupMembership, isLoading: membershipLoading } = useSiteGroupMembership(
@@ -234,7 +243,21 @@ export default function InterSiteSettlementPage() {
         year: balance.year,
         weekNumber: balance.week_number,
       })
-    } catch (error) {
+    } catch (error: any) {
+      const errorMessage = error?.message || 'Failed to generate settlement'
+      if (errorMessage.startsWith('VENDOR_UNPAID:')) {
+        setSnackbar({
+          open: true,
+          message: errorMessage.replace('VENDOR_UNPAID:', ''),
+          severity: 'warning',
+        })
+      } else {
+        setSnackbar({
+          open: true,
+          message: errorMessage,
+          severity: 'error',
+        })
+      }
       console.error('Failed to generate settlement:', error)
     }
   }
@@ -308,6 +331,11 @@ export default function InterSiteSettlementPage() {
     } catch (error) {
       console.error('Failed to delete unsettled balance:', error)
     }
+  }
+
+  const handleRecordGroupUsage = (materialId?: string) => {
+    setPreSelectedMaterialId(materialId ?? null)
+    setGroupUsageDialogOpen(true)
   }
 
   const handleNetSettle = (balanceA: InterSiteBalance, balanceB: InterSiteBalance) => {
@@ -397,6 +425,7 @@ export default function InterSiteSettlementPage() {
             onViewTransaction={handleViewTransaction}
             onEditTransaction={handleEditTransaction}
             onDeleteTransaction={handleDeleteTransaction}
+            onRecordGroupUsage={handleRecordGroupUsage}
           />
         </TabPanel>
 
@@ -596,6 +625,19 @@ export default function InterSiteSettlementPage() {
         onComplete={handleConfirmBatchCompletion}
       />
 
+      {selectedSite?.id && (
+        <GroupStockUsageDialog
+          open={groupUsageDialogOpen}
+          onClose={() => {
+            setGroupUsageDialogOpen(false)
+            setPreSelectedMaterialId(null)
+          }}
+          siteId={selectedSite.id}
+          batchesWithUsage={batchesWithUsage}
+          preSelectedMaterialId={preSelectedMaterialId}
+        />
+      )}
+
       {netSettlePair && groupMembership?.groupId && (
         <NetSettlementDialog
           open={netSettleDialogOpen}
@@ -610,8 +652,30 @@ export default function InterSiteSettlementPage() {
             setNetSettleDialogOpen(false)
             setNetSettlePair(null)
           }}
+          debtorSiteId={
+            netSettlePair.balanceA.total_amount_owed > netSettlePair.balanceB.total_amount_owed
+              ? netSettlePair.balanceA.debtor_site_id
+              : netSettlePair.balanceB.debtor_site_id
+          }
         />
       )}
+
+      {/* Error/Warning Snackbar */}
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={8000}
+        onClose={() => setSnackbar(prev => ({ ...prev, open: false }))}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert
+          onClose={() => setSnackbar(prev => ({ ...prev, open: false }))}
+          severity={snackbar.severity}
+          variant="filled"
+          sx={{ width: '100%' }}
+        >
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </Box>
   )
 }

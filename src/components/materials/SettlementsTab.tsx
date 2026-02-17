@@ -24,6 +24,7 @@ import {
   Delete as DeleteIcon,
   Visibility as ViewIcon,
   AccountBalance as SettlementIcon,
+  Warning as WarningIcon,
 } from '@mui/icons-material'
 import { formatCurrency, formatDate } from '@/lib/formatters'
 import { SETTLEMENT_STATUS_COLORS, SETTLEMENT_STATUS_LABELS } from '@/types/material.types'
@@ -149,8 +150,19 @@ export default function SettlementsTab({
 
   const getStatusChip = (row: UnifiedRow) => {
     switch (row.status) {
-      case 'unsettled':
-        return <Chip label="Unsettled" size="small" color="warning" />
+      case 'unsettled': {
+        const balance = row.raw as InterSiteBalance
+        return (
+          <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center' }}>
+            <Chip label="Unsettled" size="small" color="warning" />
+            {balance.has_unpaid_vendor && (
+              <Tooltip title="Vendor not yet paid by creditor site">
+                <Chip icon={<WarningIcon sx={{ fontSize: 14 }} />} label="Vendor Unpaid" size="small" color="error" variant="outlined" sx={{ fontSize: '0.7rem', height: 22 }} />
+              </Tooltip>
+            )}
+          </Box>
+        )
+      }
       case 'in_progress':
         return <Chip label={SETTLEMENT_STATUS_LABELS[(row.raw as InterSiteSettlementWithDetails).status]} size="small" color={SETTLEMENT_STATUS_COLORS[(row.raw as InterSiteSettlementWithDetails).status]} />
       case 'settled':
@@ -166,15 +178,24 @@ export default function SettlementsTab({
     if (row.type === 'unsettled') {
       const balance = row.raw as InterSiteBalance
       return (
-        <Box sx={{ display: 'flex', gap: 0.5, justifyContent: 'center' }}>
-          <Button
-            size="small"
-            variant="outlined"
-            onClick={() => onGenerateSettlement(balance)}
-            disabled={generatePending}
-          >
-            Generate
-          </Button>
+        <Box sx={{ display: 'flex', gap: 0.5, justifyContent: 'center', alignItems: 'center' }}>
+          {balance.has_unpaid_vendor && (
+            <Tooltip title="Vendor must be paid first in Material Settlements">
+              <WarningIcon fontSize="small" color="error" />
+            </Tooltip>
+          )}
+          <Tooltip title={balance.has_unpaid_vendor ? "Vendor must be paid first. Go to Material Settlements to mark vendor as paid." : ""}>
+            <span>
+              <Button
+                size="small"
+                variant="outlined"
+                onClick={() => onGenerateSettlement(balance)}
+                disabled={generatePending || !!balance.has_unpaid_vendor}
+              >
+                Generate
+              </Button>
+            </span>
+          </Tooltip>
           {canEdit && (
             <Tooltip title="Delete Usage Records">
               <IconButton

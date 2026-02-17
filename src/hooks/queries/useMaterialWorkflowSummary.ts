@@ -95,14 +95,18 @@ export function useMaterialWorkflowSummary(
     };
 
     // Material settlements (vendor payments) - pending = no settlement_reference
+    // Exclude group_stock batches — they're settled via inter-site settlement, not vendor settlement
+    const ownSiteExpenses = expensesData?.expenses?.filter(
+      (e) => e.purchase_type !== "group_stock"
+    ) ?? [];
     const settlements = {
-      pending: expensesData?.expenses?.filter(
+      pending: ownSiteExpenses.filter(
         (e) => !e.settlement_reference
-      ).length ?? 0,
-      settled: expensesData?.expenses?.filter(
+      ).length,
+      settled: ownSiteExpenses.filter(
         (e) => !!e.settlement_reference
-      ).length ?? 0,
-      total: expensesData?.expenses?.length ?? 0,
+      ).length,
+      total: ownSiteExpenses.length,
     };
 
     const interSite = {

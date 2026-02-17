@@ -25,11 +25,11 @@ import {
   Block as BlockIcon,
 } from "@mui/icons-material";
 import { formatCurrency, formatDate } from "@/lib/formatters";
-import type { DailyMaterialUsageWithDetails } from "@/types/material.types";
+import type { GroupedUsageRecord } from "@/types/material.types";
 
 interface UsageDeleteConfirmDialogProps {
   open: boolean;
-  usageRecord: DailyMaterialUsageWithDetails | null;
+  usageRecord: GroupedUsageRecord | null;
   onClose: () => void;
   onConfirm: () => void;
   isDeleting: boolean;
@@ -99,8 +99,13 @@ export default function UsageDeleteConfirmDialog({
                 Quantity
               </Typography>
               <Typography variant="body2" fontWeight={600} color="error.main">
-                {usageRecord.quantity} {unit}
+                {usageRecord.total_quantity} {unit}
               </Typography>
+              {usageRecord.is_grouped && (
+                <Typography variant="caption" color="text.secondary">
+                  ({usageRecord.child_count} batch allocations)
+                </Typography>
+              )}
             </Box>
             <Box>
               <Typography variant="caption" color="text.secondary">
@@ -144,6 +149,17 @@ export default function UsageDeleteConfirmDialog({
           </Alert>
         ) : (
           <>
+            {/* Grouped record warning */}
+            {usageRecord.is_grouped && (
+              <Alert severity="warning" sx={{ mb: 2 }}>
+                <Typography variant="body2" fontWeight={500}>
+                  This will delete all {usageRecord.child_count} batch allocations
+                  totaling {usageRecord.total_quantity} {unit} and restore the
+                  quantities to their respective inventory batches.
+                </Typography>
+              </Alert>
+            )}
+
             {/* Impact List */}
             <Typography variant="subtitle2" fontWeight={600} sx={{ mb: 1 }}>
               This will:
@@ -159,7 +175,7 @@ export default function UsageDeleteConfirmDialog({
                     <Typography variant="body2" component="span">
                       Restore{" "}
                       <Chip
-                        label={`+${usageRecord.quantity} ${unit}`}
+                        label={`+${usageRecord.total_quantity} ${unit}`}
                         size="small"
                         color="success"
                         sx={{ height: 20 }}

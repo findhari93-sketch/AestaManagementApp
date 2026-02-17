@@ -30,10 +30,15 @@ export async function updateSession(request: NextRequest) {
     },
   });
 
-  // Refresh session if expired
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // Refresh session if expired - wrapped in try/catch to prevent 500 errors
+  // when Supabase is temporarily unreachable
+  let user = null;
+  try {
+    const { data } = await supabase.auth.getUser();
+    user = data.user;
+  } catch {
+    // Supabase unreachable - treat as unauthenticated
+  }
 
   // Protected routes - allow access to login and debug pages without authentication
   const isPublicRoute =

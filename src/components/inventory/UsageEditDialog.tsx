@@ -17,14 +17,13 @@ import {
 import {
   Edit as EditIcon,
   Block as BlockIcon,
-  Warning as WarningIcon,
 } from "@mui/icons-material";
 import { formatCurrency, formatDate } from "@/lib/formatters";
-import type { DailyMaterialUsageWithDetails } from "@/types/material.types";
+import type { GroupedUsageRecord } from "@/types/material.types";
 
 interface UsageEditDialogProps {
   open: boolean;
-  usageRecord: DailyMaterialUsageWithDetails | null;
+  usageRecord: GroupedUsageRecord | null;
   currentStockQty: number;
   onClose: () => void;
   onSave: (data: { quantity: number; work_description: string }) => void;
@@ -50,7 +49,7 @@ export default function UsageEditDialog({
   // Initialize form when dialog opens
   useEffect(() => {
     if (open && usageRecord) {
-      setQuantity(usageRecord.quantity);
+      setQuantity(usageRecord.total_quantity);
       setWorkDescription(usageRecord.work_description || "");
       setError(null);
     }
@@ -62,16 +61,19 @@ export default function UsageEditDialog({
     (usageRecord.material as { name?: string })?.name || usageRecord.material_id;
   const brandName = (usageRecord.brand as { brand_name?: string })?.brand_name;
   const unit = (usageRecord.material as { unit?: string })?.unit || "nos";
-  const unitCost = usageRecord.unit_cost || 0;
+  const unitCost = usageRecord.representative.unit_cost || 0;
+
+  // For grouped records, quantity editing is disabled
+  const isQuantityDisabled = usageRecord.is_grouped;
 
   // Calculate available stock for validation
-  // If increasing quantity, we need enough stock
-  const originalQuantity = usageRecord.quantity;
+  const originalQuantity = usageRecord.total_quantity;
   const quantityDelta = quantity - originalQuantity;
   const availableForIncrease = currentStockQty;
 
   // Validate quantity
   const validateQuantity = () => {
+    if (isQuantityDisabled) return null; // Skip validation for grouped records
     if (quantity <= 0) {
       return "Quantity must be greater than 0";
     }
@@ -82,7 +84,8 @@ export default function UsageEditDialog({
   };
 
   const validationError = validateQuantity();
-  const hasChanges = quantity !== originalQuantity || workDescription !== (usageRecord.work_description || "");
+  const hasChanges = (!isQuantityDisabled && quantity !== originalQuantity) ||
+    workDescription !== (usageRecord.work_description || "");
 
   const handleSave = () => {
     const err = validateQuantity();
@@ -94,7 +97,7 @@ export default function UsageEditDialog({
   };
 
   // Calculate new total cost
-  const newTotalCost = quantity * unitCost;
+  const newTotalCost = isQuantityDisabled ? usageRecord.total_cost : quantity * unitCost;
 
   return (
     <Dialog
@@ -145,18 +148,23 @@ export default function UsageEditDialog({
             </Box>
             <Box>
               <Typography variant="caption" color="text.secondary">
-                Unit Cost
+                Total Quantity
               </Typography>
               <Typography variant="body2">
-                {formatCurrency(unitCost)} / {unit}
+                {usageRecord.total_quantity} {unit}
+                {usageRecord.is_grouped && (
+                  <Typography variant="caption" color="text.secondary" component="span" sx={{ ml: 0.5 }}>
+                    ({usageRecord.child_count} batches)
+                  </Typography>
+                )}
               </Typography>
             </Box>
             <Box>
               <Typography variant="caption" color="text.secondary">
-                Current Stock
+                Total Cost
               </Typography>
               <Typography variant="body2">
-                {currentStockQty} {unit}
+                {formatCurrency(usageRecord.total_cost || 0)}
               </Typography>
             </Box>
           </Box>
@@ -189,21 +197,32 @@ export default function UsageEditDialog({
               </Alert>
             )}
 
+            {/* Grouped record info */}
+            {usageRecord.is_grouped && (
+              <Alert severity="info" sx={{ mb: 2 }}>
+                <Typography variant="body2">
+                  Quantity cannot be changed for multi-batch usage. Delete and re-record to change quantity.
+                </Typography>
+              </Alert>
+            )}
+
             {/* Editable Fields */}
             <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-              <TextField
-                label={`Quantity (${unit})`}
-                type="number"
-                value={quantity}
-                onChange={(e) => {
-                  setQuantity(Number(e.target.value));
-                  setError(null);
-                }}
-                error={!!validationError}
-                helperText={validationError || `Original: ${originalQuantity} ${unit}`}
-                fullWidth
-                inputProps={{ min: 0.001, step: 0.001 }}
-              />
+              {!isQuantityDisabled && (
+                <TextField
+                  label={`Quantity (${unit})`}
+                  type="number"
+                  value={quantity}
+                  onChange={(e) => {
+                    setQuantity(Number(e.target.value));
+                    setError(null);
+                  }}
+                  error={!!validationError}
+                  helperText={validationError || `Original: ${originalQuantity} ${unit}`}
+                  fullWidth
+                  inputProps={{ min: 0.001, step: 0.001 }}
+                />
+              )}
 
               <TextField
                 label="Work Description"
@@ -222,7 +241,7 @@ export default function UsageEditDialog({
                 <Typography variant="subtitle2" fontWeight={600} sx={{ mb: 1 }}>
                   Changes:
                 </Typography>
-                {quantity !== originalQuantity && (
+                {!isQuantityDisabled && quantity !== originalQuantity && (
                   <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.5 }}>
                     <Typography variant="body2">Quantity:</Typography>
                     <Chip
@@ -237,17 +256,19 @@ export default function UsageEditDialog({
                     )}
                   </Box>
                 )}
-                <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                  <Typography variant="body2">New Total Cost:</Typography>
-                  <Typography variant="body2" fontWeight={600}>
-                    {formatCurrency(newTotalCost)}
-                  </Typography>
-                  {newTotalCost !== (usageRecord.total_cost || 0) && (
-                    <Typography variant="caption" color="text.secondary">
-                      (was {formatCurrency(usageRecord.total_cost || 0)})
+                {!isQuantityDisabled && (
+                  <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                    <Typography variant="body2">New Total Cost:</Typography>
+                    <Typography variant="body2" fontWeight={600}>
+                      {formatCurrency(newTotalCost || 0)}
                     </Typography>
-                  )}
-                </Box>
+                    {(newTotalCost || 0) !== (usageRecord.total_cost || 0) && (
+                      <Typography variant="caption" color="text.secondary">
+                        (was {formatCurrency(usageRecord.total_cost || 0)})
+                      </Typography>
+                    )}
+                  </Box>
+                )}
               </Box>
             )}
 

@@ -494,14 +494,57 @@ export function useUpdatePurchaseOrder() {
           delivery_address: data.delivery_address,
           delivery_location_id: data.delivery_location_id,
           payment_terms: data.payment_terms,
+          payment_timing: data.payment_timing,
           transport_cost: data.transport_cost ?? undefined,
           notes: data.notes,
           vendor_bill_url: data.vendor_bill_url ?? undefined,
+          internal_notes: data.internal_notes || null,
           updated_at: new Date().toISOString(),
         })
         .eq("id", id)
         .select()
         .single();
+
+      // If an expense record exists for this PO, update it to match new group stock settings
+      if (data.internal_notes !== undefined) {
+        let parsedNotes: { is_group_stock?: boolean; site_group_id?: string; payment_source_site_id?: string } | null = null;
+        try {
+          parsedNotes = data.internal_notes
+            ? typeof data.internal_notes === "string" ? JSON.parse(data.internal_notes) : data.internal_notes
+            : null;
+        } catch { /* ignore */ }
+
+        const isGroupStock = parsedNotes?.is_group_stock === true;
+
+        const { data: existingExpense } = await supabase
+          .from("material_purchase_expenses")
+          .select("id, purchase_type")
+          .eq("purchase_order_id", id)
+          .maybeSingle();
+
+        if (existingExpense) {
+          // Fetch PO items for quantity calculation
+          const { data: poItems } = await supabase
+            .from("purchase_order_items")
+            .select("quantity")
+            .eq("po_id", id);
+          const totalQuantity = (poItems || []).reduce(
+            (sum: number, item: any) => sum + Number(item.quantity || 0), 0
+          );
+
+          await supabase
+            .from("material_purchase_expenses")
+            .update({
+              purchase_type: isGroupStock ? "group_stock" : "own_site",
+              site_group_id: isGroupStock ? (parsedNotes?.site_group_id || null) : null,
+              paying_site_id: isGroupStock ? (parsedNotes?.payment_source_site_id || result.site_id) : null,
+              original_qty: isGroupStock ? totalQuantity : null,
+              remaining_qty: isGroupStock ? totalQuantity : null,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", existingExpense.id);
+        }
+      }
 
       if (error) throw error;
       return result as PurchaseOrder;
@@ -985,371 +1028,42 @@ export function usePODeletionImpact(poId: string | undefined) {
 
 /**
  * Delete a purchase order with full cascade (includes group stock cleanup)
- * This enhanced version also cleans up:
+ * This enhanced version uses an atomic server-side RPC function that handles:
  * - batch usage records, settlements, and derived expenses (for group stock)
  * - stock_inventory and stock_transactions (for site stock)
+ * - ALL linked records in a single atomic transaction
  */
 export function useDeletePurchaseOrderCascade() {
   const queryClient = useQueryClient();
   const supabase = createClient() as any;
 
   return useMutation({
-    retry: false, // Not idempotent - cascade deletes multiple records
+    retry: false, // Cascade delete is not idempotent
     mutationFn: async ({ id, siteId }: { id: string; siteId: string }) => {
-      // Ensure fresh session before mutation
       await ensureFreshSession();
 
-      // First, get material purchase expenses to find batch ref_code
-      const { data: materialExpenses } = await (supabase as any)
-        .from("material_purchase_expenses")
-        .select("id, ref_code, purchase_type")
-        .eq("purchase_order_id", id);
+      console.log("[useDeletePurchaseOrderCascade] Starting atomic cascade delete for PO:", id);
 
-      // Get all deliveries and their items for stock cleanup
-      const { data: stockDeliveries } = await supabase
-        .from("deliveries")
-        .select("id")
-        .eq("po_id", id);
+      // Use atomic RPC function instead of 30+ sequential queries
+      const { data, error } = await supabase.rpc("cascade_delete_purchase_order", {
+        p_po_id: id,
+        p_site_id: siteId,
+      });
 
-      // Clean up stock inventory records linked to this PO's deliveries
-      if (stockDeliveries && stockDeliveries.length > 0) {
-        const stockDeliveryIds = stockDeliveries.map((d: any) => d.id);
-
-        // Get delivery items to find materials that need stock cleanup
-        const { data: deliveryItems } = await supabase
-          .from("delivery_items")
-          .select("material_id, brand_id")
-          .in("delivery_id", stockDeliveryIds);
-
-        if (deliveryItems && deliveryItems.length > 0) {
-          // Get unique material/brand combinations
-          const materialBrandPairs = new Map<string, { material_id: string; brand_id: string | null }>();
-          for (const item of deliveryItems) {
-            const key = `${item.material_id}-${item.brand_id || "null"}`;
-            materialBrandPairs.set(key, {
-              material_id: item.material_id,
-              brand_id: item.brand_id,
-            });
-          }
-
-          // Delete stock inventory and transactions for each material
-          for (const { material_id, brand_id } of materialBrandPairs.values()) {
-            // Find stock inventory records
-            let stockQuery = supabase
-              .from("stock_inventory")
-              .select("id")
-              .eq("site_id", siteId)
-              .eq("material_id", material_id);
-
-            if (brand_id) {
-              stockQuery = stockQuery.eq("brand_id", brand_id);
-            } else {
-              stockQuery = stockQuery.is("brand_id", null);
-            }
-
-            const { data: stockRecords } = await stockQuery;
-
-            if (stockRecords && stockRecords.length > 0) {
-              const stockIds = stockRecords.map((s: any) => s.id);
-
-              // Delete stock transactions first (FK constraint)
-              const { error: txError } = await supabase
-                .from("stock_transactions")
-                .delete()
-                .in("inventory_id", stockIds);
-
-              if (txError) {
-                console.warn("Warning: Could not delete stock_transactions:", txError);
-              }
-
-              // Delete daily_material_usage records linked to this material/site
-              const { error: usageError } = await supabase
-                .from("daily_material_usage")
-                .delete()
-                .eq("site_id", siteId)
-                .eq("material_id", material_id);
-
-              if (usageError) {
-                console.warn("Warning: Could not delete daily_material_usage:", usageError);
-              }
-
-              // Delete stock inventory records
-              const { error: stockError } = await supabase
-                .from("stock_inventory")
-                .delete()
-                .in("id", stockIds);
-
-              if (stockError) {
-                console.warn("Warning: Could not delete stock_inventory:", stockError);
-              } else {
-                console.log(`[useDeletePurchaseOrderCascade] Cleaned up stock for material ${material_id}`);
-              }
-            }
-          }
-        }
+      if (error) {
+        console.error("[useDeletePurchaseOrderCascade] RPC error:", error);
+        throw error;
       }
 
-      // Find group stock batch if exists
-      const groupStockExpense = materialExpenses?.find(
-        (e: { purchase_type: string }) => e.purchase_type === "group_stock"
-      );
-      const batchRefCode = groupStockExpense?.ref_code || null;
-
-      // If this is a group stock batch, clean up ALL related records
-      if (batchRefCode) {
-        console.log("[useDeletePurchaseOrderCascade] Deleting batch cascade:", batchRefCode);
-
-        // Step 0: Get inventory IDs for this batch (usage transactions may link via inventory_id)
-        const { data: inventoryRecords } = await (supabase as any)
-          .from("group_stock_inventory")
-          .select("id")
-          .eq("batch_code", batchRefCode);
-
-        const inventoryIds = (inventoryRecords || []).map((inv: { id: string }) => inv.id);
-        console.log("[useDeletePurchaseOrderCascade] Found inventory records:", inventoryIds.length);
-
-        // Step 1: Get settlement IDs and transaction IDs for proper FK deletion order
-        const { data: settlements } = await (supabase as any)
-          .from("inter_site_material_settlements")
-          .select("id")
-          .eq("batch_ref_code", batchRefCode);
-
-        const settlementIds = (settlements || []).map((s: { id: string }) => s.id);
-
-        // Get transactions by batch_ref_code
-        const { data: txByBatch } = await (supabase as any)
-          .from("group_stock_transactions")
-          .select("id")
-          .eq("batch_ref_code", batchRefCode);
-
-        // Also get transactions by inventory_id (usage transactions may not have batch_ref_code)
-        let txByInventory: { id: string }[] = [];
-        if (inventoryIds.length > 0) {
-          const { data: txByInv } = await (supabase as any)
-            .from("group_stock_transactions")
-            .select("id")
-            .in("inventory_id", inventoryIds);
-          txByInventory = txByInv || [];
-        }
-
-        // Combine all transaction IDs
-        const allTransactionIds = new Set([
-          ...(txByBatch || []).map((t: { id: string }) => t.id),
-          ...txByInventory.map((t: { id: string }) => t.id),
-        ]);
-        const transactionIds = Array.from(allTransactionIds);
-        console.log("[useDeletePurchaseOrderCascade] Found transactions:", transactionIds.length);
-
-        // Step 2: Delete inter_site_settlement_items FIRST (FK to transactions and settlements)
-        if (settlementIds.length > 0) {
-          const { error: itemsBySettlementError } = await (supabase as any)
-            .from("inter_site_settlement_items")
-            .delete()
-            .in("settlement_id", settlementIds);
-
-          if (itemsBySettlementError) {
-            console.warn("Warning: Could not delete inter_site_settlement_items by settlement_id:", itemsBySettlementError);
-          }
-        }
-
-        if (transactionIds.length > 0) {
-          const { error: itemsByTxError } = await (supabase as any)
-            .from("inter_site_settlement_items")
-            .delete()
-            .in("transaction_id", transactionIds);
-
-          if (itemsByTxError) {
-            console.warn("Warning: Could not delete inter_site_settlement_items by transaction_id:", itemsByTxError);
-          }
-        }
-
-        // Step 3: Delete inter_site_settlement_payments
-        if (settlementIds.length > 0) {
-          const { error: paymentsError } = await (supabase as any)
-            .from("inter_site_settlement_payments")
-            .delete()
-            .in("settlement_id", settlementIds);
-
-          if (paymentsError) {
-            console.warn("Warning: Could not delete inter_site_settlement_payments:", paymentsError);
-          }
-        }
-
-        // Step 4: Delete settlement_expense_allocations
-        if (settlementIds.length > 0) {
-          const { error: allocationsError } = await (supabase as any)
-            .from("settlement_expense_allocations")
-            .delete()
-            .in("settlement_id", settlementIds);
-
-          if (allocationsError) {
-            console.warn("Warning: Could not delete settlement_expense_allocations:", allocationsError);
-          }
-        }
-
-        // Step 5: Delete inter_site_material_settlements
-        const { error: settlementsError } = await (supabase as any)
-          .from("inter_site_material_settlements")
-          .delete()
-          .eq("batch_ref_code", batchRefCode);
-
-        if (settlementsError) {
-          console.warn("Warning: Could not delete inter_site_material_settlements:", settlementsError);
-        }
-
-        // Step 5b: Get transaction IDs from batch_usage_records BEFORE deleting them
-        // (In case transactions don't have batch_ref_code set - legacy data)
-        const { data: batchUsageWithTx } = await (supabase as any)
-          .from("batch_usage_records")
-          .select("group_stock_transaction_id")
-          .eq("batch_ref_code", batchRefCode)
-          .not("group_stock_transaction_id", "is", null);
-
-        const txIdsFromBatchUsage = (batchUsageWithTx || [])
-          .map((r: { group_stock_transaction_id: string }) => r.group_stock_transaction_id)
-          .filter(Boolean);
-
-        console.log("[useDeletePurchaseOrderCascade] Found transactions via batch_usage_records:", txIdsFromBatchUsage.length);
-
-        // Step 6: Delete batch_usage_records
-        const { error: usageError } = await (supabase as any)
-          .from("batch_usage_records")
-          .delete()
-          .eq("batch_ref_code", batchRefCode);
-
-        if (usageError) {
-          console.warn("Warning: Could not delete batch_usage_records:", usageError);
-        }
-
-        // Step 6b: Delete transactions found via batch_usage_records (may not have batch_ref_code)
-        if (txIdsFromBatchUsage.length > 0) {
-          const { error: txByBatchUsageError } = await (supabase as any)
-            .from("group_stock_transactions")
-            .delete()
-            .in("id", txIdsFromBatchUsage);
-
-          if (txByBatchUsageError) {
-            console.warn("Warning: Could not delete group_stock_transactions by batch_usage_records:", txByBatchUsageError);
-          } else {
-            console.log("[useDeletePurchaseOrderCascade] Deleted transactions via batch_usage_records:", txIdsFromBatchUsage.length);
-          }
-        }
-
-        // Step 7: Delete group_stock_transactions by batch_ref_code
-        const { error: txError } = await (supabase as any)
-          .from("group_stock_transactions")
-          .delete()
-          .eq("batch_ref_code", batchRefCode);
-
-        if (txError) {
-          console.warn("Warning: Could not delete group_stock_transactions by batch_ref_code:", txError);
-        }
-
-        // Step 7b: Delete group_stock_transactions by inventory_id (catches usage transactions without batch_ref_code)
-        if (inventoryIds.length > 0) {
-          const { error: txByInvError } = await (supabase as any)
-            .from("group_stock_transactions")
-            .delete()
-            .in("inventory_id", inventoryIds);
-
-          if (txByInvError) {
-            console.warn("Warning: Could not delete group_stock_transactions by inventory_id:", txByInvError);
-          } else {
-            console.log("[useDeletePurchaseOrderCascade] Deleted transactions by inventory_id");
-          }
-        }
-
-        // Step 8: Delete group_stock_inventory for this batch
-        const { error: inventoryError } = await (supabase as any)
-          .from("group_stock_inventory")
-          .delete()
-          .eq("batch_code", batchRefCode);
-
-        if (inventoryError) {
-          console.warn("Warning: Could not delete group_stock_inventory:", inventoryError);
-        }
-
-        // Step 9: Delete derived expenses (debtor expenses and self-use expenses)
-        const { data: derivedExpenses } = await (supabase as any)
-          .from("material_purchase_expenses")
-          .select("id")
-          .eq("original_batch_code", batchRefCode);
-
-        if (derivedExpenses && derivedExpenses.length > 0) {
-          const derivedExpenseIds = derivedExpenses.map((e: { id: string }) => e.id);
-
-          // Delete derived expense items
-          await (supabase as any)
-            .from("material_purchase_expense_items")
-            .delete()
-            .in("purchase_expense_id", derivedExpenseIds);
-
-          // Delete derived expenses
-          await (supabase as any)
-            .from("material_purchase_expenses")
-            .delete()
-            .eq("original_batch_code", batchRefCode);
-        }
-
-        console.log("[useDeletePurchaseOrderCascade] Batch cascade complete:", batchRefCode);
+      // Check for function-level errors
+      if (data && !data.success) {
+        console.error("[useDeletePurchaseOrderCascade] Function error:", data.error);
+        throw new Error(data.error || "Cascade delete failed");
       }
 
-      // Now proceed with the standard deletion flow
-      // Get all deliveries for this PO
-      const { data: deliveries } = await supabase
-        .from("deliveries")
-        .select("id")
-        .eq("po_id", id);
+      console.log("[useDeletePurchaseOrderCascade] Cascade delete complete:", data);
 
-      // Delete delivery items for all deliveries
-      if (deliveries && deliveries.length > 0) {
-        const deliveryIds = deliveries.map((d: any) => d.id);
-        await supabase
-          .from("delivery_items")
-          .delete()
-          .in("delivery_id", deliveryIds);
-
-        // Delete deliveries
-        await supabase.from("deliveries").delete().eq("po_id", id);
-      }
-
-      // Delete material purchase expense items linked to this PO
-      if (materialExpenses && materialExpenses.length > 0) {
-        const expenseIds = materialExpenses.map((e: { id: string }) => e.id);
-
-        // Delete material purchase expense items
-        await (supabase as any)
-          .from("material_purchase_expense_items")
-          .delete()
-          .in("purchase_expense_id", expenseIds);
-
-        // Delete material purchase expenses
-        await (supabase as any)
-          .from("material_purchase_expenses")
-          .delete()
-          .eq("purchase_order_id", id);
-      }
-
-      // Delete PO items
-      await supabase.from("purchase_order_items").delete().eq("po_id", id);
-
-      // Delete the PO itself
-      const { error } = await supabase
-        .from("purchase_orders")
-        .delete()
-        .eq("id", id);
-
-      if (error) throw error;
-
-      // Safety cleanup: remove any orphan zero-qty stock_inventory records for this site
-      // (e.g., trigger set qty to 0 but record wasn't explicitly deleted)
-      await supabase
-        .from("stock_inventory")
-        .delete()
-        .eq("site_id", siteId)
-        .lte("current_qty", 0);
-
-      return { id, siteId };
+      return { id, siteId, ...data };
     },
     onSuccess: (result) => {
       // Invalidate all related caches comprehensively

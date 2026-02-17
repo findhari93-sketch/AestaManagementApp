@@ -26,6 +26,7 @@ import {
   Visibility,
 } from "@mui/icons-material";
 import { SupabaseClient } from "@supabase/supabase-js";
+import { ensureFreshSession } from "@/lib/supabase/client";
 
 // Upload status type for better UX feedback
 type UploadStatus =
@@ -572,6 +573,14 @@ export default function FileUploader({
           const delay = UPLOAD_CONSTANTS.INITIAL_RETRY_DELAY * Math.pow(2, attempt - 1);
           console.log(`[FileUploader] Waiting ${delay}ms before retry ${attempt}`);
           await new Promise((resolve) => setTimeout(resolve, delay));
+
+          // Re-check session before retry - previous attempt may have failed due to stale token
+          try {
+            console.log(`[FileUploader] Re-checking session before retry ${attempt}`);
+            await ensureFreshSession();
+          } catch {
+            console.warn("[FileUploader] Session re-check failed before retry, continuing anyway");
+          }
         }
 
         console.log(

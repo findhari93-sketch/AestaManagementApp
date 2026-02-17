@@ -478,23 +478,69 @@ export function useCompletedStock(siteId: string | undefined) {
 
       if (error) throw error;
 
+      // Fetch original delivered quantities from stock_transactions
+      const inventoryIds = (completedStock || []).map((item: any) => item.id);
+      const batchCodes = (completedStock || [])
+        .filter((item: any) => item.batch_code?.trim())
+        .map((item: any) => item.batch_code);
+      let originalQtyMap: Record<string, number> = {};
+
+      if (inventoryIds.length > 0) {
+        const { data: purchaseTransactions } = await supabase
+          .from("stock_transactions")
+          .select("inventory_id, quantity")
+          .in("inventory_id", inventoryIds)
+          .eq("transaction_type", "purchase");
+
+        if (purchaseTransactions) {
+          for (const txn of purchaseTransactions) {
+            originalQtyMap[txn.inventory_id] = (originalQtyMap[txn.inventory_id] || 0) + txn.quantity;
+          }
+        }
+
+        // For batch-coded items without stock_transactions, fall back to material_purchase_expenses
+        if (batchCodes.length > 0) {
+          const { data: mpeRecords } = await supabase
+            .from("material_purchase_expenses")
+            .select("ref_code, original_qty")
+            .in("ref_code", batchCodes);
+
+          if (mpeRecords) {
+            const mpeMap: Record<string, number> = {};
+            for (const mpe of mpeRecords) {
+              if (mpe.ref_code) mpeMap[mpe.ref_code] = mpe.original_qty ?? 0;
+            }
+            // Fill in missing original_qty from MPE for batch-coded items
+            for (const item of completedStock || []) {
+              const si = item as any;
+              if (si.batch_code?.trim() && !originalQtyMap[si.id] && mpeMap[si.batch_code]) {
+                originalQtyMap[si.id] = mpeMap[si.batch_code];
+              }
+            }
+          }
+        }
+      }
+
       // Transform to CompletedStockItem format
-      const completedItems: CompletedStockItem[] = ((completedStock || []) as any[]).map((item) => ({
-        id: item.id,
-        material_id: item.material_id,
-        material_name: item.material?.name || "Unknown Material",
-        material_code: item.material?.code,
-        brand_name: item.brand?.brand_name,
-        original_qty: 0, // Will be calculated from transactions if needed
-        unit: item.material?.unit || "nos",
-        total_value: 0, // Will be calculated from transactions if needed
-        avg_unit_cost: item.avg_unit_cost || 0,
-        completion_date: item.last_issued_date,
-        last_received_date: item.last_received_date,
-        is_shared: false,
-        batch_code: item.batch_code,
-        po_reference: null, // Would need to join with PO data
-      }));
+      const completedItems: CompletedStockItem[] = ((completedStock || []) as any[]).map((item) => {
+        const hasBatchCode = !!(item.batch_code && item.batch_code.trim().length > 0);
+        return {
+          id: item.id,
+          material_id: item.material_id,
+          material_name: item.material?.name || "Unknown Material",
+          material_code: item.material?.code,
+          brand_name: item.brand?.brand_name,
+          original_qty: originalQtyMap[item.id] || 0,
+          unit: item.material?.unit || "nos",
+          total_value: (originalQtyMap[item.id] || 0) * (item.avg_unit_cost || 0),
+          avg_unit_cost: item.avg_unit_cost || 0,
+          completion_date: item.last_issued_date,
+          last_received_date: item.last_received_date,
+          is_shared: hasBatchCode,
+          batch_code: item.batch_code,
+          po_reference: null,
+        };
+      });
 
       return completedItems;
     },

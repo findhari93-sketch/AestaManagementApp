@@ -72,6 +72,7 @@ export default function RecordInterSitePaymentDialog({
 
   // Form state
   const [paymentMode, setPaymentMode] = useState<string>("upi");
+  const [paymentSource, setPaymentSource] = useState<string>("company");
   const [paymentDate, setPaymentDate] = useState<string>(
     new Date().toISOString().split("T")[0]
   );
@@ -91,6 +92,7 @@ export default function RecordInterSitePaymentDialog({
   useEffect(() => {
     if (!open) {
       setPaymentMode("upi");
+      setPaymentSource("company");
       setPaymentDate(new Date().toISOString().split("T")[0]);
       setPaymentReference("");
       setPaymentProof(null);
@@ -124,6 +126,7 @@ export default function RecordInterSitePaymentDialog({
         amount: settlement?.total_amount || amount,
         payment_date: paymentDate,
         payment_mode: paymentMode as any,
+        payment_source: paymentSource || undefined,
         reference_number: paymentReference || undefined,
         notes: notes ? `${notes}${subcontractId ? ` | Linked to subcontract` : ""}${paymentProof ? ` | Proof: ${paymentProof.url}` : ""}` : undefined,
         userId: userProfile?.id,
@@ -339,8 +342,26 @@ export default function RecordInterSitePaymentDialog({
             </TextField>
           </Grid>
 
-          {/* Payment Date */}
+          {/* Payment Source */}
           <Grid size={{ xs: 12, sm: 6 }}>
+            <TextField
+              select
+              fullWidth
+              label="Payment Source"
+              value={paymentSource}
+              onChange={(e) => setPaymentSource(e.target.value)}
+              required
+            >
+              <MenuItem value="company">Company</MenuItem>
+              <MenuItem value="amma_money">Amma Money</MenuItem>
+              <MenuItem value="engineer_own">Engineer Own</MenuItem>
+              <MenuItem value="client_money">Client Money</MenuItem>
+              <MenuItem value="other">Other</MenuItem>
+            </TextField>
+          </Grid>
+
+          {/* Payment Date */}
+          <Grid size={12}>
             <TextField
               fullWidth
               label="Payment Date"

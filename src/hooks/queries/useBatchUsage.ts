@@ -12,6 +12,7 @@ import type {
   InitiateBatchSettlementFormData,
   BatchSettlementResult,
 } from "@/types/material.types";
+import type { GroupStockBatchAllocation } from "@/lib/utils/fifoAllocator";
 
 // ============================================
 // HELPER FUNCTIONS
@@ -618,6 +619,81 @@ export function useBatchesWithUsage(groupId: string | undefined) {
       }
     },
     enabled: !!groupId,
+  });
+}
+
+// ============================================
+// RECORD GROUP STOCK USAGE WITH FIFO
+// ============================================
+
+/**
+ * Record usage across multiple group stock batches using FIFO allocation.
+ * Calls record_batch_usage RPC sequentially for each allocation (oldest first).
+ * Each RPC handles auto-complete + self-use expense creation when a batch is fully consumed.
+ */
+export function useRecordGroupStockUsageFIFO() {
+  const queryClient = useQueryClient();
+  const supabase = createClient();
+
+  return useMutation({
+    retry: false,
+    mutationFn: async (data: {
+      allocations: GroupStockBatchAllocation[];
+      usage_site_id: string;
+      usage_date: string;
+      work_description?: string;
+      created_by?: string;
+    }) => {
+      const results: Array<{ batch_ref_code: string; usage_id: string }> = [];
+
+      // Process sequentially — order matters (oldest first)
+      for (const alloc of data.allocations) {
+        const { data: usageId, error } = await (supabase as any).rpc("record_batch_usage", {
+          p_batch_ref_code: alloc.batch_ref_code,
+          p_usage_site_id: data.usage_site_id,
+          p_quantity: alloc.quantity,
+          p_usage_date: data.usage_date,
+          p_work_description: data.work_description || null,
+          p_created_by: data.created_by || null,
+        });
+
+        if (error) {
+          throw new Error(
+            `Failed to record usage for batch ${alloc.batch_ref_code}: ${error.message}`
+          );
+        }
+
+        results.push({ batch_ref_code: alloc.batch_ref_code, usage_id: usageId });
+      }
+
+      return results;
+    },
+    onSuccess: (results, variables) => {
+      // Invalidate all affected batch queries
+      for (const r of results) {
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.batchUsage.byBatch(r.batch_ref_code),
+        });
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.batchUsage.summary(r.batch_ref_code),
+        });
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.materialPurchases.byRefCode(r.batch_ref_code),
+        });
+      }
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.batchUsage.bySite(variables.usage_site_id),
+      });
+      queryClient.invalidateQueries({ queryKey: ["material-purchases", "batches"] });
+      queryClient.invalidateQueries({ queryKey: ["material-purchases"] });
+      queryClient.invalidateQueries({ queryKey: ["all-expenses"] });
+      queryClient.invalidateQueries({ queryKey: ["expenses"] });
+      queryClient.invalidateQueries({ queryKey: ["inter-site-settlements"] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.batchUsage.all });
+      // Invalidate stock inventory - record_batch_usage now decrements stock_inventory.current_qty
+      queryClient.invalidateQueries({ queryKey: queryKeys.materialStock.all });
+      queryClient.invalidateQueries({ queryKey: ["stock-inventory"] });
+    },
   });
 }
 

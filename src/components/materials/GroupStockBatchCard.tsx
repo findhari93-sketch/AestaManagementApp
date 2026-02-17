@@ -162,6 +162,16 @@ export default function GroupStockBatchCard({
             <Typography variant="body2" color="text.secondary">
               {dayjs(batch.purchase_date).format("DD MMM YYYY")}
             </Typography>
+            {/* Show entry date annotation when batch was added later (backdated) */}
+            {(batch as any).created_at &&
+              dayjs((batch as any).created_at).format("YYYY-MM-DD") !==
+                dayjs(batch.purchase_date).format("YYYY-MM-DD") && (
+              <Tooltip title={`Entered on ${dayjs((batch as any).created_at).format("DD MMM YYYY")}`}>
+                <Typography variant="caption" color="warning.main" sx={{ ml: 0.5 }}>
+                  (entered {dayjs((batch as any).created_at).format("DD MMM")})
+                </Typography>
+              </Tooltip>
+            )}
           </Box>
           {batch.vendor_name && (
             <Box display="flex" alignItems="center" gap={0.5}>
