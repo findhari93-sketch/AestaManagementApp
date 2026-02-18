@@ -473,34 +473,50 @@ export async function createStockFromDeliveryItems(
     // Calculate unit price including GST
     const unitPriceWithGst = (item.unit_price || 0) * (1 + taxRate / 100);
 
-    // Group stock with batch_code: ALWAYS create a new stock_inventory row per batch.
-    // This prevents multiple Group PO deliveries for the same material from merging
-    // into a single row. Each batch must stay separate for FIFO allocation and settlement.
+    // Group stock with batch_code: create a separate stock_inventory row per batch.
+    // Check if the DB trigger already created it (fires on delivery_items INSERT).
+    // If so, skip to avoid double-counting.
     if (batchCode) {
-      const { error: insertError } = await supabase.from("stock_inventory").insert({
-        site_id: delivery.site_id,
-        location_id: delivery.location_id,
-        material_id: item.material_id,
-        brand_id: item.brand_id,
-        current_qty: qty,
-        avg_unit_cost: unitPriceWithGst,
-        last_received_date: delivery.delivery_date,
-        batch_code: batchCode,
-      });
+      const { data: existingBatch } = await supabase
+        .from("stock_inventory")
+        .select("id")
+        .eq("site_id", delivery.site_id)
+        .eq("material_id", item.material_id)
+        .eq("batch_code", batchCode)
+        .maybeSingle();
 
-      if (insertError) {
-        console.error("[Stock Creation] Error inserting group stock batch:", insertError);
-        throw new Error(`Failed to create group stock inventory: ${insertError.message}`);
+      if (existingBatch) {
+        console.log("[Stock Creation] Group stock batch already exists (trigger created it):", batchCode);
+        stockUpdatedCount++;
+      } else {
+        const { error: insertError } = await supabase.from("stock_inventory").insert({
+          site_id: delivery.site_id,
+          location_id: delivery.location_id,
+          material_id: item.material_id,
+          brand_id: item.brand_id,
+          current_qty: qty,
+          avg_unit_cost: unitPriceWithGst,
+          last_received_date: delivery.delivery_date,
+          batch_code: batchCode,
+        });
+
+        if (insertError) {
+          console.error("[Stock Creation] Error inserting group stock batch:", insertError);
+          throw new Error(`Failed to create group stock inventory: ${insertError.message}`);
+        }
+        stockCreatedCount++;
+        console.log("[Stock Creation] Created new group stock batch:", batchCode, "material:", item.material_id, "qty:", qty);
       }
-      stockCreatedCount++;
-      console.log("[Stock Creation] Created new group stock batch:", batchCode, "material:", item.material_id, "qty:", qty);
     } else {
       // Non-group stock: check if inventory exists, update or insert
+      // FIX: Filter by batch_code IS NULL to prevent accidentally matching/updating
+      // batch-coded group stock rows when this is a non-group delivery
       let stockQuery = supabase
         .from("stock_inventory")
         .select("id, current_qty, avg_unit_cost, batch_code")
         .eq("site_id", delivery.site_id)
-        .eq("material_id", item.material_id);
+        .eq("material_id", item.material_id)
+        .is("batch_code", null);
 
       if (delivery.location_id) {
         stockQuery = stockQuery.eq("location_id", delivery.location_id);

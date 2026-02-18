@@ -165,11 +165,11 @@ export default function UsageEntryDrawer({
       return [];
     }
     try {
-      return allocateFIFO(preSelectedConsolidated.batches, form.quantity);
+      return allocateFIFO(preSelectedConsolidated.batches, form.quantity, siteId);
     } catch {
       return [];
     }
-  }, [isConsolidatedMode, preSelectedConsolidated, form.quantity]);
+  }, [isConsolidatedMode, preSelectedConsolidated, form.quantity, siteId]);
 
   const fifoTotalCost = fifoAllocations.reduce((sum, a) => sum + a.total_cost, 0);
 

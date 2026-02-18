@@ -79,7 +79,7 @@ export default function StockBatchesTab({
   onDeleteTransaction,
   onRecordGroupUsage,
 }: StockBatchesTabProps) {
-  const [viewMode, setViewMode] = useState<'grouped' | 'card' | 'list'>('grouped')
+  const [viewMode, setViewMode] = useState<'grouped' | 'card' | 'list'>('list')
   const [statusFilter, setStatusFilter] = useState<'all' | 'in_stock' | 'partial_used' | 'completed'>('all')
   const [siteFilter, setSiteFilter] = useState<string>('all')
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())

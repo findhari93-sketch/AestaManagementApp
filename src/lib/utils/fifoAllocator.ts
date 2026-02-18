@@ -96,20 +96,23 @@ function getEffectiveCostPerPiece(stock: ExtendedStockInventory): number {
 /**
  * Allocates a requested quantity across multiple stock batches using FIFO.
  *
- * Order of consumption:
+ * Order of consumption (3-tier priority):
  * 1. Own stock batches (no batch_code) — no settlement implications
- * 2. Shared stock batches (has batch_code) — sorted by date ascending
+ * 2. Self-paid group stock (batch_code, paying_site = current site) — self_use settlement
+ * 3. Other-site group stock (batch_code, paying_site ≠ current site) — pending settlement
  *
- * Within each group, sorted by last_received_date ascending (oldest first).
+ * Within each tier, sorted by last_received_date ascending (oldest first).
  *
  * @param batches - Stock inventory rows for the same material+brand
  * @param requestedQty - Total quantity to allocate
+ * @param siteId - Current site ID for self-paid priority (optional for backward compat)
  * @returns Array of BatchAllocation objects, one per consumed batch
  * @throws Error if insufficient total stock
  */
 export function allocateFIFO(
   batches: ExtendedStockInventory[],
-  requestedQty: number
+  requestedQty: number,
+  siteId?: string
 ): BatchAllocation[] {
   if (requestedQty <= 0) {
     throw new Error("Quantity must be greater than 0");
@@ -126,14 +129,24 @@ export function allocateFIFO(
     );
   }
 
-  // Sort: own stock first, then shared; within each group by date ascending
+  // Sort: own stock first, then self-paid group stock, then other-site group stock
+  // Within each tier, sorted by date ascending (oldest first = FIFO)
   const sorted = [...batches]
     .filter((b) => (b.available_qty ?? b.current_qty) > 0)
     .sort((a, b) => {
+      // Tier 1: Own stock (no batch_code) before shared/group stock
       const aShared = a.is_shared ? 1 : 0;
       const bShared = b.is_shared ? 1 : 0;
       if (aShared !== bShared) return aShared - bShared;
 
+      // Tier 2: Within shared stock, self-paid batches before other-site batches
+      if (siteId && aShared === 1) {
+        const aSelfPaid = a.paid_by_site_id === siteId ? 0 : 1;
+        const bSelfPaid = b.paid_by_site_id === siteId ? 0 : 1;
+        if (aSelfPaid !== bSelfPaid) return aSelfPaid - bSelfPaid;
+      }
+
+      // Tier 3: Within same tier, oldest date first (FIFO)
       const aDate = a.last_received_date || a.created_at || "";
       const bDate = b.last_received_date || b.created_at || "";
       return aDate.localeCompare(bDate);

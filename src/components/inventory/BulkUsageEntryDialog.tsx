@@ -406,7 +406,7 @@ export default function BulkUsageEntryDialog({
         const item = consolidatedStock.find((c) => c.key === entry.key);
         if (!item) continue;
 
-        const allocations = allocateFIFO(item.batches, entry.quantity!);
+        const allocations = allocateFIFO(item.batches, entry.quantity!, siteId);
 
         await Promise.race([
           createUsageFIFO.mutateAsync({
