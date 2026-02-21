@@ -76,7 +76,7 @@ type AttendanceMode = "morning" | "evening" | "full";
 interface AttendanceDrawerProps {
   open: boolean;
   onClose: () => void;
-  siteId: string;
+  siteId: string; 
   date?: string;
   onSuccess?: () => void;
   mode?: AttendanceMode; // morning=check-in, evening=confirm, full=legacy
