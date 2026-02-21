@@ -483,6 +483,207 @@ export function useDeleteBatchUsage() {
 }
 
 // ============================================
+// UPDATE BATCH USAGE MUTATION
+// ============================================
+
+/**
+ * Update a batch usage record (only if not yet settled)
+ * Supports editing work_description and quantity
+ */
+export function useUpdateBatchUsage() {
+  const queryClient = useQueryClient();
+  const supabase = createClient();
+
+  return useMutation({
+    retry: false,
+    mutationFn: async (data: {
+      usageId: string;
+      batchRefCode: string;
+      siteId: string;
+      updates: { quantity?: number; work_description?: string };
+    }) => {
+      // 1. Fetch the current record
+      const { data: record, error: fetchError } = await (supabase as any)
+        .from("batch_usage_records")
+        .select("quantity, unit_cost, settlement_status, is_self_use")
+        .eq("id", data.usageId)
+        .single();
+
+      if (fetchError) throw new Error(fetchError.message);
+      if (record.settlement_status === "settled") {
+        throw new Error("Cannot edit settled usage record");
+      }
+
+      // 2. Build update payload
+      const updatePayload: Record<string, unknown> = {
+        updated_at: new Date().toISOString(),
+      };
+
+      if (data.updates.work_description !== undefined) {
+        updatePayload.work_description = data.updates.work_description;
+      }
+
+      const quantityDelta =
+        data.updates.quantity !== undefined
+          ? data.updates.quantity - Number(record.quantity)
+          : 0;
+
+      if (data.updates.quantity !== undefined && quantityDelta !== 0) {
+        // Validate stock availability if increasing
+        if (quantityDelta > 0) {
+          const { data: batch } = await (supabase as any)
+            .from("material_purchase_expenses")
+            .select("remaining_qty")
+            .eq("ref_code", data.batchRefCode)
+            .single();
+
+          if (batch && Number(batch.remaining_qty) < quantityDelta) {
+            throw new Error(
+              `Not enough batch stock. Available: ${batch.remaining_qty}`
+            );
+          }
+        }
+
+        updatePayload.quantity = data.updates.quantity;
+        // total_cost is GENERATED AS (quantity * unit_cost) in DB
+
+        // Update batch quantities
+        await (supabase as any)
+          .from("material_purchase_expenses")
+          .update({
+            used_qty: (supabase as any).rpc ? undefined : undefined, // handled below
+          })
+          .eq("ref_code", data.batchRefCode);
+
+        // Recalculate batch used_qty and remaining_qty
+        const { data: batchInfo } = await (supabase as any)
+          .from("material_purchase_expenses")
+          .select("original_qty, used_qty, remaining_qty")
+          .eq("ref_code", data.batchRefCode)
+          .single();
+
+        if (batchInfo) {
+          const newUsedQty = Number(batchInfo.used_qty) + quantityDelta;
+          const newRemainingQty = Number(batchInfo.original_qty) - newUsedQty;
+          await (supabase as any)
+            .from("material_purchase_expenses")
+            .update({
+              used_qty: newUsedQty,
+              remaining_qty: newRemainingQty,
+              status:
+                newRemainingQty <= 0
+                  ? "completed"
+                  : newUsedQty > 0
+                  ? "partial_used"
+                  : "recorded",
+              updated_at: new Date().toISOString(),
+            })
+            .eq("ref_code", data.batchRefCode);
+        }
+
+        // Update stock_inventory
+        await (supabase as any)
+          .from("stock_inventory")
+          .update({
+            current_qty: (supabase as any).sql
+              ? undefined
+              : undefined, // handled below
+          })
+          .eq("batch_code", data.batchRefCode);
+
+        // Adjust stock_inventory.current_qty
+        const { data: inventory } = await (supabase as any)
+          .from("stock_inventory")
+          .select("id, current_qty")
+          .eq("batch_code", data.batchRefCode)
+          .maybeSingle();
+
+        if (inventory) {
+          await (supabase as any)
+            .from("stock_inventory")
+            .update({
+              current_qty: Math.max(
+                Number(inventory.current_qty) - quantityDelta,
+                0
+              ),
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", inventory.id);
+        }
+
+        // Update self_used_qty/amount if self-use record
+        if (record.is_self_use) {
+          const { data: batchForSelf } = await (supabase as any)
+            .from("material_purchase_expenses")
+            .select("self_used_qty, self_used_amount")
+            .eq("ref_code", data.batchRefCode)
+            .single();
+
+          if (batchForSelf) {
+            await (supabase as any)
+              .from("material_purchase_expenses")
+              .update({
+                self_used_qty:
+                  Number(batchForSelf.self_used_qty || 0) + quantityDelta,
+                self_used_amount:
+                  Number(batchForSelf.self_used_amount || 0) +
+                  quantityDelta * Number(record.unit_cost),
+                updated_at: new Date().toISOString(),
+              })
+              .eq("ref_code", data.batchRefCode);
+          }
+        }
+      }
+
+      // 3. Update the batch_usage_records entry
+      const { error: updateError } = await (supabase as any)
+        .from("batch_usage_records")
+        .update(updatePayload)
+        .eq("id", data.usageId);
+
+      if (updateError) throw new Error(updateError.message);
+      return { success: true };
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.batchUsage.byBatch(variables.batchRefCode),
+      });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.batchUsage.bySite(variables.siteId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.batchUsage.summary(variables.batchRefCode),
+      });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.materialPurchases.byRefCode(variables.batchRefCode),
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["material-purchases", "batches"],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["material-purchases"],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["inter-site-settlements"],
+      });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.batchUsage.all,
+      });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.materialStock.all,
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["stock-inventory"],
+      });
+      // Also invalidate material usage for inventory page
+      queryClient.invalidateQueries({
+        queryKey: ["material-usage"],
+      });
+    },
+  });
+}
+
+// ============================================
 // FETCH BATCHES WITH USAGE FOR GROUP
 // ============================================
 
@@ -531,12 +732,14 @@ export function useBatchesWithUsage(groupId: string | undefined) {
         const { data: usageRecords, error: usageError } = await (supabase as any)
           .from("batch_usage_records")
           .select(`
+            id,
             batch_ref_code,
             usage_site_id,
             quantity,
             total_cost,
             is_self_use,
             settlement_status,
+            usage_date,
             usage_site:sites!batch_usage_records_usage_site_id_fkey(id, name)
           `)
           .in("batch_ref_code", batchRefCodes);
@@ -580,13 +783,22 @@ export function useBatchesWithUsage(groupId: string | undefined) {
             amount: number;
             is_payer: boolean;
             settlement_status: string;
+            usage_records: Array<{ id: string; quantity: number; total_cost: number; usage_date: string; settlement_status: string }>;
           }>();
 
           batchUsage.forEach((u: any) => {
+            const recordDetail = {
+              id: u.id,
+              quantity: Number(u.quantity),
+              total_cost: Number(u.total_cost),
+              usage_date: u.usage_date,
+              settlement_status: u.settlement_status,
+            };
             const existing = siteUsageMap.get(u.usage_site_id);
             if (existing) {
               existing.quantity_used += Number(u.quantity);
               existing.amount += Number(u.total_cost);
+              existing.usage_records.push(recordDetail);
               // Keep the "worse" status (pending > settled > self_use)
               if (u.settlement_status === "pending") {
                 existing.settlement_status = "pending";
@@ -599,6 +811,7 @@ export function useBatchesWithUsage(groupId: string | undefined) {
                 amount: Number(u.total_cost),
                 is_payer: u.is_self_use,
                 settlement_status: u.settlement_status,
+                usage_records: [recordDetail],
               });
             }
           });
@@ -619,6 +832,7 @@ export function useBatchesWithUsage(groupId: string | undefined) {
       }
     },
     enabled: !!groupId,
+    staleTime: 2 * 60 * 1000, // 2 minutes
   });
 }
 

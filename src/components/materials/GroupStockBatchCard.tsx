@@ -26,10 +26,10 @@ import {
   Inventory as InventoryIcon,
   CalendarMonth as CalendarIcon,
   Store as StoreIcon,
-  Payment as PaymentIcon,
   OpenInNew as OpenIcon,
   Add as AddIcon,
   AccountBalance as SettleIcon,
+  Delete as DeleteIcon,
 } from "@mui/icons-material";
 import type {
   GroupStockBatch,
@@ -54,6 +54,7 @@ interface GroupStockBatchCardProps {
   onComplete?: () => void;
   onRecordUsage?: () => void;
   onSettleUsage?: (siteId: string, siteName: string, amount: number) => void;
+  onDeleteUsage?: (batchRefCode: string, siteId: string, siteName: string, recordIds: string[]) => void;
   onClick?: () => void;
   showActions?: boolean;
   compact?: boolean;
@@ -68,6 +69,7 @@ export default function GroupStockBatchCard({
   onComplete,
   onRecordUsage,
   onSettleUsage,
+  onDeleteUsage,
   onClick,
   showActions = true,
   compact = false,
@@ -122,13 +124,24 @@ export default function GroupStockBatchCard({
           mb={1}
         >
           <Box>
-            <Typography
-              variant="body2"
-              color="text.secondary"
-              fontSize="0.75rem"
-            >
-              {batch.ref_code}
-            </Typography>
+            <Box display="flex" alignItems="center" gap={0.5} flexWrap="wrap">
+              <Typography
+                variant="body2"
+                color="text.secondary"
+                fontSize="0.75rem"
+              >
+                {batch.ref_code}
+              </Typography>
+              {(batch.paying_site?.name || batch.payment_source_site_name) && (
+                <Chip
+                  label={`Paid by: ${batch.paying_site?.name || batch.payment_source_site_name}`}
+                  size="small"
+                  color="info"
+                  variant="outlined"
+                  sx={{ height: 18, fontSize: '0.6rem', '& .MuiChip-label': { px: 0.75 } }}
+                />
+              )}
+            </Box>
             {/* Show both original and paid amounts when bargained */}
             {batch.amount_paid && batch.amount_paid !== batch.total_amount ? (
               <Box>
@@ -178,14 +191,6 @@ export default function GroupStockBatchCard({
               <StoreIcon sx={{ fontSize: 16, color: "text.secondary" }} />
               <Typography variant="body2" color="text.secondary">
                 {batch.vendor_name}
-              </Typography>
-            </Box>
-          )}
-          {batch.payment_source_site_name && (
-            <Box display="flex" alignItems="center" gap={0.5}>
-              <PaymentIcon sx={{ fontSize: 16, color: "text.secondary" }} />
-              <Typography variant="body2" color="text.secondary">
-                Paid by: {batch.payment_source_site_name}
               </Typography>
             </Box>
           )}
@@ -335,6 +340,13 @@ export default function GroupStockBatchCard({
                   >
                     Status
                   </TableCell>
+                  {onDeleteUsage && (
+                    <TableCell
+                      align="center"
+                      sx={{ py: 0.5, fontSize: "0.75rem", width: 48 }}
+                    >
+                    </TableCell>
+                  )}
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -393,6 +405,25 @@ export default function GroupStockBatchCard({
                           />
                         )}
                       </TableCell>
+                      {onDeleteUsage && (
+                        <TableCell align="center" sx={{ py: 0.5 }}>
+                          {!isPayer && settlementStatus !== "settled" && settlementStatus !== "in_settlement" && (
+                            <Tooltip title="Delete usage">
+                              <IconButton
+                                size="small"
+                                color="error"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const recordIds = (usage.usage_records || []).map((r: any) => r.id).filter(Boolean);
+                                  onDeleteUsage(batch.ref_code, usage.site_id, usage.site_name, recordIds);
+                                }}
+                              >
+                                <DeleteIcon sx={{ fontSize: 16 }} />
+                              </IconButton>
+                            </Tooltip>
+                          )}
+                        </TableCell>
+                      )}
                     </TableRow>
                   );
                 })}

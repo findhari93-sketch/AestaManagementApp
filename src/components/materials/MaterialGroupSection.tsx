@@ -29,6 +29,7 @@ interface MaterialGroupSectionProps {
   onConvertToOwnSite: (batch: GroupStockBatch) => void
   onCompleteBatch: (batch: GroupStockBatch) => void
   onSettleUsage: (batch: any) => (siteId: string, siteName: string, amount: number) => void
+  onDeleteUsage?: (batchRefCode: string, siteId: string, siteName: string, recordIds: string[]) => void
   onRecordGroupUsage?: (materialId?: string) => void
 }
 
@@ -40,6 +41,7 @@ export default function MaterialGroupSection({
   onConvertToOwnSite,
   onCompleteBatch,
   onSettleUsage,
+  onDeleteUsage,
   onRecordGroupUsage,
 }: MaterialGroupSectionProps) {
   const usagePercent =
@@ -140,6 +142,7 @@ export default function MaterialGroupSection({
                   onConvertToOwnSite={() => onConvertToOwnSite(batch)}
                   onComplete={() => onCompleteBatch(batch)}
                   onSettleUsage={onSettleUsage(batch)}
+                  onDeleteUsage={onDeleteUsage}
                   onRecordUsage={
                     onRecordGroupUsage
                       ? () => {

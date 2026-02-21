@@ -7,6 +7,7 @@ import type {
   InterSiteSettlement,
   InterSiteSettlementWithDetails,
   InterSiteBalance,
+  InterSiteBalanceMaterial,
   SiteSettlementSummary,
   InterSiteSettlementStatus,
   SettlementPaymentFormData,
@@ -85,6 +86,7 @@ export function useInterSiteSettlements(
       }
     },
     enabled: !!siteId,
+    staleTime: 2 * 60 * 1000, // 2 minutes
   });
 }
 
@@ -218,6 +220,8 @@ export function useInterSiteBalances(groupId: string | undefined) {
         // Aggregate balances: for each usage by site X of material paid by site Y
         // Site X owes Site Y the usage cost
         const balanceMap = new Map<string, InterSiteBalance>();
+        // Material breakdown: sitePairKey -> materialId -> breakdown
+        const materialBreakdownMap = new Map<string, Map<string, InterSiteBalanceMaterial>>();
 
         // Process batch usage records (source of truth)
         for (const record of batchUsageRecords || []) {
@@ -259,8 +263,44 @@ export function useInterSiteBalances(groupId: string | undefined) {
               total_amount_owed: amount,
               is_settled: false,
               has_unpaid_vendor: !vendorPaid,
+              material_breakdown: [],
             });
           }
+
+          // Build material-level breakdown
+          if (!materialBreakdownMap.has(key)) {
+            materialBreakdownMap.set(key, new Map());
+          }
+          const matMap = materialBreakdownMap.get(key)!;
+          const matId = record.material_id;
+
+          if (matMap.has(matId)) {
+            const existing = matMap.get(matId)!;
+            existing.total_amount += amount;
+            existing.quantity += record.quantity || 0;
+            existing.transaction_count += 1;
+            if (!vendorPaid) existing.has_unpaid_vendor = true;
+          } else {
+            matMap.set(matId, {
+              material_id: matId,
+              material_name: record.material?.name || "Unknown",
+              material_code: record.material?.code || "",
+              total_amount: amount,
+              quantity: record.quantity || 0,
+              unit: record.material?.unit || "nos",
+              transaction_count: 1,
+              has_unpaid_vendor: !vendorPaid,
+            });
+          }
+        }
+
+        // Attach material breakdowns to balances, sorted by amount descending
+        for (const [key, balance] of balanceMap.entries()) {
+          const matMap = materialBreakdownMap.get(key);
+          balance.material_breakdown = matMap
+            ? Array.from(matMap.values()).sort((a, b) => b.total_amount - a.total_amount)
+            : [];
+          balance.material_count = balance.material_breakdown.length;
         }
 
         return Array.from(balanceMap.values());
@@ -273,6 +313,7 @@ export function useInterSiteBalances(groupId: string | undefined) {
       }
     },
     enabled: !!groupId,
+    staleTime: 2 * 60 * 1000, // 2 minutes
   });
 }
 
@@ -425,6 +466,7 @@ export function useSiteSettlementSummary(siteId: string | undefined) {
       }
     },
     enabled: !!siteId,
+    staleTime: 2 * 60 * 1000, // 2 minutes
   });
 }
 
@@ -449,6 +491,7 @@ export function useGenerateSettlement() {
       weekNumber?: number;
       userId?: string;
       skipVendorCheck?: boolean; // Override: allow generation even if vendor is unpaid
+      materialIds?: string[]; // Optional: generate settlement for specific materials only
     }) => {
       await ensureFreshSession();
 
@@ -476,10 +519,17 @@ export function useGenerateSettlement() {
       if (batchError) throw batchError;
 
       // Filter to only records where creditor (paying site) matches fromSiteId
-      const matchingRecords = (batchRecords || []).filter((record: any) => {
+      let matchingRecords = (batchRecords || []).filter((record: any) => {
         const payingSiteId = record.batch?.paying_site_id || record.batch?.site_id;
         return payingSiteId === data.fromSiteId;
       });
+
+      // If materialIds specified, further filter to those materials only
+      if (data.materialIds && data.materialIds.length > 0) {
+        matchingRecords = matchingRecords.filter(
+          (record: any) => data.materialIds!.includes(record.material_id)
+        );
+      }
 
       if (matchingRecords.length === 0) {
         throw new Error("No unsettled transactions found between these sites");
@@ -1697,6 +1747,7 @@ export function useGroupStockTransactions(
       }
     },
     enabled: !!groupId,
+    staleTime: 2 * 60 * 1000, // 2 minutes
   });
 }
 

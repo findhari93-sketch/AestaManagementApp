@@ -59,6 +59,7 @@ interface StockBatchesTabProps {
   onViewTransaction: (tx: GroupStockTransaction) => void
   onEditTransaction: (tx: GroupStockTransaction) => void
   onDeleteTransaction: (tx: GroupStockTransaction) => void
+  onDeleteUsage?: (batchRefCode: string, siteId: string, siteName: string, recordIds: string[]) => void
   onRecordGroupUsage?: (materialId?: string) => void
 }
 
@@ -77,6 +78,7 @@ export default function StockBatchesTab({
   onViewTransaction,
   onEditTransaction,
   onDeleteTransaction,
+  onDeleteUsage,
   onRecordGroupUsage,
 }: StockBatchesTabProps) {
   const [viewMode, setViewMode] = useState<'grouped' | 'card' | 'list'>('list')
@@ -339,6 +341,7 @@ export default function StockBatchesTab({
                   onConvertToOwnSite={onConvertToOwnSite}
                   onCompleteBatch={onCompleteBatch}
                   onSettleUsage={handleSettleUsage}
+                  onDeleteUsage={onDeleteUsage}
                   onRecordGroupUsage={onRecordGroupUsage}
                 />
               ))}
@@ -373,6 +376,7 @@ export default function StockBatchesTab({
                       const materialId = batch.items?.[0]?.material_id
                       onRecordGroupUsage(materialId)
                     } : undefined}
+                    onDeleteUsage={onDeleteUsage}
                     currentSiteId={currentSiteId}
                     showActions
                   />
@@ -422,6 +426,7 @@ export default function StockBatchesTab({
                     onViewTransaction={onViewTransaction}
                     onEditTransaction={onEditTransaction}
                     onDeleteTransaction={onDeleteTransaction}
+                    onDeleteUsage={onDeleteUsage}
                     canEdit={canEdit}
                   />
                 ))

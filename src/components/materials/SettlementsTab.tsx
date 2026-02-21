@@ -54,7 +54,7 @@ interface SettlementsTabProps {
   currentSiteId: string | undefined
   isLoading: boolean
   canEdit: boolean
-  onGenerateSettlement: (balance: InterSiteBalance) => void
+  onGenerateSettlement: (balance: InterSiteBalance, materialIds?: string[]) => void
   onSettlePayment: (settlement: InterSiteSettlementWithDetails) => void
   onDeleteSettlement: (settlementId: string) => void
   onCancelSettlement: (settlementId: string, type: 'completed' | 'pending') => void

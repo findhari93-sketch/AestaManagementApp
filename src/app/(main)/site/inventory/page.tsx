@@ -901,10 +901,9 @@ export default function InventoryPage() {
               </Typography>
               {row.original.is_shared_usage && (
                 <Chip
-                  label="Shared"
+                  label="Inter-Site"
                   size="small"
                   color="info"
-                  variant="outlined"
                   sx={{ height: 18, fontSize: "0.65rem" }}
                 />
               )}

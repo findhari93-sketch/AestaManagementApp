@@ -277,6 +277,20 @@ export interface InterSiteBalance {
   is_settled: boolean;
   /** True if any batch in this balance has vendor unpaid (creditor hasn't settled with vendor) */
   has_unpaid_vendor?: boolean;
+  /** Material-level breakdown of the balance */
+  material_breakdown: InterSiteBalanceMaterial[];
+}
+
+// Material-level breakdown within an inter-site balance
+export interface InterSiteBalanceMaterial {
+  material_id: string;
+  material_name: string;
+  material_code: string;
+  total_amount: number;
+  quantity: number;
+  unit: string;
+  transaction_count: number;
+  has_unpaid_vendor: boolean;
 }
 
 // Site settlement summary (aggregated view)
@@ -2043,6 +2057,13 @@ export interface BatchSiteAllocation {
   amount: number;
   is_payer: boolean;
   settlement_status: BatchUsageSettlementStatus;
+  usage_records?: Array<{
+    id: string;
+    quantity: number;
+    total_cost: number;
+    usage_date: string;
+    settlement_status: string;
+  }>;
 }
 
 export interface BatchSettlementSummary {

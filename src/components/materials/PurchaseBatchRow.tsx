@@ -37,6 +37,7 @@ interface PurchaseBatchRowProps {
   onViewTransaction: (tx: GroupStockTransaction) => void
   onEditTransaction: (tx: GroupStockTransaction) => void
   onDeleteTransaction: (tx: GroupStockTransaction) => void
+  onDeleteUsage?: (batchRefCode: string, siteId: string, siteName: string, recordIds: string[]) => void
   canEdit: boolean
 }
 
@@ -47,6 +48,7 @@ export default function PurchaseBatchRow({
   onViewTransaction,
   onEditTransaction,
   onDeleteTransaction,
+  onDeleteUsage,
   canEdit,
 }: PurchaseBatchRowProps) {
   const [open, setOpen] = useState(false)
@@ -474,29 +476,46 @@ export default function PurchaseBatchRow({
                               )}
                             </TableCell>
                             <TableCell align="center">
-                              {usageTx && (
-                                <Box sx={{ display: 'flex', justifyContent: 'center', gap: 0.5 }}>
+                              <Box sx={{ display: 'flex', justifyContent: 'center', gap: 0.5 }}>
+                                {usageTx && (
                                   <Tooltip title="View Details">
                                     <IconButton size="small" onClick={() => onViewTransaction(usageTx)}>
                                       <ViewIcon fontSize="small" />
                                     </IconButton>
                                   </Tooltip>
-                                  {canEdit && !isSelfUse && (
-                                    <>
+                                )}
+                                {canEdit && !isSelfUse && allocation.settlement_status !== 'settled' && allocation.settlement_status !== 'in_settlement' && (
+                                  <>
+                                    {usageTx && (
                                       <Tooltip title="Edit">
                                         <IconButton size="small" onClick={() => onEditTransaction(usageTx)}>
                                           <EditIcon fontSize="small" />
                                         </IconButton>
                                       </Tooltip>
+                                    )}
+                                    {onDeleteUsage ? (
+                                      <Tooltip title="Delete Usage">
+                                        <IconButton
+                                          size="small"
+                                          color="error"
+                                          onClick={() => {
+                                            const recordIds = (allocation.usage_records || []).map((r: any) => r.id).filter(Boolean)
+                                            onDeleteUsage(batch.ref_code, allocation.site_id, allocation.site_name, recordIds)
+                                          }}
+                                        >
+                                          <DeleteIcon fontSize="small" />
+                                        </IconButton>
+                                      </Tooltip>
+                                    ) : usageTx && (
                                       <Tooltip title="Delete">
                                         <IconButton size="small" color="error" onClick={() => onDeleteTransaction(usageTx)}>
                                           <DeleteIcon fontSize="small" />
                                         </IconButton>
                                       </Tooltip>
-                                    </>
-                                  )}
-                                </Box>
-                              )}
+                                    )}
+                                  </>
+                                )}
+                              </Box>
                             </TableCell>
                           </TableRow>
                         )

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, lazy, Suspense, useRef } from 'react'
 import {
   Box,
   Typography,
@@ -9,10 +9,12 @@ import {
   Tabs,
   Tab,
   Snackbar,
+  CircularProgress,
 } from '@mui/material'
 import {
   Inventory as BatchesIcon,
   AccountBalance as SettlementIcon,
+  History as HistoryIcon,
 } from '@mui/icons-material'
 import PageHeader from '@/components/layout/PageHeader'
 import Breadcrumbs from '@/components/layout/Breadcrumbs'
@@ -33,35 +35,31 @@ import {
   useDeleteUnsettledUsage,
 } from '@/hooks/queries/useInterSiteSettlements'
 import { useDeleteBatchCascade } from '@/hooks/queries/useMaterialPurchases'
-import { useBatchesWithUsage, useCompleteBatch } from '@/hooks/queries/useBatchUsage'
-import NetSettlementDialog from '@/components/materials/NetSettlementDialog'
-import ConvertToOwnSiteDialog from '@/components/materials/ConvertToOwnSiteDialog'
-import GroupStockTransactionDrawer from '@/components/materials/GroupStockTransactionDrawer'
-import EditGroupStockTransactionDialog from '@/components/materials/EditGroupStockTransactionDialog'
-import InitiateBatchSettlementDialog from '@/components/materials/InitiateBatchSettlementDialog'
-import RecordInterSitePaymentDialog from '@/components/materials/RecordInterSitePaymentDialog'
-import BatchCompletionDialog from '@/components/materials/BatchCompletionDialog'
-import GroupStockUsageDialog from '@/components/materials/GroupStockUsageDialog'
+import { useBatchesWithUsage, useCompleteBatch, useDeleteBatchUsage } from '@/hooks/queries/useBatchUsage'
 import ConfirmDialog from '@/components/common/ConfirmDialog'
 import SettlementSummaryCards from '@/components/materials/SettlementSummaryCards'
 import SettlementLedger from '@/components/materials/SettlementLedger'
-import StockBatchesTab from '@/components/materials/StockBatchesTab'
-import SettlementsTab from '@/components/materials/SettlementsTab'
 import type { InterSiteSettlementWithDetails, InterSiteBalance, GroupStockBatch } from '@/types/material.types'
 import type { GroupStockTransaction } from '@/hooks/queries/useInterSiteSettlements'
 
-interface TabPanelProps {
-  children?: React.ReactNode
-  index: number
-  value: number
-}
+// Lazy-load heavy tab content and dialog components
+const StockBatchesTab = lazy(() => import('@/components/materials/StockBatchesTab'))
+const SettlementsTab = lazy(() => import('@/components/materials/SettlementsTab'))
+const BatchUsageHistoryTab = lazy(() => import('@/components/materials/BatchUsageHistoryTab'))
+const NetSettlementDialog = lazy(() => import('@/components/materials/NetSettlementDialog'))
+const ConvertToOwnSiteDialog = lazy(() => import('@/components/materials/ConvertToOwnSiteDialog'))
+const GroupStockTransactionDrawer = lazy(() => import('@/components/materials/GroupStockTransactionDrawer'))
+const EditGroupStockTransactionDialog = lazy(() => import('@/components/materials/EditGroupStockTransactionDialog'))
+const InitiateBatchSettlementDialog = lazy(() => import('@/components/materials/InitiateBatchSettlementDialog'))
+const RecordInterSitePaymentDialog = lazy(() => import('@/components/materials/RecordInterSitePaymentDialog'))
+const BatchCompletionDialog = lazy(() => import('@/components/materials/BatchCompletionDialog'))
+const GroupStockUsageDialog = lazy(() => import('@/components/materials/GroupStockUsageDialog'))
 
-function TabPanel(props: TabPanelProps) {
-  const { children, value, index, ...other } = props
+function TabLoader() {
   return (
-    <div role="tabpanel" hidden={value !== index} {...other}>
-      {value === index && <Box sx={{ pt: 2 }}>{children}</Box>}
-    </div>
+    <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>
+      <CircularProgress size={32} />
+    </Box>
   )
 }
 
@@ -115,10 +113,20 @@ export default function InterSiteSettlementPage() {
   const [netSettleDialogOpen, setNetSettleDialogOpen] = useState(false)
   const [netSettlePair, setNetSettlePair] = useState<{ balanceA: InterSiteBalance; balanceB: InterSiteBalance } | null>(null)
 
+  // Delete batch usage states
+  const [deleteUsageData, setDeleteUsageData] = useState<{ batchRefCode: string; siteId: string; siteName: string; recordIds: string[] } | null>(null)
+  const [deleteUsageConfirmOpen, setDeleteUsageConfirmOpen] = useState(false)
+
   // Snackbar for error messages
   const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: 'error' | 'warning' | 'success' | 'info' }>({ open: false, message: '', severity: 'error' })
 
-  // Data hooks
+  // Track which tabs have been visited to avoid unmounting fetched data
+  const visitedTabs = useRef(new Set<number>([0]))
+  if (!visitedTabs.current.has(tabValue)) {
+    visitedTabs.current.add(tabValue)
+  }
+
+  // Data hooks — always-on (needed for summary + ledger which are always visible)
   const { data: groupMembership, isLoading: membershipLoading } = useSiteGroupMembership(
     selectedSite?.id
   )
@@ -128,15 +136,22 @@ export default function InterSiteSettlementPage() {
   const { data: balances = [], isLoading: balancesLoading } = useInterSiteBalances(
     groupMembership?.groupId
   )
+
+  // Tab-conditional queries — only fetch when the tab has been visited
+  const tab0Active = visitedTabs.current.has(0)
+  const tab1Active = visitedTabs.current.has(1)
+
   const { data: settlements = [], isLoading: settlementsLoading } = useInterSiteSettlements(
-    selectedSite?.id
+    tab1Active ? selectedSite?.id : undefined
   )
-  // Transactions still needed for list view in StockBatchesTab
+  // Transactions only needed for list view in StockBatchesTab
   const { data: transactions = [], isLoading: transactionsLoading } = useGroupStockTransactions(
-    groupMembership?.groupId,
+    tab0Active ? groupMembership?.groupId : undefined,
     { limit: 100 }
   )
-  const { data: batchesWithUsage = [], isLoading: batchesLoading } = useBatchesWithUsage(groupMembership?.groupId)
+  const { data: batchesWithUsage = [], isLoading: batchesLoading } = useBatchesWithUsage(
+    tab0Active ? groupMembership?.groupId : undefined
+  )
 
   // Mutation hooks
   const generateSettlement = useGenerateSettlement()
@@ -147,12 +162,15 @@ export default function InterSiteSettlementPage() {
   const cancelCompletedSettlement = useCancelCompletedSettlement()
   const cancelPendingSettlement = useCancelPendingSettlement()
   const deleteUnsettledUsage = useDeleteUnsettledUsage()
+  const deleteBatchUsage = useDeleteBatchUsage()
 
   // Auth and permissions
   const { userProfile } = useAuth()
   const canEdit = hasEditPermission(userProfile?.role)
 
-  const isLoading = membershipLoading || summaryLoading || balancesLoading || settlementsLoading || transactionsLoading || batchesLoading
+  // Per-tab loading: only block tab content on its own data
+  const tab0Loading = membershipLoading || transactionsLoading || batchesLoading
+  const tab1Loading = membershipLoading || balancesLoading || settlementsLoading
 
   // Filter settlements for the ledger
   const pendingSettlements = settlements.filter(
@@ -233,7 +251,7 @@ export default function InterSiteSettlementPage() {
     }
   }
 
-  const handleGenerateSettlement = async (balance: InterSiteBalance) => {
+  const handleGenerateSettlement = async (balance: InterSiteBalance, materialIds?: string[]) => {
     if (!groupMembership?.groupId) return
     try {
       await generateSettlement.mutateAsync({
@@ -242,6 +260,7 @@ export default function InterSiteSettlementPage() {
         toSiteId: balance.debtor_site_id,
         year: balance.year,
         weekNumber: balance.week_number,
+        materialIds,
       })
     } catch (error: any) {
       const errorMessage = error?.message || 'Failed to generate settlement'
@@ -333,6 +352,34 @@ export default function InterSiteSettlementPage() {
     }
   }
 
+  const handleDeleteUsage = (batchRefCode: string, siteId: string, siteName: string, recordIds: string[]) => {
+    setDeleteUsageData({ batchRefCode, siteId, siteName, recordIds })
+    setDeleteUsageConfirmOpen(true)
+  }
+
+  const handleConfirmDeleteUsage = async () => {
+    if (!deleteUsageData) return
+    try {
+      // Delete each usage record
+      for (const recordId of deleteUsageData.recordIds) {
+        await deleteBatchUsage.mutateAsync({
+          usageId: recordId,
+          batchRefCode: deleteUsageData.batchRefCode,
+          siteId: deleteUsageData.siteId,
+        })
+      }
+      setDeleteUsageConfirmOpen(false)
+      setDeleteUsageData(null)
+    } catch (error) {
+      console.error('Failed to delete usage:', error)
+      setSnackbar({
+        open: true,
+        message: 'Failed to delete usage record. It may already be settled.',
+        severity: 'error',
+      })
+    }
+  }
+
   const handleRecordGroupUsage = (materialId?: string) => {
     setPreSelectedMaterialId(materialId ?? null)
     setGroupUsageDialogOpen(true)
@@ -406,58 +453,82 @@ export default function InterSiteSettlementPage() {
         >
           <Tab label="Stock & Batches" icon={<BatchesIcon />} iconPosition="start" />
           <Tab label="Settlements" icon={<SettlementIcon />} iconPosition="start" />
+          <Tab label="Usage History" icon={<HistoryIcon />} iconPosition="start" />
         </Tabs>
 
-        {/* Tab 0: Stock & Batches */}
-        <TabPanel value={tabValue} index={0}>
-          <StockBatchesTab
-            batches={batchesWithUsage}
-            batchesWithUsage={batchesWithUsage}
-            transactions={transactions}
-            isLoading={isLoading}
-            currentSiteId={selectedSite?.id}
-            allSites={groupMembership?.allSites}
-            groupName={groupMembership?.groupName}
-            canEdit={canEdit}
-            onConvertToOwnSite={handleConvertBatch}
-            onCompleteBatch={handleCompleteBatch}
-            onSettleUsage={handleSettleUsage}
-            onViewTransaction={handleViewTransaction}
-            onEditTransaction={handleEditTransaction}
-            onDeleteTransaction={handleDeleteTransaction}
-            onRecordGroupUsage={handleRecordGroupUsage}
-          />
-        </TabPanel>
+        {/* Tab 0: Stock & Batches — only mount when active */}
+        {tabValue === 0 && (
+          <Box sx={{ pt: 2 }}>
+            <Suspense fallback={<TabLoader />}>
+              <StockBatchesTab
+                batches={batchesWithUsage}
+                batchesWithUsage={batchesWithUsage}
+                transactions={transactions}
+                isLoading={tab0Loading}
+                currentSiteId={selectedSite?.id}
+                allSites={groupMembership?.allSites}
+                groupName={groupMembership?.groupName}
+                canEdit={canEdit}
+                onConvertToOwnSite={handleConvertBatch}
+                onCompleteBatch={handleCompleteBatch}
+                onSettleUsage={handleSettleUsage}
+                onViewTransaction={handleViewTransaction}
+                onEditTransaction={handleEditTransaction}
+                onDeleteTransaction={handleDeleteTransaction}
+                onDeleteUsage={handleDeleteUsage}
+                onRecordGroupUsage={handleRecordGroupUsage}
+              />
+            </Suspense>
+          </Box>
+        )}
 
-        {/* Tab 1: Settlements */}
-        <TabPanel value={tabValue} index={1}>
-          <SettlementsTab
-            balances={balances}
-            settlements={settlements}
-            currentSiteId={selectedSite?.id}
-            isLoading={isLoading}
-            canEdit={canEdit}
-            onGenerateSettlement={handleGenerateSettlement}
-            onSettlePayment={handleSettlePayment}
-            onDeleteSettlement={(id) => {
-              setDeleteSettlementId(id)
-              setDeleteSettlementConfirmOpen(true)
-            }}
-            onCancelSettlement={(id, type) => {
-              setCancelSettlementId(id)
-              setCancelSettlementType(type)
-              setCancelSettlementConfirmOpen(true)
-            }}
-            onDeleteUnsettledBalance={(balance) => {
-              setDeleteUnsettledBalance(balance)
-              setDeleteUnsettledConfirmOpen(true)
-            }}
-            generatePending={generateSettlement.isPending}
-            cancelPending={cancelCompletedSettlement.isPending || cancelPendingSettlement.isPending}
-            deletePending={deleteSettlement.isPending}
-            deleteUnsettledPending={deleteUnsettledUsage.isPending}
-          />
-        </TabPanel>
+        {/* Tab 1: Settlements — only mount when active */}
+        {tabValue === 1 && (
+          <Box sx={{ pt: 2 }}>
+            <Suspense fallback={<TabLoader />}>
+              <SettlementsTab
+                balances={balances}
+                settlements={settlements}
+                currentSiteId={selectedSite?.id}
+                isLoading={tab1Loading}
+                canEdit={canEdit}
+                onGenerateSettlement={handleGenerateSettlement}
+                onSettlePayment={handleSettlePayment}
+                onDeleteSettlement={(id) => {
+                  setDeleteSettlementId(id)
+                  setDeleteSettlementConfirmOpen(true)
+                }}
+                onCancelSettlement={(id, type) => {
+                  setCancelSettlementId(id)
+                  setCancelSettlementType(type)
+                  setCancelSettlementConfirmOpen(true)
+                }}
+                onDeleteUnsettledBalance={(balance) => {
+                  setDeleteUnsettledBalance(balance)
+                  setDeleteUnsettledConfirmOpen(true)
+                }}
+                generatePending={generateSettlement.isPending}
+                cancelPending={cancelCompletedSettlement.isPending || cancelPendingSettlement.isPending}
+                deletePending={deleteSettlement.isPending}
+                deleteUnsettledPending={deleteUnsettledUsage.isPending}
+              />
+            </Suspense>
+          </Box>
+        )}
+
+        {/* Tab 2: Usage History — only mount when active */}
+        {tabValue === 2 && (
+          <Box sx={{ pt: 2 }}>
+            <Suspense fallback={<TabLoader />}>
+              <BatchUsageHistoryTab
+                groupId={groupMembership?.groupId}
+                currentSiteId={selectedSite?.id}
+                allSites={groupMembership?.allSites}
+                canEdit={canEdit}
+              />
+            </Suspense>
+          </Box>
+        )}
       </Paper>
 
       {/* Info Box */}
@@ -487,37 +558,47 @@ export default function InterSiteSettlementPage() {
         </Box>
       </Alert>
 
-      {/* Dialogs */}
-      {selectedSite?.id && (
-        <ConvertToOwnSiteDialog
-          open={convertDialogOpen}
-          onClose={() => {
-            setConvertDialogOpen(false)
-            setSelectedBatch(null)
-          }}
-          batch={selectedBatch}
-          siteId={selectedSite.id}
-        />
+      {/* Dialogs — only mount when open (lazy-loaded) */}
+      {convertDialogOpen && selectedSite?.id && (
+        <Suspense fallback={null}>
+          <ConvertToOwnSiteDialog
+            open={convertDialogOpen}
+            onClose={() => {
+              setConvertDialogOpen(false)
+              setSelectedBatch(null)
+            }}
+            batch={selectedBatch}
+            siteId={selectedSite.id}
+          />
+        </Suspense>
       )}
 
-      <GroupStockTransactionDrawer
-        open={viewDrawerOpen}
-        onClose={() => {
-          setViewDrawerOpen(false)
-          setViewTransaction(null)
-        }}
-        transaction={viewTransaction}
-      />
+      {viewDrawerOpen && (
+        <Suspense fallback={null}>
+          <GroupStockTransactionDrawer
+            open={viewDrawerOpen}
+            onClose={() => {
+              setViewDrawerOpen(false)
+              setViewTransaction(null)
+            }}
+            transaction={viewTransaction}
+          />
+        </Suspense>
+      )}
 
-      <EditGroupStockTransactionDialog
-        open={editDialogOpen}
-        onClose={() => {
-          setEditDialogOpen(false)
-          setEditTransaction(null)
-        }}
-        transaction={editTransaction}
-        groupId={groupMembership?.groupId}
-      />
+      {editDialogOpen && (
+        <Suspense fallback={null}>
+          <EditGroupStockTransactionDialog
+            open={editDialogOpen}
+            onClose={() => {
+              setEditDialogOpen(false)
+              setEditTransaction(null)
+            }}
+            transaction={editTransaction}
+            groupId={groupMembership?.groupId}
+          />
+        </Suspense>
+      )}
 
       <ConfirmDialog
         open={deleteConfirmOpen}
@@ -583,81 +664,107 @@ export default function InterSiteSettlementPage() {
         }}
       />
 
-      {settlementData && !settlementData.settlementId && (
-        <InitiateBatchSettlementDialog
-          open={settlementDialogOpen}
-          onClose={() => {
-            setSettlementDialogOpen(false)
-            setSettlementData(null)
-          }}
-          batchRefCode={settlementData.batchRefCode}
-          debtorSiteId={settlementData.debtorSiteId}
-          debtorSiteName={settlementData.debtorSiteName}
-          creditorSiteId={settlementData.creditorSiteId}
-          creditorSiteName={settlementData.creditorSiteName}
-          amount={settlementData.amount}
-        />
-      )}
-
-      {settlementData && settlementData.settlementId && (
-        <RecordInterSitePaymentDialog
-          open={settlementDialogOpen}
-          onClose={() => {
-            setSettlementDialogOpen(false)
-            setSettlementData(null)
-          }}
-          settlementId={settlementData.settlementId}
-          debtorSiteId={settlementData.debtorSiteId}
-          debtorSiteName={settlementData.debtorSiteName}
-          creditorSiteId={settlementData.creditorSiteId}
-          creditorSiteName={settlementData.creditorSiteName}
-          amount={settlementData.amount}
-        />
-      )}
-
-      <BatchCompletionDialog
-        open={batchCompletionOpen}
-        onClose={() => {
-          setBatchCompletionOpen(false)
-          setSelectedBatch(null)
+      <ConfirmDialog
+        open={deleteUsageConfirmOpen}
+        title="Delete Usage Record"
+        message={`Are you sure you want to delete the usage record for ${deleteUsageData?.siteName || 'this site'} from batch ${deleteUsageData?.batchRefCode || ''}? This will restore the stock back to the batch.`}
+        confirmText="Delete"
+        confirmColor="error"
+        isLoading={deleteBatchUsage.isPending}
+        onConfirm={handleConfirmDeleteUsage}
+        onCancel={() => {
+          setDeleteUsageConfirmOpen(false)
+          setDeleteUsageData(null)
         }}
-        batch={selectedBatch}
-        onComplete={handleConfirmBatchCompletion}
       />
 
-      {selectedSite?.id && (
-        <GroupStockUsageDialog
-          open={groupUsageDialogOpen}
-          onClose={() => {
-            setGroupUsageDialogOpen(false)
-            setPreSelectedMaterialId(null)
-          }}
-          siteId={selectedSite.id}
-          batchesWithUsage={batchesWithUsage}
-          preSelectedMaterialId={preSelectedMaterialId}
-        />
+      {settlementDialogOpen && settlementData && !settlementData.settlementId && (
+        <Suspense fallback={null}>
+          <InitiateBatchSettlementDialog
+            open={settlementDialogOpen}
+            onClose={() => {
+              setSettlementDialogOpen(false)
+              setSettlementData(null)
+            }}
+            batchRefCode={settlementData.batchRefCode}
+            debtorSiteId={settlementData.debtorSiteId}
+            debtorSiteName={settlementData.debtorSiteName}
+            creditorSiteId={settlementData.creditorSiteId}
+            creditorSiteName={settlementData.creditorSiteName}
+            amount={settlementData.amount}
+          />
+        </Suspense>
       )}
 
-      {netSettlePair && groupMembership?.groupId && (
-        <NetSettlementDialog
-          open={netSettleDialogOpen}
-          onClose={() => {
-            setNetSettleDialogOpen(false)
-            setNetSettlePair(null)
-          }}
-          balanceA={netSettlePair.balanceA}
-          balanceB={netSettlePair.balanceB}
-          groupId={groupMembership.groupId}
-          onSuccess={() => {
-            setNetSettleDialogOpen(false)
-            setNetSettlePair(null)
-          }}
-          debtorSiteId={
-            netSettlePair.balanceA.total_amount_owed > netSettlePair.balanceB.total_amount_owed
-              ? netSettlePair.balanceA.debtor_site_id
-              : netSettlePair.balanceB.debtor_site_id
-          }
-        />
+      {settlementDialogOpen && settlementData && settlementData.settlementId && (
+        <Suspense fallback={null}>
+          <RecordInterSitePaymentDialog
+            open={settlementDialogOpen}
+            onClose={() => {
+              setSettlementDialogOpen(false)
+              setSettlementData(null)
+            }}
+            settlementId={settlementData.settlementId}
+            debtorSiteId={settlementData.debtorSiteId}
+            debtorSiteName={settlementData.debtorSiteName}
+            creditorSiteId={settlementData.creditorSiteId}
+            creditorSiteName={settlementData.creditorSiteName}
+            amount={settlementData.amount}
+          />
+        </Suspense>
+      )}
+
+      {batchCompletionOpen && (
+        <Suspense fallback={null}>
+          <BatchCompletionDialog
+            open={batchCompletionOpen}
+            onClose={() => {
+              setBatchCompletionOpen(false)
+              setSelectedBatch(null)
+            }}
+            batch={selectedBatch}
+            onComplete={handleConfirmBatchCompletion}
+          />
+        </Suspense>
+      )}
+
+      {groupUsageDialogOpen && selectedSite?.id && (
+        <Suspense fallback={null}>
+          <GroupStockUsageDialog
+            open={groupUsageDialogOpen}
+            onClose={() => {
+              setGroupUsageDialogOpen(false)
+              setPreSelectedMaterialId(null)
+            }}
+            siteId={selectedSite.id}
+            batchesWithUsage={batchesWithUsage}
+            preSelectedMaterialId={preSelectedMaterialId}
+          />
+        </Suspense>
+      )}
+
+      {netSettleDialogOpen && netSettlePair && groupMembership?.groupId && (
+        <Suspense fallback={null}>
+          <NetSettlementDialog
+            open={netSettleDialogOpen}
+            onClose={() => {
+              setNetSettleDialogOpen(false)
+              setNetSettlePair(null)
+            }}
+            balanceA={netSettlePair.balanceA}
+            balanceB={netSettlePair.balanceB}
+            groupId={groupMembership.groupId}
+            onSuccess={() => {
+              setNetSettleDialogOpen(false)
+              setNetSettlePair(null)
+            }}
+            debtorSiteId={
+              netSettlePair.balanceA.total_amount_owed > netSettlePair.balanceB.total_amount_owed
+                ? netSettlePair.balanceA.debtor_site_id
+                : netSettlePair.balanceB.debtor_site_id
+            }
+          />
+        </Suspense>
       )}
 
       {/* Error/Warning Snackbar */}
