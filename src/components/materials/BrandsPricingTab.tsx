@@ -81,6 +81,7 @@ function groupBrandsWithVariants(brands: MaterialBrand[]): BrandWithVariants[] {
       variant_name: brand.variant_name,
       quality_rating: brand.quality_rating,
       notes: brand.notes,
+      image_url: brand.image_url,
       is_active: brand.is_active,
     });
     if (brand.is_preferred) {

@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from "react";
 import {
+  Avatar,
   Box,
   Card,
   CardContent,
@@ -74,6 +75,12 @@ export default function BrandCard({
     };
   }, [brandGroup.variants, brandPrices]);
 
+  // Find the first brand image from variants
+  const brandImage = useMemo(
+    () => brandGroup.variants.find((v) => v.image_url)?.image_url ?? null,
+    [brandGroup.variants]
+  );
+
   const hasMultipleVariants = brandGroup.variants.length > 1;
   const shouldCollapse = brandGroup.variants.length > 4;
 
@@ -112,6 +119,18 @@ export default function BrandCard({
             </Typography>
           )}
         </Box>
+
+        {/* Brand Product Image */}
+        {brandImage && (
+          <Box sx={{ display: "flex", justifyContent: "center", mb: 1 }}>
+            <Avatar
+              src={brandImage}
+              alt={brandGroup.brand_name}
+              variant="rounded"
+              sx={{ width: 48, height: 48 }}
+            />
+          </Box>
+        )}
 
         {/* Best vendor info */}
         {aggregatedInfo.bestVendorName && (

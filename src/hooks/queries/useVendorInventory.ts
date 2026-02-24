@@ -1208,7 +1208,7 @@ export function useVendorMaterialBrands(
           .select(
             `
             brand_id,
-            brand:material_brands(id, material_id, brand_name, variant_name, is_preferred, quality_rating, notes, is_active, created_at)
+            brand:material_brands(id, material_id, brand_name, variant_name, is_preferred, quality_rating, notes, image_url, is_active, created_at)
           `
           )
           .eq("vendor_id", vendorId)
@@ -1229,6 +1229,7 @@ export function useVendorMaterialBrands(
           is_preferred: boolean;
           quality_rating: number | null;
           notes: string | null;
+          image_url: string | null;
           is_active: boolean;
           created_at: string;
         }>();

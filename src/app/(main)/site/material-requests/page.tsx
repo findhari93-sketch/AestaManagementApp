@@ -92,6 +92,8 @@ const PRIORITY_COLORS: Record<RequestPriority, "default" | "info" | "warning" | 
 
 type TabValue = "all" | "pending" | "approved" | "fulfilled" | "rejected";
 
+const EMPTY_PO_SUMMARY_MAP = new Map<string, RequestPOSummary>();
+
 export default function MaterialRequestsPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [approvalDialogOpen, setApprovalDialogOpen] = useState(false);
@@ -114,12 +116,25 @@ export default function MaterialRequestsPage() {
 
   const { data: allRequests = [], isLoading } = useMaterialRequests(selectedSite?.id);
   const { data: summary } = useRequestSummary(selectedSite?.id);
-  const { data: poSummaryMap = new Map<string, RequestPOSummary>() } = useRequestsPOSummary(selectedSite?.id);
+  const { data: poSummaryMap = EMPTY_PO_SUMMARY_MAP } = useRequestsPOSummary(selectedSite?.id);
 
   const queryClient = useQueryClient();
   const cancelRequest = useCancelMaterialRequest();
   const approveRequest = useApproveMaterialRequest();
   const rejectRequest = useRejectMaterialRequest();
+
+  // Unique material names for column filter
+  const materialFilterOptions = useMemo(() => {
+    const names = new Set<string>();
+    allRequests.forEach((r) =>
+      r.items?.forEach((item) => {
+        if (item.material?.name) names.add(item.material.name);
+      })
+    );
+    return Array.from(names)
+      .sort((a, b) => a.localeCompare(b))
+      .map((name) => ({ value: name, label: name }));
+  }, [allRequests]);
 
   // Filter requests based on tab and search
   const filteredRequests = useMemo(() => {
@@ -408,6 +423,16 @@ export default function MaterialRequestsPage() {
         accessorKey: "items",
         header: "Materials",
         size: 200,
+        filterVariant: "multi-select",
+        filterSelectOptions: materialFilterOptions,
+        filterFn: (row, _columnId, filterValues: string[]) => {
+          if (!filterValues || filterValues.length === 0) return true;
+          const items = row.original.items;
+          if (!items || items.length === 0) return false;
+          return items.some((item) =>
+            filterValues.includes(item.material?.name || "")
+          );
+        },
         Cell: ({ row }) => {
           const items = row.original.items;
           if (!items || items.length === 0) {
@@ -485,7 +510,7 @@ export default function MaterialRequestsPage() {
             : "-",
       },
     ],
-    [handleViewDetails, poSummaryMap, isAdmin, handleOpenConvertDialog]
+    [handleViewDetails, poSummaryMap, isAdmin, handleOpenConvertDialog, materialFilterOptions]
   );
 
   // Memoized props for DataTable to prevent re-renders

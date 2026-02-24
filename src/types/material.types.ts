@@ -466,6 +466,7 @@ export interface MaterialBrand {
   is_preferred: boolean;
   quality_rating: number | null;
   notes: string | null;
+  image_url: string | null;
   is_active: boolean;
   created_at: string;
 }
@@ -479,6 +480,7 @@ export interface BrandWithVariants {
     variant_name: string | null;
     quality_rating: number | null;
     notes: string | null;
+    image_url: string | null;
     is_active: boolean;
   }>;
 }
@@ -1268,6 +1270,7 @@ export interface MaterialBrandFormData {
   is_preferred?: boolean;
   quality_rating?: number;
   notes?: string;
+  image_url?: string | null;
 }
 
 export interface StockAdjustmentFormData {

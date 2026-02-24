@@ -1044,6 +1044,7 @@ export default function MaterialDialog({
                     materialId={material.id}
                     brands={activeBrands}
                     categoryName={currentCategoryName}
+                    supabase={supabase}
                     onAddBrand={handleAddBrand}
                     onUpdateBrand={async (brandId, data) => {
                       await updateBrand.mutateAsync({ id: brandId, data });

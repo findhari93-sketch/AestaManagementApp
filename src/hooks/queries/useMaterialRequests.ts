@@ -124,6 +124,7 @@ export function useMaterialRequests(
       return data as MaterialRequestWithDetails[];
     },
     enabled: !!siteId,
+    staleTime: 30000,
   });
 }
 
@@ -783,6 +784,7 @@ export function useRequestSummary(siteId: string | undefined) {
       return summary;
     },
     enabled: !!siteId,
+    staleTime: 30000,
   });
 }
 
@@ -1020,6 +1022,7 @@ export function useRequestsPOSummary(siteId: string | undefined) {
       }
     },
     enabled: !!siteId,
+    staleTime: 60000,
   });
 }
 

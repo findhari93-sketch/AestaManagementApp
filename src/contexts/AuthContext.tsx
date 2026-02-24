@@ -87,8 +87,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(session?.user ?? null);
 
         if (session?.user) {
-          await fetchUserProfile(session.user.id);
-          // Initialize session manager to keep session alive during long form fills
+          // Profile fetch is handled by onAuthStateChange INITIAL_SESSION event
+          // to avoid duplicate concurrent requests causing CORS errors
           initializeSessionManager();
         }
       } catch (error) {

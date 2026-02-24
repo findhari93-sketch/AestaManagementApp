@@ -21,8 +21,11 @@ import {
   ExpandMore as ExpandMoreIcon,
   ExpandLess as ExpandLessIcon,
   Close as CloseIcon,
+  CameraAlt as CameraAltIcon,
 } from "@mui/icons-material";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import type { MaterialBrand, BrandWithVariants } from "@/types/material.types";
+import FileUploader from "@/components/common/FileUploader";
 
 // Category-specific suggested brands
 const CATEGORY_BRAND_SUGGESTIONS: Record<string, string[]> = {
@@ -57,8 +60,9 @@ interface BrandVariantEditorProps {
   materialId: string;
   brands: MaterialBrand[];
   categoryName?: string | null;
+  supabase: SupabaseClient<any>;
   onAddBrand: (brandName: string, variantName?: string | null) => Promise<void>;
-  onUpdateBrand: (brandId: string, data: { is_preferred?: boolean }) => Promise<void>;
+  onUpdateBrand: (brandId: string, data: { is_preferred?: boolean; image_url?: string | null }) => Promise<void>;
   onDeleteBrand: (brand: MaterialBrand) => Promise<void>;
   disabled?: boolean;
 }
@@ -67,6 +71,7 @@ export default function BrandVariantEditor({
   materialId,
   brands,
   categoryName,
+  supabase,
   onAddBrand,
   onUpdateBrand,
   onDeleteBrand,
@@ -126,6 +131,7 @@ export default function BrandVariantEditor({
         variant_name: brand.variant_name,
         quality_rating: brand.quality_rating,
         notes: brand.notes,
+        image_url: brand.image_url,
         is_active: brand.is_active,
       });
       // Mark group as preferred if any variant is preferred
@@ -315,6 +321,63 @@ export default function BrandVariantEditor({
                 {/* Expanded Content - Variants */}
                 <Collapse in={isExpanded}>
                   <Box sx={{ px: 2, py: 1.5, bgcolor: "grey.50" }}>
+                    {/* Brand Product Image */}
+                    {(() => {
+                      // Use the first variant (or generic brand) for image storage
+                      const mainVariant = group.variants.find(v => !v.variant_name) || group.variants[0];
+                      const brandImage = group.variants.find(v => v.image_url)?.image_url || null;
+                      return (
+                        <Box sx={{ mb: 1.5 }}>
+                          {brandImage ? (
+                            <Box sx={{ display: "flex", alignItems: "flex-start", gap: 1 }}>
+                              <Box
+                                component="img"
+                                src={brandImage}
+                                alt={`${group.brand_name} product`}
+                                sx={{
+                                  width: 80,
+                                  height: 80,
+                                  objectFit: "cover",
+                                  borderRadius: 1,
+                                  border: 1,
+                                  borderColor: "divider",
+                                }}
+                              />
+                              <IconButton
+                                size="small"
+                                onClick={() => {
+                                  if (mainVariant) {
+                                    onUpdateBrand(mainVariant.id, { image_url: null });
+                                  }
+                                }}
+                                disabled={disabled}
+                              >
+                                <CloseIcon fontSize="small" />
+                              </IconButton>
+                            </Box>
+                          ) : (
+                            <FileUploader
+                              supabase={supabase}
+                              bucketName="work-updates"
+                              folderPath="product-photos"
+                              fileNamePrefix={`brand-${group.brand_name.toLowerCase().replace(/\s+/g, "-")}`}
+                              accept="image"
+                              label="Brand Product Image"
+                              value={null}
+                              onUpload={(file) => {
+                                if (mainVariant) {
+                                  onUpdateBrand(mainVariant.id, { image_url: file.url });
+                                }
+                              }}
+                              onRemove={() => {}}
+                              compact
+                              maxSizeMB={2}
+                            />
+                          )}
+                        </Box>
+                      );
+                    })()}
+
                     {/* Existing Variants */}
                     <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5, mb: 1 }}>
                       {group.variants.map((variant) => (
