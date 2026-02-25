@@ -81,7 +81,20 @@
       "mcp__supabase__get_advisors",
       "Bash(wmic process where \"CommandLine like ''%start-server%'' and Name=''node.exe''\" call terminate)",
       "Bash(wmic process where \"ProcessId=13536\" get CommandLine:*)",
-      "Bash(PGPASSWORD=pnzsGWOpxyJc1oNw psql:*)"
+      "Bash(PGPASSWORD=pnzsGWOpxyJc1oNw psql:*)",
+      "Bash(SUPABASE_ACCESS_TOKEN=sbp_17eb05acab06227bde573d9ba3fbe232600da27e npx supabase db push)",
+      "Bash(SUPABASE_ACCESS_TOKEN=sbp_17eb05acab06227bde573d9ba3fbe232600da27e npx supabase db push --include-all)",
+      "Bash(SUPABASE_ACCESS_TOKEN=sbp_17eb05acab06227bde573d9ba3fbe232600da27e npx supabase migration repair 20260212100000 --status applied)",
+      "Bash(SUPABASE_ACCESS_TOKEN=sbp_17eb05acab06227bde573d9ba3fbe232600da27e npx supabase migration repair 20260213100000 --status applied)",
+      "Bash(SUPABASE_ACCESS_TOKEN=sbp_17eb05acab06227bde573d9ba3fbe232600da27e npx supabase migration repair 20260215190000 --status applied)",
+      "Bash(SUPABASE_ACCESS_TOKEN=sbp_17eb05acab06227bde573d9ba3fbe232600da27e npx supabase migration repair 20260224100000 --status applied)",
+      "Bash(SUPABASE_ACCESS_TOKEN=sbp_17eb05acab06227bde573d9ba3fbe232600da27e npx supabase migration list)",
+      "Bash(SUPABASE_ACCESS_TOKEN=sbp_17eb05acab06227bde573d9ba3fbe232600da27e npx supabase migration repair 20260212100000 --status reverted)",
+      "Bash(SUPABASE_ACCESS_TOKEN=sbp_17eb05acab06227bde573d9ba3fbe232600da27e npx supabase migration repair 20260213100000 --status reverted)",
+      "Bash(SUPABASE_ACCESS_TOKEN=sbp_17eb05acab06227bde573d9ba3fbe232600da27e npx supabase migration repair 20260215190000 --status reverted)",
+      "Bash(SUPABASE_ACCESS_TOKEN=sbp_17eb05acab06227bde573d9ba3fbe232600da27e npx supabase db execute --file supabase/migrations/20260225100000_fix_work_updates_public_access.sql)",
+      "Bash(SUPABASE_ACCESS_TOKEN=sbp_17eb05acab06227bde573d9ba3fbe232600da27e npx supabase projects list)",
+      "Bash(SUPABASE_ACCESS_TOKEN=sbp_17eb05acab06227bde573d9ba3fbe232600da27e npx supabase migration repair 20260225100000 --status applied)"
     ],
     "deny": [],
     "ask": []

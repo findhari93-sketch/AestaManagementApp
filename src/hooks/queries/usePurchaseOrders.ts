@@ -52,8 +52,8 @@ export function usePurchaseOrders(
           vendor:vendors(id, name, phone, email),
           items:purchase_order_items(
             *,
-            material:materials(id, name, code, unit, weight_per_unit, weight_unit, length_per_piece, length_unit),
-            brand:material_brands(id, brand_name, variant_name)
+            material:materials(id, name, code, unit, weight_per_unit, weight_unit, length_per_piece, length_unit, image_url),
+            brand:material_brands(id, brand_name, variant_name, image_url)
           )
         `
         )
@@ -93,8 +93,8 @@ export function usePurchaseOrder(id: string | undefined) {
           vendor:vendors(*),
           items:purchase_order_items(
             *,
-            material:materials(id, name, code, unit, gst_rate, weight_per_unit, weight_unit, length_per_piece, length_unit),
-            brand:material_brands(id, brand_name, variant_name)
+            material:materials(id, name, code, unit, gst_rate, weight_per_unit, weight_unit, length_per_piece, length_unit, image_url),
+            brand:material_brands(id, brand_name, variant_name, image_url)
           ),
           deliveries(
             id, grn_number, delivery_date, delivery_status,
@@ -518,15 +518,19 @@ export function useUpdatePurchaseOrder() {
 
         const { data: existingExpense } = await supabase
           .from("material_purchase_expenses")
-          .select("id, purchase_type")
+          .select("id, purchase_type, ref_code, site_group_id")
           .eq("purchase_order_id", id)
           .maybeSingle();
 
         if (existingExpense) {
-          // Fetch PO items for quantity calculation
+          const oldPurchaseType = existingExpense.purchase_type;
+          const typeChanged = (isGroupStock && oldPurchaseType === "own_site") ||
+                              (!isGroupStock && oldPurchaseType === "group_stock");
+
+          // Fetch PO items for quantity calculation and cascade updates
           const { data: poItems } = await supabase
             .from("purchase_order_items")
-            .select("quantity")
+            .select("material_id, brand_id, quantity, unit_price")
             .eq("po_id", id);
           const totalQuantity = (poItems || []).reduce(
             (sum: number, item: any) => sum + Number(item.quantity || 0), 0
@@ -543,6 +547,201 @@ export function useUpdatePurchaseOrder() {
               updated_at: new Date().toISOString(),
             })
             .eq("id", existingExpense.id);
+
+          // CASCADE: Update related records when purchase_type changed OR
+          // when isGroupStock but stock_inventory records may be missing batch_code
+          // (handles retroactive fix for POs edited before cascade logic existed)
+          if (existingExpense.ref_code && (typeChanged || isGroupStock)) {
+            const refCode = existingExpense.ref_code;
+            const siteGroupId = parsedNotes?.site_group_id;
+
+            try {
+              if (isGroupStock && (oldPurchaseType === "own_site" || !typeChanged)) {
+                // === own_site → group_stock (or ensure consistency for existing group_stock) ===
+                console.log("[useUpdatePurchaseOrder] Ensuring group_stock consistency for ref:", refCode);
+
+                // 1. Set batch_code on stock_inventory records
+                for (const item of (poItems || [])) {
+                  let batchUpdateQuery = supabase
+                    .from("stock_inventory")
+                    .update({ batch_code: refCode, updated_at: new Date().toISOString() })
+                    .eq("site_id", result.site_id)
+                    .eq("material_id", item.material_id)
+                    .is("batch_code", null);
+
+                  if (item.brand_id) {
+                    batchUpdateQuery = batchUpdateQuery.eq("brand_id", item.brand_id);
+                  } else {
+                    batchUpdateQuery = batchUpdateQuery.is("brand_id", null);
+                  }
+                  await batchUpdateQuery;
+                }
+
+                // 2. Create group_stock_inventory and group_stock_transactions if site_group_id available
+                // Skip if transactions already exist for this batch (prevents duplicates on re-save)
+                if (siteGroupId) {
+                  const { data: existingTx } = await supabase
+                    .from("group_stock_transactions")
+                    .select("id")
+                    .eq("batch_ref_code", refCode)
+                    .limit(1);
+
+                  if (!existingTx || existingTx.length === 0) {
+                    const transactionsToInsert: any[] = [];
+
+                    for (const item of (poItems || [])) {
+                      // Check if group_stock_inventory exists
+                      let invQuery = supabase
+                        .from("group_stock_inventory")
+                        .select("id, current_qty, avg_unit_cost")
+                        .eq("site_group_id", siteGroupId)
+                        .eq("material_id", item.material_id);
+
+                      if (item.brand_id) {
+                        invQuery = invQuery.eq("brand_id", item.brand_id);
+                      } else {
+                        invQuery = invQuery.is("brand_id", null);
+                      }
+
+                      const { data: existingInv } = await invQuery.maybeSingle();
+                      let inventoryId: string;
+
+                      if (existingInv) {
+                        inventoryId = existingInv.id;
+                        const newQty = Number(existingInv.current_qty) + Number(item.quantity);
+                        const newAvgCost = newQty > 0
+                          ? ((Number(existingInv.current_qty) * Number(existingInv.avg_unit_cost || 0)) +
+                             (Number(item.quantity) * Number(item.unit_price))) / newQty
+                          : Number(item.unit_price);
+
+                        await supabase
+                          .from("group_stock_inventory")
+                          .update({
+                            current_qty: newQty,
+                            avg_unit_cost: newAvgCost,
+                            last_received_date: new Date().toISOString().split("T")[0],
+                            updated_at: new Date().toISOString(),
+                            batch_code: refCode,
+                          })
+                          .eq("id", existingInv.id);
+                      } else {
+                        const { data: newInv, error: invInsertError } = await supabase
+                          .from("group_stock_inventory")
+                          .insert({
+                            site_group_id: siteGroupId,
+                            material_id: item.material_id,
+                            brand_id: item.brand_id || null,
+                            current_qty: Number(item.quantity),
+                            avg_unit_cost: Number(item.unit_price),
+                            last_received_date: new Date().toISOString().split("T")[0],
+                            batch_code: refCode,
+                          })
+                          .select("id")
+                          .single();
+
+                        if (invInsertError) {
+                          console.warn("[useUpdatePurchaseOrder] Failed to insert group_stock_inventory:", invInsertError);
+                          continue;
+                        }
+                        inventoryId = newInv.id;
+                      }
+
+                      const unitCost = Number(item.unit_price) || 0;
+                      const totalCost = Number(item.quantity) * unitCost;
+                      transactionsToInsert.push({
+                        site_group_id: siteGroupId,
+                        inventory_id: inventoryId,
+                        transaction_type: "purchase",
+                        transaction_date: result.order_date || new Date().toISOString().split("T")[0],
+                        material_id: item.material_id,
+                        brand_id: item.brand_id || null,
+                        quantity: Number(item.quantity),
+                        unit_cost: unitCost,
+                        total_cost: totalCost,
+                        payment_source_site_id: result.site_id,
+                        batch_ref_code: refCode,
+                        reference_id: existingExpense.id,
+                        notes: `Type changed from own_site to group_stock on PO edit`,
+                      });
+                    }
+
+                    if (transactionsToInsert.length > 0) {
+                      const { error: txInsertError } = await supabase
+                        .from("group_stock_transactions")
+                        .insert(transactionsToInsert);
+                      if (txInsertError) {
+                        console.warn("[useUpdatePurchaseOrder] Failed to create group_stock_transactions:", txInsertError);
+                      }
+                    }
+                  } else {
+                    console.log("[useUpdatePurchaseOrder] group_stock_transactions already exist for ref:", refCode, "- skipping");
+                  }
+                }
+
+                console.log("[useUpdatePurchaseOrder] Cascade group_stock consistency complete");
+
+              } else if (!isGroupStock && oldPurchaseType === "group_stock") {
+                // === group_stock → own_site ===
+                console.log("[useUpdatePurchaseOrder] Cascading group_stock → own_site for ref:", refCode);
+
+                // 1. Clear batch_code on stock_inventory
+                await supabase
+                  .from("stock_inventory")
+                  .update({ batch_code: null, updated_at: new Date().toISOString() })
+                  .eq("batch_code", refCode);
+
+                // 2. Delete batch_usage_records
+                await supabase
+                  .from("batch_usage_records")
+                  .delete()
+                  .eq("batch_ref_code", refCode);
+
+                // 3. Delete group_stock_transactions
+                await supabase
+                  .from("group_stock_transactions")
+                  .delete()
+                  .eq("batch_ref_code", refCode);
+
+                // 4. Clean up group_stock_inventory for matching materials
+                const oldSiteGroupId = existingExpense.site_group_id;
+                if (oldSiteGroupId) {
+                  for (const item of (poItems || [])) {
+                    let invQuery = supabase
+                      .from("group_stock_inventory")
+                      .select("id, current_qty")
+                      .eq("site_group_id", oldSiteGroupId)
+                      .eq("material_id", item.material_id);
+
+                    if (item.brand_id) {
+                      invQuery = invQuery.eq("brand_id", item.brand_id);
+                    } else {
+                      invQuery = invQuery.is("brand_id", null);
+                    }
+
+                    const { data: groupInv } = await invQuery.maybeSingle();
+                    if (groupInv) {
+                      const newQty = Number(groupInv.current_qty) - Number(item.quantity);
+                      if (newQty <= 0) {
+                        await supabase
+                          .from("group_stock_inventory")
+                          .delete()
+                          .eq("id", groupInv.id);
+                      } else {
+                        await supabase
+                          .from("group_stock_inventory")
+                          .update({ current_qty: newQty, updated_at: new Date().toISOString() })
+                          .eq("id", groupInv.id);
+                      }
+                    }
+                  }
+                }
+
+                console.log("[useUpdatePurchaseOrder] Cascade group_stock → own_site complete");
+              }
+            } catch (cascadeError) {
+              console.warn("[useUpdatePurchaseOrder] Cascade update error (non-fatal):", cascadeError);
+            }
+          }
         }
       }
 
@@ -1405,8 +1604,8 @@ export function useDeliveries(
           po:purchase_orders(id, po_number, status),
           items:delivery_items(
             id, material_id, received_qty, accepted_qty, rejected_qty, unit_price,
-            material:materials(id, name, code, unit),
-            brand:material_brands(id, brand_name)
+            material:materials(id, name, code, unit, image_url),
+            brand:material_brands(id, brand_name, image_url)
           )
         `
         )
@@ -1445,8 +1644,8 @@ export function useDelivery(id: string | undefined) {
           po:purchase_orders(id, po_number, status, expected_delivery_date),
           items:delivery_items(
             *,
-            material:materials(id, name, code, unit),
-            brand:material_brands(id, brand_name)
+            material:materials(id, name, code, unit, image_url),
+            brand:material_brands(id, brand_name, image_url)
           )
         `
         )
@@ -3322,8 +3521,8 @@ export function usePaginatedPurchaseOrders(
           vendor:vendors(id, name, phone, email),
           items:purchase_order_items(
             *,
-            material:materials(id, name, code, unit, weight_per_unit, weight_unit, length_per_piece, length_unit),
-            brand:material_brands(id, brand_name, variant_name)
+            material:materials(id, name, code, unit, weight_per_unit, weight_unit, length_per_piece, length_unit, image_url),
+            brand:material_brands(id, brand_name, variant_name, image_url)
           )
         `
         )

@@ -19,6 +19,8 @@ import {
   Grid,
   Stack,
   Badge,
+  Avatar,
+  AvatarGroup,
 } from "@mui/material";
 import {
   Add as AddIcon,
@@ -32,6 +34,7 @@ import {
   Delete as DeleteIcon,
   Link as LinkIcon,
   CheckCircleOutline as FulfilledIcon,
+  Inventory2 as MaterialIcon,
 } from "@mui/icons-material";
 import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
 import PageHeader from "@/components/layout/PageHeader";
@@ -450,10 +453,12 @@ export default function MaterialRequestsPage() {
             return qty ? `${name} (${qty} ${unit})` : name;
           });
 
-          const shortNames = items.map((item) => item.material?.name || "Unknown");
+          const getItemImage = (item: any) =>
+            item.brand?.image_url || item.material?.image_url || null;
+
           const MAX_VISIBLE = 2;
-          const visibleNames = shortNames.slice(0, MAX_VISIBLE);
-          const remainingCount = shortNames.length - MAX_VISIBLE;
+          const visibleItems = items.slice(0, MAX_VISIBLE);
+          const remainingCount = items.length - MAX_VISIBLE;
 
           return (
             <Tooltip
@@ -468,33 +473,68 @@ export default function MaterialRequestsPage() {
               }
               arrow
             >
-              <Box sx={{ display: "flex", gap: 0.5, flexWrap: "wrap", alignItems: "center" }}>
-                {visibleNames.map((name, idx) => (
-                  <Chip
-                    key={idx}
-                    label={name}
-                    size="small"
-                    variant="outlined"
+              <Box sx={{ display: "flex", gap: 0.5, alignItems: "center" }}>
+                {items.length === 1 ? (
+                  <Avatar
+                    src={getItemImage(items[0]) || undefined}
+                    variant="rounded"
+                    sx={{ width: 28, height: 28, bgcolor: "action.hover" }}
+                  >
+                    <MaterialIcon sx={{ fontSize: 16, color: "text.disabled" }} />
+                  </Avatar>
+                ) : (
+                  <AvatarGroup
+                    max={3}
                     sx={{
-                      maxWidth: 120,
-                      height: 22,
-                      fontSize: "0.7rem",
-                      "& .MuiChip-label": {
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
+                      "& .MuiAvatar-root": {
+                        width: 28,
+                        height: 28,
+                        fontSize: 11,
+                        border: "2px solid",
+                        borderColor: "background.paper",
                       },
                     }}
-                  />
-                ))}
-                {remainingCount > 0 && (
-                  <Chip
-                    label={`+${remainingCount}`}
-                    size="small"
-                    color="default"
-                    sx={{ height: 20, fontSize: "0.65rem" }}
-                  />
+                  >
+                    {items.map((item, idx) => (
+                      <Avatar
+                        key={idx}
+                        src={getItemImage(item) || undefined}
+                        variant="rounded"
+                        sx={{ bgcolor: "action.hover" }}
+                      >
+                        <MaterialIcon sx={{ fontSize: 14, color: "text.disabled" }} />
+                      </Avatar>
+                    ))}
+                  </AvatarGroup>
                 )}
+                <Box sx={{ display: "flex", gap: 0.5, flexWrap: "wrap", alignItems: "center", minWidth: 0 }}>
+                  {visibleItems.map((item, idx) => (
+                    <Chip
+                      key={idx}
+                      label={item.material?.name || "Unknown"}
+                      size="small"
+                      variant="outlined"
+                      sx={{
+                        maxWidth: 100,
+                        height: 22,
+                        fontSize: "0.7rem",
+                        "& .MuiChip-label": {
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        },
+                      }}
+                    />
+                  ))}
+                  {remainingCount > 0 && (
+                    <Chip
+                      label={`+${remainingCount}`}
+                      size="small"
+                      color="default"
+                      sx={{ height: 20, fontSize: "0.65rem" }}
+                    />
+                  )}
+                </Box>
               </Box>
             </Tooltip>
           );

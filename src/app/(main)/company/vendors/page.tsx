@@ -372,6 +372,7 @@ export default function VendorsPage() {
       {/* Search */}
       <Box sx={{ mb: 2, display: "flex", alignItems: "center", gap: 2 }}>
         <TextField
+          id="vendor-search"
           size="small"
           placeholder="Search vendors (min 2 chars)..."
           value={searchInput}

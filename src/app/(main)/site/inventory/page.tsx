@@ -1256,6 +1256,7 @@ export default function InventoryPage() {
           {/* Search + View Mode Toggle */}
           <Box sx={{ mb: 2, display: "flex", gap: 2, alignItems: "center", flexWrap: "wrap" }}>
             <TextField
+              id="inventory-search"
               size="small"
               placeholder="Search materials, batch codes..."
               value={searchTerm}

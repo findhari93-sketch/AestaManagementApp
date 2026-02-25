@@ -108,7 +108,7 @@ export function useMaterialRequests(
           section:building_sections(id, name),
           items:material_request_items(
             id, material_id, requested_qty, approved_qty, fulfilled_qty,
-            material:materials(id, name, code, unit)
+            material:materials(id, name, code, unit, image_url)
           )
         `
         )
@@ -149,8 +149,8 @@ export function useMaterialRequest(id: string | undefined) {
           section:building_sections(id, name),
           items:material_request_items(
             *,
-            material:materials(id, name, code, unit, gst_rate),
-            brand:material_brands(id, brand_name)
+            material:materials(id, name, code, unit, gst_rate, image_url),
+            brand:material_brands(id, brand_name, image_url)
           ),
           converted_to_po:purchase_orders(id, po_number, status)
         `
@@ -833,7 +833,7 @@ export function useMyRequests(userId: string | undefined, siteId?: string) {
           *,
           items:material_request_items(
             id, material_id, requested_qty, approved_qty, fulfilled_qty,
-            material:materials(id, name, unit)
+            material:materials(id, name, unit, image_url)
           )
         `
         )
@@ -1046,8 +1046,8 @@ export function useRequestItemsForConversion(requestId: string | undefined) {
         .select(
           `
           id, material_id, brand_id, requested_qty, approved_qty, fulfilled_qty, estimated_cost,
-          material:materials(id, name, code, unit, gst_rate, parent_id, weight_per_unit, weight_unit, length_per_piece, length_unit),
-          brand:material_brands(id, brand_name)
+          material:materials(id, name, code, unit, gst_rate, parent_id, weight_per_unit, weight_unit, length_per_piece, length_unit, image_url),
+          brand:material_brands(id, brand_name, image_url)
         `
         )
         .eq("request_id", requestId);
@@ -1473,7 +1473,7 @@ export function usePaginatedMaterialRequests(
           section:building_sections(id, name),
           items:material_request_items(
             id, material_id, requested_qty, approved_qty, fulfilled_qty,
-            material:materials(id, name, code, unit)
+            material:materials(id, name, code, unit, image_url)
           )
         `
         )

@@ -23,6 +23,8 @@ import {
   DialogContent,
   DialogActions,
   CircularProgress,
+  Avatar,
+  AvatarGroup,
 } from "@mui/material";
 import {
   Add as AddIcon,
@@ -35,6 +37,7 @@ import {
   Cancel as CancelIcon,
   Groups as GroupStockIcon,
   Sync as SyncIcon,
+  Inventory2 as MaterialIcon,
 } from "@mui/icons-material";
 import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
 import PageHeader from "@/components/layout/PageHeader";
@@ -194,6 +197,36 @@ export default function PurchaseOrdersPage() {
 
   // Fetch sync status for all delivered Group Stock POs
   const { data: syncStatusMap = new Map() } = useGroupStockPOsSyncStatus(deliveredGroupStockPOIds);
+
+  // Unique vendor names for column filter
+  const vendorFilterOptions = useMemo(() => {
+    const names = new Set<string>();
+    allPOs.forEach((po) => {
+      if (po.vendor?.name) names.add(po.vendor.name);
+    });
+    return Array.from(names)
+      .sort((a, b) => a.localeCompare(b))
+      .map((name) => ({ value: name, label: name }));
+  }, [allPOs]);
+
+  // Status options for column filter
+  const statusFilterOptions = useMemo(
+    () => Object.entries(STATUS_LABELS).map(([value, label]) => ({ value, label })),
+    []
+  );
+
+  // Unique material names for column filter
+  const materialFilterOptions = useMemo(() => {
+    const names = new Set<string>();
+    allPOs.forEach((po) =>
+      po.items?.forEach((item) => {
+        if (item.material?.name) names.add(item.material.name);
+      })
+    );
+    return Array.from(names)
+      .sort((a, b) => a.localeCompare(b))
+      .map((name) => ({ value: name, label: name }));
+  }, [allPOs]);
 
   // Filter POs based on tab and search
   const filteredPOs = useMemo(() => {
@@ -383,12 +416,16 @@ export default function PurchaseOrdersPage() {
         accessorKey: "vendor.name",
         header: "Vendor",
         size: 180,
+        filterVariant: "multi-select",
+        filterSelectOptions: vendorFilterOptions,
         Cell: ({ row }) => row.original.vendor?.name || "-",
       },
       {
         accessorKey: "status",
         header: "Status",
         size: 130,
+        filterVariant: "multi-select",
+        filterSelectOptions: statusFilterOptions,
         Cell: ({ row }) => (
           <Chip
             label={STATUS_LABELS[row.original.status]}
@@ -445,6 +482,16 @@ export default function PurchaseOrdersPage() {
         accessorKey: "items",
         header: "Materials",
         size: 200,
+        filterVariant: "multi-select",
+        filterSelectOptions: materialFilterOptions,
+        filterFn: (row, _columnId, filterValues: string[]) => {
+          if (!filterValues || filterValues.length === 0) return true;
+          const items = row.original.items;
+          if (!items || items.length === 0) return false;
+          return items.some((item) =>
+            filterValues.includes(item.material?.name || "")
+          );
+        },
         Cell: ({ row }) => {
           const items = row.original.items;
           if (!items || items.length === 0) {
@@ -462,10 +509,12 @@ export default function PurchaseOrdersPage() {
             return qty ? `${name} (${qty} ${unit})` : name;
           });
 
-          const shortNames = items.map((item) => item.material?.name || "Unknown");
+          const getItemImage = (item: any) =>
+            item.brand?.image_url || item.material?.image_url || null;
+
           const MAX_VISIBLE = 2;
-          const visibleNames = shortNames.slice(0, MAX_VISIBLE);
-          const remainingCount = shortNames.length - MAX_VISIBLE;
+          const visibleItems = items.slice(0, MAX_VISIBLE);
+          const remainingCount = items.length - MAX_VISIBLE;
 
           return (
             <Tooltip
@@ -480,33 +529,68 @@ export default function PurchaseOrdersPage() {
               }
               arrow
             >
-              <Box sx={{ display: "flex", gap: 0.5, flexWrap: "wrap", alignItems: "center" }}>
-                {visibleNames.map((name, idx) => (
-                  <Chip
-                    key={idx}
-                    label={name}
-                    size="small"
-                    variant="outlined"
+              <Box sx={{ display: "flex", gap: 0.5, alignItems: "center" }}>
+                {items.length === 1 ? (
+                  <Avatar
+                    src={getItemImage(items[0]) || undefined}
+                    variant="rounded"
+                    sx={{ width: 28, height: 28, bgcolor: "action.hover" }}
+                  >
+                    <MaterialIcon sx={{ fontSize: 16, color: "text.disabled" }} />
+                  </Avatar>
+                ) : (
+                  <AvatarGroup
+                    max={3}
                     sx={{
-                      maxWidth: 120,
-                      height: 22,
-                      fontSize: "0.7rem",
-                      "& .MuiChip-label": {
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
+                      "& .MuiAvatar-root": {
+                        width: 28,
+                        height: 28,
+                        fontSize: 11,
+                        border: "2px solid",
+                        borderColor: "background.paper",
                       },
                     }}
-                  />
-                ))}
-                {remainingCount > 0 && (
-                  <Chip
-                    label={`+${remainingCount}`}
-                    size="small"
-                    color="default"
-                    sx={{ height: 20, fontSize: "0.65rem" }}
-                  />
+                  >
+                    {items.map((item, idx) => (
+                      <Avatar
+                        key={idx}
+                        src={getItemImage(item) || undefined}
+                        variant="rounded"
+                        sx={{ bgcolor: "action.hover" }}
+                      >
+                        <MaterialIcon sx={{ fontSize: 14, color: "text.disabled" }} />
+                      </Avatar>
+                    ))}
+                  </AvatarGroup>
                 )}
+                <Box sx={{ display: "flex", gap: 0.5, flexWrap: "wrap", alignItems: "center", minWidth: 0 }}>
+                  {visibleItems.map((item, idx) => (
+                    <Chip
+                      key={idx}
+                      label={item.material?.name || "Unknown"}
+                      size="small"
+                      variant="outlined"
+                      sx={{
+                        maxWidth: 100,
+                        height: 22,
+                        fontSize: "0.7rem",
+                        "& .MuiChip-label": {
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        },
+                      }}
+                    />
+                  ))}
+                  {remainingCount > 0 && (
+                    <Chip
+                      label={`+${remainingCount}`}
+                      size="small"
+                      color="default"
+                      sx={{ height: 20, fontSize: "0.65rem" }}
+                    />
+                  )}
+                </Box>
               </Box>
             </Tooltip>
           );
@@ -515,14 +599,15 @@ export default function PurchaseOrdersPage() {
       {
         accessorKey: "expected_delivery_date",
         header: "Expected",
-        size: 110,
+        size: 140,
+        filterVariant: "date-range",
         Cell: ({ row }) =>
           row.original.expected_delivery_date
             ? formatDate(row.original.expected_delivery_date)
             : "-",
       },
     ],
-    [handleViewDetails, syncStatusMap]
+    [handleViewDetails, syncStatusMap, vendorFilterOptions, statusFilterOptions, materialFilterOptions]
   );
 
   // Row actions
@@ -765,6 +850,7 @@ export default function PurchaseOrdersPage() {
         </Tabs>
 
         <TextField
+          id="po-search"
           size="small"
           placeholder="Search PO number or vendor..."
           value={searchTerm}

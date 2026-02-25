@@ -120,8 +120,8 @@ export function useSiteStock(
   return useQuery({
     queryKey: siteId
       ? locationId
-        ? [...queryKeys.materialStock.bySite(siteId), locationId, siteGroupId]
-        : [...queryKeys.materialStock.bySite(siteId), siteGroupId]
+        ? [...queryKeys.materialStock.bySite(siteId), locationId, ...(siteGroupId ? [siteGroupId] : [])]
+        : [...queryKeys.materialStock.bySite(siteId), ...(siteGroupId ? [siteGroupId] : [])]
       : ["site-stock", "unknown"],
     queryFn: async () => {
       if (!siteId) return [];

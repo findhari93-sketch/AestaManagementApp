@@ -517,7 +517,14 @@ export default function FileUploader({
           if (xhr.status >= 200 && xhr.status < 300) {
             try {
               const response = JSON.parse(xhr.responseText);
-              resolve({ path: response.Key || filePath });
+              // response.Key includes bucket name prefix (e.g., "work-updates/product-photos/file.jpg")
+              // Strip bucket prefix since getPublicUrl() already prepends it
+              let responsePath = response.Key || filePath;
+              const bucketPrefix = `${bucketName}/`;
+              if (responsePath.startsWith(bucketPrefix)) {
+                responsePath = responsePath.slice(bucketPrefix.length);
+              }
+              resolve({ path: responsePath });
             } catch {
               // If response parsing fails but status is OK, use the filePath
               resolve({ path: filePath });
