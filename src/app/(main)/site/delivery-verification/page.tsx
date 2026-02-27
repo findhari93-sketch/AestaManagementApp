@@ -14,6 +14,8 @@ import {
   Divider,
   Stack,
   Badge,
+  Avatar,
+  AvatarGroup,
 } from "@mui/material";
 import {
   LocalShipping as DeliveryIcon,
@@ -22,6 +24,7 @@ import {
   Cancel as RejectedIcon,
   ShoppingCart as POIcon,
   Groups as GroupStockIcon,
+  Inventory2 as MaterialIcon,
 } from "@mui/icons-material";
 import PageHeader from "@/components/layout/PageHeader";
 import MaterialWorkflowBar from "@/components/materials/MaterialWorkflowBar";
@@ -94,6 +97,45 @@ interface DeliveryData {
   vehicle_number: string | null;
   driver_name: string | null;
   verification_status?: string;
+  material_images?: Array<{
+    material_image_url: string | null;
+    brand_image_url: string | null;
+    material_name: string | null;
+  }>;
+}
+
+/** Get the best available image: brand image > material image > null */
+function getBestImage(item: {
+  brand_image_url?: string | null;
+  material_image_url?: string | null;
+}): string | null {
+  return item.brand_image_url || item.material_image_url || null;
+}
+
+/** Material avatar with fallback icon */
+function MaterialAvatar({
+  src,
+  name,
+  size = 36,
+}: {
+  src: string | null;
+  name?: string | null;
+  size?: number;
+}) {
+  return (
+    <Avatar
+      src={src || undefined}
+      alt={name || "Material"}
+      variant="rounded"
+      sx={{
+        width: size,
+        height: size,
+        bgcolor: src ? "transparent" : "grey.200",
+      }}
+    >
+      {!src && <MaterialIcon sx={{ fontSize: size * 0.6, color: "grey.500" }} />}
+    </Avatar>
+  );
 }
 
 export default function DeliveryVerificationPage() {
@@ -258,17 +300,38 @@ export default function DeliveryVerificationPage() {
                         </Stack>
                       </Box>
 
-                      <Divider />
-
-                      {/* Vendor */}
-                      <Box>
-                        <Typography variant="caption" color="text.secondary">
-                          Vendor
-                        </Typography>
-                        <Typography variant="body2" fontWeight="medium">
-                          {po.vendor_name || "-"}
-                        </Typography>
+                      {/* Material Avatars */}
+                      <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
+                        <AvatarGroup
+                          max={4}
+                          sx={{
+                            "& .MuiAvatar-root": {
+                              width: 36,
+                              height: 36,
+                              fontSize: "0.75rem",
+                              borderColor: "background.paper",
+                            },
+                          }}
+                        >
+                          {po.items.map((item) => (
+                            <MaterialAvatar
+                              key={item.id}
+                              src={getBestImage(item)}
+                              name={item.material_name}
+                            />
+                          ))}
+                        </AvatarGroup>
+                        <Box sx={{ minWidth: 0, flex: 1 }}>
+                          <Typography variant="body2" fontWeight="medium" noWrap>
+                            {po.vendor_name || "-"}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary" noWrap>
+                            {po.items.map((i) => i.material_name).join(", ")}
+                          </Typography>
+                        </Box>
                       </Box>
+
+                      <Divider />
 
                       {/* Items Summary */}
                       <Box sx={{ display: "flex", justifyContent: "space-between" }}>
@@ -371,15 +434,40 @@ export default function DeliveryVerificationPage() {
                             color={config.color}
                           />
                         </Box>
-                        <Typography variant="body2" color="text.secondary">
-                          {delivery.po_number || "Direct Delivery"}
-                        </Typography>
-                        <Typography variant="body2">
-                          {delivery.vendor_name || "-"}
-                        </Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          {formatDate(delivery.delivery_date)}
-                        </Typography>
+                        <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
+                          {delivery.material_images && delivery.material_images.length > 0 ? (
+                            <AvatarGroup
+                              max={3}
+                              sx={{
+                                "& .MuiAvatar-root": {
+                                  width: 32,
+                                  height: 32,
+                                  fontSize: "0.7rem",
+                                  borderColor: "background.paper",
+                                },
+                              }}
+                            >
+                              {delivery.material_images.map((img, idx) => (
+                                <MaterialAvatar
+                                  key={idx}
+                                  src={img.brand_image_url || img.material_image_url}
+                                  name={img.material_name}
+                                  size={32}
+                                />
+                              ))}
+                            </AvatarGroup>
+                          ) : (
+                            <MaterialAvatar src={null} size={32} />
+                          )}
+                          <Box sx={{ minWidth: 0, flex: 1 }}>
+                            <Typography variant="body2">
+                              {delivery.vendor_name || "-"}
+                            </Typography>
+                            <Typography variant="caption" color="text.secondary">
+                              {formatDate(delivery.delivery_date)}
+                            </Typography>
+                          </Box>
+                        </Box>
                       </Stack>
                     </CardContent>
                   </Card>
@@ -429,12 +517,40 @@ export default function DeliveryVerificationPage() {
                             color={config.color}
                           />
                         </Box>
-                        <Typography variant="body2">
-                          {delivery.vendor_name || "-"}
-                        </Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          {formatDate(delivery.delivery_date)}
-                        </Typography>
+                        <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
+                          {delivery.material_images && delivery.material_images.length > 0 ? (
+                            <AvatarGroup
+                              max={3}
+                              sx={{
+                                "& .MuiAvatar-root": {
+                                  width: 32,
+                                  height: 32,
+                                  fontSize: "0.7rem",
+                                  borderColor: "background.paper",
+                                },
+                              }}
+                            >
+                              {delivery.material_images.map((img, idx) => (
+                                <MaterialAvatar
+                                  key={idx}
+                                  src={img.brand_image_url || img.material_image_url}
+                                  name={img.material_name}
+                                  size={32}
+                                />
+                              ))}
+                            </AvatarGroup>
+                          ) : (
+                            <MaterialAvatar src={null} size={32} />
+                          )}
+                          <Box sx={{ minWidth: 0, flex: 1 }}>
+                            <Typography variant="body2" noWrap>
+                              {delivery.vendor_name || "-"}
+                            </Typography>
+                            <Typography variant="caption" color="text.secondary">
+                              {formatDate(delivery.delivery_date)}
+                            </Typography>
+                          </Box>
+                        </Box>
                       </Stack>
                     </CardContent>
                   </Card>

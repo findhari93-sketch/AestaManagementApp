@@ -59,6 +59,7 @@ import UnifiedPurchaseOrderDialog from "@/components/materials/UnifiedPurchaseOr
 import RecordAndVerifyDeliveryDialog from "@/components/materials/RecordAndVerifyDeliveryDialog";
 import PODetailsDrawer from "@/components/materials/PODetailsDrawer";
 import PODeleteConfirmationDialog from "@/components/materials/PODeleteConfirmationDialog";
+import CreatePORedirectDialog from "@/components/materials/CreatePORedirectDialog";
 import type {
   PurchaseOrderWithDetails,
   POStatus,
@@ -124,6 +125,9 @@ export default function PurchaseOrdersPage() {
   const [pushingPO, setPushingPO] = useState<PurchaseOrderWithDetails | null>(null);
   const [pushError, setPushError] = useState("");
 
+  // Redirect dialog for direct PO creation
+  const [redirectDialogOpen, setRedirectDialogOpen] = useState(false);
+
   const searchParams = useSearchParams();
   const router = useRouter();
   const { userProfile, user } = useAuth();
@@ -144,6 +148,7 @@ export default function PurchaseOrdersPage() {
   const sourceParam = searchParams.get("source");
 
   // Handle URL params for prefilled data (from material-search)
+  // Redirect to material requests page to enforce the proper workflow
   useEffect(() => {
     if (hasProcessedParams.current) return;
 
@@ -151,19 +156,14 @@ export default function PurchaseOrdersPage() {
     if (isNew && (vendorIdParam || materialIdParam)) {
       hasProcessedParams.current = true;
 
-      setPrefilledData({
-        vendorId: vendorIdParam || undefined,
-        materialId: materialIdParam || undefined,
-        materialName: materialNameParam || undefined,
-        unit: unitParam || undefined,
-        source: sourceParam || undefined,
-      });
-
-      // Auto-open the dialog
-      setDialogOpen(true);
-
-      // Clean up URL params after reading
-      router.replace("/site/purchase-orders", { scroll: false });
+      // Redirect to material requests page with prefilled material info
+      const params = new URLSearchParams();
+      params.set("new", "true");
+      if (materialIdParam) params.set("materialId", materialIdParam);
+      if (materialNameParam) params.set("materialName", materialNameParam);
+      if (unitParam) params.set("unit", unitParam);
+      router.replace(`/site/material-requests?${params.toString()}`);
+      return;
     }
   }, [isNewParam, vendorIdParam, materialIdParam, materialNameParam, unitParam, sourceParam, router]);
 
@@ -763,7 +763,7 @@ export default function PurchaseOrdersPage() {
             <Button
               variant="contained"
               startIcon={<AddIcon />}
-              onClick={() => handleOpenDialog()}
+              onClick={() => setRedirectDialogOpen(true)}
             >
               Create PO
             </Button>
@@ -886,22 +886,29 @@ export default function PurchaseOrdersPage() {
         <Fab
           color="primary"
           sx={{ position: "fixed", bottom: 16, right: 16 }}
-          onClick={() => handleOpenDialog()}
+          onClick={() => setRedirectDialogOpen(true)}
         >
           <AddIcon />
         </Fab>
       )}
 
       {/* Create/Edit PO Dialog */}
+      {/* Redirect dialog for direct PO creation */}
+      <CreatePORedirectDialog
+        open={redirectDialogOpen}
+        onClose={() => setRedirectDialogOpen(false)}
+        onCreateRequest={() => {
+          setRedirectDialogOpen(false);
+          router.push("/site/material-requests?new=true");
+        }}
+      />
+
+      {/* Edit PO Dialog (only for editing existing POs) */}
       <UnifiedPurchaseOrderDialog
         open={dialogOpen}
         onClose={handleCloseDialog}
         purchaseOrder={editingPO}
         siteId={selectedSite.id}
-        prefilledVendorId={prefilledData?.vendorId}
-        prefilledMaterialId={prefilledData?.materialId}
-        prefilledMaterialName={prefilledData?.materialName}
-        prefilledUnit={prefilledData?.unit}
       />
 
       {/* Record & Verify Delivery Dialog */}

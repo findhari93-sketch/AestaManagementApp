@@ -42,8 +42,10 @@ export interface POAwaitingDelivery {
     id: string;
     material_id: string;
     material_name: string;
+    material_image_url: string | null;
     brand_id: string | null;
     brand_name: string | null;
+    brand_image_url: string | null;
     quantity: number;
     received_qty: number;
     unit: string;
@@ -96,8 +98,8 @@ export function usePOsAwaitingDelivery(siteId: string | undefined) {
             calculated_weight,
             actual_weight,
             tax_rate,
-            material:materials(id, name, code, unit),
-            brand:material_brands(id, brand_name)
+            material:materials(id, name, code, unit, image_url),
+            brand:material_brands(id, brand_name, image_url)
           )
         `)
         .eq("site_id", siteId)
@@ -140,8 +142,10 @@ export function usePOsAwaitingDelivery(siteId: string | undefined) {
             id: item.id,
             material_id: item.material_id,
             material_name: item.material?.name || "Unknown",
+            material_image_url: item.material?.image_url || null,
             brand_id: item.brand?.id || null,
             brand_name: item.brand?.brand_name || null,
+            brand_image_url: item.brand?.image_url || null,
             quantity: Number(item.quantity || 0),
             received_qty: Number(item.received_qty || 0),
             unit: item.material?.unit || "nos",
@@ -342,7 +346,11 @@ export function useDeliveriesWithVerification(
           driver_name,
           verification_status,
           po:purchase_orders(po_number),
-          vendor:vendors(name)
+          vendor:vendors(name),
+          delivery_items(
+            material:materials(name, image_url),
+            brand:material_brands(image_url)
+          )
         `)
         .eq("site_id", siteId)
         .order("delivery_date", { ascending: false });
@@ -365,6 +373,10 @@ export function useDeliveriesWithVerification(
         verification_status: string | null;
         po: { po_number: string } | null;
         vendor: { name: string } | null;
+        delivery_items: Array<{
+          material: { name: string; image_url: string | null } | null;
+          brand: { image_url: string | null } | null;
+        }> | null;
       }>).map((d) => ({
         id: d.id,
         grn_number: d.grn_number,
@@ -374,9 +386,14 @@ export function useDeliveriesWithVerification(
         delivery_date: d.delivery_date,
         verification_status: d.verification_status || "pending",
         total_value: null,
-        item_count: 0,
+        item_count: d.delivery_items?.length || 0,
         vehicle_number: d.vehicle_number,
         driver_name: d.driver_name,
+        material_images: (d.delivery_items || []).map((di) => ({
+          material_image_url: di.material?.image_url || null,
+          brand_image_url: di.brand?.image_url || null,
+          material_name: di.material?.name || null,
+        })),
       }));
 
       return transformed;

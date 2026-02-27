@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState, useCallback } from "react";
+import { useMemo, useState, useCallback, useEffect, useRef } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   Box,
@@ -17,7 +18,6 @@ import {
   Card,
   CardContent,
   Grid,
-  Stack,
   Badge,
   Avatar,
   AvatarGroup,
@@ -30,7 +30,6 @@ import {
   CheckCircle as ApproveIcon,
   Cancel as CancelIcon,
   ShoppingCart as ConvertIcon,
-  ShoppingCart as POIcon,
   Delete as DeleteIcon,
   Link as LinkIcon,
   CheckCircleOutline as FulfilledIcon,
@@ -102,7 +101,6 @@ export default function MaterialRequestsPage() {
   const [approvalDialogOpen, setApprovalDialogOpen] = useState(false);
   const [detailsDrawerOpen, setDetailsDrawerOpen] = useState(false);
   const [convertDialogOpen, setConvertDialogOpen] = useState(false);
-  const [directPODialogOpen, setDirectPODialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [editingRequest, setEditingRequest] = useState<MaterialRequestWithDetails | null>(null);
   const [selectedRequest, setSelectedRequest] = useState<MaterialRequestWithDetails | null>(null);
@@ -111,11 +109,27 @@ export default function MaterialRequestsPage() {
   const [currentTab, setCurrentTab] = useState<TabValue>("all");
   const [searchTerm, setSearchTerm] = useState("");
 
+  const searchParams = useSearchParams();
+  const router = useRouter();
   const { userProfile, user } = useAuth();
   const { selectedSite } = useSite();
   const isMobile = useIsMobile();
   const canEdit = hasEditPermission(userProfile?.role);
   const isAdmin = hasAdminPermission(userProfile?.role);
+
+  // Handle ?new=true query param (redirect from PO page or price comparison)
+  const hasProcessedNewParam = useRef(false);
+  useEffect(() => {
+    if (hasProcessedNewParam.current) return;
+    if (searchParams.get("new") === "true") {
+      hasProcessedNewParam.current = true;
+      // Auto-open the create dialog
+      setDialogOpen(true);
+      setEditingRequest(null);
+      // Clean up URL params
+      router.replace("/site/material-requests", { scroll: false });
+    }
+  }, [searchParams, router]);
 
   const { data: allRequests = [], isLoading } = useMaterialRequests(selectedSite?.id);
   const { data: summary } = useRequestSummary(selectedSite?.id);
@@ -712,22 +726,13 @@ export default function MaterialRequestsPage() {
         title="Material Requests"
         actions={
           !isMobile && canEdit ? (
-            <Stack direction="row" spacing={1}>
-              <Button
-                variant="outlined"
-                startIcon={<POIcon />}
-                onClick={() => setDirectPODialogOpen(true)}
-              >
-                Create PO
-              </Button>
-              <Button
-                variant="contained"
-                startIcon={<AddIcon />}
-                onClick={() => handleOpenDialog()}
-              >
-                New Request
-              </Button>
-            </Stack>
+            <Button
+              variant="contained"
+              startIcon={<AddIcon />}
+              onClick={() => handleOpenDialog()}
+            >
+              New Request
+            </Button>
           ) : null
         }
       />
@@ -879,13 +884,6 @@ export default function MaterialRequestsPage() {
           onSuccess={handleConvertSuccess}
         />
       )}
-
-      {/* Direct PO Dialog (no request) */}
-      <UnifiedPurchaseOrderDialog
-        open={directPODialogOpen}
-        onClose={() => setDirectPODialogOpen(false)}
-        siteId={selectedSite.id}
-      />
 
       {/* Delete Confirmation Dialog */}
       <MaterialRequestDeleteConfirmationDialog

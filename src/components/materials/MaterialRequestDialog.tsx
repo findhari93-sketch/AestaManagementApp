@@ -25,6 +25,7 @@ import {
   InputLabel,
   Select,
   MenuItem,
+  Tooltip,
 } from "@mui/material";
 import {
   Close as CloseIcon,
@@ -42,6 +43,8 @@ import {
   useUpdateMaterialRequest,
   useLinkedPOsCount,
   useRevertLinkedPOsToDraft,
+  useEditMaterialRequestItems,
+  useRequestItemDeliveryStatus,
 } from "@/hooks/queries/useMaterialRequests";
 import { useQuery } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase/client";
@@ -107,6 +110,7 @@ export default function MaterialRequestDialog({
   const createRequest = useCreateMaterialRequest();
   const updateRequest = useUpdateMaterialRequest();
   const revertPOsToDraft = useRevertLinkedPOsToDraft();
+  const editItems = useEditMaterialRequestItems();
 
   // Check if this request has linked POs (only relevant for edit mode)
   const { data: linkedPOsData } = useLinkedPOsCount(
@@ -114,7 +118,13 @@ export default function MaterialRequestDialog({
   );
   const linkedPOsCount = linkedPOsData?.total || 0;
 
+  // Check which items have delivery records (cannot be removed)
+  const { data: itemDeliveryStatus = {} } = useRequestItemDeliveryStatus(
+    isEdit ? request?.id : undefined
+  );
+
   const [error, setError] = useState("");
+  const [removedItemIds, setRemovedItemIds] = useState<string[]>([]);
   const [sectionId, setSectionId] = useState("");
   const [requiredByDate, setRequiredByDate] = useState("");
   const [priority, setPriority] = useState<RequestPriority>("normal");
@@ -169,6 +179,7 @@ export default function MaterialRequestDialog({
     setSelectedMaterial(null);
     setNewItemQty("");
     setNewItemNotes("");
+    setRemovedItemIds([]);
     // Reset submission guard when dialog opens/closes
     isSubmittingRef.current = false;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -209,6 +220,11 @@ export default function MaterialRequestDialog({
   };
 
   const handleRemoveItem = (index: number) => {
+    const item = items[index];
+    // Track existing item removal for backend cascade in edit mode
+    if (isEdit && item.id) {
+      setRemovedItemIds((prev) => [...prev, item.id!]);
+    }
     setItems(items.filter((_, i) => i !== index));
   };
 
@@ -232,6 +248,7 @@ export default function MaterialRequestDialog({
 
     try {
       if (isEdit) {
+        // Update request-level fields
         await updateRequest.mutateAsync({
           id: request.id,
           data: {
@@ -242,13 +259,28 @@ export default function MaterialRequestDialog({
           },
         });
 
-        // Revert linked POs to draft status if any exist
-        if (linkedPOsCount > 0) {
+        // Determine new items (items without an id are new)
+        const newItems = items.filter((item) => !item.id);
+
+        if (removedItemIds.length > 0 || newItems.length > 0) {
+          // Use the edit items RPC for add/remove with cascade
+          await editItems.mutateAsync({
+            requestId: request.id,
+            siteId,
+            itemsToRemove: removedItemIds,
+            itemsToAdd: newItems.map((item) => ({
+              material_id: item.material_id,
+              brand_id: item.brand_id,
+              requested_qty: item.requested_qty,
+              notes: item.notes,
+            })),
+          });
+        } else if (linkedPOsCount > 0) {
+          // Only revert POs if no item changes but request fields changed
           try {
             await revertPOsToDraft.mutateAsync({ requestId: request.id, siteId });
           } catch (revertError) {
             console.warn("Failed to revert linked POs to draft:", revertError);
-            // Don't fail the whole operation, the request was already updated
           }
         }
       } else {
@@ -290,7 +322,7 @@ export default function MaterialRequestDialog({
     }
   };
 
-  const isSubmitting = createRequest.isPending || updateRequest.isPending || revertPOsToDraft.isPending;
+  const isSubmitting = createRequest.isPending || updateRequest.isPending || revertPOsToDraft.isPending || editItems.isPending;
 
   return (
     <Dialog
@@ -330,8 +362,16 @@ export default function MaterialRequestDialog({
             sx={{ mb: 2 }}
           >
             This request has <strong>{linkedPOsCount}</strong> linked Purchase Order
-            {linkedPOsCount !== 1 ? "s" : ""}. Saving changes will revert non-delivered POs
-            back to <strong>draft</strong> status for re-processing.
+            {linkedPOsCount !== 1 ? "s" : ""}.
+            {removedItemIds.length > 0 ? (
+              <> Removing <strong>{removedItemIds.length}</strong> item
+              {removedItemIds.length !== 1 ? "s" : ""} may affect linked POs.
+              POs that lose all linked items will be deleted. Remaining POs will be
+              reverted to <strong>draft</strong> status.</>
+            ) : (
+              <> Saving changes will revert non-delivered POs
+              back to <strong>draft</strong> status for re-processing.</>
+            )}
           </Alert>
         )}
 
@@ -383,84 +423,80 @@ export default function MaterialRequestDialog({
             </FormControl>
           </Grid>
 
-          {/* Add Item Section - Only for new requests */}
-          {!isEdit && (
-            <>
-              <Grid size={12}>
-                <Divider sx={{ my: 1 }}>
-                  <Typography variant="subtitle2">Add Items</Typography>
-                </Divider>
-              </Grid>
+          {/* Add Item Section */}
+          <Grid size={12}>
+            <Divider sx={{ my: 1 }}>
+              <Typography variant="subtitle2">Add Items</Typography>
+            </Divider>
+          </Grid>
 
-              <Grid size={{ xs: 12, md: 5 }}>
-                <Autocomplete
-                  options={materials}
-                  getOptionLabel={(option) =>
-                    `${option.name}${option.code ? ` (${option.code})` : ""}`
-                  }
-                  value={selectedMaterial}
-                  onChange={(_, value) => setSelectedMaterial(value)}
-                  renderInput={(params) => (
-                    <TextField {...params} label="Material" size="small" />
-                  )}
-                  renderOption={(props, option) => {
-                    const stock = getAvailableStock(option.id);
-                    return (
-                      <li {...props} key={option.id}>
-                        <Box sx={{ flex: 1 }}>
-                          <Typography variant="body2">{option.name}</Typography>
-                          <Typography variant="caption" color="text.secondary">
-                            {option.code} • {option.unit}
-                            {stock > 0 && (
-                              <span style={{ color: "green" }}>
-                                {" "}
-                                • In Stock: {stock}
-                              </span>
-                            )}
-                          </Typography>
-                        </Box>
-                      </li>
-                    );
-                  }}
-                />
-              </Grid>
+          <Grid size={{ xs: 12, md: 5 }}>
+            <Autocomplete
+              options={materials}
+              getOptionLabel={(option) =>
+                `${option.name}${option.code ? ` (${option.code})` : ""}`
+              }
+              value={selectedMaterial}
+              onChange={(_, value) => setSelectedMaterial(value)}
+              renderInput={(params) => (
+                <TextField {...params} label="Material" size="small" />
+              )}
+              renderOption={(props, option) => {
+                const stock = getAvailableStock(option.id);
+                return (
+                  <li {...props} key={option.id}>
+                    <Box sx={{ flex: 1 }}>
+                      <Typography variant="body2">{option.name}</Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        {option.code} • {option.unit}
+                        {stock > 0 && (
+                          <span style={{ color: "green" }}>
+                            {" "}
+                            • In Stock: {stock}
+                          </span>
+                        )}
+                      </Typography>
+                    </Box>
+                  </li>
+                );
+              }}
+            />
+          </Grid>
 
-              <Grid size={{ xs: 4, md: 2 }}>
-                <TextField
-                  fullWidth
-                  size="small"
-                  type="number"
-                  label="Quantity"
-                  value={newItemQty}
-                  onChange={(e) => setNewItemQty(e.target.value)}
-                  slotProps={{ input: { inputProps: { min: 0, step: 0.01 } } }}
-                />
-              </Grid>
+          <Grid size={{ xs: 4, md: 2 }}>
+            <TextField
+              fullWidth
+              size="small"
+              type="number"
+              label="Quantity"
+              value={newItemQty}
+              onChange={(e) => setNewItemQty(e.target.value)}
+              slotProps={{ input: { inputProps: { min: 0, step: 0.01 } } }}
+            />
+          </Grid>
 
-              <Grid size={{ xs: 8, md: 3 }}>
-                <TextField
-                  fullWidth
-                  size="small"
-                  label="Notes"
-                  value={newItemNotes}
-                  onChange={(e) => setNewItemNotes(e.target.value)}
-                  placeholder="Optional"
-                />
-              </Grid>
+          <Grid size={{ xs: 8, md: 3 }}>
+            <TextField
+              fullWidth
+              size="small"
+              label="Notes"
+              value={newItemNotes}
+              onChange={(e) => setNewItemNotes(e.target.value)}
+              placeholder="Optional"
+            />
+          </Grid>
 
-              <Grid size={{ xs: 12, md: 2 }}>
-                <Button
-                  fullWidth
-                  variant="outlined"
-                  startIcon={<AddIcon />}
-                  onClick={handleAddItem}
-                  sx={{ height: 40 }}
-                >
-                  Add
-                </Button>
-              </Grid>
-            </>
-          )}
+          <Grid size={{ xs: 12, md: 2 }}>
+            <Button
+              fullWidth
+              variant="outlined"
+              startIcon={<AddIcon />}
+              onClick={handleAddItem}
+              sx={{ height: 40 }}
+            >
+              Add
+            </Button>
+          </Grid>
 
           {/* Items Table */}
           <Grid size={12}>
@@ -472,7 +508,7 @@ export default function MaterialRequestDialog({
                     <TableCell align="right">Requested</TableCell>
                     <TableCell align="right">In Stock</TableCell>
                     <TableCell>Notes</TableCell>
-                    {!isEdit && <TableCell width={50}></TableCell>}
+                    <TableCell width={50}></TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -517,8 +553,16 @@ export default function MaterialRequestDialog({
                             {item.notes || "-"}
                           </Typography>
                         </TableCell>
-                        {!isEdit && (
-                          <TableCell>
+                        <TableCell>
+                          {isEdit && item.id && itemDeliveryStatus[item.id] ? (
+                            <Tooltip title="Cannot remove — has delivery records">
+                              <span>
+                                <IconButton size="small" disabled>
+                                  <DeleteIcon fontSize="small" />
+                                </IconButton>
+                              </span>
+                            </Tooltip>
+                          ) : (
                             <IconButton
                               size="small"
                               color="error"
@@ -526,8 +570,8 @@ export default function MaterialRequestDialog({
                             >
                               <DeleteIcon fontSize="small" />
                             </IconButton>
-                          </TableCell>
-                        )}
+                          )}
+                        </TableCell>
                       </TableRow>
                     ))
                   )}

@@ -1781,3 +1781,106 @@ export function useLinkedPOsCount(requestId: string | undefined) {
     enabled: !!requestId,
   });
 }
+
+/**
+ * Check which request items have delivery records (cannot be removed during editing)
+ */
+export function useRequestItemDeliveryStatus(requestId: string | undefined) {
+  const supabase = createClient() as any;
+
+  return useQuery({
+    queryKey: requestId
+      ? ["material-requests", "item-delivery-status", requestId]
+      : ["material-requests", "item-delivery-status", "none"],
+    queryFn: async (): Promise<Record<string, boolean>> => {
+      if (!requestId) return {};
+
+      const { data: items } = await supabase
+        .from("material_request_items")
+        .select("id")
+        .eq("request_id", requestId);
+
+      if (!items?.length) return {};
+
+      const itemIds = items.map((i: { id: string }) => i.id);
+
+      // Find which items have junction records linking to PO items with deliveries
+      const { data: linkedItems } = await supabase
+        .from("purchase_order_request_items")
+        .select(`
+          request_item_id,
+          po_item:purchase_order_items!po_item_id (
+            id,
+            delivery_items:delivery_items!po_item_id (id)
+          )
+        `)
+        .in("request_item_id", itemIds);
+
+      const hasDelivery: Record<string, boolean> = {};
+      for (const link of linkedItems || []) {
+        const deliveries = link.po_item?.delivery_items;
+        if (deliveries && deliveries.length > 0) {
+          hasDelivery[link.request_item_id] = true;
+        }
+      }
+      return hasDelivery;
+    },
+    enabled: !!requestId,
+  });
+}
+
+/**
+ * Edit material request items (add/remove) with cascade effects on linked POs
+ */
+export function useEditMaterialRequestItems() {
+  const queryClient = useQueryClient();
+  const supabase = createClient() as any;
+
+  return useMutation({
+    mutationFn: async ({
+      requestId,
+      siteId,
+      itemsToRemove,
+      itemsToAdd,
+    }: {
+      requestId: string;
+      siteId: string;
+      itemsToRemove: string[];
+      itemsToAdd: MaterialRequestItemFormData[];
+    }) => {
+      await ensureFreshSession();
+
+      const { data, error } = await supabase.rpc("edit_material_request_items", {
+        p_request_id: requestId,
+        p_site_id: siteId,
+        p_items_to_remove: itemsToRemove,
+        p_items_to_add: itemsToAdd,
+      });
+
+      if (error) throw error;
+      if (data && !data.success) throw new Error(data.error);
+      return data;
+    },
+    onSuccess: (_data, variables) => {
+      // Invalidate all related queries
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.materialRequests.bySite(variables.siteId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["material-requests", "detail", variables.requestId],
+      });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.purchaseOrders.bySite(variables.siteId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["material-requests", "linked-pos", variables.requestId],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["material-requests", "linked-pos-count", variables.requestId],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["material-requests", "item-delivery-status", variables.requestId],
+      });
+    },
+  });
+}
