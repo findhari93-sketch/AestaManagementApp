@@ -93,6 +93,7 @@ export type ExtendedStockInventory = StockInventoryWithDetails & {
   batch_tax_ratio?: number | null; // GST multiplier (e.g., 1.18 for 18% GST)
   batch_total_amount?: number | null; // Total batch purchase amount incl. GST
   batch_original_qty?: number | null; // Original qty purchased for this material
+  is_vendor_paid?: boolean | null; // Whether vendor has been paid for this batch
 };
 
 /**
@@ -160,15 +161,23 @@ export function useSiteStock(
       const ownBatchTaxRatio = new Map<string, number>();
       const ownBatchTotalAmount = new Map<string, number>(); // Key: "ref_code" (batch-level)
       const ownBatchOriginalQty = new Map<string, number>();
+      const ownBatchIsPaid = new Map<string, boolean>(); // Vendor settlement status per batch
       if (ownBatchCodes.length > 0) {
         // Step 1: Get expense records (for total_amount which includes GST)
         const { data: ownExpenses, error: expenseError } = await supabase
           .from("material_purchase_expenses")
-          .select("id, ref_code, total_amount")
+          .select("id, ref_code, total_amount, is_paid")
           .in("ref_code", ownBatchCodes);
 
         if (expenseError) {
           console.warn("[useSiteStock] Failed to fetch batch expenses:", expenseError);
+        }
+
+        // Build is_paid map for own batch vendor settlement status
+        if (ownExpenses) {
+          ownExpenses.forEach((e: any) => {
+            if (e.ref_code) ownBatchIsPaid.set(e.ref_code, !!e.is_paid);
+          });
         }
 
         if (ownExpenses && ownExpenses.length > 0) {
@@ -244,6 +253,9 @@ export function useSiteStock(
             batch_original_qty: hasBatchCode && item.material_id
               ? ownBatchOriginalQty.get(`${item.batch_code}|${item.material_id}`) || null
               : null,
+            is_vendor_paid: hasBatchCode
+              ? ownBatchIsPaid.get(item.batch_code) ?? null
+              : null,
           };
         }
       );
@@ -284,7 +296,7 @@ export function useSiteStock(
             // Query by batch codes only - removed purchase_type filter as it was too restrictive
             const { data: groupPurchases, error: gpError } = await supabase
               .from("material_purchase_expenses")
-              .select("id, ref_code, paying_site_id, site_group_id, total_amount")
+              .select("id, ref_code, paying_site_id, site_group_id, total_amount, is_paid, paying_site:sites!material_purchase_expenses_paying_site_id_fkey(name)")
               .in("ref_code", batchCodes);
 
             if (gpError) {
@@ -303,6 +315,14 @@ export function useSiteStock(
 
             const validBatchCodes = new Set((groupPurchases || []).map((p: any) => p.ref_code));
             const batchToPayingSite = new Map((groupPurchases || []).map((p: any) => [p.ref_code, p.paying_site_id]));
+            const batchIsPaid = new Map<string, boolean>(
+              (groupPurchases || []).map((p: any) => [p.ref_code, !!p.is_paid])
+            );
+            const batchToPayingSiteName = new Map<string, string>(
+              (groupPurchases || [])
+                .filter((p: any) => p.paying_site?.name)
+                .map((p: any) => [p.ref_code, p.paying_site.name])
+            );
 
             // Calculate per-material GST-inclusive unit costs
             const batchMaterialUnitCost = new Map<string, number>(); // Key: "ref_code|material_id"
@@ -359,7 +379,7 @@ export function useSiteStock(
                 is_shared: true,
                 is_dedicated: false,
                 paid_by_site_id: batchToPayingSite.get(item.batch_code) || item.site_id,
-                paid_by_site_name: item.site?.name || null,
+                paid_by_site_name: batchToPayingSiteName.get(item.batch_code) || item.site?.name || null,
                 batch_code: item.batch_code,
                 pricing_mode: item.pricing_mode || "per_piece",
                 total_weight: item.total_weight ? Number(item.total_weight) : null,
@@ -376,6 +396,7 @@ export function useSiteStock(
                 batch_original_qty: item.material_id
                   ? sharedBatchOriginalQty.get(`${item.batch_code}|${item.material_id}`) || null
                   : null,
+                is_vendor_paid: batchIsPaid.get(item.batch_code) ?? null,
               }));
           }
         }

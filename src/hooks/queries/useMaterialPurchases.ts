@@ -1097,6 +1097,43 @@ export function useSiteMaterialExpenses(siteId: string | undefined) {
           throw expensesError;
         }
 
+        // 1b. Also fetch group_stock expenses from sibling sites in the same group
+        // This allows any group member to see and settle group PO vendor payments
+        let siblingGroupExpenses: any[] = [];
+        const { data: siteData } = await supabase
+          .from("sites")
+          .select("site_group_id")
+          .eq("id", siteId)
+          .single();
+
+        if (siteData?.site_group_id) {
+          const existingIds = new Set((expensesData || []).map((e: any) => e.id));
+          const { data: siblingData, error: siblingError } = await (supabase as any)
+            .from("material_purchase_expenses")
+            .select(`
+              *,
+              vendor:vendors(id, name, qr_code_url, upi_id),
+              purchase_order:purchase_orders(id, po_number, vendor_bill_url, bill_verified, total_amount, transport_cost),
+              paying_site:sites!material_purchase_expenses_paying_site_id_fkey(id, name),
+              items:material_purchase_expense_items(
+                *,
+                material:materials(id, name, code, unit),
+                brand:material_brands(id, brand_name)
+              )
+            `)
+            .eq("site_group_id", siteData.site_group_id)
+            .eq("purchase_type", "group_stock")
+            .neq("site_id", siteId)
+            .order("purchase_date", { ascending: false });
+
+          if (siblingError && !isQueryError(siblingError)) {
+            console.warn("[useSiteMaterialExpenses] Sibling group stock query failed:", siblingError);
+          } else if (siblingData) {
+            // Deduplicate against already-fetched expenses
+            siblingGroupExpenses = siblingData.filter((e: any) => !existingIds.has(e.id));
+          }
+        }
+
         // 2. Fetch POs with advance payment that haven't been paid yet
         const { data: advancePOsData, error: advancePOsError } = await (supabase as any)
           .from("purchase_orders")
@@ -1119,7 +1156,10 @@ export function useSiteMaterialExpenses(siteId: string | undefined) {
           throw advancePOsError;
         }
 
-        const expenses = (expensesData || []) as MaterialPurchaseExpenseWithDetails[];
+        const expenses = [
+          ...(expensesData || []),
+          ...siblingGroupExpenses,
+        ] as MaterialPurchaseExpenseWithDetails[];
         const advancePOs = (advancePOsData || []) as any[];
 
         // Debug logging

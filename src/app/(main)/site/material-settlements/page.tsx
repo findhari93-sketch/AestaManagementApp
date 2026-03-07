@@ -498,10 +498,18 @@ export default function MaterialSettlementsPage() {
                           />
                         </Tooltip>
                       ) : isGroupStockParent ? (
-                        <Tooltip title="Group stock purchase - you paid the vendor">
+                        <Tooltip title={
+                          purchase && purchase.site_id !== selectedSite?.id
+                            ? `Group stock PO from ${purchase.paying_site?.name || "another site"}`
+                            : "Group stock purchase - you paid the vendor"
+                        }>
                           <Chip
                             icon={<GroupIcon sx={{ fontSize: 16 }} />}
-                            label="Group PO"
+                            label={
+                              purchase && purchase.site_id !== selectedSite?.id
+                                ? `Group PO · ${purchase.paying_site?.name || "Other"}`
+                                : "Group PO"
+                            }
                             size="small"
                             color="secondary"
                             variant="outlined"

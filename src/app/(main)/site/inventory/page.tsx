@@ -509,18 +509,54 @@ export default function InventoryPage() {
       {
         id: "paid_by",
         header: "Paid By",
-        size: 120,
+        size: 140,
         Cell: ({ row }) => {
-          const paidBy = (row.original as ExtendedStock).paid_by_site_name;
-          return paidBy ? (
-            <Chip
-              icon={<SiteIcon />}
-              label={paidBy}
-              size="small"
-              variant="outlined"
-              color="primary"
-            />
-          ) : (
+          const stock = row.original as ExtendedStock;
+          const paidBy = stock.paid_by_site_name;
+          const isVendorPaid = stock.is_vendor_paid;
+          const hasBatch = stock.batch_code && stock.batch_code.trim().length > 0;
+
+          // Shared stock with batch: show settlement status
+          if (hasBatch && paidBy) {
+            return isVendorPaid ? (
+              <Chip
+                icon={<SiteIcon />}
+                label={`Paid by ${paidBy}`}
+                size="small"
+                variant="outlined"
+                color="success"
+              />
+            ) : (
+              <Chip
+                label="Vendor Unpaid"
+                size="small"
+                variant="outlined"
+                color="warning"
+              />
+            );
+          }
+
+          // Own stock with batch (self-paid group stock)
+          if (hasBatch && !paidBy) {
+            return isVendorPaid ? (
+              <Chip
+                label={selectedSite?.name || "This Site"}
+                size="small"
+                variant="outlined"
+                color="success"
+              />
+            ) : (
+              <Chip
+                label="Vendor Unpaid"
+                size="small"
+                variant="outlined"
+                color="warning"
+              />
+            );
+          }
+
+          // Own site stock (no batch)
+          return (
             <Chip
               label={selectedSite?.name || "This Site"}
               size="small"
@@ -730,9 +766,14 @@ export default function InventoryPage() {
                     Received: {dayjs(batch.last_received_date).format("DD MMM YYYY")}
                   </Typography>
                 )}
-                {batch.paid_by_site_name && (
-                  <Typography variant="caption" color="info.main" display="block">
+                {batch.batch_code && batch.is_vendor_paid === true && batch.paid_by_site_name && (
+                  <Typography variant="caption" color="success.main" display="block">
                     Paid by: {batch.paid_by_site_name}
+                  </Typography>
+                )}
+                {batch.batch_code && batch.is_vendor_paid === false && (
+                  <Typography variant="caption" color="warning.main" display="block">
+                    Vendor payment pending
                   </Typography>
                 )}
               </Paper>
