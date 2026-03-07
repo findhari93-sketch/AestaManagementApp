@@ -29,6 +29,7 @@ import {
   CheckCircleOutline,
 } from "@mui/icons-material";
 import { useAuth } from "@/contexts/AuthContext";
+import { createClient } from "@/lib/supabase/client";
 
 // Error messages mapping for user-friendly display
 const ERROR_MESSAGES: Record<string, string> = {
@@ -99,6 +100,16 @@ export default function LoginPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const sessionExpired = searchParams.get("session_expired") === "true";
+
+  // Clear expired session to stop background token refresh errors
+  useEffect(() => {
+    if (sessionExpired) {
+      const supabase = createClient();
+      // Use scope: 'local' to only clear localStorage without calling Supabase API
+      // (which would also fail if the token is already expired/invalid)
+      supabase.auth.signOut({ scope: "local" }).catch(() => {});
+    }
+  }, [sessionExpired]);
 
   // Load remembered email and check lockout on mount
   useEffect(() => {
