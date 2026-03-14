@@ -105,6 +105,45 @@ async function createSettlementWithRetry(
 }
 
 /**
+ * Insert a labor_payment with retry on unique constraint violation (23505).
+ * The generate_payment_reference RPC and INSERT run in separate transactions,
+ * so concurrent calls can generate the same reference. This retries with a
+ * fresh reference on collision.
+ */
+async function insertLaborPaymentWithRetry(
+  supabase: SupabaseClient,
+  payload: Record<string, any>,
+  siteId: string,
+  maxRetries = 3
+): Promise<{ data: any; error: any }> {
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    const { data: payRefData, error: payRefError } = await supabase.rpc(
+      "generate_payment_reference",
+      { p_site_id: siteId }
+    );
+
+    const paymentReference = payRefError
+      ? `PAY-${dayjs().format("YYMMDD")}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`
+      : (payRefData as string);
+
+    const { data, error } = await (supabase.from("labor_payments") as any)
+      .insert({ ...payload, payment_reference: paymentReference })
+      .select()
+      .single();
+
+    if (!error) return { data, error: null };
+
+    if (error.code === "23505" && attempt < maxRetries - 1) {
+      console.warn(`[Settlement] Payment reference collision (attempt ${attempt + 1}), retrying...`);
+      continue;
+    }
+
+    return { data: null, error };
+  }
+  return { data: null, error: new Error("Failed to insert labor_payment after max retries") };
+}
+
+/**
  * Generate idempotency key for a settlement
  * Used to prevent duplicate submissions within a short time window
  */
@@ -1024,24 +1063,10 @@ export async function processContractPayment(
         .eq("id", settlementGroupId);
     }
 
-    // 3. Generate unique payment reference for this payment
-    const { data: payRefData, error: payRefError } = await supabase.rpc(
-      "generate_payment_reference",
-      { p_site_id: config.siteId }
-    );
-
-    if (payRefError) {
-      console.warn("Could not generate payment reference:", payRefError);
-      const uniqueSuffix = crypto.randomUUID().slice(0, 8).toUpperCase();
-      paymentReference = `PAY-${dayjs().format("YYMMDD")}-${uniqueSuffix}`;
-    } else {
-      paymentReference = payRefData as string;
-    }
-
-    // 4. Create labor_payments record with unique payment_reference
-    const { data: paymentData, error: paymentError } = await (supabase
-      .from("labor_payments") as any)
-      .insert({
+    // 3 & 4. Create labor_payments record with retry on reference collision
+    const { data: paymentData, error: paymentError } = await insertLaborPaymentWithRetry(
+      supabase,
+      {
         laborer_id: config.laborerId,
         site_id: config.siteId,
         payment_date: paymentDate,
@@ -1051,7 +1076,6 @@ export async function processContractPayment(
         payment_mode: config.paymentMode,
         payment_channel: config.paymentChannel,
         payment_type: config.paymentType,
-        payment_reference: paymentReference,
         is_under_contract: true,
         subcontract_id: config.subcontractId || null,
         proof_url: config.proofUrl || null,
@@ -1062,9 +1086,9 @@ export async function processContractPayment(
         notes: config.notes || null,
         settlement_group_id: settlementGroupId,
         site_engineer_transaction_id: engineerTransactionId,
-      })
-      .select()
-      .single();
+      },
+      config.siteId
+    );
 
     if (paymentError) {
       console.error("Error creating labor_payment:", paymentError);
@@ -1948,24 +1972,10 @@ export async function processWaterfallContractPayment(
 
         if (finalAmount <= 0) continue;
 
-        // Generate unique payment reference
-        const { data: payRefData, error: payRefError } = await supabase.rpc(
-          "generate_payment_reference",
-          { p_site_id: config.siteId }
-        );
-
-        let paymentReference: string;
-        if (payRefError) {
-          const uniqueSuffix = crypto.randomUUID().slice(0, 8).toUpperCase();
-          paymentReference = `PAY-${dayjs().format("YYMMDD")}-${uniqueSuffix}`;
-        } else {
-          paymentReference = payRefData as string;
-        }
-
-        // Create labor_payments record
-        const { data: paymentData, error: paymentError } = await (supabase
-          .from("labor_payments") as any)
-          .insert({
+        // Create labor_payments record with retry on reference collision
+        const { data: paymentData, error: paymentError } = await insertLaborPaymentWithRetry(
+          supabase,
+          {
             laborer_id: laborer.laborerId,
             site_id: config.siteId,
             payment_date: paymentDate,
@@ -1975,7 +1985,6 @@ export async function processWaterfallContractPayment(
             payment_mode: normalizedPaymentMode,
             payment_channel: config.paymentChannel,
             payment_type: config.paymentType,
-            payment_reference: paymentReference,
             is_under_contract: true,
             subcontract_id: laborer.subcontractId || config.subcontractId || null,
             proof_url: config.proofUrl || null,
@@ -1986,9 +1995,9 @@ export async function processWaterfallContractPayment(
             notes: `Waterfall payment for ${week.weekLabel}${config.notes ? `: ${config.notes}` : ""}`,
             settlement_group_id: settlementGroupId,
             site_engineer_transaction_id: engineerTransactionId,
-          })
-          .select()
-          .single();
+          },
+          config.siteId
+        );
 
         if (paymentError) {
           console.error(`Error creating labor_payment for ${laborer.laborerName}:`, paymentError);
@@ -2338,24 +2347,10 @@ export async function processDateWiseContractSettlement(
 
         if (finalAmount <= 0) continue;
 
-        // Generate unique payment reference
-        const { data: payRefData, error: payRefError } = await supabase.rpc(
-          "generate_payment_reference",
-          { p_site_id: config.siteId }
-        );
-
-        let paymentReference: string;
-        if (payRefError) {
-          const uniqueSuffix = crypto.randomUUID().slice(0, 8).toUpperCase();
-          paymentReference = `PAY-${dayjs().format("YYMMDD")}-${uniqueSuffix}`;
-        } else {
-          paymentReference = payRefData as string;
-        }
-
-        // Create labor_payments record
-        const { data: paymentData, error: paymentError } = await (supabase
-          .from("labor_payments") as any)
-          .insert({
+        // Create labor_payments record with retry on reference collision
+        const { data: paymentData, error: paymentError } = await insertLaborPaymentWithRetry(
+          supabase,
+          {
             laborer_id: laborer.laborerId,
             site_id: config.siteId,
             payment_date: paymentDate,
@@ -2365,7 +2360,6 @@ export async function processDateWiseContractSettlement(
             payment_mode: config.paymentMode,
             payment_channel: config.paymentChannel,
             payment_type: "salary",
-            payment_reference: paymentReference,
             is_under_contract: true,
             subcontract_id: config.subcontractId || null,
             proof_url: config.proofUrls?.[0] || null,
@@ -2376,9 +2370,9 @@ export async function processDateWiseContractSettlement(
             notes: `Date-wise settlement (${allocation.weekLabel})${config.notes ? `: ${config.notes}` : ""}`,
             settlement_group_id: settlementGroupId,
             site_engineer_transaction_id: engineerTransactionId,
-          })
-          .select()
-          .single();
+          },
+          config.siteId
+        );
 
         if (paymentError) {
           console.error(`Error creating labor_payment for ${laborer.laborerName}:`, paymentError);
