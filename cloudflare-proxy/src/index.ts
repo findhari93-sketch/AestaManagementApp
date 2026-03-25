@@ -136,15 +136,29 @@ function handleCors(request: Request): Response {
 /**
  * Set CORS headers on a response
  */
+// Allow ALL headers that Supabase client sends
+const ALLOWED_HEADERS = [
+  "Accept",
+  "Accept-Encoding",
+  "Accept-Language",
+  "Authorization",
+  "Content-Type",
+  "apikey",
+  "accept-profile",
+  "content-profile",
+  "prefer",
+  "range",
+  "x-client-info",
+  "x-supabase-api-version",
+  "x-upsert",
+].join(", ");
+
 function setCorsHeaders(headers: Headers, request: Request): void {
   const origin = request.headers.get("Origin") || "*";
   headers.set("Access-Control-Allow-Origin", origin);
-  headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
-  headers.set(
-    "Access-Control-Allow-Headers",
-    "Content-Type, Authorization, apikey, x-client-info, x-supabase-api-version, range, prefer"
-  );
-  headers.set("Access-Control-Expose-Headers", "Content-Range, Range, x-supabase-api-version");
+  headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD");
+  headers.set("Access-Control-Allow-Headers", ALLOWED_HEADERS);
+  headers.set("Access-Control-Expose-Headers", "Content-Range, Range, x-supabase-api-version, content-range");
   headers.set("Access-Control-Allow-Credentials", "true");
 }
 
@@ -155,10 +169,9 @@ function getCorsHeadersObj(request: Request): Record<string, string> {
   const origin = request.headers.get("Origin") || "*";
   return {
     "Access-Control-Allow-Origin": origin,
-    "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
-    "Access-Control-Allow-Headers":
-      "Content-Type, Authorization, apikey, x-client-info, x-supabase-api-version, range, prefer",
-    "Access-Control-Expose-Headers": "Content-Range, Range, x-supabase-api-version",
+    "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD",
+    "Access-Control-Allow-Headers": ALLOWED_HEADERS,
+    "Access-Control-Expose-Headers": "Content-Range, Range, x-supabase-api-version, content-range",
     "Access-Control-Allow-Credentials": "true",
   };
 }
