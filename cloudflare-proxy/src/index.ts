@@ -11,21 +11,29 @@ interface Env {
   SUPABASE_URL: string;
 }
 
-// Headers that should not be forwarded (hop-by-hop)
-const HOP_BY_HOP_HEADERS = new Set([
-  "connection",
-  "keep-alive",
-  "proxy-authenticate",
-  "proxy-authorization",
-  "te",
-  "trailer",
-  "transfer-encoding",
-]);
+// All headers that Supabase client sends
+const ALLOWED_HEADERS = [
+  "Accept",
+  "Accept-Encoding",
+  "Accept-Language",
+  "Authorization",
+  "Content-Type",
+  "apikey",
+  "accept-profile",
+  "content-profile",
+  "prefer",
+  "range",
+  "x-client-info",
+  "x-supabase-api-version",
+  "x-upsert",
+  "Upgrade",
+  "Connection",
+].join(", ");
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
-    const supabaseUrl = env.SUPABASE_URL;
+    const supabaseOrigin = new URL(env.SUPABASE_URL);
 
     // Handle CORS preflight
     if (request.method === "OPTIONS") {
@@ -33,28 +41,31 @@ export default {
     }
 
     // Build the target URL: replace worker origin with Supabase origin
-    const targetUrl = `${supabaseUrl}${url.pathname}${url.search}`;
+    const targetUrl = new URL(url.pathname + url.search, env.SUPABASE_URL);
 
-    // Check for WebSocket upgrade (Realtime connections)
+    // For WebSocket upgrade requests (Supabase Realtime),
+    // create a new Request pointing to Supabase and let Cloudflare handle the upgrade
     const upgradeHeader = request.headers.get("Upgrade");
     if (upgradeHeader && upgradeHeader.toLowerCase() === "websocket") {
-      return handleWebSocket(request, targetUrl);
+      // Clone headers and set correct Host
+      const headers = new Headers(request.headers);
+      headers.set("Host", supabaseOrigin.host);
+
+      // Cloudflare handles WebSocket proxying automatically when you fetch
+      // with the Upgrade header - just use https:// (not wss://)
+      return fetch(targetUrl.toString(), {
+        method: request.method,
+        headers,
+        body: request.body,
+      });
     }
 
-    // Forward the request to Supabase
-    const headers = new Headers();
-    for (const [key, value] of request.headers.entries()) {
-      if (!HOP_BY_HOP_HEADERS.has(key.toLowerCase())) {
-        headers.set(key, value);
-      }
-    }
-
-    // Override the Host header to match Supabase
-    const supabaseHost = new URL(supabaseUrl).host;
-    headers.set("Host", supabaseHost);
+    // For regular HTTP requests
+    const headers = new Headers(request.headers);
+    headers.set("Host", supabaseOrigin.host);
 
     try {
-      const response = await fetch(targetUrl, {
+      const response = await fetch(targetUrl.toString(), {
         method: request.method,
         headers,
         body: request.method !== "GET" && request.method !== "HEAD"
@@ -91,36 +102,6 @@ export default {
 };
 
 /**
- * Handle WebSocket upgrade for Supabase Realtime
- */
-async function handleWebSocket(
-  request: Request,
-  targetUrl: string
-): Promise<Response> {
-  // Cloudflare Workers support WebSocket proxying via fetch with Upgrade header
-  const headers = new Headers();
-  for (const [key, value] of request.headers.entries()) {
-    if (!HOP_BY_HOP_HEADERS.has(key.toLowerCase())) {
-      headers.set(key, value);
-    }
-  }
-
-  const supabaseHost = new URL(targetUrl).host;
-  headers.set("Host", supabaseHost);
-
-  // Use the target URL with wss:// for WebSocket
-  const wsUrl = targetUrl.replace("https://", "wss://").replace("http://", "ws://");
-
-  const response = await fetch(wsUrl, {
-    method: request.method,
-    headers,
-    body: request.body,
-  });
-
-  return response;
-}
-
-/**
  * Handle CORS preflight request
  */
 function handleCors(request: Request): Response {
@@ -133,26 +114,6 @@ function handleCors(request: Request): Response {
   });
 }
 
-/**
- * Set CORS headers on a response
- */
-// Allow ALL headers that Supabase client sends
-const ALLOWED_HEADERS = [
-  "Accept",
-  "Accept-Encoding",
-  "Accept-Language",
-  "Authorization",
-  "Content-Type",
-  "apikey",
-  "accept-profile",
-  "content-profile",
-  "prefer",
-  "range",
-  "x-client-info",
-  "x-supabase-api-version",
-  "x-upsert",
-].join(", ");
-
 function setCorsHeaders(headers: Headers, request: Request): void {
   const origin = request.headers.get("Origin") || "*";
   headers.set("Access-Control-Allow-Origin", origin);
@@ -162,9 +123,6 @@ function setCorsHeaders(headers: Headers, request: Request): void {
   headers.set("Access-Control-Allow-Credentials", "true");
 }
 
-/**
- * Get CORS headers as a plain object (for Response constructor)
- */
 function getCorsHeadersObj(request: Request): Record<string, string> {
   const origin = request.headers.get("Origin") || "*";
   return {
