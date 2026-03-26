@@ -458,8 +458,14 @@ export default function TeaShopPage() {
   };
 
   useEffect(() => {
+    // In group mode, data is fetched by React Query hooks (useCombinedTeaShopEntries etc.)
+    // Only use legacy fetchData() for non-group sites
+    if (isInGroup) {
+      setLoading(false); // Ensure spinner doesn't block group mode
+      return;
+    }
     fetchData();
-  }, [selectedSite, dateFrom, dateTo, isAllTime]);
+  }, [selectedSite, dateFrom, dateTo, isAllTime, isInGroup]);
 
   const handleDeleteEntry = async (id: string) => {
     if (!confirm("Are you sure you want to delete this entry?")) return;
@@ -1250,7 +1256,7 @@ export default function TeaShopPage() {
                           </TableCell>
                           <TableCell align="center" sx={{ display: { xs: 'none', md: 'table-cell' } }}>
                             <AuditAvatarGroup
-                              createdByName={entry.entered_by}
+                              createdByName={(entry as any).entered_by_user?.name || entry.entered_by}
                               createdAt={entry.created_at}
                               updatedByName={(entry as any).updated_by}
                               updatedAt={entry.updated_at}

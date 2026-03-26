@@ -75,7 +75,7 @@ export function useCombinedTeaShopEntries(
       // - Group entries (site_group_id matches, site_id is null)
       let query = (supabase as any)
         .from("tea_shop_entries")
-        .select("*");
+        .select("*, entered_by_user:users!tea_shop_entries_entered_by_user_id_fkey(name, avatar_url)");
 
       // Handle empty siteIds to avoid invalid .or() clause
       if (siteIds.length > 0) {
