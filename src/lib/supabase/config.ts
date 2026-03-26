@@ -9,7 +9,7 @@ export const getSupabaseConfig = () => {
   return {
     url,
     anonKey,
-    isValid: Boolean(url && anonKey && (url.includes("supabase.co") || url.includes("localhost") || url.includes("127.0.0.1"))),
+    isValid: Boolean(url && anonKey && (url.includes("supabase.co") || url.includes("localhost") || url.includes("127.0.0.1") || url.includes("workers.dev"))),
   };
 };
 
@@ -30,7 +30,8 @@ export const validateSupabaseConfig = () => {
 
   const isValidUrl = config.url.includes("supabase.co") ||
                      config.url.includes("localhost") ||
-                     config.url.includes("127.0.0.1");
+                     config.url.includes("127.0.0.1") ||
+                     config.url.includes("workers.dev");
   if (!isValidUrl) {
     throw new Error(
       "NEXT_PUBLIC_SUPABASE_URL appears to be invalid. It should be a Supabase URL or localhost for local development."

@@ -258,10 +258,15 @@ export default function TeaShopPage() {
         (sum, s) => sum + (s.amount_paid || 0), 0
       );
 
-      // Recalculate pending and overpaid using site-specific settlements
-      // This is more accurate than using entries' amount_paid field
-      const pendingFromSettlements = Math.max(0, Math.round(allEntriesTotal - totalPaid));
-      const overpaidFromSettlements = Math.max(0, Math.round(totalPaid - allEntriesTotal));
+      // When filtering by site, use entry-level paid amounts (already per-allocation)
+      // Settlement-level totals are only accurate for unfiltered (all-sites) view
+      // because group settlements don't have per-site attribution
+      const pendingFromSettlements = effectiveFilterBySiteId
+        ? pendingBalance   // From entry-level calculation (already site-proportional)
+        : Math.max(0, Math.round(allEntriesTotal - totalPaid));
+      const overpaidFromSettlements = effectiveFilterBySiteId
+        ? overpaidAmount   // From entry-level calculation (already site-proportional)
+        : Math.max(0, Math.round(totalPaid - allEntriesTotal));
 
       return {
         totalEntries: allEntriesTotal,

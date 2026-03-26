@@ -285,7 +285,7 @@ export default function QueryProvider({
       persistOptions={{
         persister,
         maxAge: 24 * 60 * 60 * 1000, // 24 hours max age for persisted data
-        buster: "v2", // Change this to invalidate all persisted cache
+        buster: "v3", // Bumped after Cloudflare proxy migration to invalidate old cache
         dehydrateOptions: {
           shouldDehydrateQuery: (query) => {
             return shouldPersistQuery(query.queryKey);
