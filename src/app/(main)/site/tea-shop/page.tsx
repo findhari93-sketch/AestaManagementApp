@@ -172,13 +172,21 @@ export default function TeaShopPage() {
     return selectedSite?.id;
   }, [selectedSite?.id]);
 
-  const { data: combinedEntriesData } = useCombinedTeaShopEntries(
+  // Date-filtered entries for the table display
+  const { data: combinedEntriesData, isLoading: combinedEntriesLoading } = useCombinedTeaShopEntries(
     isInGroup ? siteGroupId : undefined,
     {
       filterBySiteId: effectiveFilterBySiteId,
       dateFrom: isAllTime ? undefined : dateFrom ?? undefined,
       dateTo: isAllTime ? undefined : dateTo ?? undefined,
     }
+  );
+  // ALL TIME entries for THIS SITE - used for summary stats (Total Spent, Pending)
+  // This ensures the summary shows per-site totals, not group totals
+  const { data: allTimeEntriesData } = useCombinedTeaShopEntries(
+    isInGroup ? siteGroupId : undefined,
+    { filterBySiteId: effectiveFilterBySiteId }
+    // No dateFrom/dateTo = all time for this site
   );
   const { data: combinedPendingData } = useCombinedTeaShopPendingBalance(isInGroup ? siteGroupId : undefined);
   const { data: combinedSettlementsData } = useCombinedTeaShopSettlements(isInGroup ? siteGroupId : undefined);
@@ -223,32 +231,45 @@ export default function TeaShopPage() {
       const totalTea = entriesToCalc.reduce((sum, e) => sum + (e.tea_total || 0), 0);
       const totalSnacks = entriesToCalc.reduce((sum, e) => sum + (e.snacks_total || 0), 0);
 
-      // For the site-specific view, show this site's share of entries
+      // Date-filtered entries total for this site (for "Total: ₹X" chip in table header)
       const siteEntriesTotal = entriesToCalc.reduce(
         (sum, e) => sum + getAmount(e), 0
       );
 
-      // Use the pre-calculated ALL TIME pending balance from the dedicated hook
-      // This correctly compares ALL entries (not date-filtered) vs ALL settlements
-      // The combinedPendingData hook fetches everything without date filters
-      const allTimeEntriesTotal = combinedPendingData?.entriesTotal || 0;
-      const allTimePaidTotal = combinedPendingData?.paidTotal || 0;
-      const allTimePending = combinedPendingData?.pending || 0;
+      // ALL TIME entries total for THIS SITE (not date-filtered, not group-level)
+      // This ensures each site shows its own Total Spent
+      const allTimeSiteEntries = allTimeEntriesData || [];
+      const siteFilteredAllTime = effectiveFilterBySiteId
+        ? allTimeSiteEntries.filter((e) => e.site_id === effectiveFilterBySiteId)
+        : allTimeSiteEntries;
+      const allTimeSiteEntriesTotal = siteFilteredAllTime.reduce(
+        (sum, e) => sum + getAmount(e), 0
+      );
 
-      const pendingBalance = Math.max(0, Math.round(allTimePending));
-      const overpaidAmount = Math.max(0, Math.round(-allTimePending));
+      // Settlements for THIS SITE (filter by site_id for individual settlements,
+      // include group settlements only if they're attributed to this site)
+      const allSettlements = combinedSettlementsData || [];
+      const siteSettlements = effectiveFilterBySiteId
+        ? allSettlements.filter((s: any) => s.site_id === effectiveFilterBySiteId)
+        : allSettlements;
+      const sitePaidTotal = siteSettlements.reduce(
+        (sum, s) => sum + (s.amount_paid || 0), 0
+      );
 
-      // Last settlement from ALL settlements
-      const settlementsToCalc = combinedSettlementsData || [];
-      const lastSettlement = settlementsToCalc.length > 0
-        ? settlementsToCalc.reduce((latest, s) =>
+      // Per-site pending/overpaid
+      const pendingBalance = Math.max(0, Math.round(allTimeSiteEntriesTotal - sitePaidTotal));
+      const overpaidAmount = Math.max(0, Math.round(sitePaidTotal - allTimeSiteEntriesTotal));
+
+      // Last settlement for this site
+      const lastSettlement = siteSettlements.length > 0
+        ? siteSettlements.reduce((latest, s) =>
             new Date(s.payment_date) > new Date(latest.payment_date) ? s : latest
           )
         : null;
 
       return {
         totalEntries: siteEntriesTotal,
-        totalAllTime: allTimeEntriesTotal,
+        totalAllTime: allTimeSiteEntriesTotal,
         totalTea,
         totalSnacks,
         pendingBalance,
@@ -256,7 +277,7 @@ export default function TeaShopPage() {
         thisWeekTotal,
         thisMonthTotal,
         lastSettlement,
-        totalPaid: allTimePaidTotal,
+        totalPaid: sitePaidTotal,
       };
     }
 
@@ -974,7 +995,7 @@ export default function TeaShopPage() {
             </Box>
 
             {/* Entries Table - Simplified columns: Date, Att, T&S, By, Actions */}
-            {loading ? (
+            {(loading || (isInGroup && combinedEntriesLoading) || loadingCompanyTeaShop) ? (
               <Box sx={{ display: "flex", justifyContent: "center", p: 4 }}>
                 <CircularProgress />
               </Box>
