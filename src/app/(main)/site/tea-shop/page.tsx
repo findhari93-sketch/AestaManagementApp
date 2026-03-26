@@ -228,42 +228,35 @@ export default function TeaShopPage() {
         (sum, e) => sum + getAmount(e), 0
       );
 
-      // For pending/overpaid: compare ALL entries across ALL sites against ALL settlements
-      // This gives the true group-level balance, which is what matters for the tea shop owner
-      const allGroupEntriesTotal = combinedEntriesData.reduce(
-        (sum, e) => sum + getAmount(e), 0
-      );
+      // Use the pre-calculated ALL TIME pending balance from the dedicated hook
+      // This correctly compares ALL entries (not date-filtered) vs ALL settlements
+      // The combinedPendingData hook fetches everything without date filters
+      const allTimeEntriesTotal = combinedPendingData?.entriesTotal || 0;
+      const allTimePaidTotal = combinedPendingData?.paidTotal || 0;
+      const allTimePending = combinedPendingData?.pending || 0;
 
-      // All settlements (don't filter by site - settlements pay for the group as a whole)
+      const pendingBalance = Math.max(0, Math.round(allTimePending));
+      const overpaidAmount = Math.max(0, Math.round(-allTimePending));
+
+      // Last settlement from ALL settlements
       const settlementsToCalc = combinedSettlementsData || [];
-
       const lastSettlement = settlementsToCalc.length > 0
         ? settlementsToCalc.reduce((latest, s) =>
             new Date(s.payment_date) > new Date(latest.payment_date) ? s : latest
           )
         : null;
 
-      // Total paid from ALL settlements (actual money paid to shop)
-      const totalPaid = settlementsToCalc.reduce(
-        (sum, s) => sum + (s.amount_paid || 0), 0
-      );
-
-      // Calculate group-level pending/overpaid by comparing ALL entries vs ALL settlements
-      // This matches the waterfall logic which uses totalPaid to determine paid checkmarks
-      const pendingFromSettlements = Math.max(0, Math.round(allGroupEntriesTotal - totalPaid));
-      const overpaidFromSettlements = Math.max(0, Math.round(totalPaid - allGroupEntriesTotal));
-
       return {
         totalEntries: siteEntriesTotal,
-        totalAllTime: siteEntriesTotal,
+        totalAllTime: allTimeEntriesTotal,
         totalTea,
         totalSnacks,
-        pendingBalance: pendingFromSettlements,
-        overpaidAmount: overpaidFromSettlements,
+        pendingBalance,
+        overpaidAmount,
         thisWeekTotal,
         thisMonthTotal,
         lastSettlement,
-        totalPaid,
+        totalPaid: allTimePaidTotal,
       };
     }
 
