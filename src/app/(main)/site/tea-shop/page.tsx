@@ -466,6 +466,68 @@ export default function TeaShopPage() {
     fetchData();
   }, [selectedSite, dateFrom, dateTo, isAllTime, isInGroup]);
 
+  // Fetch attendance + holidays data for group mode
+  // (In non-group mode, this is handled inside fetchData())
+  useEffect(() => {
+    if (!isInGroup || !selectedSite?.id) return;
+
+    const fetchAttendanceAndHolidays = async () => {
+      const shouldFilterByDate = !isAllTime && dateFrom && dateTo;
+      const fetchDateFrom = shouldFilterByDate ? dateFrom : null;
+      const fetchDateTo = shouldFilterByDate ? dateTo : null;
+
+      // Holidays
+      let holidaysQuery = (supabase.from("site_holidays") as any)
+        .select("*")
+        .eq("site_id", selectedSite.id)
+        .order("date", { ascending: false });
+      if (fetchDateFrom && fetchDateTo) {
+        holidaysQuery = holidaysQuery.gte("date", fetchDateFrom).lte("date", fetchDateTo);
+      }
+      const { data: holidaysData } = await holidaysQuery;
+      setHolidays((holidaysData || []) as SiteHoliday[]);
+
+      // Named laborers per date
+      let attendanceQuery = (supabase.from("daily_attendance") as any)
+        .select("date")
+        .eq("site_id", selectedSite.id);
+      if (fetchDateFrom && fetchDateTo) {
+        attendanceQuery = attendanceQuery.gte("date", fetchDateFrom).lte("date", fetchDateTo);
+      }
+      const { data: attendanceData } = await attendanceQuery;
+
+      // Market laborers per date
+      let marketQuery = (supabase.from("market_laborer_attendance") as any)
+        .select("date, count")
+        .eq("site_id", selectedSite.id);
+      if (fetchDateFrom && fetchDateTo) {
+        marketQuery = marketQuery.gte("date", fetchDateFrom).lte("date", fetchDateTo);
+      }
+      const { data: marketData } = await marketQuery;
+
+      // Build attendance map
+      const attMap = new Map<string, { named: number; market: number }>();
+      const namedCounts = new Map<string, number>();
+      (attendanceData || []).forEach((a: any) => {
+        namedCounts.set(a.date, (namedCounts.get(a.date) || 0) + 1);
+      });
+      const marketCounts = new Map<string, number>();
+      (marketData || []).forEach((m: any) => {
+        marketCounts.set(m.date, (marketCounts.get(m.date) || 0) + (m.count || 0));
+      });
+      const allAttDates = new Set([...namedCounts.keys(), ...marketCounts.keys()]);
+      allAttDates.forEach((date) => {
+        attMap.set(date, {
+          named: namedCounts.get(date) || 0,
+          market: marketCounts.get(date) || 0,
+        });
+      });
+      setAttendanceByDate(attMap);
+    };
+
+    fetchAttendanceAndHolidays();
+  }, [selectedSite?.id, dateFrom, dateTo, isAllTime, isInGroup, supabase]);
+
   const handleDeleteEntry = async (id: string) => {
     if (!confirm("Are you sure you want to delete this entry?")) return;
 
@@ -583,12 +645,21 @@ export default function TeaShopPage() {
       entriesToUse = entriesToUse.filter((e) => e.date >= dateFrom && e.date <= dateTo);
     }
 
-    // WATERFALL CALCULATION: Apply total paid amount to entries (oldest first)
-    // This ensures the "Paid" column reflects actual settlement waterfall
+    // WATERFALL CALCULATION: Apply total paid amount to ALL-TIME entries (oldest first)
+    // Must use ALL-TIME entries so that payment distribution is correct.
+    // If we only used date-filtered entries, all visible entries appear paid even when
+    // older entries (not in view) are still unpaid.
     const getAmount = (e: any) => e.display_amount !== undefined ? e.display_amount : e.total_amount || 0;
 
-    // Sort entries by date ascending for waterfall calculation
-    const sortedForWaterfall = [...entriesToUse].sort((a, b) => a.date.localeCompare(b.date));
+    // Use ALL-TIME entries for waterfall when in group mode, otherwise use visible entries
+    const allEntriesForWaterfall = isInGroup && allTimeEntriesData
+      ? [...allTimeEntriesData].filter((e) =>
+          !effectiveFilterBySiteId || e.site_id === effectiveFilterBySiteId || (e as any).isGroupEntry === true
+        )
+      : [...entriesToUse];
+
+    // Sort ALL entries by date ascending for waterfall calculation
+    const sortedForWaterfall = allEntriesForWaterfall.sort((a, b) => a.date.localeCompare(b.date));
 
     // Apply waterfall: allocate totalPaid to oldest entries first
     let remainingPaid = stats.totalPaid || 0;
