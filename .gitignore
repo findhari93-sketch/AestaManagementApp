@@ -44,3 +44,9 @@ nul
 
 # Supabase backups
 supabase/production_backup.sql
+
+# Playwright MCP artifacts
+.playwright-mcp/
+
+# Env backups
+*.local.bak
