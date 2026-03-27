@@ -12,9 +12,21 @@ const nextConfig = {
       ? { exclude: ['error'] }
       : false,
   },
-  // Force browsers to revalidate cached pages/chunks after proxy migration
-  // Vercel returns 304 if unchanged, so no bandwidth wasted
+  // Cache headers: aggressive for static PWA assets, revalidate for everything else
   headers: async () => [
+    {
+      source: '/icons/:path*',
+      headers: [
+        { key: 'Cache-Control', value: 'public, max-age=2592000, immutable' },
+      ],
+    },
+    {
+      source: '/sw.js',
+      headers: [
+        { key: 'Cache-Control', value: 'public, max-age=0, must-revalidate' },
+        { key: 'Service-Worker-Allowed', value: '/' },
+      ],
+    },
     {
       source: '/(.*)',
       headers: [

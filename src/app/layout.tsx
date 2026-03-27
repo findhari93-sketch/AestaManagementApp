@@ -10,6 +10,7 @@ import { NotificationProvider } from "@/contexts/NotificationContext";
 import { ToastProvider } from "@/contexts/ToastContext";
 import QueryProvider from "@/providers/QueryProvider";
 import { TabProvider } from "@/providers/TabProvider";
+import { PWAProvider } from "@/components/pwa";
 
 
 export const metadata: Metadata = {
@@ -18,6 +19,15 @@ export const metadata: Metadata = {
   icons: {
     icon: "/favicon.png",
     shortcut: "/favicon.png",
+    apple: "/icons/apple-touch-icon.png",
+  },
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "Aesta",
+  },
+  other: {
+    "mobile-web-app-capable": "yes",
   },
 };
 
@@ -38,6 +48,7 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning>
       <body suppressHydrationWarning>
         <ThemeProvider>
+          <PWAProvider>
           <TabProvider>
             <AuthProvider>
               <SessionErrorHandler>
@@ -57,6 +68,7 @@ export default function RootLayout({
               </SessionErrorHandler>
             </AuthProvider>
           </TabProvider>
+          </PWAProvider>
         </ThemeProvider>
       </body>
     </html>
