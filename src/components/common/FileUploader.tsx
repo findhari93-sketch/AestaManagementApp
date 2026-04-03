@@ -578,6 +578,7 @@ export default function FileUploader({
       maxRetries: number = UPLOAD_CONSTANTS.MAX_RETRIES
     ): Promise<{ data: { path: string } | null; error: Error | null }> => {
       let lastError: Error | null = null;
+      let currentToken = accessToken;
       const timeoutMs = getAttemptTimeout(fileToUpload.size);
 
       for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -595,8 +596,17 @@ export default function FileUploader({
           const delay = UPLOAD_CONSTANTS.INITIAL_RETRY_DELAY * Math.pow(2, attempt - 1);
           console.log(`[FileUploader] Waiting ${delay}ms before retry ${attempt}`);
           await new Promise((resolve) => setTimeout(resolve, delay));
-          // Session was already checked at upload start - no need to re-check on each retry
-          // (this was causing 8-15s delays per retry, often exceeding global timeout)
+
+          // On retry, refresh the session token - network errors are often caused by expired tokens
+          try {
+            const { data: { session: freshSession } } = await supabase.auth.refreshSession();
+            if (freshSession?.access_token) {
+              currentToken = freshSession.access_token;
+              console.log("[FileUploader] Refreshed auth token for retry");
+            }
+          } catch (refreshErr) {
+            console.warn("[FileUploader] Token refresh on retry failed:", refreshErr);
+          }
         }
 
         console.log(
@@ -607,7 +617,7 @@ export default function FileUploader({
           const result = await uploadViaXHR(
             filePath,
             fileToUpload,
-            accessToken,
+            currentToken,
             onProgress,
             timeoutMs
           );
@@ -628,7 +638,7 @@ export default function FileUploader({
 
       return { data: null, error: lastError };
     },
-    [uploadViaXHR]
+    [uploadViaXHR, supabase]
   );
 
   const uploadFile = useCallback(
@@ -707,7 +717,14 @@ export default function FileUploader({
           throw new Error("Upload cancelled");
         }
 
-        // === PHASE 2: Get auth token (instant - from cached session) ===
+        // === PHASE 2: Get fresh auth token ===
+        // Ensure token is valid before upload - expired tokens cause CORS/network errors
+        // from Supabase Storage that appear as "Network error during upload"
+        try {
+          await ensureFreshSession();
+        } catch (sessionError) {
+          console.warn("[FileUploader] ensureFreshSession failed, proceeding with cached session:", sessionError);
+        }
         const { data: { session } } = await supabase.auth.getSession();
         if (!session?.access_token) {
           throw new Error("Session expired. Please log in again.");
@@ -796,6 +813,8 @@ export default function FileUploader({
           errorMsg.includes("aborted")
         ) {
           errorMsg = "Upload cancelled";
+        } else if (errorMsg.includes("Network error")) {
+          errorMsg = "Network error during upload. Please check your internet connection and try again.";
         }
 
         setError(errorMsg);
