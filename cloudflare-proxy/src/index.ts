@@ -23,6 +23,7 @@ const ALLOWED_HEADERS = [
   "content-profile",
   "prefer",
   "range",
+  "cache-control",
   "x-client-info",
   "x-supabase-api-version",
   "x-upsert",
