@@ -379,18 +379,31 @@ export default function DateRangePicker({
       return;
     }
     const next = parsed.toDate();
+
     if (which === "start") {
-      const end =
-        tempRange[0].endDate && next <= tempRange[0].endDate
-          ? tempRange[0].endDate
-          : next;
-      setTempRange([{ startDate: next, endDate: end, key: "selection" }]);
+      const currentEnd = tempRange[0].endDate;
+      if (currentEnd && next > currentEnd) {
+        // Typed start is AFTER current end → swap so the user keeps a valid range
+        setTempRange([
+          { startDate: currentEnd, endDate: next, key: "selection" },
+        ]);
+      } else {
+        setTempRange([
+          { startDate: next, endDate: currentEnd ?? next, key: "selection" },
+        ]);
+      }
     } else {
-      const start =
-        tempRange[0].startDate && next >= tempRange[0].startDate
-          ? tempRange[0].startDate
-          : next;
-      setTempRange([{ startDate: start, endDate: next, key: "selection" }]);
+      const currentStart = tempRange[0].startDate;
+      if (currentStart && next < currentStart) {
+        // Typed end is BEFORE current start → swap
+        setTempRange([
+          { startDate: next, endDate: currentStart, key: "selection" },
+        ]);
+      } else {
+        setTempRange([
+          { startDate: currentStart ?? next, endDate: next, key: "selection" },
+        ]);
+      }
     }
     setSelectedPreset(null);
   };
