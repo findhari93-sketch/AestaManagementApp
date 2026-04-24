@@ -108,17 +108,26 @@ export function DateRangeProvider({ children }: { children: React.ReactNode }) {
     const storedFrom = getStoredDateFrom();
     const storedTo = getStoredDateTo();
 
-    // Check for ALL_TIME marker - keep null (All Time)
+    // Explicit All Time — respect it.
     if (storedFrom === ALL_TIME_MARKER || storedTo === ALL_TIME_MARKER) {
       return;
     }
 
-    // Restore date range if valid dates are stored
+    // Restore specific range if valid dates are stored.
     if (storedFrom && storedTo) {
       setStartDate(new Date(storedFrom));
       setEndDate(new Date(storedTo));
+      return;
     }
-    // If no stored values, keep null (All Time)
+
+    // First-time visitor: default to This Month so initial page loads don't
+    // pull the full row history from heavy views like v_all_expenses. The
+    // user can always switch to All Time via the ScopePill or picker.
+    // Not persisted here — once the user picks a specific scope, that choice
+    // is what we remember.
+    const now = dayjs();
+    setStartDate(now.startOf("month").toDate());
+    setEndDate(now.endOf("day").toDate());
   }, []);
 
   const setDateRange = useCallback(

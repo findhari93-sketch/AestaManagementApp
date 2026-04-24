@@ -111,8 +111,14 @@ export default function ExpensesPage() {
   const [subcontractDrawerOpen, setSubcontractDrawerOpen] = useState(false);
   const [subcontractsLoadedForSite, setSubcontractsLoadedForSite] = useState<string | null>(null);
 
-  // Result-cap state — guards against pulling unbounded rows from v_all_expenses
-  const RESULT_LIMIT = 2000;
+  // Result-cap state — load recent rows first and let the user "Load more"
+  // so we don't pull thousands of rows from the heavy v_all_expenses view on
+  // every page load. The hard ceiling is kept as a safety net for runaway
+  // queries (30s client timeout, Cloudflare TTFB).
+  const INITIAL_RESULT_LIMIT = 200;
+  const MAX_RESULT_LIMIT = 2000;
+  const LOAD_MORE_STEP = 200;
+  const [loadedLimit, setLoadedLimit] = useState(INITIAL_RESULT_LIMIT);
   const [resultLimitHit, setResultLimitHit] = useState(false);
 
   // Material Purchases state removed - now handled by Material Settlements page
@@ -266,17 +272,20 @@ export default function ExpensesPage() {
 
       if (activeTab !== "all") query = query.eq("module", activeTab);
 
-      // Cap the result set to keep response time bounded for sites with large history.
-      // v_all_expenses is a 7-way UNION ALL with correlated subqueries, so unlimited
-      // selects can exceed both the client 30s wrapper and the Cloudflare proxy TTFB.
-      query = query.limit(RESULT_LIMIT);
+      // Load a bounded slice. The initial limit is small (200) so fresh page
+      // loads stay snappy even when the user's All Time view would otherwise
+      // return thousands of rows. The "Load more" button grows this limit
+      // in LOAD_MORE_STEP chunks up to MAX_RESULT_LIMIT as a safety net for
+      // the view's 7-way UNION ALL exceeding the 30s client timeout or the
+      // Cloudflare proxy TTFB.
+      query = query.limit(loadedLimit);
 
       // Use timeout protection to prevent infinite loading
       const { data, error } = await supabaseQueryWithTimeout<any[]>(query, 30000);
       if (error) throw error;
 
       const rows = data || [];
-      setResultLimitHit(rows.length >= RESULT_LIMIT);
+      setResultLimitHit(rows.length >= loadedLimit);
       setExpenses(
         rows.map((e: any) => ({
           ...e,
@@ -294,9 +303,17 @@ export default function ExpensesPage() {
     }
   };
 
+  // Reset the load-more window whenever the "what we're looking at" changes:
+  // different site, different date scope, or different module tab. The next
+  // effect then re-fetches with the fresh limit.
+  useEffect(() => {
+    setLoadedLimit(INITIAL_RESULT_LIMIT);
+  }, [selectedSite, dateFrom, dateTo, activeTab, isAllTime]);
+
   useEffect(() => {
     fetchExpenses();
-  }, [selectedSite, dateFrom, dateTo, activeTab, isAllTime]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSite, dateFrom, dateTo, activeTab, isAllTime, loadedLimit]);
 
   const handleOpenDialog = (expense?: ExpenseWithCategory) => {
     // Prevent editing of settlement-derived expenses
@@ -965,9 +982,35 @@ export default function ExpensesPage() {
       </Card>
 
       {resultLimitHit && (
-        <Alert severity="info" sx={{ mb: 2 }}>
-          Showing the first {RESULT_LIMIT.toLocaleString("en-IN")} records for the selected
-          range. Narrow the date range or filter by module/type to see older entries.
+        <Alert
+          severity="info"
+          sx={{ mb: 2 }}
+          action={
+            loadedLimit < MAX_RESULT_LIMIT ? (
+              <Button
+                color="inherit"
+                size="small"
+                disabled={loading}
+                onClick={() =>
+                  setLoadedLimit((l) =>
+                    Math.min(l + LOAD_MORE_STEP, MAX_RESULT_LIMIT)
+                  )
+                }
+              >
+                {loading
+                  ? "Loading…"
+                  : `Load ${LOAD_MORE_STEP} more`}
+              </Button>
+            ) : null
+          }
+        >
+          Showing the most recent {loadedLimit.toLocaleString("en-IN")}{" "}
+          records for the current scope. Totals above reflect this slice —
+          {loadedLimit < MAX_RESULT_LIMIT
+            ? ` click "Load ${LOAD_MORE_STEP} more" to expand, or narrow the date range for complete figures.`
+            : ` you've reached the ${MAX_RESULT_LIMIT.toLocaleString(
+                "en-IN"
+              )} row ceiling. Narrow the date range for complete figures.`}
         </Alert>
       )}
 
