@@ -41,6 +41,7 @@ import {
 } from "@mui/icons-material";
 import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
 import RedirectConfirmDialog from "@/components/common/RedirectConfirmDialog";
+import ScopePill from "@/components/common/ScopePill";
 import { createClient } from "@/lib/supabase/client";
 import { useSite } from "@/contexts/SiteContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -779,13 +780,15 @@ export default function ExpensesPage() {
 
       {/* Unified Expense Summary */}
       <Card sx={{ mb: 3 }}>
-        <CardContent sx={{ p: { xs: 2, md: 2.5 } }}>
+        <CardContent sx={{ p: 0 }}>
+          <ScopePill />
           <Box
             sx={{
               display: "flex",
               flexDirection: { xs: "column", md: "row" },
               gap: { xs: 2.5, md: 3 },
               alignItems: { xs: "stretch", md: "stretch" },
+              p: { xs: 2, md: 2.5 },
             }}
           >
             {/* Left: Total */}
