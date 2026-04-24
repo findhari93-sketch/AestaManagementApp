@@ -134,8 +134,8 @@ export function DateRangeProvider({ children }: { children: React.ReactNode }) {
   );
 
   const setToday = useCallback(() => {
-    const today = dayjs().startOf("day").toDate();
-    setDateRange(today, today);
+    const now = dayjs();
+    setDateRange(now.startOf("day").toDate(), now.endOf("day").toDate());
   }, [setDateRange]);
 
   const setLastWeek = useCallback(() => {

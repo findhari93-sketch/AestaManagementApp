@@ -436,8 +436,6 @@ export default function MainLayout({
     setToday,
     setLastWeek,
     setLastMonth,
-    setAllTime,
-    isAllTime,
     label: dateRangeLabel,
   } = useDateRange();
 
