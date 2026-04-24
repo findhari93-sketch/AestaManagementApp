@@ -121,6 +121,22 @@ export default function ExpensesPage() {
   const [loadedLimit, setLoadedLimit] = useState(INITIAL_RESULT_LIMIT);
   const [resultLimitHit, setResultLimitHit] = useState(false);
 
+  // Scope-wide summary from the get_expense_summary RPC. When available it
+  // gives accurate lifetime totals regardless of how many rows the table
+  // has loaded. If the RPC isn't applied yet (local dev without the
+  // migration, for example), this stays null and the summary falls back to
+  // client-side aggregation from `expenses`.
+  interface ScopeSummary {
+    total: number;
+    totalCount: number;
+    cleared: number;
+    clearedCount: number;
+    pending: number;
+    pendingCount: number;
+    breakdown: Record<string, { amount: number; count: number }>;
+  }
+  const [scopeSummary, setScopeSummary] = useState<ScopeSummary | null>(null);
+
   // Material Purchases state removed - now handled by Material Settlements page
 
   // Redirect dialog state for salary expenses that can't be deleted directly
@@ -280,8 +296,21 @@ export default function ExpensesPage() {
       // Cloudflare proxy TTFB.
       query = query.limit(loadedLimit);
 
+      // Kick off the scope-wide summary RPC in parallel. It's cheap (single
+      // aggregated row regardless of scope size) and lets the summary card
+      // stay accurate when the table is showing only a 200-row slice.
+      const summaryPromise = (supabase as any).rpc("get_expense_summary", {
+        p_site_id: selectedSite.id,
+        p_date_from: !isAllTime && dateFrom ? dateFrom : null,
+        p_date_to: !isAllTime && dateTo ? dateTo : null,
+        p_module: activeTab === "all" ? null : activeTab,
+      });
+
       // Use timeout protection to prevent infinite loading
-      const { data, error } = await supabaseQueryWithTimeout<any[]>(query, 30000);
+      const [{ data, error }, summaryResult] = await Promise.all([
+        supabaseQueryWithTimeout<any[]>(query, 30000),
+        summaryPromise,
+      ]);
       if (error) throw error;
 
       const rows = data || [];
@@ -292,12 +321,47 @@ export default function ExpensesPage() {
           // View already has category_name, payer_name, subcontract_title
         }))
       );
+
+      // If the RPC landed, use it. Otherwise (e.g. migration not yet
+      // applied in local dev) keep scopeSummary null and the summary card
+      // falls back to client-side totals over the loaded rows.
+      if (summaryResult && !summaryResult.error && summaryResult.data) {
+        const s = summaryResult.data as {
+          total_amount: number | string;
+          total_count: number | string;
+          cleared_amount: number | string;
+          cleared_count: number | string;
+          pending_amount: number | string;
+          pending_count: number | string;
+          by_type: Array<{ type: string; amount: number | string; count: number | string }>;
+        };
+        const breakdown: Record<string, { amount: number; count: number }> = {};
+        for (const row of s.by_type ?? []) {
+          breakdown[row.type] = {
+            amount: Number(row.amount) || 0,
+            count: Number(row.count) || 0,
+          };
+        }
+        setScopeSummary({
+          total: Number(s.total_amount) || 0,
+          totalCount: Number(s.total_count) || 0,
+          cleared: Number(s.cleared_amount) || 0,
+          clearedCount: Number(s.cleared_count) || 0,
+          pending: Number(s.pending_amount) || 0,
+          pendingCount: Number(s.pending_count) || 0,
+          breakdown,
+        });
+      } else {
+        setScopeSummary(null);
+      }
+
       // Mark subcontract totals as stale; they refresh next time the drawer opens.
       setSubcontractsLoadedForSite(null);
     } catch (error: any) {
       console.error("Error loading expenses:", error);
       setExpenses([]);
       setResultLimitHit(false);
+      setScopeSummary(null);
     } finally {
       setLoading(false);
     }
@@ -505,6 +569,22 @@ export default function ExpensesPage() {
   };
 
   const stats = useMemo(() => {
+    // Prefer the server-side RPC aggregates — they reflect the entire current
+    // scope (including All Time with 2000+ rows) without depending on how
+    // many rows the table happened to load. Fall back to client aggregation
+    // from `expenses` only if the RPC hasn't returned yet or isn't deployed.
+    if (scopeSummary) {
+      return {
+        total: scopeSummary.total,
+        cleared: scopeSummary.cleared,
+        pending: scopeSummary.pending,
+        totalCount: scopeSummary.totalCount,
+        clearedCount: scopeSummary.clearedCount,
+        pendingCount: scopeSummary.pendingCount,
+        categoryBreakdown: scopeSummary.breakdown,
+      };
+    }
+
     const total = expenses.reduce((s, e) => s + e.amount, 0);
     const clearedExpenses = expenses.filter((e) => e.is_cleared);
     const cleared = clearedExpenses.reduce((s, e) => s + e.amount, 0);
@@ -532,7 +612,7 @@ export default function ExpensesPage() {
       pendingCount: pendingExpenses.length,
       categoryBreakdown,
     };
-  }, [expenses]);
+  }, [expenses, scopeSummary]);
 
   const columns = useMemo<MRT_ColumnDef<ExpenseWithCategory>[]>(() => {
     const cols: MRT_ColumnDef<ExpenseWithCategory>[] = [
@@ -1004,13 +1084,18 @@ export default function ExpensesPage() {
             ) : null
           }
         >
-          Showing the most recent {loadedLimit.toLocaleString("en-IN")}{" "}
-          records for the current scope. Totals above reflect this slice —
-          {loadedLimit < MAX_RESULT_LIMIT
-            ? ` click "Load ${LOAD_MORE_STEP} more" to expand, or narrow the date range for complete figures.`
-            : ` you've reached the ${MAX_RESULT_LIMIT.toLocaleString(
+          Table shows the most recent {loadedLimit.toLocaleString("en-IN")}{" "}
+          records for the current scope.
+          {scopeSummary
+            ? ` Totals above are accurate across all ${scopeSummary.totalCount.toLocaleString(
                 "en-IN"
-              )} row ceiling. Narrow the date range for complete figures.`}
+              )} records.`
+            : " Totals above reflect this slice."}
+          {loadedLimit < MAX_RESULT_LIMIT
+            ? ` Click "Load ${LOAD_MORE_STEP} more" to see older rows, or narrow the date range.`
+            : ` You've reached the ${MAX_RESULT_LIMIT.toLocaleString(
+                "en-IN"
+              )} row table ceiling. Narrow the date range to see older rows.`}
         </Alert>
       )}
 
