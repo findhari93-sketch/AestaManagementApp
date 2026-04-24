@@ -433,12 +433,15 @@ export default function MainLayout({
     startDate,
     endDate,
     setDateRange,
+    setToday,
     setLastWeek,
     setLastMonth,
     setAllTime,
     isAllTime,
     label: dateRangeLabel,
   } = useDateRange();
+
+  const [openPickerCustom, setOpenPickerCustom] = useState(false);
 
   // Refresh session on navigation (since middleware doesn't run on client-side navigation)
   useSessionRefresh();
@@ -1085,21 +1088,38 @@ export default function MainLayout({
               mr: { xs: 0.5, sm: 1 },
             }}
           >
-            {/* Date Range Picker - Always visible */}
             <DateRangePicker
               startDate={startDate}
               endDate={endDate}
-              onChange={(start, end) => setDateRange(start, end)}
+              onChange={(start, end) => {
+                setDateRange(start, end);
+                setOpenPickerCustom(false);
+              }}
               minDate={selectedSite?.start_date ? new Date(selectedSite.start_date) : undefined}
+              openOnMount={openPickerCustom}
+              onPopoverClose={() => setOpenPickerCustom(false)}
             />
 
-            {/* Quick Filter Chips - Hidden on mobile */}
+            {/* Quick chips — hidden on mobile */}
+            <Chip
+              label="Today"
+              size="small"
+              variant={dateRangeLabel === "Today" ? "filled" : "outlined"}
+              color={dateRangeLabel === "Today" ? "primary" : "default"}
+              onClick={() => setToday()}
+              sx={{
+                display: { xs: "none", sm: "flex" },
+                cursor: "pointer",
+                minWidth: 56,
+                fontWeight: dateRangeLabel === "Today" ? 600 : 400,
+              }}
+            />
             <Chip
               label="Week"
               size="small"
               variant={dateRangeLabel === "This Week" ? "filled" : "outlined"}
               color={dateRangeLabel === "This Week" ? "primary" : "default"}
-              onClick={() => dateRangeLabel === "This Week" ? setAllTime() : setLastWeek()}
+              onClick={() => setLastWeek()}
               sx={{
                 display: { xs: "none", sm: "flex" },
                 cursor: "pointer",
@@ -1112,12 +1132,23 @@ export default function MainLayout({
               size="small"
               variant={dateRangeLabel === "This Month" ? "filled" : "outlined"}
               color={dateRangeLabel === "This Month" ? "primary" : "default"}
-              onClick={() => dateRangeLabel === "This Month" ? setAllTime() : setLastMonth()}
+              onClick={() => setLastMonth()}
               sx={{
                 display: { xs: "none", sm: "flex" },
                 cursor: "pointer",
                 minWidth: 64,
                 fontWeight: dateRangeLabel === "This Month" ? 600 : 400,
+              }}
+            />
+            <Chip
+              label="Custom"
+              size="small"
+              variant="outlined"
+              onClick={() => setOpenPickerCustom(true)}
+              sx={{
+                display: { xs: "none", sm: "flex" },
+                cursor: "pointer",
+                minWidth: 64,
               }}
             />
           </Box>

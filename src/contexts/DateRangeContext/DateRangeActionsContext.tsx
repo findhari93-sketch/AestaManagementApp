@@ -8,6 +8,7 @@ import { createContext, useContext } from "react";
  */
 interface DateRangeActionsContextType {
   setDateRange: (start: Date | null, end: Date | null) => void;
+  setToday: () => void;
   setLastWeek: () => void;
   setLastMonth: () => void;
   setAllTime: () => void;

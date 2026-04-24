@@ -133,6 +133,11 @@ export function DateRangeProvider({ children }: { children: React.ReactNode }) {
     []
   );
 
+  const setToday = useCallback(() => {
+    const today = dayjs().startOf("day").toDate();
+    setDateRange(today, today);
+  }, [setDateRange]);
+
   const setLastWeek = useCallback(() => {
     const today = dayjs();
     const weekStart = today.startOf("week"); // Sunday
@@ -184,12 +189,13 @@ export function DateRangeProvider({ children }: { children: React.ReactNode }) {
   const actionsValue = useMemo(
     () => ({
       setDateRange,
+      setToday,
       setLastWeek,
       setLastMonth,
       setAllTime,
       setMonth,
     }),
-    [setDateRange, setLastWeek, setLastMonth, setAllTime, setMonth]
+    [setDateRange, setToday, setLastWeek, setLastMonth, setAllTime, setMonth]
   );
 
   return (

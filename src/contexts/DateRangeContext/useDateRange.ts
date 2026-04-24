@@ -14,13 +14,14 @@ import { useDateRangeActions } from "./DateRangeActionsContext";
 export function useDateRange() {
   const { startDate, endDate, formatForApi, isAllTime, label } =
     useDateRangeData();
-  const { setDateRange, setLastWeek, setLastMonth, setAllTime, setMonth } =
+  const { setDateRange, setToday, setLastWeek, setLastMonth, setAllTime, setMonth } =
     useDateRangeActions();
 
   return {
     startDate,
     endDate,
     setDateRange,
+    setToday,
     setLastWeek,
     setLastMonth,
     setAllTime,
