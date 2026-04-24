@@ -12,6 +12,7 @@ import {
   ListItemButton,
   ListItemText,
   Divider,
+  TextField,
 } from "@mui/material";
 import {
   ChevronLeft as ChevronLeftIcon,
@@ -19,6 +20,7 @@ import {
   KeyboardArrowDown as ArrowDownIcon,
 } from "@mui/icons-material";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { useDateRange } from "@/contexts/DateRangeContext";
 import { DateRange, Range, RangeKeyDict } from "react-date-range";
 import dayjs from "dayjs";
 import "react-date-range/dist/styles.css";
@@ -54,7 +56,20 @@ interface DateRangePickerProps {
   onChange: (startDate: Date | null, endDate: Date | null) => void;
   minDate?: Date;
   maxDate?: Date;
+  /**
+   * When true, on next mount/open the popover opens with the calendar
+   * focused and the preset list visually present but not highlighted.
+   * Used by the "Custom" top-bar chip.
+   */
+  openOnMount?: boolean;
+  /**
+   * Called when the user closes the picker without applying.
+   * Lets the parent reset `openOnMount` flags.
+   */
+  onPopoverClose?: () => void;
 }
+
+type PresetGroup = "quick" | "rolling" | "previous" | "special";
 
 type PresetKey =
   | "today"
@@ -63,21 +78,31 @@ type PresetKey =
   | "last7days"
   | "lastWeek"
   | "last14days"
-  | "thisMonth"
   | "last30days"
+  | "last90days"
+  | "thisMonth"
   | "lastMonth"
   | "allTime";
 
 interface Preset {
   key: PresetKey;
   label: string;
+  group: PresetGroup;
   getRange: () => { start: Date; end: Date };
 }
+
+const PRESET_GROUP_LABELS: Record<PresetGroup, string> = {
+  quick: "Quick",
+  rolling: "Rolling",
+  previous: "Previous",
+  special: "Special",
+};
 
 const presets: Preset[] = [
   {
     key: "today",
     label: "Today",
+    group: "quick",
     getRange: () => ({
       start: startOfDay(new Date()),
       end: endOfDay(new Date()),
@@ -86,6 +111,7 @@ const presets: Preset[] = [
   {
     key: "yesterday",
     label: "Yesterday",
+    group: "quick",
     getRange: () => ({
       start: startOfDay(subDays(new Date(), 1)),
       end: endOfDay(subDays(new Date(), 1)),
@@ -93,55 +119,71 @@ const presets: Preset[] = [
   },
   {
     key: "thisWeek",
-    label: "This week (Sun - Today)",
+    label: "This Week",
+    group: "quick",
     getRange: () => ({
       start: startOfWeek(new Date()),
       end: endOfDay(new Date()),
     }),
   },
   {
-    key: "last7days",
-    label: "Last 7 days",
-    getRange: () => ({
-      start: startOfDay(subDays(new Date(), 6)),
-      end: endOfDay(new Date()),
-    }),
-  },
-  {
-    key: "lastWeek",
-    label: "Last week (Sun - Sat)",
-    getRange: () => ({
-      start: startOfWeek(subDays(new Date(), 7)),
-      end: endOfWeek(subDays(new Date(), 7)),
-    }),
-  },
-  {
-    key: "last14days",
-    label: "Last 14 days",
-    getRange: () => ({
-      start: startOfDay(subDays(new Date(), 13)),
-      end: endOfDay(new Date()),
-    }),
-  },
-  {
     key: "thisMonth",
-    label: "This month",
+    label: "This Month",
+    group: "quick",
     getRange: () => ({
       start: startOfMonth(new Date()),
       end: endOfDay(new Date()),
     }),
   },
   {
+    key: "last7days",
+    label: "Last 7 days",
+    group: "rolling",
+    getRange: () => ({
+      start: startOfDay(subDays(new Date(), 6)),
+      end: endOfDay(new Date()),
+    }),
+  },
+  {
+    key: "last14days",
+    label: "Last 14 days",
+    group: "rolling",
+    getRange: () => ({
+      start: startOfDay(subDays(new Date(), 13)),
+      end: endOfDay(new Date()),
+    }),
+  },
+  {
     key: "last30days",
     label: "Last 30 days",
+    group: "rolling",
     getRange: () => ({
       start: startOfDay(subDays(new Date(), 29)),
       end: endOfDay(new Date()),
     }),
   },
   {
+    key: "last90days",
+    label: "Last 90 days",
+    group: "rolling",
+    getRange: () => ({
+      start: startOfDay(subDays(new Date(), 89)),
+      end: endOfDay(new Date()),
+    }),
+  },
+  {
+    key: "lastWeek",
+    label: "Last Week",
+    group: "previous",
+    getRange: () => ({
+      start: startOfWeek(subDays(new Date(), 7)),
+      end: endOfWeek(subDays(new Date(), 7)),
+    }),
+  },
+  {
     key: "lastMonth",
-    label: "Last month",
+    label: "Last Month",
+    group: "previous",
     getRange: () => ({
       start: startOfMonth(subMonths(new Date(), 1)),
       end: endOfMonth(subMonths(new Date(), 1)),
@@ -149,9 +191,10 @@ const presets: Preset[] = [
   },
   {
     key: "allTime",
-    label: "All time",
-    getRange: (siteStartDate?: Date) => ({
-      start: siteStartDate || new Date(2020, 0, 1), // Use site start date if provided
+    label: "All Time",
+    group: "special",
+    getRange: () => ({
+      start: new Date(2020, 0, 1),
       end: endOfDay(new Date()),
     }),
   },
@@ -185,52 +228,18 @@ const findMatchingPreset = (start: Date, end: Date, presetList: Preset[] = prese
   return null;
 };
 
-// Get label for current selection
-const getSelectionLabel = (start: Date, end: Date, compact = false): string => {
-  const matchingPreset = findMatchingPreset(start, end);
-  if (matchingPreset) {
-    const preset = presets.find((p) => p.key === matchingPreset);
-    if (preset && preset.key !== "allTime") {
-      // Compact labels for mobile
-      if (compact) {
-        const shortLabels: Record<string, string> = {
-          today: "Today",
-          yesterday: "Yesterday",
-          thisWeek: "This Week",
-          last7days: "7 Days",
-          lastWeek: "Last Week",
-          last14days: "14 Days",
-          thisMonth: "This Month",
-          last30days: "30 Days",
-          lastMonth: "Last Month",
-        };
-        return shortLabels[preset.key] || preset.label;
-      }
-      return preset.label;
-    }
-  }
-  // Custom range - show dates
-  if (compact) {
-    const startStr = format(start, "d/M");
-    const endStr = format(end, "d/M");
-    if (startStr === endStr) return format(start, "d MMM");
-    return `${startStr} - ${endStr}`;
-  }
-  const startStr = format(start, "MMM d, yyyy");
-  const endStr = format(end, "MMM d, yyyy");
-  if (startStr === endStr) return startStr;
-  return `${format(start, "MMM d")} - ${format(end, "MMM d, yyyy")}`;
-};
-
 export default function DateRangePicker({
   startDate,
   endDate,
   onChange,
   minDate,
   maxDate = new Date(),
+  openOnMount,
+  onPopoverClose,
 }: DateRangePickerProps) {
   const isMobile = useIsMobile();
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
 
   // Create dynamic presets with minDate for allTime
   const dynamicPresets = useMemo(() => getPresetsWithMinDate(minDate), [minDate]);
@@ -246,7 +255,27 @@ export default function DateRangePicker({
     startDate && endDate ? findMatchingPreset(startDate, endDate) : null
   );
 
+  const [clickStage, setClickStage] = useState<"start" | "end">("start");
+  const [typedStart, setTypedStart] = useState("");
+  const [typedEnd, setTypedEnd] = useState("");
+
+  useEffect(() => {
+    if (tempRange[0].startDate) {
+      setTypedStart(format(tempRange[0].startDate, "MMM d, yyyy"));
+    }
+    if (tempRange[0].endDate) {
+      setTypedEnd(format(tempRange[0].endDate, "MMM d, yyyy"));
+    }
+  }, [tempRange]);
+
   const open = Boolean(anchorEl);
+
+  // Open popover when openOnMount changes to true
+  useEffect(() => {
+    if (openOnMount && triggerRef.current && !anchorEl) {
+      setAnchorEl(triggerRef.current);
+    }
+  }, [openOnMount, anchorEl]);
 
   // Sync temp range when props change
   useEffect(() => {
@@ -300,6 +329,7 @@ export default function DateRangePicker({
       },
     ]);
     setSelectedPreset(preset.key);
+    setClickStage("start");
 
     // Auto-apply on mobile for quick preset selection
     if (isMobile) {
@@ -316,10 +346,53 @@ export default function DateRangePicker({
   const handleRangeChange = (ranges: RangeKeyDict) => {
     const selection = ranges.selection;
     setTempRange([selection]);
-    // Clear preset when manually selecting
+
     if (selection.startDate && selection.endDate) {
-      setSelectedPreset(findMatchingPreset(selection.startDate, selection.endDate, dynamicPresets));
+      setSelectedPreset(
+        findMatchingPreset(selection.startDate, selection.endDate, dynamicPresets)
+      );
     }
+
+    // Toggle click-stage label
+    if (
+      selection.startDate &&
+      selection.endDate &&
+      format(selection.startDate, "yyyy-MM-dd") ===
+        format(selection.endDate, "yyyy-MM-dd")
+    ) {
+      // First click (start = end)
+      setClickStage("end");
+    } else {
+      setClickStage("start");
+    }
+  };
+
+  const commitTypedDate = (which: "start" | "end", raw: string) => {
+    const parsed = dayjs(raw);
+    if (!parsed.isValid()) {
+      // Revert displayed value
+      if (which === "start" && tempRange[0].startDate) {
+        setTypedStart(format(tempRange[0].startDate, "MMM d, yyyy"));
+      } else if (which === "end" && tempRange[0].endDate) {
+        setTypedEnd(format(tempRange[0].endDate, "MMM d, yyyy"));
+      }
+      return;
+    }
+    const next = parsed.toDate();
+    if (which === "start") {
+      const end =
+        tempRange[0].endDate && next <= tempRange[0].endDate
+          ? tempRange[0].endDate
+          : next;
+      setTempRange([{ startDate: next, endDate: end, key: "selection" }]);
+    } else {
+      const start =
+        tempRange[0].startDate && next >= tempRange[0].startDate
+          ? tempRange[0].startDate
+          : next;
+      setTempRange([{ startDate: start, endDate: next, key: "selection" }]);
+    }
+    setSelectedPreset(null);
   };
 
   // Check if dates are set (not "All Time" mode)
@@ -361,8 +434,8 @@ export default function DateRangePicker({
 
   const isPrevDisabled = !hasDates;
 
-  // Current label - show "All Time" when no dates are set
-  const currentLabel = hasDates ? getSelectionLabel(startDate, endDate, isMobile) : "All Time";
+  // Current label comes from shared context computeLabel
+  const { label: currentLabel } = useDateRange();
 
   return (
     <Box sx={{ display: "flex", alignItems: "center", gap: { xs: 0, sm: 1 } }}>
@@ -380,6 +453,7 @@ export default function DateRangePicker({
 
         {/* Date range button */}
         <Button
+          ref={triggerRef}
           variant="outlined"
           size="small"
           onClick={handleOpen}
@@ -427,15 +501,12 @@ export default function DateRangePicker({
       <Popover
         open={open}
         anchorEl={anchorEl}
-        onClose={handleClose}
-        anchorOrigin={{
-          vertical: "bottom",
-          horizontal: "left",
+        onClose={() => {
+          handleClose();
+          onPopoverClose?.();
         }}
-        transformOrigin={{
-          vertical: "top",
-          horizontal: "left",
-        }}
+        anchorOrigin={{ vertical: "bottom", horizontal: "left" }}
+        transformOrigin={{ vertical: "top", horizontal: "left" }}
         PaperProps={{
           sx: {
             mt: 1,
@@ -449,17 +520,16 @@ export default function DateRangePicker({
           sx={{
             display: "flex",
             flexDirection: { xs: "column", sm: "row" },
-            minWidth: { xs: "auto", sm: 600 },
+            minWidth: { xs: "auto", sm: 780 },
           }}
         >
-          {/* Mobile: Horizontal scrollable preset chips */}
+          {/* Mobile: Horizontal preset chips */}
           <Box
             sx={{
               display: { xs: "flex", sm: "none" },
               overflowX: "auto",
               gap: 0.5,
               p: 1,
-              pb: 0.5,
               borderBottom: 1,
               borderColor: "divider",
               WebkitOverflowScrolling: "touch",
@@ -467,80 +537,185 @@ export default function DateRangePicker({
               scrollbarWidth: "none",
             }}
           >
-            {dynamicPresets.slice(0, 8).map((preset) => (
+            {dynamicPresets.map((preset) => (
               <Chip
                 key={preset.key}
-                label={preset.label.replace(" (Sun - Today)", "").replace(" (Sun - Sat)", "")}
+                label={preset.label}
                 size="small"
                 variant={selectedPreset === preset.key ? "filled" : "outlined"}
                 color={selectedPreset === preset.key ? "primary" : "default"}
                 onClick={() => handlePresetClick(preset)}
-                sx={{
-                  flexShrink: 0,
-                  fontSize: "0.7rem",
-                  height: 26,
-                }}
+                sx={{ flexShrink: 0, fontSize: "0.7rem", height: 26 }}
               />
             ))}
           </Box>
 
-          {/* Desktop: Vertical presets list */}
+          {/* Desktop: Grouped presets */}
           <Box
             sx={{
               display: { xs: "none", sm: "block" },
-              width: 180,
+              width: 200,
               borderRight: 1,
               borderColor: "divider",
-              maxHeight: 400,
+              maxHeight: 460,
               overflow: "auto",
+              py: 1,
             }}
           >
-            <List dense disablePadding>
-              {dynamicPresets.map((preset) => (
+            {(["quick", "rolling", "previous"] as PresetGroup[]).map((group) => (
+              <Box key={group} sx={{ mb: 1.5 }}>
+                <Typography
+                  variant="caption"
+                  sx={{
+                    px: 2,
+                    pt: 0.5,
+                    display: "block",
+                    color: "text.secondary",
+                    textTransform: "uppercase",
+                    letterSpacing: 0.5,
+                    fontWeight: 600,
+                    fontSize: "0.65rem",
+                  }}
+                >
+                  {PRESET_GROUP_LABELS[group]}
+                </Typography>
+                <List dense disablePadding>
+                  {dynamicPresets
+                    .filter((p) => p.group === group)
+                    .map((preset) => (
+                      <ListItemButton
+                        key={preset.key}
+                        selected={selectedPreset === preset.key}
+                        onClick={() => handlePresetClick(preset)}
+                        sx={{
+                          py: 0.75,
+                          "&.Mui-selected": {
+                            bgcolor: "primary.50",
+                            color: "primary.main",
+                            "&:hover": { bgcolor: "primary.100" },
+                          },
+                        }}
+                      >
+                        <ListItemText
+                          primary={preset.label}
+                          primaryTypographyProps={{
+                            fontSize: "0.8rem",
+                            fontWeight: selectedPreset === preset.key ? 600 : 400,
+                          }}
+                        />
+                      </ListItemButton>
+                    ))}
+                </List>
+              </Box>
+            ))}
+
+            <Divider sx={{ my: 1 }} />
+
+            {/* Special: All Time */}
+            {dynamicPresets
+              .filter((p) => p.group === "special")
+              .map((preset) => (
                 <ListItemButton
                   key={preset.key}
                   selected={selectedPreset === preset.key}
                   onClick={() => handlePresetClick(preset)}
                   sx={{
-                    py: 0.75,
-                    "&.Mui-selected": {
-                      bgcolor: "primary.50",
-                      color: "primary.main",
-                      "&:hover": {
-                        bgcolor: "primary.100",
-                      },
-                    },
+                    py: 1,
+                    mx: 1,
+                    borderRadius: 1,
+                    bgcolor:
+                      selectedPreset === preset.key ? "primary.50" : "transparent",
                   }}
                 >
+                  <Typography
+                    component="span"
+                    sx={{ mr: 1, fontSize: "0.9rem" }}
+                    aria-hidden
+                  >
+                    ★
+                  </Typography>
                   <ListItemText
                     primary={preset.label}
                     primaryTypographyProps={{
-                      fontSize: "0.8rem",
-                      fontWeight: selectedPreset === preset.key ? 600 : 400,
+                      fontSize: "0.85rem",
+                      fontWeight: 600,
                     }}
                   />
                 </ListItemButton>
               ))}
-            </List>
           </Box>
 
-          {/* Calendar */}
-          <Box sx={{ p: { xs: 0.5, sm: 1 }, overflow: "auto" }}>
+          {/* Calendar panel */}
+          <Box sx={{ p: { xs: 0.5, sm: 2 }, overflow: "auto" }}>
+            {/* Typed date inputs — desktop only */}
+            <Box
+              sx={{
+                display: { xs: "none", sm: "flex" },
+                alignItems: "center",
+                gap: 1,
+                mb: 1.5,
+              }}
+            >
+              <TextField
+                size="small"
+                label="Start"
+                value={typedStart}
+                onChange={(e) => setTypedStart(e.target.value)}
+                onBlur={() => commitTypedDate("start", typedStart)}
+                sx={{
+                  width: 160,
+                  "& .MuiOutlinedInput-root": clickStage === "start"
+                    ? { "& fieldset": { borderColor: "primary.main", borderWidth: 2 } }
+                    : {},
+                }}
+                inputProps={{ "aria-label": "Start date" }}
+              />
+              <Typography sx={{ color: "text.secondary" }}>→</Typography>
+              <TextField
+                size="small"
+                label="End"
+                value={typedEnd}
+                onChange={(e) => setTypedEnd(e.target.value)}
+                onBlur={() => commitTypedDate("end", typedEnd)}
+                sx={{
+                  width: 160,
+                  "& .MuiOutlinedInput-root": clickStage === "end"
+                    ? { "& fieldset": { borderColor: "primary.main", borderWidth: 2 } }
+                    : {},
+                }}
+                inputProps={{ "aria-label": "End date" }}
+              />
+            </Box>
+
             <DateRange
               ranges={tempRange}
               onChange={handleRangeChange}
-              months={1}
+              months={isMobile ? 1 : 2}
               direction="horizontal"
               maxDate={maxDate}
               minDate={minDate}
               rangeColors={["#1976d2"]}
-              showDateDisplay={!isMobile}
-              editableDateInputs={!isMobile}
+              showDateDisplay={false}
+              editableDateInputs={false}
+              moveRangeOnFirstSelection={false}
             />
+
+            <Typography
+              variant="caption"
+              sx={{
+                display: { xs: "none", sm: "block" },
+                mt: 0.5,
+                color: "text.secondary",
+              }}
+            >
+              {clickStage === "start"
+                ? "Click a start date, then an end date."
+                : "Now pick the end date."}
+            </Typography>
           </Box>
         </Box>
 
-        {/* Actions - Hidden on mobile since presets auto-apply */}
+        {/* Desktop actions */}
         <Box sx={{ display: { xs: "none", sm: "block" } }}>
           <Divider />
           <Box
@@ -551,7 +726,7 @@ export default function DateRangePicker({
               p: 1.5,
             }}
           >
-            <Button size="small" onClick={handleClose}>
+            <Button size="small" onClick={() => { handleClose(); onPopoverClose?.(); }}>
               Cancel
             </Button>
             <Button size="small" variant="contained" onClick={handleApply}>
@@ -560,7 +735,7 @@ export default function DateRangePicker({
           </Box>
         </Box>
 
-        {/* Mobile: Compact actions for custom calendar selection */}
+        {/* Mobile actions */}
         <Box
           sx={{
             display: { xs: "flex", sm: "none" },
@@ -568,7 +743,6 @@ export default function DateRangePicker({
             alignItems: "center",
             gap: 1,
             p: 1,
-            pt: 0,
             borderTop: 1,
             borderColor: "divider",
           }}
@@ -577,10 +751,19 @@ export default function DateRangePicker({
             Tap preset to quick-apply
           </Typography>
           <Box sx={{ display: "flex", gap: 0.5 }}>
-            <Button size="small" onClick={handleClose} sx={{ minWidth: 60, py: 0.25 }}>
+            <Button
+              size="small"
+              onClick={() => { handleClose(); onPopoverClose?.(); }}
+              sx={{ minWidth: 60, py: 0.25 }}
+            >
               Close
             </Button>
-            <Button size="small" variant="contained" onClick={handleApply} sx={{ minWidth: 60, py: 0.25 }}>
+            <Button
+              size="small"
+              variant="contained"
+              onClick={handleApply}
+              sx={{ minWidth: 60, py: 0.25 }}
+            >
               Apply
             </Button>
           </Box>
