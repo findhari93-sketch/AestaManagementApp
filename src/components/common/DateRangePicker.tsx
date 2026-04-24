@@ -255,7 +255,13 @@ export default function DateRangePicker({
     startDate && endDate ? findMatchingPreset(startDate, endDate) : null
   );
 
-  const [clickStage, setClickStage] = useState<"start" | "end">("start");
+  // react-date-range's internal [rangeIndex, step] focus. 0 = pick start, 1 = pick end.
+  // We control this so presets and typed-input commits reset the library to a clean
+  // "next click sets start" state. Without this, an active preset leaves step=0 or 1
+  // lingering and the user's first calendar click after a preset unexpectedly extends
+  // the end instead of beginning a new range.
+  const [focusedRange, setFocusedRange] = useState<[number, 0 | 1]>([0, 0]);
+  const clickStage: "start" | "end" = focusedRange[1] === 0 ? "start" : "end";
   const [typedStart, setTypedStart] = useState("");
   const [typedEnd, setTypedEnd] = useState("");
 
@@ -303,6 +309,7 @@ export default function DateRangePicker({
         key: "selection",
       },
     ]);
+    setFocusedRange([0, 0]);
   };
 
   const handleClose = () => {
@@ -329,7 +336,7 @@ export default function DateRangePicker({
       },
     ]);
     setSelectedPreset(preset.key);
-    setClickStage("start");
+    setFocusedRange([0, 0]);
 
     // Auto-apply on mobile for quick preset selection
     if (isMobile) {
@@ -352,19 +359,8 @@ export default function DateRangePicker({
         findMatchingPreset(selection.startDate, selection.endDate, dynamicPresets)
       );
     }
-
-    // Toggle click-stage label
-    if (
-      selection.startDate &&
-      selection.endDate &&
-      format(selection.startDate, "yyyy-MM-dd") ===
-        format(selection.endDate, "yyyy-MM-dd")
-    ) {
-      // First click (start = end)
-      setClickStage("end");
-    } else {
-      setClickStage("start");
-    }
+    // Click stage is derived from focusedRange, which the library updates via
+    // onRangeFocusChange — no manual toggling needed here.
   };
 
   const commitTypedDate = (which: "start" | "end", raw: string) => {
@@ -406,6 +402,7 @@ export default function DateRangePicker({
       }
     }
     setSelectedPreset(null);
+    setFocusedRange([0, 0]);
   };
 
   // Check if dates are set (not "All Time" mode)
@@ -703,6 +700,13 @@ export default function DateRangePicker({
             <DateRange
               ranges={tempRange}
               onChange={handleRangeChange}
+              focusedRange={focusedRange}
+              onRangeFocusChange={(range) =>
+                setFocusedRange([
+                  range[0] ?? 0,
+                  (range[1] === 1 ? 1 : 0) as 0 | 1,
+                ])
+              }
               months={isMobile ? 1 : 2}
               direction="horizontal"
               maxDate={maxDate}
