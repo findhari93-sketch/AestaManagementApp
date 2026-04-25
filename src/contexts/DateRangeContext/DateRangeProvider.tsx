@@ -48,6 +48,14 @@ function storeDateRange(
   }
 }
 
+export function computeDays(
+  startDate: Date | null,
+  endDate: Date | null
+): number | null {
+  if (!startDate || !endDate) return null;
+  return dayjs(endDate).diff(dayjs(startDate), "day") + 1;
+}
+
 export function computeLabel(
   startDate: Date | null,
   endDate: Date | null
@@ -93,6 +101,19 @@ export function computeLabel(
   const lastMonthEnd = today.subtract(1, "month").endOf("month");
   if (start.isSame(lastMonthStart, "day") && end.isSame(lastMonthEnd, "day")) {
     return "Last Month";
+  }
+
+  // Past calendar month (e.g. Mar 2026, Feb 2026 — anything that exactly
+  // spans a full calendar month and is not the current month).
+  const startsAtMonthStart = start.isSame(start.startOf("month"), "day");
+  const endsAtMonthEnd = end.isSame(start.endOf("month"), "day");
+  const isFullCalendarMonth =
+    startsAtMonthStart &&
+    endsAtMonthEnd &&
+    start.isSame(end, "month") &&
+    start.isSame(end, "year");
+  if (isFullCalendarMonth && !start.isSame(today, "month")) {
+    return start.format("MMM YYYY");
   }
 
   // Custom range — ScopePill / picker button append the date string via their own formatter.
@@ -183,6 +204,11 @@ export function DateRangeProvider({ children }: { children: React.ReactNode }) {
   const isAllTime = !startDate && !endDate;
   const label = computeLabel(startDate, endDate);
 
+  const days = useMemo(
+    () => computeDays(startDate, endDate),
+    [startDate, endDate]
+  );
+
   // Memoize context values to prevent unnecessary re-renders
   const dataValue = useMemo(
     () => ({
@@ -191,8 +217,9 @@ export function DateRangeProvider({ children }: { children: React.ReactNode }) {
       formatForApi,
       isAllTime,
       label,
+      days,
     }),
-    [startDate, endDate, formatForApi, isAllTime, label]
+    [startDate, endDate, formatForApi, isAllTime, label, days]
   );
 
   const actionsValue = useMemo(

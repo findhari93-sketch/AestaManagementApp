@@ -12,7 +12,7 @@ import { useDateRangeData } from "./DateRangeDataContext";
 import { useDateRangeActions } from "./DateRangeActionsContext";
 
 export function useDateRange() {
-  const { startDate, endDate, formatForApi, isAllTime, label } =
+  const { startDate, endDate, formatForApi, isAllTime, label, days } =
     useDateRangeData();
   const { setDateRange, setToday, setLastWeek, setLastMonth, setAllTime, setMonth } =
     useDateRangeActions();
@@ -29,5 +29,6 @@ export function useDateRange() {
     formatForApi,
     isAllTime,
     label,
+    days,
   };
 }

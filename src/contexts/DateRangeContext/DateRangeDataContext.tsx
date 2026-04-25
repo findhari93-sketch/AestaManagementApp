@@ -12,6 +12,7 @@ interface DateRangeDataContextType {
   formatForApi: () => { dateFrom: string | null; dateTo: string | null };
   isAllTime: boolean;
   label: string;
+  days: number | null;
 }
 
 export const DateRangeDataContext = createContext<

@@ -72,3 +72,50 @@ describe("computeLabel", () => {
     expect(computeLabel(d, d)).toBe("Mar 10, 2026");
   });
 });
+
+import { computeDays } from "./DateRangeProvider";
+
+describe("computeLabel — calendar months (revised 2026-04-25)", () => {
+  it("returns 'Feb 2026' for a full past calendar month (two months ago)", () => {
+    const start = dayjs("2026-02-01").startOf("day").toDate();
+    const end = dayjs("2026-02-28").endOf("day").toDate();
+    expect(computeLabel(start, end)).toBe("Feb 2026");
+  });
+
+  it("still returns 'This Month' for the current calendar month ending today", () => {
+    const today = dayjs();
+    const start = today.startOf("month").toDate();
+    const end = today.endOf("day").toDate();
+    expect(computeLabel(start, end)).toBe("This Month");
+  });
+
+  it("returns 'Last Month' for the previous calendar month (current-month minus one)", () => {
+    const today = dayjs();
+    const start = today.subtract(1, "month").startOf("month").toDate();
+    const end = today.subtract(1, "month").endOf("month").toDate();
+    expect(computeLabel(start, end)).toBe("Last Month");
+  });
+});
+
+describe("computeDays", () => {
+  it("returns null for All Time (both null)", () => {
+    expect(computeDays(null, null)).toBeNull();
+  });
+
+  it("returns 1 for a same-day range", () => {
+    const d = new Date("2026-04-24");
+    expect(computeDays(d, d)).toBe(1);
+  });
+
+  it("returns 7 for a 7-day inclusive range", () => {
+    expect(
+      computeDays(new Date("2026-04-18"), new Date("2026-04-24"))
+    ).toBe(7);
+  });
+
+  it("returns 25 for Apr 1 → Apr 25", () => {
+    expect(
+      computeDays(new Date("2026-04-01"), new Date("2026-04-25"))
+    ).toBe(25);
+  });
+});
