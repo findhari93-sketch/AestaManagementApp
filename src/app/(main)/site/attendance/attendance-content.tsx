@@ -2615,13 +2615,19 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
 
   return (
     <Box
+      ref={tableContainerRef}
       sx={{
         width: "100%",
         overflowX: "hidden",
         display: "flex",
         flexDirection: "column",
-        height: { xs: "calc(100vh - 56px)", sm: "calc(100vh - 64px)" },
+        height: isFullscreen
+          ? "100vh"
+          : { xs: "calc(100vh - 56px)", sm: "calc(100vh - 64px)" },
         minHeight: 0,
+        ...(isFullscreen && {
+          bgcolor: "background.paper",
+        }),
       }}
     >
       {/* ===== HEADER ROW 1: Title + Days Count + View Toggle + Refresh ===== */}
@@ -3094,57 +3100,14 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
         </Box>
       ) : viewMode === "date-wise" ? (
         <Box
-          ref={tableContainerRef}
           sx={{
             display: "flex",
             flexDirection: "column",
             flex: 1,
             minHeight: 0,
             width: "100%",
-            // Fullscreen styling - applied when using native Fullscreen API
-            ...(isFullscreen && {
-              bgcolor: "background.paper",
-              height: "100vh",
-              width: "100vw",
-            }),
           }}
         >
-          {/* Fullscreen Header - Only visible in fullscreen mode */}
-          {isFullscreen && (
-            <Box
-              sx={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                p: 1,
-                bgcolor: "primary.main",
-                color: "white",
-                flexShrink: 0,
-              }}
-            >
-              <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                <Typography variant="subtitle1" fontWeight={600}>
-                  Attendance Table
-                </Typography>
-                <Chip
-                  label={`${dateSummaries.length} days`}
-                  size="small"
-                  sx={{
-                    bgcolor: "rgba(255,255,255,0.2)",
-                    color: "white",
-                    height: 24,
-                  }}
-                />
-              </Box>
-              <IconButton
-                size="small"
-                onClick={exitFullscreen}
-                sx={{ color: "white" }}
-              >
-                <CloseIcon />
-              </IconButton>
-            </Box>
-          )}
           <Paper
             sx={{
               borderRadius: isFullscreen ? 0 : 2,
@@ -3161,7 +3124,6 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
               sx={{
                 flex: 1,
                 minHeight: 0,
-                ...(isFullscreen && { maxHeight: "calc(100vh - 56px)" }),
                 overflowX: "auto",
                 overflowY: "auto",
                 WebkitOverflowScrolling: "touch",
