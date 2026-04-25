@@ -21,6 +21,7 @@ import {
 } from "@mui/icons-material";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useDateRange } from "@/contexts/DateRangeContext";
+import { computeStep } from "@/contexts/DateRangeContext/DateRangeProvider";
 import { DateRange, Range, RangeKeyDict } from "react-date-range";
 import dayjs from "dayjs";
 import "react-date-range/dist/styles.css";
@@ -446,40 +447,17 @@ export default function DateRangePicker({
   const isSingleDate = hasDates &&
     format(startDate, "yyyy-MM-dd") === format(endDate, "yyyy-MM-dd");
 
-  // Navigate dates based on selection type (disabled when no dates set)
-  const handleNavigate = (direction: "prev" | "next") => {
-    if (!hasDates) return;
-
-    if (isSingleDate) {
-      // Single date: move by 1 day in either direction
-      if (direction === "prev") {
-        const newDate = subDays(startDate, 1);
-        onChange(newDate, newDate);
-      } else {
-        const newDate = addDays(startDate, 1);
-        // Don't go past today
-        if (newDate <= new Date()) {
-          onChange(newDate, newDate);
-        }
-      }
-    } else {
-      // Date range: only allow going backwards, move by 1 day
-      if (direction === "prev") {
-        onChange(subDays(startDate, 1), subDays(endDate, 1));
-      }
-      // "next" does nothing for ranges (button is disabled)
-    }
-  };
-
-  // Disable buttons when no dates are set (All Time mode)
-  const isNextDisabled = !hasDates ||
-    format(endDate, "yyyy-MM-dd") === format(new Date(), "yyyy-MM-dd") ||
-    !isSingleDate;
-
-  const isPrevDisabled = !hasDates;
-
   // Current label comes from shared context computeLabel
-  const { label: currentLabel } = useDateRange();
+  const { label: currentLabel, stepBackward, stepForward } = useDateRange();
+
+  const isPrevDisabled = useMemo(() => {
+    // null result from computeStep means out of bounds
+    return computeStep(startDate, endDate, "backward", minDate ?? null) === null;
+  }, [startDate, endDate, minDate]);
+
+  const isNextDisabled = useMemo(() => {
+    return computeStep(startDate, endDate, "forward", minDate ?? null) === null;
+  }, [startDate, endDate, minDate]);
 
   return (
     <Box sx={{ display: "flex", alignItems: "center", gap: { xs: 0, sm: 1 } }}>
@@ -488,7 +466,7 @@ export default function DateRangePicker({
         {/* Prev arrow - Hidden on mobile */}
         <IconButton
           size="small"
-          onClick={() => handleNavigate("prev")}
+          onClick={() => stepBackward(minDate ?? null)}
           disabled={isPrevDisabled}
           sx={{ p: 0.5, display: { xs: "none", sm: "flex" } }}
         >
@@ -530,10 +508,10 @@ export default function DateRangePicker({
           </Typography>
         </Button>
 
-        {/* Next arrow - Hidden on mobile, disabled for date ranges */}
+        {/* Next arrow - Hidden on mobile */}
         <IconButton
           size="small"
-          onClick={() => handleNavigate("next")}
+          onClick={() => stepForward(minDate ?? null)}
           disabled={isNextDisabled}
           sx={{ p: 0.5, display: { xs: "none", sm: "flex" } }}
         >
