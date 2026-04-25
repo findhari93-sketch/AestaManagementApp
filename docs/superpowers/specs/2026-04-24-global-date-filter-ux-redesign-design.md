@@ -287,7 +287,7 @@ Screenshot each major state. `playwright_close` at the end.
 
 ## 11. Success criteria
 
-- On first load, `/site/attendance` shows All Time, `ScopeChip` reads `All Time` (no `×`), table sorted most-recent first.
+- On first load, `/site/attendance` shows the user's last-saved range or — for a first-time visitor — defaults to `This Month` (a deliberate `DateRangeProvider` perf default that avoids pulling all rows from heavy views like `v_all_expenses` on the very first page load). `ScopeChip` reflects whichever range is active and includes a `×` to clear back to `All Time`. Table is sorted most-recent first.
 - Applying any preset or custom range updates the `ScopeChip` to `<range> · <N days>` with `×` within the same render cycle, and the top-bar pill matches.
 - Clicking `ScopeChip` `×` clears the filter and re-fetches in one interaction.
 - Week / Month chip no longer toggles back to All Time on a second click.
