@@ -14,6 +14,15 @@ interface DateRangeDataContextType {
   label: string;
   days: number | null;
   pickerOpen: boolean;
+  /**
+   * Optional DOM element to use as the picker popover's portal container.
+   * When non-null, the picker's <Popover> renders inside this element instead
+   * of the default document.body. Set by pages that need the picker to remain
+   * visible inside a fullscreened DOM subtree (the native Fullscreen API only
+   * paints descendants of the fullscreened element). Default null = portal to
+   * document.body.
+   */
+  pickerContainer: HTMLElement | null;
 }
 
 export const DateRangeDataContext = createContext<

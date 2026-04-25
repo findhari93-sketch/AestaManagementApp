@@ -189,9 +189,15 @@ export function DateRangeProvider({ children }: { children: React.ReactNode }) {
   const [startDate, setStartDate] = useState<Date | null>(null);
   const [endDate, setEndDate] = useState<Date | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerContainer, setPickerContainerState] =
+    useState<HTMLElement | null>(null);
 
   const openPicker = useCallback(() => setPickerOpen(true), []);
   const closePicker = useCallback(() => setPickerOpen(false), []);
+  const setPickerContainer = useCallback(
+    (el: HTMLElement | null) => setPickerContainerState(el),
+    []
+  );
 
   // Restore from localStorage on mount
   useEffect(() => {
@@ -304,8 +310,9 @@ export function DateRangeProvider({ children }: { children: React.ReactNode }) {
       label,
       days,
       pickerOpen,
+      pickerContainer,
     }),
-    [startDate, endDate, formatForApi, isAllTime, label, days, pickerOpen]
+    [startDate, endDate, formatForApi, isAllTime, label, days, pickerOpen, pickerContainer]
   );
 
   const actionsValue = useMemo(
@@ -320,8 +327,9 @@ export function DateRangeProvider({ children }: { children: React.ReactNode }) {
       stepForward,
       openPicker,
       closePicker,
+      setPickerContainer,
     }),
-    [setDateRange, setToday, setLastWeek, setLastMonth, setAllTime, setMonth, stepBackward, stepForward, openPicker, closePicker]
+    [setDateRange, setToday, setLastWeek, setLastMonth, setAllTime, setMonth, stepBackward, stepForward, openPicker, closePicker, setPickerContainer]
   );
 
   return (

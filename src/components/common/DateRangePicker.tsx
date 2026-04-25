@@ -440,7 +440,7 @@ export default function DateRangePicker({
   };
 
   // Current label comes from shared context computeLabel
-  const { label: currentLabel, stepBackward, stepForward } = useDateRange();
+  const { label: currentLabel, stepBackward, stepForward, pickerContainer } = useDateRange();
 
   const isPrevDisabled = useMemo(() => {
     // null result from computeStep means out of bounds
@@ -511,10 +511,16 @@ export default function DateRangePicker({
         </IconButton>
       </Box>
 
-      {/* Popover with presets and calendar */}
+      {/* Popover with presets and calendar.
+          `container` defaults to document.body. When a page registers a
+          pickerContainer (e.g. attendance-content while fullscreened), the
+          popover renders inside that subtree so it remains visible inside the
+          fullscreened element — the native Fullscreen API only paints
+          descendants of the fullscreened element. */}
       <Popover
         open={open}
         anchorEl={anchorEl}
+        container={pickerContainer ?? undefined}
         onClose={() => {
           handleClose();
           onPopoverClose?.();

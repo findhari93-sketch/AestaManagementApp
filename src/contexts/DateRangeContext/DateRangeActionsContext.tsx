@@ -22,6 +22,12 @@ interface DateRangeActionsContextType {
   openPicker: () => void;
   /** Close the date range picker popover */
   closePicker: () => void;
+  /**
+   * Register a DOM element as the picker popover's portal container, or pass
+   * null to clear it. Used by pages that put the picker inside a fullscreened
+   * DOM subtree so the popover stays visible. Pages MUST clear it on unmount.
+   */
+  setPickerContainer: (el: HTMLElement | null) => void;
 }
 
 export const DateRangeActionsContext = createContext<

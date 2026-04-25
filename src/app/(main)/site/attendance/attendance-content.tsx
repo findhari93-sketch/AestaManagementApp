@@ -317,7 +317,7 @@ interface WeeklySummary {
 export default function AttendanceContent({ initialData }: AttendanceContentProps) {
   const { selectedSite, loading: siteLoading } = useSite();
   const { userProfile, loading: authLoading } = useAuth();
-  const { formatForApi, isAllTime } = useDateRange();
+  const { formatForApi, isAllTime, setPickerContainer } = useDateRange();
   const supabase = createClient();
   const isMobile = useIsMobile();
   const searchParams = useSearchParams();
@@ -369,10 +369,26 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
 
   // Fullscreen mode using native Fullscreen API
   const tableContainerRef = useRef<HTMLDivElement>(null);
+  const pickerPortalRef = useRef<HTMLDivElement>(null);
   const { isFullscreen, enterFullscreen, exitFullscreen } = useFullscreen(
     tableContainerRef,
     { orientation: "landscape" }
   );
+
+  // While fullscreened, register an in-tree portal target for the global
+  // DateRangePicker. The native Fullscreen API only paints descendants of the
+  // fullscreened element, so the picker's default body-portal popover is
+  // invisible. Registering this ref makes the popover render inside our
+  // fullscreened Box. Cleared on exit / unmount so other pages keep using the
+  // default body portal.
+  useEffect(() => {
+    if (isFullscreen && pickerPortalRef.current) {
+      setPickerContainer(pickerPortalRef.current);
+      return () => setPickerContainer(null);
+    }
+    setPickerContainer(null);
+    return undefined;
+  }, [isFullscreen, setPickerContainer]);
 
   // Edit dialog state
   const [editDialogOpen, setEditDialogOpen] = useState(false);
@@ -2635,6 +2651,11 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
         }),
       }}
     >
+      {/* Portal target for the global DateRangePicker popover while fullscreened.
+          Lives inside the fullscreened DOM subtree so the popover remains
+          visible — see setPickerContainer effect above. Empty div, zero size. */}
+      <div ref={pickerPortalRef} id="attendance-picker-portal" />
+
       {/* ===== HEADER ROW 1: Title + Days Count + View Toggle + Refresh ===== */}
       <Box sx={{ flexShrink: 0 }}>
         <PageHeader
