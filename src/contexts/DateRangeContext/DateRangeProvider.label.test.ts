@@ -119,3 +119,73 @@ describe("computeDays", () => {
     ).toBe(25);
   });
 });
+
+import { computeStep } from "./DateRangeProvider";
+
+describe("computeStep — hybrid arrow semantics", () => {
+  // Freeze to 2026-04-23 (Thursday) so "Last 7 days" (Apr 17–Apr 23) does not
+  // coincide with the start-of-week boundary (which is Sunday Apr 19).
+  beforeAll(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-23T12:00:00"));
+  });
+
+  afterAll(() => {
+    vi.useRealTimers();
+  });
+
+  const today = dayjs("2026-04-23");
+
+  it("week-aligned window steps by 7 days backward", () => {
+    const start = today.startOf("week").toDate();
+    const end = today.endOf("day").toDate();
+    const result = computeStep(start, end, "backward", null);
+    expect(dayjs(result!.start).diff(dayjs(start), "day")).toBe(-7);
+    expect(dayjs(result!.end).diff(dayjs(end), "day")).toBe(-7);
+  });
+
+  it("calendar-month window steps by 1 month backward", () => {
+    const start = dayjs("2026-04-01").startOf("day").toDate();
+    const end = dayjs("2026-04-30").endOf("day").toDate();
+    const result = computeStep(start, end, "backward", null);
+    expect(dayjs(result!.start).format("YYYY-MM-DD")).toBe("2026-03-01");
+    expect(dayjs(result!.end).format("YYYY-MM-DD")).toBe("2026-03-31");
+  });
+
+  it("non-aligned window (Last 7 days) steps by 1 month backward", () => {
+    const start = today.subtract(6, "day").startOf("day").toDate();
+    const end = today.endOf("day").toDate();
+    const result = computeStep(start, end, "backward", null);
+    const expectedStart = today.subtract(1, "month").startOf("month");
+    const expectedEnd = today.subtract(1, "month").endOf("month");
+    expect(dayjs(result!.start).format("YYYY-MM")).toBe(
+      expectedStart.format("YYYY-MM")
+    );
+    expect(dayjs(result!.end).format("YYYY-MM-DD")).toBe(
+      expectedEnd.format("YYYY-MM-DD")
+    );
+  });
+
+  it("All Time steps backward to the previous calendar month", () => {
+    const result = computeStep(null, null, "backward", null);
+    const expectedStart = today.subtract(1, "month").startOf("month");
+    expect(dayjs(result!.start).format("YYYY-MM")).toBe(
+      expectedStart.format("YYYY-MM")
+    );
+  });
+
+  it("returns null when stepping backward would predate minDate", () => {
+    const minDate = dayjs("2026-04-01").toDate();
+    const start = dayjs("2026-04-01").startOf("day").toDate();
+    const end = dayjs("2026-04-30").endOf("day").toDate();
+    const result = computeStep(start, end, "backward", minDate);
+    expect(result).toBeNull();
+  });
+
+  it("returns null when stepping forward would move past today", () => {
+    const start = today.startOf("month").toDate();
+    const end = today.endOf("day").toDate();
+    const result = computeStep(start, end, "forward", null);
+    expect(result).toBeNull();
+  });
+});

@@ -14,6 +14,10 @@ interface DateRangeActionsContextType {
   setAllTime: () => void;
   /** Set date range to a specific month (0-indexed month, e.g. 0=January) */
   setMonth: (year: number, month: number) => void;
+  /** Step backward using hybrid semantics (week-aligned → 7 days, calendar-month → 1 month, else → 1 month) */
+  stepBackward: (minDate: Date | null) => void;
+  /** Step forward using hybrid semantics (week-aligned → 7 days, calendar-month → 1 month, else → 1 month) */
+  stepForward: (minDate: Date | null) => void;
 }
 
 export const DateRangeActionsContext = createContext<

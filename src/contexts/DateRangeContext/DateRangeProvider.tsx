@@ -120,6 +120,70 @@ export function computeLabel(
   return "Custom range";
 }
 
+export type StepResult = { start: Date; end: Date } | null;
+
+export function computeStep(
+  startDate: Date | null,
+  endDate: Date | null,
+  direction: "backward" | "forward",
+  minDate: Date | null
+): StepResult {
+  const today = dayjs().endOf("day");
+  const sign = direction === "backward" ? -1 : 1;
+
+  let nextStart: dayjs.Dayjs;
+  let nextEnd: dayjs.Dayjs;
+
+  if (!startDate || !endDate) {
+    // All Time → step into the previous (or next) calendar month.
+    const target = dayjs().add(sign, "month");
+    nextStart = target.startOf("month");
+    nextEnd = target.endOf("month");
+  } else {
+    const start = dayjs(startDate);
+    const end = dayjs(endDate);
+
+    const isWeekAligned =
+      start.isSame(start.startOf("week"), "day");
+
+    const isCalendarMonth =
+      start.isSame(start.startOf("month"), "day") &&
+      end.isSame(start.endOf("month"), "day");
+
+    const isCurrentMonthInProgress =
+      start.isSame(start.startOf("month"), "day") &&
+      end.isSame(today, "day") &&
+      start.isSame(today, "month");
+
+    if (isWeekAligned) {
+      nextStart = start.add(sign * 7, "day");
+      nextEnd = end.add(sign * 7, "day");
+    } else if (isCalendarMonth || isCurrentMonthInProgress) {
+      const target = start.add(sign, "month");
+      nextStart = target.startOf("month");
+      nextEnd = target.endOf("month");
+    } else {
+      // Non-aligned window — generic month stepper.
+      const target = dayjs().add(sign, "month");
+      nextStart = target.startOf("month");
+      nextEnd = target.endOf("month");
+    }
+  }
+
+  // Bounds: don't step past today; don't step before minDate.
+  if (direction === "forward" && nextStart.isAfter(today)) return null;
+  if (direction === "backward" && minDate && nextStart.isBefore(dayjs(minDate))) {
+    return null;
+  }
+
+  // If stepping forward would put `end` past today, clip end to today.
+  if (nextEnd.isAfter(today)) {
+    nextEnd = today;
+  }
+
+  return { start: nextStart.toDate(), end: nextEnd.toDate() };
+}
+
 export function DateRangeProvider({ children }: { children: React.ReactNode }) {
   const [startDate, setStartDate] = useState<Date | null>(null);
   const [endDate, setEndDate] = useState<Date | null>(null);
@@ -194,6 +258,22 @@ export function DateRangeProvider({ children }: { children: React.ReactNode }) {
     setDateRange(monthStart.toDate(), monthEnd.toDate());
   }, [setDateRange]);
 
+  const stepBackward = useCallback(
+    (minDate: Date | null) => {
+      const result = computeStep(startDate, endDate, "backward", minDate);
+      if (result) setDateRange(result.start, result.end);
+    },
+    [startDate, endDate, setDateRange]
+  );
+
+  const stepForward = useCallback(
+    (minDate: Date | null) => {
+      const result = computeStep(startDate, endDate, "forward", minDate);
+      if (result) setDateRange(result.start, result.end);
+    },
+    [startDate, endDate, setDateRange]
+  );
+
   const formatForApi = useCallback(() => {
     return {
       dateFrom: startDate ? dayjs(startDate).format("YYYY-MM-DD") : null,
@@ -230,8 +310,10 @@ export function DateRangeProvider({ children }: { children: React.ReactNode }) {
       setLastMonth,
       setAllTime,
       setMonth,
+      stepBackward,
+      stepForward,
     }),
-    [setDateRange, setToday, setLastWeek, setLastMonth, setAllTime, setMonth]
+    [setDateRange, setToday, setLastWeek, setLastMonth, setAllTime, setMonth, stepBackward, stepForward]
   );
 
   return (
