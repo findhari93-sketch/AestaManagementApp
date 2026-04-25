@@ -2630,7 +2630,23 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
           title="Attendance"
           subtitle={isMobile ? undefined : selectedSite?.name}
           titleChip={<ScopeChip />}
-          actions={null}
+          actions={
+            <Tooltip
+              title={
+                isFullscreen ? "Exit fullscreen (Esc)" : "Enter fullscreen"
+              }
+            >
+              <IconButton
+                onClick={isFullscreen ? exitFullscreen : enterFullscreen}
+                size="small"
+                aria-label={
+                  isFullscreen ? "Exit fullscreen" : "Enter fullscreen"
+                }
+              >
+                {isFullscreen ? <FullscreenExit /> : <Fullscreen />}
+              </IconButton>
+            </Tooltip>
+          }
         />
       </Box>
 
@@ -3141,27 +3157,6 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
               minHeight: 0,
             }}
           >
-            {/* Fullscreen toggle - top right corner overlay (Mobile Only) */}
-            {!isFullscreen && (
-              <Tooltip title="View fullscreen">
-                <IconButton
-                  size="small"
-                  onClick={enterFullscreen}
-                  sx={{
-                    display: { xs: "flex", sm: "none" },
-                    position: "absolute",
-                    top: 8,
-                    right: 8,
-                    zIndex: 10,
-                    bgcolor: "rgba(255,255,255,0.95)",
-                    boxShadow: 2,
-                    "&:hover": { bgcolor: "background.paper" },
-                  }}
-                >
-                  <Fullscreen fontSize="small" />
-                </IconButton>
-              </Tooltip>
-            )}
             <TableContainer
               sx={{
                 flex: 1,
