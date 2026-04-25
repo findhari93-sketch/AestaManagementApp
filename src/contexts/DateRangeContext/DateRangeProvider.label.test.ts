@@ -137,11 +137,22 @@ describe("computeStep — hybrid arrow semantics", () => {
   const today = dayjs("2026-04-23");
 
   it("week-aligned window steps by 7 days backward", () => {
-    const start = today.startOf("week").toDate();
-    const end = today.endOf("day").toDate();
+    const start = today.startOf("week").toDate();           // Sun Apr 19
+    const end = today.startOf("week").add(6, "day").endOf("day").toDate();  // Sat Apr 25
     const result = computeStep(start, end, "backward", null);
-    expect(dayjs(result!.start).diff(dayjs(start), "day")).toBe(-7);
-    expect(dayjs(result!.end).diff(dayjs(end), "day")).toBe(-7);
+    expect(dayjs(result!.start).format("YYYY-MM-DD")).toBe("2026-04-12");
+    expect(dayjs(result!.end).format("YYYY-MM-DD")).toBe("2026-04-18");
+  });
+
+  it("Sunday-starting non-week-length range is NOT week-aligned (steps by month, not 7 days)", () => {
+    // 4-day range starting on a Sunday — must NOT be misclassified as week-aligned
+    const start = dayjs("2026-04-19").startOf("day").toDate();   // Sun
+    const end = dayjs("2026-04-22").endOf("day").toDate();        // Wed (4-day range, diff=3)
+    const result = computeStep(start, end, "backward", null);
+    // Generic month-stepper falls through to "step into prior calendar month relative to today (frozen Thu Apr 23)"
+    expect(dayjs(result!.start).format("YYYY-MM")).toBe("2026-03");
+    expect(dayjs(result!.start).format("YYYY-MM-DD")).toBe("2026-03-01");
+    expect(dayjs(result!.end).format("YYYY-MM-DD")).toBe("2026-03-31");
   });
 
   it("calendar-month window steps by 1 month backward", () => {

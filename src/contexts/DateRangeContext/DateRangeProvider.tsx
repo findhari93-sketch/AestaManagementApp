@@ -144,7 +144,8 @@ export function computeStep(
     const end = dayjs(endDate);
 
     const isWeekAligned =
-      start.isSame(start.startOf("week"), "day");
+      start.isSame(start.startOf("week"), "day") &&
+      end.diff(start, "day") === 6;
 
     const isCalendarMonth =
       start.isSame(start.startOf("month"), "day") &&
