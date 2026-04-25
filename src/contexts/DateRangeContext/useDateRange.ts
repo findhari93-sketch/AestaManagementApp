@@ -12,9 +12,9 @@ import { useDateRangeData } from "./DateRangeDataContext";
 import { useDateRangeActions } from "./DateRangeActionsContext";
 
 export function useDateRange() {
-  const { startDate, endDate, formatForApi, isAllTime, label, days } =
+  const { startDate, endDate, formatForApi, isAllTime, label, days, pickerOpen } =
     useDateRangeData();
-  const { setDateRange, setToday, setLastWeek, setLastMonth, setAllTime, setMonth, stepBackward, stepForward } =
+  const { setDateRange, setToday, setLastWeek, setLastMonth, setAllTime, setMonth, stepBackward, stepForward, openPicker, closePicker } =
     useDateRangeActions();
 
   return {
@@ -28,9 +28,12 @@ export function useDateRange() {
     setMonth,
     stepBackward,
     stepForward,
+    openPicker,
+    closePicker,
     formatForApi,
     isAllTime,
     label,
     days,
+    pickerOpen,
   };
 }

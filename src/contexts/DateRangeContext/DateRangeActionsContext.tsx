@@ -18,6 +18,10 @@ interface DateRangeActionsContextType {
   stepBackward: (minDate: Date | null) => void;
   /** Step forward using hybrid semantics (week-aligned → 7 days, calendar-month → 1 month, else → 1 month) */
   stepForward: (minDate: Date | null) => void;
+  /** Open the date range picker popover */
+  openPicker: () => void;
+  /** Close the date range picker popover */
+  closePicker: () => void;
 }
 
 export const DateRangeActionsContext = createContext<

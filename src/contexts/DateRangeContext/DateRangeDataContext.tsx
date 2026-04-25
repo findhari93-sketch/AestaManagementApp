@@ -13,6 +13,7 @@ interface DateRangeDataContextType {
   isAllTime: boolean;
   label: string;
   days: number | null;
+  pickerOpen: boolean;
 }
 
 export const DateRangeDataContext = createContext<

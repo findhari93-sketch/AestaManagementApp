@@ -437,9 +437,9 @@ export default function MainLayout({
     setLastWeek,
     setLastMonth,
     label: dateRangeLabel,
+    pickerOpen,
+    closePicker,
   } = useDateRange();
-
-  const [openPickerCustom, setOpenPickerCustom] = useState(false);
 
   // Refresh session on navigation (since middleware doesn't run on client-side navigation)
   useSessionRefresh();
@@ -1105,11 +1105,11 @@ export default function MainLayout({
               endDate={endDate}
               onChange={(start, end) => {
                 setDateRange(start, end);
-                setOpenPickerCustom(false);
+                closePicker();
               }}
               minDate={selectedSite?.start_date ? new Date(selectedSite.start_date) : undefined}
-              openOnMount={openPickerCustom}
-              onPopoverClose={() => setOpenPickerCustom(false)}
+              openOnMount={pickerOpen}
+              onPopoverClose={() => closePicker()}
             />
 
             {/* Quick chips — hidden on mobile */}
@@ -1150,17 +1150,6 @@ export default function MainLayout({
                 cursor: "pointer",
                 minWidth: 64,
                 fontWeight: dateRangeLabel === "This Month" ? 600 : 400,
-              }}
-            />
-            <Chip
-              label="Custom"
-              size="small"
-              variant="outlined"
-              onClick={() => setOpenPickerCustom(true)}
-              sx={{
-                display: { xs: "none", sm: "flex" },
-                cursor: "pointer",
-                minWidth: 64,
               }}
             />
           </Box>

@@ -21,6 +21,9 @@ describe("ScopePill", () => {
       stepBackward: vi.fn(),
       stepForward: vi.fn(),
       formatForApi: () => ({ dateFrom: null, dateTo: null }),
+      pickerOpen: false,
+      openPicker: vi.fn(),
+      closePicker: vi.fn(),
     } as ReturnType<typeof DateRangeModule.useDateRange>);
 
     const { container } = render(<ScopePill />);
@@ -43,6 +46,9 @@ describe("ScopePill", () => {
       stepBackward: vi.fn(),
       stepForward: vi.fn(),
       formatForApi: () => ({ dateFrom: "2026-04-17", dateTo: "2026-04-24" }),
+      pickerOpen: false,
+      openPicker: vi.fn(),
+      closePicker: vi.fn(),
     } as ReturnType<typeof DateRangeModule.useDateRange>);
 
     render(<ScopePill />);
@@ -70,6 +76,9 @@ describe("ScopePill", () => {
       stepBackward: vi.fn(),
       stepForward: vi.fn(),
       formatForApi: () => ({ dateFrom: "2026-04-17", dateTo: "2026-04-24" }),
+      pickerOpen: false,
+      openPicker: vi.fn(),
+      closePicker: vi.fn(),
     } as ReturnType<typeof DateRangeModule.useDateRange>);
 
     render(<ScopePill />);
@@ -95,6 +104,9 @@ describe("ScopePill", () => {
       stepBackward: vi.fn(),
       stepForward: vi.fn(),
       formatForApi: () => ({ dateFrom: "2026-04-24", dateTo: "2026-04-24" }),
+      pickerOpen: false,
+      openPicker: vi.fn(),
+      closePicker: vi.fn(),
     } as ReturnType<typeof DateRangeModule.useDateRange>);
 
     render(<ScopePill />);
@@ -120,6 +132,9 @@ describe("ScopePill", () => {
       stepBackward: vi.fn(),
       stepForward: vi.fn(),
       formatForApi: () => ({ dateFrom: "2026-04-17", dateTo: "2026-04-24" }),
+      pickerOpen: false,
+      openPicker: vi.fn(),
+      closePicker: vi.fn(),
     } as ReturnType<typeof DateRangeModule.useDateRange>);
 
     render(<ScopePill />);
