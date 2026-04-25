@@ -2625,16 +2625,18 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
       }}
     >
       {/* ===== HEADER ROW 1: Title + Days Count + View Toggle + Refresh ===== */}
-      <PageHeader
-        title="Attendance"
-        subtitle={isMobile ? undefined : selectedSite?.name}
-        titleChip={<ScopeChip />}
-        actions={null}
-      />
+      <Box sx={{ flexShrink: 0 }}>
+        <PageHeader
+          title="Attendance"
+          subtitle={isMobile ? undefined : selectedSite?.name}
+          titleChip={<ScopeChip />}
+          actions={null}
+        />
+      </Box>
 
       {/* Back button when coming from settlement page */}
       {cameFromSettlement && (
-        <Box sx={{ px: { xs: 1, sm: 0 }, mb: 1 }}>
+        <Box sx={{ px: { xs: 1, sm: 0 }, mb: 1, flexShrink: 0 }}>
           <Button
             variant="outlined"
             size="small"
@@ -3062,7 +3064,16 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
 
       {/* Data Display */}
       {loading ? (
-        <Box sx={{ display: "flex", justifyContent: "center", p: 4 }}>
+        <Box
+          sx={{
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            p: 4,
+            flex: 1,
+            minHeight: 0,
+          }}
+        >
           <CircularProgress />
         </Box>
       ) : viewMode === "date-wise" ? (
@@ -3154,9 +3165,8 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
             <TableContainer
               sx={{
                 flex: 1,
-                maxHeight: isFullscreen
-                  ? "calc(100vh - 56px)"
-                  : { xs: "calc(100vh - 180px)", sm: "calc(100vh - 300px)" },
+                minHeight: 0,
+                ...(isFullscreen && { maxHeight: "calc(100vh - 56px)" }),
                 overflowX: "auto",
                 overflowY: "auto",
                 WebkitOverflowScrolling: "touch",
@@ -5266,12 +5276,14 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
           </Paper>
         </Box>
       ) : (
-        <DataTable
-          columns={detailedColumns}
-          data={attendanceRecords}
-          isLoading={loading}
-          showRecordCount
-        />
+        <Box sx={{ flex: 1, minHeight: 0, overflow: "auto" }}>
+          <DataTable
+            columns={detailedColumns}
+            data={attendanceRecords}
+            isLoading={loading}
+            showRecordCount
+          />
+        </Box>
       )}
 
       {/* Attendance Drawer */}
