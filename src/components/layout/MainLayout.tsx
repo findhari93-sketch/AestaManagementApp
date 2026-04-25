@@ -415,7 +415,7 @@ export default function MainLayout({
     severity: "success" | "error" | "warning" | "info";
   }>({ open: false, message: "", severity: "info" });
 
-  const { userProfile, signOut } = useAuth();
+  const { user, userProfile, loading: authLoading, signOut } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
   const theme = useTheme();
@@ -443,6 +443,16 @@ export default function MainLayout({
 
   // Refresh session on navigation (since middleware doesn't run on client-side navigation)
   useSessionRefresh();
+
+  // Redirect to /login when there is no authenticated user. Middleware should
+  // catch this on full requests, but RSC navigations + client-side state drift
+  // can leave the layout rendered for a logged-out user (empty avatar "U",
+  // "Welcome back, User", no sites).
+  useEffect(() => {
+    if (!authLoading && !user) {
+      router.replace("/login");
+    }
+  }, [authLoading, user, router]);
 
   // Determine active tab based on current path
   useEffect(() => {
@@ -492,8 +502,12 @@ export default function MainLayout({
 
   const handleSignOut = async () => {
     handleUserMenuClose();
-    await signOut();
-    router.push("/login");
+    try {
+      await signOut();
+    } catch (error) {
+      console.error("[MainLayout] Sign out error:", error);
+    }
+    router.replace("/login");
   };
 
   const handleSettings = () => {

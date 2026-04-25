@@ -168,10 +168,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signOut = async () => {
-    const { error } = await supabase.auth.signOut();
-    if (error) throw error;
+    try {
+      await supabase.auth.signOut();
+    } catch (error) {
+      // Swallow: a missing/expired session would otherwise leave the user
+      // stranded on a protected page with stale UI. Local state must be cleared
+      // unconditionally so the redirect guard fires.
+      console.warn("[AuthContext] signOut error (continuing):", error);
+    }
     setUser(null);
     setUserProfile(null);
+    stopSessionManager();
   };
 
   const value = {
