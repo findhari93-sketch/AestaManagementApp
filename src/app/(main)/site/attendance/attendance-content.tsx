@@ -122,7 +122,7 @@ const PaymentDialog = dynamic(
 import type { UnifiedSettlementConfig, SettlementRecord } from "@/types/settlement.types";
 import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
 import AuditAvatarGroup from "@/components/common/AuditAvatarGroup";
-import ScopePill from "@/components/common/ScopePill";
+import ScopeChip from "@/components/common/ScopeChip";
 import {
   PhotoBadge,
   WorkUpdateViewer,
@@ -2655,16 +2655,7 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
       <PageHeader
         title="Attendance"
         subtitle={isMobile ? undefined : selectedSite?.name}
-        titleChip={
-          dateSummaries.length > 0 ? (
-            <Chip
-              label={`${dateSummaries.length} days`}
-              size="small"
-              color="primary"
-              sx={{ height: 22, fontSize: "0.7rem", fontWeight: 500 }}
-            />
-          ) : null
-        }
+        titleChip={<ScopeChip />}
         actions={
           <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
             {/* View Mode Toggle */}
@@ -2745,7 +2736,6 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
           flexShrink: 0,
         }}
       >
-        <ScopePill />
         <Box sx={{ p: { xs: 0.75, sm: 2 } }}>
           {/* Mobile: Collapsible Summary */}
           <Box sx={{ display: { xs: "block", sm: "none" } }}>
