@@ -45,7 +45,7 @@ CREATE OR REPLACE FUNCTION public.get_salary_waterfall(
   status             text,
   filled_by          jsonb
 )
-  LANGUAGE plpgsql STABLE
+  LANGUAGE plpgsql VOLATILE
   SECURITY INVOKER
   SET search_path = public
 AS $$
@@ -58,10 +58,13 @@ DECLARE
 BEGIN
   -- Per-week wages_due from contract-laborer attendance, scoped optionally
   -- to a single subcontract.
+  -- Note: VOLATILE (not STABLE) because the function CREATEs and UPDATEs
+  -- temp tables. CTE column aliased as w_start to avoid ambiguity with the
+  -- function's RETURNS TABLE column 'week_start'.
   CREATE TEMP TABLE _weeks ON COMMIT DROP AS
   WITH attendance_in_scope AS (
     SELECT
-      date_trunc('week', d.date)::date AS week_start,
+      date_trunc('week', d.date)::date AS w_start,
       d.laborer_id,
       d.daily_earnings
     FROM public.daily_attendance d
@@ -74,16 +77,16 @@ BEGIN
       AND (p_subcontract_id IS NULL OR d.subcontract_id = p_subcontract_id)
   )
   SELECT
-    week_start,
-    (week_start + 6)::date                    AS week_end,
-    COUNT(*)::int                              AS days_worked,
-    COUNT(DISTINCT laborer_id)::int            AS laborer_count,
-    COALESCE(SUM(daily_earnings), 0)::numeric  AS wages_due,
-    0::numeric                                 AS paid,
-    '[]'::jsonb                                AS filled_by
-  FROM attendance_in_scope
-  GROUP BY week_start
-  ORDER BY week_start
+    a.w_start                                   AS week_start,
+    (a.w_start + 6)::date                       AS week_end,
+    COUNT(*)::int                                AS days_worked,
+    COUNT(DISTINCT a.laborer_id)::int            AS laborer_count,
+    COALESCE(SUM(a.daily_earnings), 0)::numeric  AS wages_due,
+    0::numeric                                   AS paid,
+    '[]'::jsonb                                  AS filled_by
+  FROM attendance_in_scope a
+  GROUP BY a.w_start
+  ORDER BY a.w_start
   LIMIT 200;
 
   -- Contract-linked settlements in scope, ordered oldest-first with id tiebreak.
@@ -115,7 +118,7 @@ BEGIN
   FOR v_settlement IN SELECT * FROM _settlements LOOP
     v_remaining := v_settlement.amount;
 
-    FOR v_week IN SELECT * FROM _weeks ORDER BY week_start LOOP
+    FOR v_week IN SELECT * FROM _weeks w ORDER BY w.week_start LOOP
       EXIT WHEN v_remaining <= 0;
 
       v_week_due_left := v_week.wages_due - v_week.paid;
@@ -125,14 +128,14 @@ BEGIN
 
       v_alloc := LEAST(v_remaining, v_week_due_left);
 
-      UPDATE _weeks
-        SET paid = paid + v_alloc,
-            filled_by = filled_by || jsonb_build_array(jsonb_build_object(
+      UPDATE _weeks w
+        SET paid = w.paid + v_alloc,
+            filled_by = w.filled_by || jsonb_build_array(jsonb_build_object(
               'ref',         v_settlement.settlement_reference,
               'amount',      v_alloc,
               'settled_at',  v_settlement.settlement_date
             ))
-      WHERE _weeks.week_start = v_week.week_start;
+      WHERE w.week_start = v_week.week_start;
 
       v_remaining := v_remaining - v_alloc;
     END LOOP;
