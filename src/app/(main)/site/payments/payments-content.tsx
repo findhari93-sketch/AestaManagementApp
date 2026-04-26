@@ -281,6 +281,30 @@ export default function PaymentsContent() {
       </Box>
 
       <Box sx={{ flex: 1, minHeight: 0, overflow: "auto" }}>
+        {salarySummaryQuery.isError && activeTab === "waterfall" && (
+          <Alert severity="error" sx={{ m: 1.5 }}>
+            Couldn&apos;t load salary slice summary:{" "}
+            {(salarySummaryQuery.error as Error)?.message ?? "Unknown error"}
+          </Alert>
+        )}
+        {waterfallQuery.isError && activeTab === "waterfall" && (
+          <Alert severity="error" sx={{ m: 1.5 }}>
+            Couldn&apos;t load waterfall:{" "}
+            {(waterfallQuery.error as Error)?.message ?? "Unknown error"}
+          </Alert>
+        )}
+        {advancesQuery.isError && activeTab === "advances" && (
+          <Alert severity="error" sx={{ m: 1.5 }}>
+            Couldn&apos;t load advances:{" "}
+            {(advancesQuery.error as Error)?.message ?? "Unknown error"}
+          </Alert>
+        )}
+        {dailyMarketLedgerQuery.isError && activeTab === "daily-market" && (
+          <Alert severity="error" sx={{ m: 1.5 }}>
+            Couldn&apos;t load daily/market ledger:{" "}
+            {(dailyMarketLedgerQuery.error as Error)?.message ?? "Unknown error"}
+          </Alert>
+        )}
         {activeTab === "waterfall" && (
           <SalaryWaterfallList
             weeks={waterfallQuery.data ?? []}
