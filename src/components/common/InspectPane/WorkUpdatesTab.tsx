@@ -10,15 +10,19 @@ export default function WorkUpdatesTab({ entity }: { entity: InspectEntity }) {
   const theme = useTheme();
 
   // Daily-date entity → updates for that single date.
-  // Weekly-week entity → updates for the week's date range.
+  // Weekly-week / weekly-aggregate entity → updates for the week's date range.
+  // Advance entity → InspectPane.tsx hides this tab; defensive fallback to a
+  // single-day query that returns no rows.
   const { siteId, dateFrom, dateTo } =
     entity.kind === "daily-date"
       ? { siteId: entity.siteId, dateFrom: entity.date, dateTo: entity.date }
-      : {
-          siteId: entity.siteId,
-          dateFrom: entity.weekStart,
-          dateTo: entity.weekEnd,
-        };
+      : entity.kind === "weekly-week" || entity.kind === "weekly-aggregate"
+        ? {
+            siteId: entity.siteId,
+            dateFrom: entity.weekStart,
+            dateTo: entity.weekEnd,
+          }
+        : { siteId: entity.siteId, dateFrom: "1970-01-01", dateTo: "1970-01-01" };
 
   const { data, isLoading } = useWorkUpdates(siteId, dateFrom, dateTo);
 

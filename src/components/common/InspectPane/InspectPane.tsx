@@ -27,9 +27,14 @@ import WorkUpdatesTab from "./WorkUpdatesTab";
 import SettlementTab from "./SettlementTab";
 import AuditTab from "./AuditTab";
 
-const TABS: { key: InspectTabKey; label: string }[] = [
+const ALL_TABS: { key: InspectTabKey; label: string }[] = [
   { key: "attendance", label: "Attendance" },
   { key: "work-updates", label: "Work Updates" },
+  { key: "settlement", label: "Settlement" },
+  { key: "audit", label: "Audit" },
+];
+
+const ADVANCE_TABS: { key: InspectTabKey; label: string }[] = [
   { key: "settlement", label: "Settlement" },
   { key: "audit", label: "Audit" },
 ];
@@ -66,6 +71,10 @@ export function InspectPane(props: InspectPaneProps) {
     if (entity.kind === "daily-date") {
       return dayjs(entity.date).format("DD MMM · ddd");
     }
+    if (entity.kind === "advance") {
+      return "Advance";
+    }
+    // weekly-week or weekly-aggregate
     const start = dayjs(entity.weekStart).format("DD");
     const end = dayjs(entity.weekEnd).format("DD MMM");
     return `Week ${start}–${end}`;
@@ -73,9 +82,24 @@ export function InspectPane(props: InspectPaneProps) {
 
   const subtitle = useMemo(() => {
     if (!entity) return "";
+    if (entity.kind === "weekly-aggregate") {
+      return entity.subcontractId ? "Subcontract scope" : "All subcontracts";
+    }
+    if (entity.kind === "advance") {
+      return entity.settlementRef ?? "Advance";
+    }
     const ref = entity.settlementRef ? entity.settlementRef : "Pending";
     return ref;
   }, [entity]);
+
+  // If the active tab isn't available for the current entity kind (e.g., advance
+  // hides Attendance + Work Updates), redirect to Settlement so the pane body
+  // doesn't go blank.
+  useEffect(() => {
+    if (entity?.kind === "advance" && (activeTab === "attendance" || activeTab === "work-updates")) {
+      onTabChange("settlement");
+    }
+  }, [entity?.kind, activeTab, onTabChange]);
 
   if (!isOpen || !entity) return null;
 
@@ -180,7 +204,7 @@ export function InspectPane(props: InspectPaneProps) {
           borderBottom: `1px solid ${theme.palette.divider}`,
         }}
       >
-        {TABS.map((t) => (
+        {(entity?.kind === "advance" ? ADVANCE_TABS : ALL_TABS).map((t) => (
           <Tab key={t.key} value={t.key} label={t.label} />
         ))}
       </Tabs>
