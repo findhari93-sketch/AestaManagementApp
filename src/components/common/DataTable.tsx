@@ -101,6 +101,10 @@ interface DataTableProps<TData extends MRT_RowData>
   mobileHiddenColumns?: string[];
   // Show total record count in toolbar
   showRecordCount?: boolean;
+  // Make the table fill its flex parent's height — Paper becomes a flex column
+  // and only the table body scrolls. Parent must be display:flex column with
+  // a constrained height for this to work.
+  fillParent?: boolean;
   // Server-side pagination props
   manualPagination?: boolean;
   rowCount?: number;
@@ -121,6 +125,7 @@ export default function DataTable<TData extends MRT_RowData>({
   compactMode = true, // Default to compact on mobile
   mobileHiddenColumns = [],
   showRecordCount = true, // Show record count by default
+  fillParent = false,
   // Server-side pagination props
   manualPagination = false,
   rowCount,
@@ -173,30 +178,58 @@ export default function DataTable<TData extends MRT_RowData>({
   const muiTableContainerProps = useMemo(
     () => ({
       sx: {
-        maxHeight: maxHeight || (useCompact ? "calc(100vh - 260px)" : isTablet ? "calc(100vh - 300px)" : "calc(100vh - 280px)"),
-        minHeight: minHeight || (useCompact ? 250 : 350),
+        // fillParent: scroll container takes whatever flex height is available;
+        // otherwise fall back to the legacy viewport-based maxHeight calc.
+        ...(fillParent
+          ? { flex: 1, minHeight: 0, maxHeight: 'none' }
+          : {
+              maxHeight:
+                maxHeight ||
+                (useCompact
+                  ? 'calc(100vh - 260px)'
+                  : isTablet
+                  ? 'calc(100vh - 300px)'
+                  : 'calc(100vh - 280px)'),
+              minHeight: minHeight || (useCompact ? 250 : 350),
+            }),
         overflowX: 'auto',
+        overflowY: 'auto',
         WebkitOverflowScrolling: 'touch',
-        // Visible scrollbar for mobile
+        scrollbarGutter: 'stable',
+        // Stylish thin scrollbar — applied in all modes for consistency.
         '&::-webkit-scrollbar': {
           height: useCompact ? 6 : 8,
           width: useCompact ? 6 : 8,
         },
         '&::-webkit-scrollbar-track': {
-          backgroundColor: theme.palette.action.hover,
-          borderRadius: 3,
+          backgroundColor: 'transparent',
         },
         '&::-webkit-scrollbar-thumb': {
-          backgroundColor: theme.palette.action.disabled,
-          borderRadius: 3,
+          backgroundColor:
+            theme.palette.mode === 'dark'
+              ? 'rgba(255,255,255,0.18)'
+              : 'rgba(0,0,0,0.22)',
+          borderRadius: 8,
+          border: `2px solid transparent`,
+          backgroundClip: 'content-box',
           '&:hover': {
-            backgroundColor: theme.palette.action.active,
+            backgroundColor:
+              theme.palette.mode === 'dark'
+                ? 'rgba(255,255,255,0.32)'
+                : 'rgba(0,0,0,0.36)',
           },
         },
+        '&::-webkit-scrollbar-corner': { background: 'transparent' },
+        // Firefox
+        scrollbarWidth: 'thin',
+        scrollbarColor:
+          theme.palette.mode === 'dark'
+            ? 'rgba(255,255,255,0.18) transparent'
+            : 'rgba(0,0,0,0.22) transparent',
         ...((otherProps.muiTableContainerProps as any)?.sx || {}),
       },
     }),
-    [maxHeight, minHeight, useCompact, isTablet, theme.palette, otherProps.muiTableContainerProps]
+    [maxHeight, minHeight, useCompact, isTablet, fillParent, theme.palette, otherProps.muiTableContainerProps]
   );
 
   // Paper styles for the table wrapper
@@ -207,10 +240,21 @@ export default function DataTable<TData extends MRT_RowData>({
         borderRadius: useCompact ? 1 : 2,
         border: `1px solid ${theme.palette.divider}`,
         overflow: 'hidden',
+        // fillParent: Paper becomes a flex column so toolbar/body/pagination
+        // share the parent's height with no nested scrollbar.
+        ...(fillParent
+          ? {
+              display: 'flex',
+              flexDirection: 'column',
+              height: '100%',
+              flex: 1,
+              minHeight: 0,
+            }
+          : {}),
         ...((otherProps.muiTablePaperProps as any)?.sx || {}),
       },
     }),
-    [theme.palette.divider, useCompact, otherProps.muiTablePaperProps]
+    [theme.palette.divider, useCompact, fillParent, otherProps.muiTablePaperProps]
   );
 
   // Table head cell styles - ultra-compact on mobile
@@ -281,6 +325,15 @@ export default function DataTable<TData extends MRT_RowData>({
         minHeight: useCompact ? 40 : 48,
         px: useCompact ? 0.5 : 1,
         py: useCompact ? 0.25 : 0.5,
+        // Vertically center every direct toolbar slot (search, column toggle,
+        // fullscreen, custom actions). MRT lays items out as flex children;
+        // alignItems on the toolbar keeps them on a shared baseline.
+        display: 'flex',
+        alignItems: 'center',
+        '& > *': {
+          display: 'flex',
+          alignItems: 'center',
+        },
         '& .MuiBox-root': {
           gap: useCompact ? 0.25 : 0.5,
         },

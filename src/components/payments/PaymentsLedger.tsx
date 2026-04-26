@@ -240,6 +240,7 @@ export default function PaymentsLedger({
       data={rows}
       isLoading={isLoading}
       enableActions={false}
+      fillParent
       initialState={{
         sorting: [{ id: "date", desc: true }],
       }}
