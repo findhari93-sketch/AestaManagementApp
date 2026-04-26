@@ -76,8 +76,6 @@ import {
   WarningAmber as WarningAmberIcon,
   ArrowForward as ArrowForwardIcon,
   ArrowBack as ArrowBackIcon,
-  ChevronLeft as ChevronLeftIcon,
-  ChevronRight as ChevronRightIcon,
   VisibilityOff as VisibilityOffIcon,
   EditCalendar as EditCalendarIcon,
   Groups as GroupsIcon,
@@ -122,6 +120,7 @@ const PaymentDialog = dynamic(
 import type { UnifiedSettlementConfig, SettlementRecord } from "@/types/settlement.types";
 import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
 import AuditAvatarGroup from "@/components/common/AuditAvatarGroup";
+import ScopeChip from "@/components/common/ScopeChip";
 import {
   PhotoBadge,
   WorkUpdateViewer,
@@ -318,37 +317,12 @@ interface WeeklySummary {
 export default function AttendanceContent({ initialData }: AttendanceContentProps) {
   const { selectedSite, loading: siteLoading } = useSite();
   const { userProfile, loading: authLoading } = useAuth();
-  const { formatForApi, isAllTime, setMonth, startDate } = useDateRange();
+  const { formatForApi, isAllTime, setPickerContainer } = useDateRange();
   const supabase = createClient();
   const isMobile = useIsMobile();
   const searchParams = useSearchParams();
   const router = useRouter();
   const theme = useTheme();
-
-  // Default to current month on first load (instead of "All Time" which loads everything)
-  const hasSetDefaultMonthRef = useRef(false);
-  useEffect(() => {
-    if (isAllTime && !hasSetDefaultMonthRef.current) {
-      hasSetDefaultMonthRef.current = true;
-      const now = dayjs();
-      setMonth(now.year(), now.month());
-    }
-  }, [isAllTime, setMonth]);
-
-  // Month navigation helpers
-  const currentViewMonth = startDate ? dayjs(startDate) : dayjs();
-  const handlePrevMonth = useCallback(() => {
-    const prev = currentViewMonth.subtract(1, "month");
-    setMonth(prev.year(), prev.month());
-  }, [currentViewMonth, setMonth]);
-  const handleNextMonth = useCallback(() => {
-    const next = currentViewMonth.add(1, "month");
-    const today = dayjs();
-    // Don't navigate beyond current month
-    if (next.isAfter(today, "month")) return;
-    setMonth(next.year(), next.month());
-  }, [currentViewMonth, setMonth]);
-  const isCurrentMonth = currentViewMonth.isSame(dayjs(), "month");
 
   // Group tea shop support
   const siteGroupId = (selectedSite as any)?.site_group_id as string | undefined;
@@ -395,10 +369,26 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
 
   // Fullscreen mode using native Fullscreen API
   const tableContainerRef = useRef<HTMLDivElement>(null);
+  const pickerPortalRef = useRef<HTMLDivElement>(null);
   const { isFullscreen, enterFullscreen, exitFullscreen } = useFullscreen(
     tableContainerRef,
     { orientation: "landscape" }
   );
+
+  // While fullscreened, register an in-tree portal target for the global
+  // DateRangePicker. The native Fullscreen API only paints descendants of the
+  // fullscreened element, so the picker's default body-portal popover is
+  // invisible. Registering this ref makes the popover render inside our
+  // fullscreened Box. Cleared on exit / unmount so other pages keep using the
+  // default body portal.
+  useEffect(() => {
+    if (isFullscreen && pickerPortalRef.current) {
+      setPickerContainer(pickerPortalRef.current);
+      return () => setPickerContainer(null);
+    }
+    setPickerContainer(null);
+    return undefined;
+  }, [isFullscreen, setPickerContainer]);
 
   // Edit dialog state
   const [editDialogOpen, setEditDialogOpen] = useState(false);
@@ -2641,86 +2631,60 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
 
   return (
     <Box
+      ref={tableContainerRef}
       sx={{
         width: "100%",
         overflowX: "hidden",
         display: "flex",
         flexDirection: "column",
-        height: { xs: "calc(100vh - 56px)", sm: "calc(100vh - 64px)" },
+        height: isFullscreen
+          ? "100vh"
+          : {
+              // Subtract MainLayout app bar (xs 56 / sm 64) + main padding (xs 1.5*8*2=24 / sm 2*8*2=32 / md 3*8*2=48)
+              xs: "calc(100vh - 80px)",
+              sm: "calc(100vh - 96px)",
+              md: "calc(100vh - 112px)",
+            },
         minHeight: 0,
+        ...(isFullscreen && {
+          bgcolor: "background.paper",
+        }),
       }}
     >
-      {/* ===== HEADER ROW 1: Title + Days Count + View Toggle + Refresh ===== */}
-      <PageHeader
-        title="Attendance"
-        subtitle={isMobile ? undefined : selectedSite?.name}
-        titleChip={
-          dateSummaries.length > 0 ? (
-            <Chip
-              label={`${dateSummaries.length} days`}
-              size="small"
-              color="primary"
-              sx={{ height: 22, fontSize: "0.7rem", fontWeight: 500 }}
-            />
-          ) : null
-        }
-        actions={
-          <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-            {/* View Mode Toggle */}
-            <Select
-              value={viewMode}
-              onChange={(e) =>
-                setViewMode(e.target.value as "date-wise" | "detailed")
-              }
-              size="small"
-              sx={{
-                minWidth: { xs: 90, sm: 120 },
-                height: 32,
-                fontSize: { xs: "0.75rem", sm: "0.875rem" },
-                bgcolor: "background.paper",
-                "& .MuiSelect-select": { py: 0.5, px: 1 },
-              }}
-            >
-              <MenuItem value="date-wise">Date View</MenuItem>
-              <MenuItem value="detailed">Detailed View</MenuItem>
-            </Select>
-          </Box>
-        }
-      />
+      {/* Portal target for the global DateRangePicker popover while fullscreened.
+          Lives inside the fullscreened DOM subtree so the popover remains
+          visible — see setPickerContainer effect above. Empty div, zero size. */}
+      <div ref={pickerPortalRef} id="attendance-picker-portal" />
 
-      {/* ===== MONTH NAVIGATION ===== */}
-      <Box
-        sx={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          gap: 1,
-          py: 0.5,
-          px: { xs: 1, sm: 0 },
-          flexShrink: 0,
-        }}
-      >
-        <IconButton size="small" onClick={handlePrevMonth}>
-          <ChevronLeftIcon />
-        </IconButton>
-        <Typography
-          variant="subtitle1"
-          sx={{ fontWeight: 600, minWidth: 120, textAlign: "center" }}
-        >
-          {currentViewMonth.format("MMMM YYYY")}
-        </Typography>
-        <IconButton
-          size="small"
-          onClick={handleNextMonth}
-          disabled={isCurrentMonth}
-        >
-          <ChevronRightIcon />
-        </IconButton>
+      {/* ===== HEADER ROW 1: Title + Days Count + View Toggle + Refresh ===== */}
+      <Box sx={{ flexShrink: 0 }}>
+        <PageHeader
+          title="Attendance"
+          subtitle={isMobile ? undefined : selectedSite?.name}
+          titleChip={<ScopeChip />}
+          actions={
+            <Tooltip
+              title={
+                isFullscreen ? "Exit fullscreen (Esc)" : "Enter fullscreen"
+              }
+            >
+              <IconButton
+                onClick={isFullscreen ? exitFullscreen : enterFullscreen}
+                size="small"
+                aria-label={
+                  isFullscreen ? "Exit fullscreen" : "Enter fullscreen"
+                }
+              >
+                {isFullscreen ? <FullscreenExit /> : <Fullscreen />}
+              </IconButton>
+            </Tooltip>
+          }
+        />
       </Box>
 
       {/* Back button when coming from settlement page */}
       {cameFromSettlement && (
-        <Box sx={{ px: { xs: 1, sm: 0 }, mb: 1 }}>
+        <Box sx={{ px: { xs: 1, sm: 0 }, mb: 1, flexShrink: 0 }}>
           <Button
             variant="outlined"
             size="small"
@@ -2738,10 +2702,15 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
       {/* ===== HEADER ROW 2: Date Picker + Show Last Quick Filters (Same Row) ===== */}
       {/* Period Summary Bar - Collapsible on Mobile */}
       <Paper
-        sx={{ p: { xs: 0.75, sm: 2 }, mb: { xs: 1, sm: 2 }, flexShrink: 0 }}
+        sx={{
+          overflow: "hidden",
+          mb: { xs: 1, sm: 2 },
+          flexShrink: 0,
+        }}
       >
-        {/* Mobile: Collapsible Summary */}
-        <Box sx={{ display: { xs: "block", sm: "none" } }}>
+        <Box sx={{ p: { xs: 0.75, sm: 2 } }}>
+          {/* Mobile: Collapsible Summary */}
+          <Box sx={{ display: { xs: "block", sm: "none" } }}>
           {/* Collapsed Header - Always visible on mobile */}
           <Box
             onClick={() => setSummaryExpanded(!summaryExpanded)}
@@ -3138,66 +3107,33 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
             </Box>
           </Box>
         </Box>
+        </Box>
       </Paper>
 
       {/* Data Display */}
       {loading ? (
-        <Box sx={{ display: "flex", justifyContent: "center", p: 4 }}>
+        <Box
+          sx={{
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            p: 4,
+            flex: 1,
+            minHeight: 0,
+          }}
+        >
           <CircularProgress />
         </Box>
       ) : viewMode === "date-wise" ? (
         <Box
-          ref={tableContainerRef}
           sx={{
             display: "flex",
             flexDirection: "column",
             flex: 1,
             minHeight: 0,
             width: "100%",
-            // Fullscreen styling - applied when using native Fullscreen API
-            ...(isFullscreen && {
-              bgcolor: "background.paper",
-              height: "100vh",
-              width: "100vw",
-            }),
           }}
         >
-          {/* Fullscreen Header - Only visible in fullscreen mode */}
-          {isFullscreen && (
-            <Box
-              sx={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                p: 1,
-                bgcolor: "primary.main",
-                color: "white",
-                flexShrink: 0,
-              }}
-            >
-              <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                <Typography variant="subtitle1" fontWeight={600}>
-                  Attendance Table
-                </Typography>
-                <Chip
-                  label={`${dateSummaries.length} days`}
-                  size="small"
-                  sx={{
-                    bgcolor: "rgba(255,255,255,0.2)",
-                    color: "white",
-                    height: 24,
-                  }}
-                />
-              </Box>
-              <IconButton
-                size="small"
-                onClick={exitFullscreen}
-                sx={{ color: "white" }}
-              >
-                <CloseIcon />
-              </IconButton>
-            </Box>
-          )}
           <Paper
             sx={{
               borderRadius: isFullscreen ? 0 : 2,
@@ -3210,33 +3146,10 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
               minHeight: 0,
             }}
           >
-            {/* Fullscreen toggle - top right corner overlay (Mobile Only) */}
-            {!isFullscreen && (
-              <Tooltip title="View fullscreen">
-                <IconButton
-                  size="small"
-                  onClick={enterFullscreen}
-                  sx={{
-                    display: { xs: "flex", sm: "none" },
-                    position: "absolute",
-                    top: 8,
-                    right: 8,
-                    zIndex: 10,
-                    bgcolor: "rgba(255,255,255,0.95)",
-                    boxShadow: 2,
-                    "&:hover": { bgcolor: "background.paper" },
-                  }}
-                >
-                  <Fullscreen fontSize="small" />
-                </IconButton>
-              </Tooltip>
-            )}
             <TableContainer
               sx={{
                 flex: 1,
-                maxHeight: isFullscreen
-                  ? "calc(100vh - 56px)"
-                  : { xs: "calc(100vh - 180px)", sm: "calc(100vh - 300px)" },
+                minHeight: 0,
                 overflowX: "auto",
                 overflowY: "auto",
                 WebkitOverflowScrolling: "touch",
@@ -5346,12 +5259,14 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
           </Paper>
         </Box>
       ) : (
-        <DataTable
-          columns={detailedColumns}
-          data={attendanceRecords}
-          isLoading={loading}
-          showRecordCount
-        />
+        <Box sx={{ flex: 1, minHeight: 0, overflow: "auto" }}>
+          <DataTable
+            columns={detailedColumns}
+            data={attendanceRecords}
+            isLoading={loading}
+            showRecordCount
+          />
+        </Box>
       )}
 
       {/* Attendance Drawer */}

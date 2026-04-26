@@ -41,6 +41,7 @@ import {
 } from "@mui/icons-material";
 import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
 import RedirectConfirmDialog from "@/components/common/RedirectConfirmDialog";
+import ScopePill from "@/components/common/ScopePill";
 import { createClient } from "@/lib/supabase/client";
 import { useSite } from "@/contexts/SiteContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -110,9 +111,31 @@ export default function ExpensesPage() {
   const [subcontractDrawerOpen, setSubcontractDrawerOpen] = useState(false);
   const [subcontractsLoadedForSite, setSubcontractsLoadedForSite] = useState<string | null>(null);
 
-  // Result-cap state — guards against pulling unbounded rows from v_all_expenses
-  const RESULT_LIMIT = 2000;
+  // Result-cap state — load recent rows first and let the user "Load more"
+  // so we don't pull thousands of rows from the heavy v_all_expenses view on
+  // every page load. The hard ceiling is kept as a safety net for runaway
+  // queries (30s client timeout, Cloudflare TTFB).
+  const INITIAL_RESULT_LIMIT = 200;
+  const MAX_RESULT_LIMIT = 2000;
+  const LOAD_MORE_STEP = 200;
+  const [loadedLimit, setLoadedLimit] = useState(INITIAL_RESULT_LIMIT);
   const [resultLimitHit, setResultLimitHit] = useState(false);
+
+  // Scope-wide summary from the get_expense_summary RPC. When available it
+  // gives accurate lifetime totals regardless of how many rows the table
+  // has loaded. If the RPC isn't applied yet (local dev without the
+  // migration, for example), this stays null and the summary falls back to
+  // client-side aggregation from `expenses`.
+  interface ScopeSummary {
+    total: number;
+    totalCount: number;
+    cleared: number;
+    clearedCount: number;
+    pending: number;
+    pendingCount: number;
+    breakdown: Record<string, { amount: number; count: number }>;
+  }
+  const [scopeSummary, setScopeSummary] = useState<ScopeSummary | null>(null);
 
   // Material Purchases state removed - now handled by Material Settlements page
 
@@ -265,37 +288,96 @@ export default function ExpensesPage() {
 
       if (activeTab !== "all") query = query.eq("module", activeTab);
 
-      // Cap the result set to keep response time bounded for sites with large history.
-      // v_all_expenses is a 7-way UNION ALL with correlated subqueries, so unlimited
-      // selects can exceed both the client 30s wrapper and the Cloudflare proxy TTFB.
-      query = query.limit(RESULT_LIMIT);
+      // Load a bounded slice. The initial limit is small (200) so fresh page
+      // loads stay snappy even when the user's All Time view would otherwise
+      // return thousands of rows. The "Load more" button grows this limit
+      // in LOAD_MORE_STEP chunks up to MAX_RESULT_LIMIT as a safety net for
+      // the view's 7-way UNION ALL exceeding the 30s client timeout or the
+      // Cloudflare proxy TTFB.
+      query = query.limit(loadedLimit);
+
+      // Kick off the scope-wide summary RPC in parallel. It's cheap (single
+      // aggregated row regardless of scope size) and lets the summary card
+      // stay accurate when the table is showing only a 200-row slice.
+      const summaryPromise = (supabase as any).rpc("get_expense_summary", {
+        p_site_id: selectedSite.id,
+        p_date_from: !isAllTime && dateFrom ? dateFrom : null,
+        p_date_to: !isAllTime && dateTo ? dateTo : null,
+        p_module: activeTab === "all" ? null : activeTab,
+      });
 
       // Use timeout protection to prevent infinite loading
-      const { data, error } = await supabaseQueryWithTimeout<any[]>(query, 30000);
+      const [{ data, error }, summaryResult] = await Promise.all([
+        supabaseQueryWithTimeout<any[]>(query, 30000),
+        summaryPromise,
+      ]);
       if (error) throw error;
 
       const rows = data || [];
-      setResultLimitHit(rows.length >= RESULT_LIMIT);
+      setResultLimitHit(rows.length >= loadedLimit);
       setExpenses(
         rows.map((e: any) => ({
           ...e,
           // View already has category_name, payer_name, subcontract_title
         }))
       );
+
+      // If the RPC landed, use it. Otherwise (e.g. migration not yet
+      // applied in local dev) keep scopeSummary null and the summary card
+      // falls back to client-side totals over the loaded rows.
+      if (summaryResult && !summaryResult.error && summaryResult.data) {
+        const s = summaryResult.data as {
+          total_amount: number | string;
+          total_count: number | string;
+          cleared_amount: number | string;
+          cleared_count: number | string;
+          pending_amount: number | string;
+          pending_count: number | string;
+          by_type: Array<{ type: string; amount: number | string; count: number | string }>;
+        };
+        const breakdown: Record<string, { amount: number; count: number }> = {};
+        for (const row of s.by_type ?? []) {
+          breakdown[row.type] = {
+            amount: Number(row.amount) || 0,
+            count: Number(row.count) || 0,
+          };
+        }
+        setScopeSummary({
+          total: Number(s.total_amount) || 0,
+          totalCount: Number(s.total_count) || 0,
+          cleared: Number(s.cleared_amount) || 0,
+          clearedCount: Number(s.cleared_count) || 0,
+          pending: Number(s.pending_amount) || 0,
+          pendingCount: Number(s.pending_count) || 0,
+          breakdown,
+        });
+      } else {
+        setScopeSummary(null);
+      }
+
       // Mark subcontract totals as stale; they refresh next time the drawer opens.
       setSubcontractsLoadedForSite(null);
     } catch (error: any) {
       console.error("Error loading expenses:", error);
       setExpenses([]);
       setResultLimitHit(false);
+      setScopeSummary(null);
     } finally {
       setLoading(false);
     }
   };
 
+  // Reset the load-more window whenever the "what we're looking at" changes:
+  // different site, different date scope, or different module tab. The next
+  // effect then re-fetches with the fresh limit.
+  useEffect(() => {
+    setLoadedLimit(INITIAL_RESULT_LIMIT);
+  }, [selectedSite, dateFrom, dateTo, activeTab, isAllTime]);
+
   useEffect(() => {
     fetchExpenses();
-  }, [selectedSite, dateFrom, dateTo, activeTab, isAllTime]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSite, dateFrom, dateTo, activeTab, isAllTime, loadedLimit]);
 
   const handleOpenDialog = (expense?: ExpenseWithCategory) => {
     // Prevent editing of settlement-derived expenses
@@ -487,6 +569,22 @@ export default function ExpensesPage() {
   };
 
   const stats = useMemo(() => {
+    // Prefer the server-side RPC aggregates — they reflect the entire current
+    // scope (including All Time with 2000+ rows) without depending on how
+    // many rows the table happened to load. Fall back to client aggregation
+    // from `expenses` only if the RPC hasn't returned yet or isn't deployed.
+    if (scopeSummary) {
+      return {
+        total: scopeSummary.total,
+        cleared: scopeSummary.cleared,
+        pending: scopeSummary.pending,
+        totalCount: scopeSummary.totalCount,
+        clearedCount: scopeSummary.clearedCount,
+        pendingCount: scopeSummary.pendingCount,
+        categoryBreakdown: scopeSummary.breakdown,
+      };
+    }
+
     const total = expenses.reduce((s, e) => s + e.amount, 0);
     const clearedExpenses = expenses.filter((e) => e.is_cleared);
     const cleared = clearedExpenses.reduce((s, e) => s + e.amount, 0);
@@ -514,7 +612,7 @@ export default function ExpensesPage() {
       pendingCount: pendingExpenses.length,
       categoryBreakdown,
     };
-  }, [expenses]);
+  }, [expenses, scopeSummary]);
 
   const columns = useMemo<MRT_ColumnDef<ExpenseWithCategory>[]>(() => {
     const cols: MRT_ColumnDef<ExpenseWithCategory>[] = [
@@ -779,13 +877,15 @@ export default function ExpensesPage() {
 
       {/* Unified Expense Summary */}
       <Card sx={{ mb: 3 }}>
-        <CardContent sx={{ p: { xs: 2, md: 2.5 } }}>
+        <CardContent sx={{ p: 0 }}>
+          <ScopePill />
           <Box
             sx={{
               display: "flex",
               flexDirection: { xs: "column", md: "row" },
               gap: { xs: 2.5, md: 3 },
               alignItems: { xs: "stretch", md: "stretch" },
+              p: { xs: 2, md: 2.5 },
             }}
           >
             {/* Left: Total */}
@@ -962,9 +1062,40 @@ export default function ExpensesPage() {
       </Card>
 
       {resultLimitHit && (
-        <Alert severity="info" sx={{ mb: 2 }}>
-          Showing the first {RESULT_LIMIT.toLocaleString("en-IN")} records for the selected
-          range. Narrow the date range or filter by module/type to see older entries.
+        <Alert
+          severity="info"
+          sx={{ mb: 2 }}
+          action={
+            loadedLimit < MAX_RESULT_LIMIT ? (
+              <Button
+                color="inherit"
+                size="small"
+                disabled={loading}
+                onClick={() =>
+                  setLoadedLimit((l) =>
+                    Math.min(l + LOAD_MORE_STEP, MAX_RESULT_LIMIT)
+                  )
+                }
+              >
+                {loading
+                  ? "Loading…"
+                  : `Load ${LOAD_MORE_STEP} more`}
+              </Button>
+            ) : null
+          }
+        >
+          Table shows the most recent {loadedLimit.toLocaleString("en-IN")}{" "}
+          records for the current scope.
+          {scopeSummary
+            ? ` Totals above are accurate across all ${scopeSummary.totalCount.toLocaleString(
+                "en-IN"
+              )} records.`
+            : " Totals above reflect this slice."}
+          {loadedLimit < MAX_RESULT_LIMIT
+            ? ` Click "Load ${LOAD_MORE_STEP} more" to see older rows, or narrow the date range.`
+            : ` You've reached the ${MAX_RESULT_LIMIT.toLocaleString(
+                "en-IN"
+              )} row table ceiling. Narrow the date range to see older rows.`}
         </Alert>
       )}
 

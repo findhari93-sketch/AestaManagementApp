@@ -415,7 +415,7 @@ export default function MainLayout({
     severity: "success" | "error" | "warning" | "info";
   }>({ open: false, message: "", severity: "info" });
 
-  const { userProfile, signOut } = useAuth();
+  const { user, userProfile, loading: authLoading, signOut } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
   const theme = useTheme();
@@ -433,15 +433,26 @@ export default function MainLayout({
     startDate,
     endDate,
     setDateRange,
+    setToday,
     setLastWeek,
     setLastMonth,
-    setAllTime,
-    isAllTime,
     label: dateRangeLabel,
+    pickerOpen,
+    closePicker,
   } = useDateRange();
 
   // Refresh session on navigation (since middleware doesn't run on client-side navigation)
   useSessionRefresh();
+
+  // Redirect to /login when there is no authenticated user. Middleware should
+  // catch this on full requests, but RSC navigations + client-side state drift
+  // can leave the layout rendered for a logged-out user (empty avatar "U",
+  // "Welcome back, User", no sites).
+  useEffect(() => {
+    if (!authLoading && !user) {
+      router.replace("/login");
+    }
+  }, [authLoading, user, router]);
 
   // Determine active tab based on current path
   useEffect(() => {
@@ -491,8 +502,12 @@ export default function MainLayout({
 
   const handleSignOut = async () => {
     handleUserMenuClose();
-    await signOut();
-    router.push("/login");
+    try {
+      await signOut();
+    } catch (error) {
+      console.error("[MainLayout] Sign out error:", error);
+    }
+    router.replace("/login");
   };
 
   const handleSettings = () => {
@@ -1085,21 +1100,38 @@ export default function MainLayout({
               mr: { xs: 0.5, sm: 1 },
             }}
           >
-            {/* Date Range Picker - Always visible */}
             <DateRangePicker
               startDate={startDate}
               endDate={endDate}
-              onChange={(start, end) => setDateRange(start, end)}
+              onChange={(start, end) => {
+                setDateRange(start, end);
+                closePicker();
+              }}
               minDate={selectedSite?.start_date ? new Date(selectedSite.start_date) : undefined}
+              forceOpen={pickerOpen}
+              onPopoverClose={() => closePicker()}
             />
 
-            {/* Quick Filter Chips - Hidden on mobile */}
+            {/* Quick chips — hidden on mobile */}
+            <Chip
+              label="Today"
+              size="small"
+              variant={dateRangeLabel === "Today" ? "filled" : "outlined"}
+              color={dateRangeLabel === "Today" ? "primary" : "default"}
+              onClick={() => setToday()}
+              sx={{
+                display: { xs: "none", sm: "flex" },
+                cursor: "pointer",
+                minWidth: 56,
+                fontWeight: dateRangeLabel === "Today" ? 600 : 400,
+              }}
+            />
             <Chip
               label="Week"
               size="small"
               variant={dateRangeLabel === "This Week" ? "filled" : "outlined"}
               color={dateRangeLabel === "This Week" ? "primary" : "default"}
-              onClick={() => dateRangeLabel === "This Week" ? setAllTime() : setLastWeek()}
+              onClick={() => setLastWeek()}
               sx={{
                 display: { xs: "none", sm: "flex" },
                 cursor: "pointer",
@@ -1112,7 +1144,7 @@ export default function MainLayout({
               size="small"
               variant={dateRangeLabel === "This Month" ? "filled" : "outlined"}
               color={dateRangeLabel === "This Month" ? "primary" : "default"}
-              onClick={() => dateRangeLabel === "This Month" ? setAllTime() : setLastMonth()}
+              onClick={() => setLastMonth()}
               sx={{
                 display: { xs: "none", sm: "flex" },
                 cursor: "pointer",
