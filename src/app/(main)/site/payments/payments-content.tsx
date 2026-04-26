@@ -296,8 +296,15 @@ export default function PaymentsContent() {
               });
             }}
             onSettleClick={(week) => {
-              setNotice(
-                `Settle Week ${week.weekStart} → ${week.weekEnd} (Phase 4 wires WeeklySettlementDialog)`
+              // Route to /site/attendance scoped to the week. The existing
+              // WeeklySettlementDialog there has the full per-laborer-per-day
+              // data shape that the waterfall row doesn't surface; opening
+              // the dialog directly from here would require a new
+              // settlement-payload RPC. Pattern matches the daily-date and
+              // weekly-week settle CTAs above.
+              setNotice("Opening attendance to settle this week…");
+              router.push(
+                `/site/attendance?weekStart=${week.weekStart}&weekEnd=${week.weekEnd}`
               );
             }}
           />
