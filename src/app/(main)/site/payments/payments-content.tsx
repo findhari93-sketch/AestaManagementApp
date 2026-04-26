@@ -5,8 +5,11 @@ import { useRouter, useSearchParams } from "next/navigation";
 import {
   Alert,
   Box,
+  Chip,
   IconButton,
   Snackbar,
+  Tab,
+  Tabs,
   Tooltip,
 } from "@mui/material";
 import {
@@ -20,12 +23,18 @@ import ScopeChip from "@/components/common/ScopeChip";
 import PendingBanner from "@/components/payments/PendingBanner";
 import { SalarySliceHero } from "@/components/payments/SalarySliceHero";
 import { SalaryWaterfallList } from "@/components/payments/SalaryWaterfallList";
+import { AdvancesList } from "@/components/payments/AdvancesList";
+import { DailyMarketLedger } from "@/components/payments/DailyMarketLedger";
 import { usePaymentSummary } from "@/hooks/queries/usePaymentSummary";
+import { usePaymentsLedger } from "@/hooks/queries/usePaymentsLedger";
 import { useSalarySliceSummary } from "@/hooks/queries/useSalarySliceSummary";
 import { useSalaryWaterfall } from "@/hooks/queries/useSalaryWaterfall";
+import { useAdvances } from "@/hooks/queries/useAdvances";
 import { useInspectPane } from "@/hooks/useInspectPane";
 import { InspectPane } from "@/components/common/InspectPane";
 import type { InspectEntity } from "@/components/common/InspectPane";
+
+type ActiveTab = "waterfall" | "advances" | "daily-market";
 
 export default function PaymentsContent() {
   const { selectedSite } = useSelectedSite();
@@ -41,6 +50,7 @@ export default function PaymentsContent() {
 
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<ActiveTab>("waterfall");
 
   const pane = useInspectPane();
 
@@ -67,6 +77,24 @@ export default function PaymentsContent() {
     dateFrom: effectiveFrom,
     dateTo: effectiveTo,
   });
+
+  const advancesQuery = useAdvances({
+    siteId: selectedSite?.id,
+    dateFrom: effectiveFrom,
+    dateTo: effectiveTo,
+  });
+
+  const dailyMarketLedgerQuery = usePaymentsLedger({
+    siteId: selectedSite?.id,
+    dateFrom: effectiveFrom,
+    dateTo: effectiveTo,
+    status: "all",
+    type: "daily-market",
+  });
+
+  const pendingDailyMarketCount = (dailyMarketLedgerQuery.data ?? []).filter(
+    (r) => r.isPending
+  ).length;
 
   const handleSettleClick = useCallback(
     (entity: InspectEntity) => {
@@ -167,30 +195,138 @@ export default function PaymentsContent() {
         )}
       </Box>
 
+      <Box sx={{ flexShrink: 0, borderBottom: 1, borderColor: "divider", bgcolor: "background.paper" }}>
+        <Tabs
+          value={activeTab}
+          onChange={(_, v) => setActiveTab(v as ActiveTab)}
+          variant="fullWidth"
+          sx={{
+            minHeight: 40,
+            "& .MuiTab-root": {
+              minHeight: 40,
+              fontSize: 12.5,
+              fontWeight: 600,
+              textTransform: "none",
+            },
+          }}
+        >
+          <Tab
+            value="waterfall"
+            label={
+              <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
+                <span>💼</span>
+                <Box sx={{ display: { xs: "none", sm: "inline" } }}>
+                  Salary Waterfall
+                </Box>
+                <Chip
+                  size="small"
+                  label={waterfallQuery.data?.length ?? 0}
+                  sx={{ height: 18, fontSize: 10, fontWeight: 700 }}
+                />
+              </Box>
+            }
+          />
+          <Tab
+            value="advances"
+            label={
+              <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
+                <span>💸</span>
+                <Box sx={{ display: { xs: "none", sm: "inline" } }}>Advances</Box>
+                <Chip
+                  size="small"
+                  label={advancesQuery.data?.length ?? 0}
+                  sx={{ height: 18, fontSize: 10, fontWeight: 700 }}
+                />
+              </Box>
+            }
+          />
+          <Tab
+            value="daily-market"
+            label={
+              <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
+                <span>📅</span>
+                <Box sx={{ display: { xs: "none", sm: "inline" } }}>
+                  Daily + Market
+                </Box>
+                <Chip
+                  size="small"
+                  color={pendingDailyMarketCount > 0 ? "warning" : "default"}
+                  label={pendingDailyMarketCount}
+                  sx={{ height: 18, fontSize: 10, fontWeight: 700 }}
+                />
+              </Box>
+            }
+          />
+        </Tabs>
+      </Box>
+
       <Box sx={{ flex: 1, minHeight: 0, overflow: "auto" }}>
-        <SalaryWaterfallList
-          weeks={waterfallQuery.data ?? []}
-          futureCredit={salarySummaryQuery.data?.futureCredit ?? 0}
-          isLoading={waterfallQuery.isLoading}
-          onRowClick={(week) => {
-            // Phase 4 adds the 'weekly-aggregate' entity kind to InspectEntity.
-            // For Phase 1 this is a placeholder cast that opens the existing
-            // InspectPane with a synthetic kind; the pane will not render
-            // tab content until Phase 4.2 adds WeeklyAggregateShape.
-            (pane.open as (entity: unknown) => void)({
-              kind: "weekly-aggregate",
-              siteId: selectedSite.id,
-              subcontractId: selectedSubcontractId,
-              weekStart: week.weekStart,
-              weekEnd: week.weekEnd,
-            });
-          }}
-          onSettleClick={(week) => {
-            setNotice(
-              `Settle Week ${week.weekStart} → ${week.weekEnd} (Phase 4 wires WeeklySettlementDialog)`
-            );
-          }}
-        />
+        {activeTab === "waterfall" && (
+          <SalaryWaterfallList
+            weeks={waterfallQuery.data ?? []}
+            futureCredit={salarySummaryQuery.data?.futureCredit ?? 0}
+            isLoading={waterfallQuery.isLoading}
+            onRowClick={(week) => {
+              // Phase 4 adds the 'weekly-aggregate' entity kind to InspectEntity.
+              // For Phase 2 this is still a placeholder cast; the pane will not
+              // render tab content until Phase 4.2 adds WeeklyAggregateShape.
+              (pane.open as (entity: unknown) => void)({
+                kind: "weekly-aggregate",
+                siteId: selectedSite.id,
+                subcontractId: selectedSubcontractId,
+                weekStart: week.weekStart,
+                weekEnd: week.weekEnd,
+              });
+            }}
+            onSettleClick={(week) => {
+              setNotice(
+                `Settle Week ${week.weekStart} → ${week.weekEnd} (Phase 4 wires WeeklySettlementDialog)`
+              );
+            }}
+          />
+        )}
+
+        {activeTab === "advances" && (
+          <AdvancesList
+            advances={advancesQuery.data ?? []}
+            isLoading={advancesQuery.isLoading}
+            onRowClick={(adv) => {
+              // Phase 4.1 adds the 'advance' entity kind. Until then we open
+              // the existing daily-date shape pointing at the advance date —
+              // it won't show meaningful attendance content but keeps the
+              // pane interaction predictable.
+              (pane.open as (entity: unknown) => void)({
+                kind: "advance",
+                siteId: selectedSite.id,
+                settlementId: adv.id,
+                settlementRef: adv.settlementRef,
+              });
+            }}
+          />
+        )}
+
+        {activeTab === "daily-market" && (
+          <DailyMarketLedger
+            rows={dailyMarketLedgerQuery.data ?? []}
+            isLoading={dailyMarketLedgerQuery.isLoading}
+            onRowClick={(row) => {
+              pane.open({
+                kind: "daily-date",
+                siteId: selectedSite.id,
+                date: row.date,
+                settlementRef: row.settlementRef,
+              });
+            }}
+            onSettleClick={(row) =>
+              handleSettleClick({
+                kind: "daily-date",
+                siteId: selectedSite.id,
+                date: row.date,
+                settlementRef: row.settlementRef,
+              })
+            }
+          />
+        )}
       </Box>
 
       <InspectPane
