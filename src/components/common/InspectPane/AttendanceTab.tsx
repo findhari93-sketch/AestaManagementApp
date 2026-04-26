@@ -16,6 +16,7 @@ import {
   useLaborerWeek,
   type LaborerWeekDay,
 } from "@/hooks/queries/useLaborerWeek";
+import { useWeekAggregateAttendance } from "@/hooks/queries/useWeekAggregateAttendance";
 
 // ----------------------------------------------------------------
 // Shared sub-component
@@ -505,10 +506,179 @@ function WeeklyShape({
 }
 
 // ----------------------------------------------------------------
+// Weekly-aggregate shape: one subcontract (or all) × one week
+// Per-day attendance roll-up across all contract laborers
+// ----------------------------------------------------------------
+
+function WeeklyAggregateShape({
+  entity,
+}: {
+  entity: Extract<InspectEntity, { kind: "weekly-aggregate" }>;
+}) {
+  const theme = useTheme();
+  const { data, isLoading } = useWeekAggregateAttendance(
+    entity.siteId,
+    entity.subcontractId,
+    entity.weekStart,
+    entity.weekEnd
+  );
+
+  if (isLoading) {
+    return (
+      <Box sx={{ p: 2 }}>
+        <Skeleton variant="rounded" height={56} sx={{ mb: 2 }} />
+        <Skeleton variant="rounded" height={140} />
+      </Box>
+    );
+  }
+
+  const days = data?.days ?? [];
+
+  return (
+    <Box sx={{ p: 2 }}>
+      <Typography
+        variant="caption"
+        color="text.secondary"
+        sx={SECTION_LABEL_SX}
+      >
+        Per-day attendance · {data?.totalLaborers ?? 0} contract laborers worked
+      </Typography>
+
+      <Box
+        sx={{
+          display: "grid",
+          gridTemplateColumns: "repeat(7, 1fr)",
+          gap: 0.5,
+          mb: 2,
+        }}
+      >
+        {Array.from({ length: 7 }).map((_, i) => {
+          const dt = dayjs(entity.weekStart).add(i, "day").format("YYYY-MM-DD");
+          const day = days.find((d) => d.date === dt);
+          return (
+            <Box
+              key={dt}
+              sx={{
+                p: 0.75,
+                borderRadius: 1,
+                textAlign: "center",
+                bgcolor: day
+                  ? alpha(theme.palette.success.main, 0.12)
+                  : "background.default",
+                border: `1px solid ${day ? theme.palette.success.main : theme.palette.divider}`,
+                minHeight: 80,
+                display: "flex",
+                flexDirection: "column",
+                justifyContent: "space-between",
+              }}
+            >
+              <Box>
+                <Typography
+                  sx={{
+                    fontSize: 8.5,
+                    color: "text.secondary",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  {dayjs(dt).format("ddd")}
+                </Typography>
+                <Typography sx={{ fontWeight: 700 }}>
+                  {dayjs(dt).format("DD")}
+                </Typography>
+              </Box>
+              {day ? (
+                <Box>
+                  <Typography
+                    sx={{
+                      fontSize: 8.5,
+                      color: "success.dark",
+                      fontWeight: 600,
+                    }}
+                  >
+                    {day.laborersWorked} lab.
+                  </Typography>
+                  <Typography
+                    sx={{
+                      fontSize: 9,
+                      color: "success.main",
+                      fontWeight: 600,
+                      fontVariantNumeric: "tabular-nums",
+                    }}
+                  >
+                    ₹{day.totalEarnings.toLocaleString("en-IN")}
+                  </Typography>
+                </Box>
+              ) : (
+                <Typography sx={{ fontSize: 9, color: "text.disabled" }}>
+                  —
+                </Typography>
+              )}
+            </Box>
+          );
+        })}
+      </Box>
+
+      <Box
+        sx={{
+          bgcolor: "background.paper",
+          border: `1px solid ${theme.palette.divider}`,
+          borderRadius: 1.5,
+          p: 1.25,
+          fontSize: 12.5,
+        }}
+      >
+        <Box
+          sx={{
+            display: "flex",
+            justifyContent: "space-between",
+            py: 0.5,
+          }}
+        >
+          <span style={{ color: theme.palette.text.secondary }}>
+            Worked this week
+          </span>
+          <span
+            style={{
+              fontWeight: 600,
+              fontVariantNumeric: "tabular-nums",
+            }}
+          >
+            {data?.totalLaborers ?? 0} laborers
+          </span>
+        </Box>
+        <Box
+          sx={{
+            display: "flex",
+            justifyContent: "space-between",
+            py: 0.5,
+          }}
+        >
+          <span style={{ color: theme.palette.text.secondary }}>
+            Total wages this week
+          </span>
+          <span
+            style={{
+              fontWeight: 600,
+              fontVariantNumeric: "tabular-nums",
+            }}
+          >
+            ₹{(data?.totalEarnings ?? 0).toLocaleString("en-IN")}
+          </span>
+        </Box>
+      </Box>
+    </Box>
+  );
+}
+
+// ----------------------------------------------------------------
 // Default export: branch by entity.kind
 // ----------------------------------------------------------------
 
 export default function AttendanceTab({ entity }: { entity: InspectEntity }) {
   if (entity.kind === "daily-date") return <DailyShape entity={entity} />;
-  return <WeeklyShape entity={entity} />;
+  if (entity.kind === "weekly-week") return <WeeklyShape entity={entity} />;
+  if (entity.kind === "weekly-aggregate")
+    return <WeeklyAggregateShape entity={entity} />;
+  // 'advance' — Attendance tab is not surfaced for this kind by InspectPane.tsx
+  return null;
 }
