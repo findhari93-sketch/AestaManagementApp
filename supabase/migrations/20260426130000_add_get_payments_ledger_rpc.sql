@@ -12,9 +12,9 @@
 --   row_type text            - 'daily-market' or 'weekly'.
 --   date_or_week_start date  - settlement_date for paid; attendance date for
 --                              pending. The ORDER BY column.
---   week_end date            - settlement_date for paid weekly (placeholder
---                              until Phase 4 introduces proper laborer-week
---                              tracking); NULL otherwise.
+--   week_end date            - Sunday of the ISO week containing
+--                              settlement_date for paid weekly rows; NULL
+--                              otherwise.
 --   for_label text           - human-readable descriptor:
 --                                paid daily-market: "<N> lab + <M> mkt"
 --                                paid weekly (1 lab): laborers.name
@@ -35,6 +35,13 @@
 --   * Pending daily-market = distinct attendance dates within scope where
 --     daily_attendance.is_paid=false (excluding contract laborers, mirroring
 --     get_payment_summary) or market_laborer_attendance.is_paid=false.
+--
+-- Paid weekly date range:
+--   date_or_week_start and week_end are derived from settlement_date via
+--   date_trunc('week', ...) (ISO Monday) + 6 days (Sunday). This gives the
+--   InspectPane weekly view a real Mon-Sun range to render the 7-day strip
+--   against. The settlement_date itself is preserved in audit/settlement
+--   contexts via settlement_ref.
 --
 -- STUB - Pending weekly:
 --   The pending-weekly stream (per-laborer-per-week unsettled contract money)
@@ -193,8 +200,8 @@ AS $$
       'p:'||p.id::text                                                          AS id,
       p.settlement_reference                                                    AS settlement_ref,
       'weekly'::text                                                            AS row_type,
-      p.settlement_date                                                         AS date_or_week_start,
-      p.settlement_date                                                         AS week_end,
+      date_trunc('week', p.settlement_date)::date                               AS date_or_week_start,
+      (date_trunc('week', p.settlement_date)::date + 6)                         AS week_end,
       COALESCE(
         CASE
           WHEN p.distinct_lab_cnt = 1 THEN
