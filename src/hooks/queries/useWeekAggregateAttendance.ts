@@ -7,8 +7,15 @@ export interface WeekDayAggregate {
   totalEarnings: number;
 }
 
+export interface WeekHoliday {
+  date: string;
+  reason: string | null;
+  isPaid: boolean;
+}
+
 export interface WeekAggregate {
   days: WeekDayAggregate[];
+  holidays: WeekHoliday[];
   totalLaborers: number;
   totalEarnings: number;
 }
@@ -31,7 +38,7 @@ export function useWeekAggregateAttendance(
     enabled: Boolean(siteId && weekStart && weekEnd),
     staleTime: 15_000,
     queryFn: async () => {
-      let q = supabase
+      let attendanceQ = supabase
         .from("daily_attendance")
         .select("date, laborer_id, daily_earnings, laborers!inner(laborer_type)")
         .eq("site_id", siteId!)
@@ -39,9 +46,21 @@ export function useWeekAggregateAttendance(
         .eq("laborers.laborer_type", "contract")
         .gte("date", weekStart!)
         .lte("date", weekEnd!);
-      if (subcontractId) q = q.eq("subcontract_id", subcontractId);
-      const { data, error } = await q;
-      if (error) throw error;
+      if (subcontractId) attendanceQ = attendanceQ.eq("subcontract_id", subcontractId);
+
+      const holidaysQ = supabase
+        .from("site_holidays")
+        .select("date, reason, is_paid_holiday")
+        .eq("site_id", siteId!)
+        .gte("date", weekStart!)
+        .lte("date", weekEnd!);
+
+      const [attendanceRes, holidaysRes] = await Promise.all([
+        attendanceQ,
+        holidaysQ,
+      ]);
+      if (attendanceRes.error) throw attendanceRes.error;
+      if (holidaysRes.error) throw holidaysRes.error;
 
       const byDate = new Map<
         string,
@@ -49,7 +68,7 @@ export function useWeekAggregateAttendance(
       >();
       const allLaborers = new Set<string>();
       let total = 0;
-      for (const r of (data ?? []) as Array<{
+      for (const r of (attendanceRes.data ?? []) as Array<{
         date: string;
         laborer_id: string;
         daily_earnings: number | string | null;
@@ -69,7 +88,21 @@ export function useWeekAggregateAttendance(
           laborersWorked: v.laborers.size,
           totalEarnings: v.earnings,
         }));
-      return { days, totalLaborers: allLaborers.size, totalEarnings: total };
+      const holidays: WeekHoliday[] = ((holidaysRes.data ?? []) as Array<{
+        date: string;
+        reason: string | null;
+        is_paid_holiday: boolean | null;
+      }>).map((h) => ({
+        date: h.date,
+        reason: h.reason,
+        isPaid: Boolean(h.is_paid_holiday),
+      }));
+      return {
+        days,
+        holidays,
+        totalLaborers: allLaborers.size,
+        totalEarnings: total,
+      };
     },
   });
 }

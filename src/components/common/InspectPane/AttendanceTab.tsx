@@ -523,6 +523,10 @@ function WeeklyAggregateShape({
     entity.weekEnd
   );
 
+  // Click a day chip to expand a per-laborer breakdown for that date below.
+  // Click again to collapse.
+  const [expandedDate, setExpandedDate] = React.useState<string | null>(null);
+
   if (isLoading) {
     return (
       <Box sx={{ p: 2 }}>
@@ -533,6 +537,7 @@ function WeeklyAggregateShape({
   }
 
   const days = data?.days ?? [];
+  const holidays = data?.holidays ?? [];
 
   return (
     <Box sx={{ p: 2 }}>
@@ -541,7 +546,7 @@ function WeeklyAggregateShape({
         color="text.secondary"
         sx={SECTION_LABEL_SX}
       >
-        Per-day attendance · {data?.totalLaborers ?? 0} contract laborers worked
+        Per-day attendance · {data?.totalLaborers ?? 0} contract laborers worked · tap a day for details
       </Typography>
 
       <Box
@@ -555,21 +560,54 @@ function WeeklyAggregateShape({
         {Array.from({ length: 7 }).map((_, i) => {
           const dt = dayjs(entity.weekStart).add(i, "day").format("YYYY-MM-DD");
           const day = days.find((d) => d.date === dt);
+          const holiday = holidays.find((h) => h.date === dt);
+          const isExpanded = expandedDate === dt;
+          // Holiday styling overrides empty styling but is overridden by worked-day
+          // (holidays where someone still worked are rare but valid).
+          const bg = day
+            ? alpha(theme.palette.success.main, 0.12)
+            : holiday
+              ? alpha(theme.palette.info.main, 0.12)
+              : "background.default";
+          const borderColor = isExpanded
+            ? theme.palette.primary.main
+            : day
+              ? theme.palette.success.main
+              : holiday
+                ? theme.palette.info.main
+                : theme.palette.divider;
           return (
             <Box
               key={dt}
+              role="button"
+              tabIndex={0}
+              aria-pressed={isExpanded}
+              onClick={() =>
+                setExpandedDate((prev) => (prev === dt ? null : dt))
+              }
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  setExpandedDate((prev) => (prev === dt ? null : dt));
+                }
+              }}
               sx={{
                 p: 0.75,
                 borderRadius: 1,
                 textAlign: "center",
-                bgcolor: day
-                  ? alpha(theme.palette.success.main, 0.12)
-                  : "background.default",
-                border: `1px solid ${day ? theme.palette.success.main : theme.palette.divider}`,
+                bgcolor: bg,
+                border: `${isExpanded ? 2 : 1}px solid ${borderColor}`,
                 minHeight: 80,
                 display: "flex",
                 flexDirection: "column",
                 justifyContent: "space-between",
+                cursor: "pointer",
+                transition: "transform 80ms ease",
+                "&:hover": { transform: "translateY(-1px)" },
+                "&:focus-visible": {
+                  outline: `2px solid ${theme.palette.primary.main}`,
+                  outlineOffset: 1,
+                },
               }}
             >
               <Box>
@@ -608,6 +646,33 @@ function WeeklyAggregateShape({
                     ₹{day.totalEarnings.toLocaleString("en-IN")}
                   </Typography>
                 </Box>
+              ) : holiday ? (
+                <Box>
+                  <Typography
+                    sx={{
+                      fontSize: 8.5,
+                      color: "info.dark",
+                      fontWeight: 700,
+                      textTransform: "uppercase",
+                      letterSpacing: 0.3,
+                    }}
+                  >
+                    Holiday
+                  </Typography>
+                  {holiday.reason && (
+                    <Typography
+                      sx={{
+                        fontSize: 8,
+                        color: "info.dark",
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                      }}
+                    >
+                      {holiday.reason}
+                    </Typography>
+                  )}
+                </Box>
               ) : (
                 <Typography sx={{ fontSize: 9, color: "text.disabled" }}>
                   —
@@ -617,6 +682,18 @@ function WeeklyAggregateShape({
           );
         })}
       </Box>
+
+      {/* Expanded per-day breakdown */}
+      {expandedDate && (
+        <Box sx={{ mb: 2 }}>
+          <DayDetailExpansion
+            siteId={entity.siteId}
+            subcontractId={entity.subcontractId}
+            date={expandedDate}
+            holiday={holidays.find((h) => h.date === expandedDate)}
+          />
+        </Box>
+      )}
 
       <Box
         sx={{
@@ -666,6 +743,194 @@ function WeeklyAggregateShape({
           </span>
         </Box>
       </Box>
+    </Box>
+  );
+}
+
+// ----------------------------------------------------------------
+// Per-day expansion: when a day chip in WeeklyAggregateShape is clicked,
+// show the laborer-by-laborer breakdown for that single date.
+// Reuses useAttendanceForDate which the DailyShape also uses.
+// ----------------------------------------------------------------
+
+import type { WeekHoliday } from "@/hooks/queries/useWeekAggregateAttendance";
+
+function DayDetailExpansion({
+  siteId,
+  subcontractId,
+  date,
+  holiday,
+}: {
+  siteId: string;
+  subcontractId: string | null;
+  date: string;
+  holiday?: WeekHoliday;
+}) {
+  void subcontractId; // Per-day RPC is not subcontract-scoped today; whole site
+  const theme = useTheme();
+  const { data, isLoading } = useAttendanceForDate(siteId, date);
+
+  return (
+    <Box
+      sx={{
+        bgcolor: "background.paper",
+        border: `1px solid ${theme.palette.primary.main}`,
+        borderRadius: 1.5,
+        p: 1.25,
+      }}
+    >
+      <Typography
+        variant="caption"
+        color="text.secondary"
+        sx={{
+          ...SECTION_LABEL_SX,
+          color: "primary.main",
+        }}
+      >
+        {dayjs(date).format("dddd, DD MMM")}
+        {holiday && " · Holiday"}
+      </Typography>
+
+      {holiday && (
+        <Typography
+          variant="caption"
+          sx={{
+            display: "block",
+            color: "info.dark",
+            mb: 1,
+          }}
+        >
+          {holiday.reason ?? "Holiday"}
+          {holiday.isPaid && " (paid)"}
+        </Typography>
+      )}
+
+      {isLoading ? (
+        <Skeleton variant="rounded" height={64} />
+      ) : (
+        <>
+          {(data?.dailyLaborers?.length ?? 0) === 0 &&
+          (data?.marketLaborers?.length ?? 0) === 0 ? (
+            <Typography variant="caption" color="text.disabled">
+              No attendance recorded on this day.
+            </Typography>
+          ) : (
+            <>
+              {(data?.dailyLaborers?.length ?? 0) > 0 && (
+                <>
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    sx={{
+                      display: "block",
+                      fontSize: 9,
+                      textTransform: "uppercase",
+                      letterSpacing: 0.4,
+                      fontWeight: 600,
+                      mt: 1,
+                      mb: 0.5,
+                    }}
+                  >
+                    Daily Laborers ({data!.dailyLaborers.length})
+                  </Typography>
+                  <Stack spacing={0.5}>
+                    {data!.dailyLaborers.map((lab) => (
+                      <Box
+                        key={lab.id}
+                        sx={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          p: 0.75,
+                          px: 1.25,
+                          bgcolor: theme.palette.background.default,
+                          border: `1px solid ${theme.palette.divider}`,
+                          borderRadius: 1,
+                        }}
+                      >
+                        <Box>
+                          <Typography variant="body2" fontWeight={500}>
+                            {lab.name}
+                          </Typography>
+                          <Typography
+                            variant="caption"
+                            color="text.secondary"
+                          >
+                            {lab.role} · {lab.fullDay ? "Full day" : "Half day"}
+                          </Typography>
+                        </Box>
+                        <Typography
+                          variant="body2"
+                          fontWeight={600}
+                          color="success.main"
+                        >
+                          ₹{lab.amount.toLocaleString("en-IN")}
+                        </Typography>
+                      </Box>
+                    ))}
+                  </Stack>
+                </>
+              )}
+
+              {(data?.marketLaborers?.length ?? 0) > 0 && (
+                <>
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    sx={{
+                      display: "block",
+                      fontSize: 9,
+                      textTransform: "uppercase",
+                      letterSpacing: 0.4,
+                      fontWeight: 600,
+                      mt: 1,
+                      mb: 0.5,
+                    }}
+                  >
+                    Market Laborers ({data!.marketLaborers.length})
+                  </Typography>
+                  <Stack spacing={0.5}>
+                    {data!.marketLaborers.map((mkt) => (
+                      <Box
+                        key={mkt.id}
+                        sx={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          p: 0.75,
+                          px: 1.25,
+                          bgcolor: theme.palette.background.default,
+                          border: `1px solid ${theme.palette.divider}`,
+                          borderRadius: 1,
+                        }}
+                      >
+                        <Box>
+                          <Typography variant="body2" fontWeight={500}>
+                            {mkt.role}
+                          </Typography>
+                          <Typography
+                            variant="caption"
+                            color="text.secondary"
+                          >
+                            {mkt.count}{" "}
+                            {mkt.count === 1 ? "person" : "people"}
+                          </Typography>
+                        </Box>
+                        <Typography
+                          variant="body2"
+                          fontWeight={600}
+                          color="success.main"
+                        >
+                          ₹{mkt.amount.toLocaleString("en-IN")}
+                        </Typography>
+                      </Box>
+                    ))}
+                  </Stack>
+                </>
+              )}
+            </>
+          )}
+        </>
+      )}
     </Box>
   );
 }

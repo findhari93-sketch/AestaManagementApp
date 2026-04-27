@@ -5,13 +5,22 @@ import { Box, Skeleton, Stack, Typography, useTheme } from "@mui/material";
 import dayjs from "dayjs";
 import { entitySettlementRef, type InspectEntity } from "./types";
 import { useSettlementAudit } from "@/hooks/useSettlementAudit";
+import { useSalaryWaterfall } from "@/hooks/queries/useSalaryWaterfall";
 
 export default function AuditTab({ entity }: { entity: InspectEntity }) {
+  // weekly-aggregate has no single ref; render one audit section per
+  // filled_by ref pulled from the waterfall.
+  if (entity.kind === "weekly-aggregate") {
+    return <WeeklyAggregateAudit entity={entity} />;
+  }
+  return <SingleRefAudit entity={entity} />;
+}
+
+function SingleRefAudit({ entity }: { entity: InspectEntity }) {
   const theme = useTheme();
   const settlementRef = entitySettlementRef(entity);
   const { data, isLoading } = useSettlementAudit(settlementRef);
 
-  // Pending entity (or aggregate without ref): no settlement row to audit.
   if (!settlementRef) {
     return (
       <Box sx={{ p: 2 }}>
@@ -47,40 +56,168 @@ export default function AuditTab({ entity }: { entity: InspectEntity }) {
     <Box sx={{ p: 2 }}>
       <Stack spacing={1}>
         {events.map((e, i) => (
-          <Box
-            key={i}
-            sx={{
-              p: 1.25,
-              borderRadius: 1,
-              bgcolor: "background.paper",
-              border: `1px solid ${theme.palette.divider}`,
-            }}
-          >
-            <Typography
-              variant="caption"
-              color="text.secondary"
-              sx={{ display: "block", mb: 0.25 }}
-            >
-              {dayjs(e.timestamp).format("DD MMM YYYY, hh:mm A")}
-            </Typography>
-            <Typography variant="body2">
-              <Box component="strong" sx={{ fontWeight: 700 }}>
-                {e.action.toUpperCase()}
-              </Box>{" "}
-              by {e.actorName}
-            </Typography>
-            {e.note && (
-              <Typography
-                variant="caption"
-                color="text.secondary"
-                sx={{ display: "block", mt: 0.5, whiteSpace: "pre-wrap" }}
-              >
-                {e.note}
-              </Typography>
-            )}
-          </Box>
+          <AuditEvent key={i} event={e} />
         ))}
       </Stack>
+    </Box>
+  );
+}
+
+interface AuditEventModel {
+  timestamp: string;
+  action: string;
+  actorName: string;
+  note?: string | null;
+}
+
+function AuditEvent({ event }: { event: AuditEventModel }) {
+  const theme = useTheme();
+  return (
+    <Box
+      sx={{
+        p: 1.25,
+        borderRadius: 1,
+        bgcolor: "background.paper",
+        border: `1px solid ${theme.palette.divider}`,
+      }}
+    >
+      <Typography
+        variant="caption"
+        color="text.secondary"
+        sx={{ display: "block", mb: 0.25 }}
+      >
+        {dayjs(event.timestamp).format("DD MMM YYYY, hh:mm A")}
+      </Typography>
+      <Typography variant="body2">
+        <Box component="strong" sx={{ fontWeight: 700 }}>
+          {event.action.toUpperCase()}
+        </Box>{" "}
+        by {event.actorName}
+      </Typography>
+      {event.note && (
+        <Typography
+          variant="caption"
+          color="text.secondary"
+          sx={{ display: "block", mt: 0.5, whiteSpace: "pre-wrap" }}
+        >
+          {event.note}
+        </Typography>
+      )}
+    </Box>
+  );
+}
+
+function WeeklyAggregateAudit({
+  entity,
+}: {
+  entity: Extract<InspectEntity, { kind: "weekly-aggregate" }>;
+}) {
+  const theme = useTheme();
+  const { data: weeks, isLoading } = useSalaryWaterfall({
+    siteId: entity.siteId,
+    subcontractId: entity.subcontractId,
+    dateFrom: entity.weekStart,
+    dateTo: entity.weekEnd,
+  });
+
+  if (isLoading) {
+    return (
+      <Box sx={{ p: 2 }}>
+        <Skeleton variant="rounded" width="100%" height={64} />
+      </Box>
+    );
+  }
+
+  const week = weeks?.find((w) => w.weekStart === entity.weekStart);
+  const refs = week?.filledBy ?? [];
+
+  if (refs.length === 0) {
+    return (
+      <Box sx={{ p: 2 }}>
+        <Typography variant="body2" color="text.secondary">
+          No settlements have touched this week yet — nothing to audit.
+        </Typography>
+      </Box>
+    );
+  }
+
+  return (
+    <Box sx={{ p: 2 }}>
+      <Typography
+        variant="caption"
+        color="text.secondary"
+        sx={{
+          display: "block",
+          fontSize: 9,
+          textTransform: "uppercase",
+          letterSpacing: 0.4,
+          fontWeight: 600,
+          mb: 1,
+        }}
+      >
+        Audit history · {refs.length} settlement{refs.length === 1 ? "" : "s"}
+      </Typography>
+      <Stack spacing={2}>
+        {refs.map((f, i) => (
+          <RefAuditSection
+            key={`${f.ref}-${i}`}
+            settlementRef={f.ref}
+            amount={f.amount}
+          />
+        ))}
+      </Stack>
+    </Box>
+  );
+}
+
+function RefAuditSection({
+  settlementRef,
+  amount,
+}: {
+  settlementRef: string;
+  amount: number;
+}) {
+  const { data, isLoading } = useSettlementAudit(settlementRef);
+  const events = data ?? [];
+
+  return (
+    <Box>
+      <Box
+        sx={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          mb: 0.75,
+          gap: 1,
+        }}
+      >
+        <Typography
+          variant="body2"
+          sx={{ fontFamily: "ui-monospace, monospace", fontSize: 11.5 }}
+        >
+          {settlementRef}
+        </Typography>
+        <Typography
+          variant="caption"
+          color="text.secondary"
+          sx={{ fontVariantNumeric: "tabular-nums" }}
+        >
+          ₹{amount.toLocaleString("en-IN")} allocated
+        </Typography>
+      </Box>
+      {isLoading ? (
+        <Skeleton variant="rounded" width="100%" height={48} />
+      ) : events.length === 0 ? (
+        <Typography variant="caption" color="text.disabled">
+          No audit events for this ref.
+        </Typography>
+      ) : (
+        <Stack spacing={0.5}>
+          {events.map((e, i) => (
+            <AuditEvent key={i} event={e} />
+          ))}
+        </Stack>
+      )}
     </Box>
   );
 }

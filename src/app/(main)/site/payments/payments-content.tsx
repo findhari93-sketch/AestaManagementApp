@@ -26,6 +26,8 @@ import { SalaryWaterfallList } from "@/components/payments/SalaryWaterfallList";
 import { AdvancesList } from "@/components/payments/AdvancesList";
 import { DailyMarketLedger } from "@/components/payments/DailyMarketLedger";
 import { SubcontractContextStrip } from "@/components/payments/SubcontractContextStrip";
+import PaymentsLedger from "@/components/payments/PaymentsLedger";
+import { MestriSettleDialog } from "@/components/payments/MestriSettleDialog";
 import { usePaymentSummary } from "@/hooks/queries/usePaymentSummary";
 import { usePaymentsLedger } from "@/hooks/queries/usePaymentsLedger";
 import { useSalarySliceSummary } from "@/hooks/queries/useSalarySliceSummary";
@@ -36,7 +38,7 @@ import { useInspectPane } from "@/hooks/useInspectPane";
 import { InspectPane } from "@/components/common/InspectPane";
 import type { InspectEntity } from "@/components/common/InspectPane";
 
-type ActiveTab = "waterfall" | "advances" | "daily-market";
+type ActiveTab = "all" | "contract" | "daily-market";
 
 export default function PaymentsContent() {
   const { selectedSite } = useSelectedSite();
@@ -52,7 +54,12 @@ export default function PaymentsContent() {
 
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<ActiveTab>("waterfall");
+  const [activeTab, setActiveTab] = useState<ActiveTab>("contract");
+  const [settleDialog, setSettleDialog] = useState<null | {
+    weekStart: string;
+    weekEnd: string;
+    suggestedAmount: number;
+  }>(null);
 
   const pane = useInspectPane();
 
@@ -99,12 +106,37 @@ export default function PaymentsContent() {
     type: "daily-market",
   });
 
+  const allLedgerQuery = usePaymentsLedger({
+    siteId: selectedSite?.id,
+    dateFrom: effectiveFrom,
+    dateTo: effectiveTo,
+    status: "all",
+    type: "all",
+  });
+
   const pendingDailyMarketCount = (dailyMarketLedgerQuery.data ?? []).filter(
     (r) => r.isPending
   ).length;
 
   const handleSettleClick = useCallback(
     (entity: InspectEntity) => {
+      // weekly-aggregate: open the in-page MestriSettleDialog scoped to that week.
+      // Other kinds: route to /site/attendance which has the full per-day data
+      // shape needed for the older settlement dialogs.
+      if (entity.kind === "weekly-aggregate") {
+        const week = waterfallQuery.data?.find(
+          (w) => w.weekStart === entity.weekStart
+        );
+        const suggestedAmount = week
+          ? Math.max(0, week.wagesDue - week.paid)
+          : 0;
+        setSettleDialog({
+          weekStart: entity.weekStart,
+          weekEnd: entity.weekEnd,
+          suggestedAmount,
+        });
+        return;
+      }
       const url =
         entity.kind === "daily-date"
           ? `/site/attendance?date=${entity.date}`
@@ -114,7 +146,7 @@ export default function PaymentsContent() {
       setNotice("Opening attendance to record this settlement…");
       router.push(url);
     },
-    [router]
+    [router, waterfallQuery.data]
   );
 
   const handleOpenInPage = useCallback(
@@ -231,30 +263,19 @@ export default function PaymentsContent() {
           }}
         >
           <Tab
-            value="waterfall"
+            value="contract"
             label={
               <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
                 <span>💼</span>
                 <Box sx={{ display: { xs: "none", sm: "inline" } }}>
-                  Salary Waterfall
+                  Contract Settlement
                 </Box>
                 <Chip
                   size="small"
-                  label={waterfallQuery.data?.length ?? 0}
-                  sx={{ height: 18, fontSize: 10, fontWeight: 700 }}
-                />
-              </Box>
-            }
-          />
-          <Tab
-            value="advances"
-            label={
-              <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
-                <span>💸</span>
-                <Box sx={{ display: { xs: "none", sm: "inline" } }}>Advances</Box>
-                <Chip
-                  size="small"
-                  label={advancesQuery.data?.length ?? 0}
+                  label={
+                    (waterfallQuery.data?.length ?? 0) +
+                    (advancesQuery.data?.length ?? 0)
+                  }
                   sx={{ height: 18, fontSize: 10, fontWeight: 700 }}
                 />
               </Box>
@@ -277,76 +298,83 @@ export default function PaymentsContent() {
               </Box>
             }
           />
+          <Tab
+            value="all"
+            label={
+              <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
+                <span>📋</span>
+                <Box sx={{ display: { xs: "none", sm: "inline" } }}>All</Box>
+                <Chip
+                  size="small"
+                  label={allLedgerQuery.data?.length ?? 0}
+                  sx={{ height: 18, fontSize: 10, fontWeight: 700 }}
+                />
+              </Box>
+            }
+          />
         </Tabs>
       </Box>
 
       <Box sx={{ flex: 1, minHeight: 0, overflow: "auto" }}>
-        {salarySummaryQuery.isError && activeTab === "waterfall" && (
-          <Alert severity="error" sx={{ m: 1.5 }}>
-            Couldn&apos;t load salary slice summary:{" "}
-            {(salarySummaryQuery.error as Error)?.message ?? "Unknown error"}
-          </Alert>
-        )}
-        {waterfallQuery.isError && activeTab === "waterfall" && (
-          <Alert severity="error" sx={{ m: 1.5 }}>
-            Couldn&apos;t load waterfall:{" "}
-            {(waterfallQuery.error as Error)?.message ?? "Unknown error"}
-          </Alert>
-        )}
-        {advancesQuery.isError && activeTab === "advances" && (
-          <Alert severity="error" sx={{ m: 1.5 }}>
-            Couldn&apos;t load advances:{" "}
-            {(advancesQuery.error as Error)?.message ?? "Unknown error"}
-          </Alert>
-        )}
+        {(salarySummaryQuery.isError || waterfallQuery.isError || advancesQuery.isError) &&
+          activeTab === "contract" && (
+            <Alert severity="error" sx={{ m: 1.5 }}>
+              Couldn&apos;t load contract settlement data.
+            </Alert>
+          )}
         {dailyMarketLedgerQuery.isError && activeTab === "daily-market" && (
           <Alert severity="error" sx={{ m: 1.5 }}>
             Couldn&apos;t load daily/market ledger:{" "}
             {(dailyMarketLedgerQuery.error as Error)?.message ?? "Unknown error"}
           </Alert>
         )}
-        {activeTab === "waterfall" && (
-          <SalaryWaterfallList
-            weeks={waterfallQuery.data ?? []}
-            futureCredit={salarySummaryQuery.data?.futureCredit ?? 0}
-            isLoading={waterfallQuery.isLoading}
-            onRowClick={(week) => {
-              pane.open({
-                kind: "weekly-aggregate",
-                siteId: selectedSite.id,
-                subcontractId: selectedSubcontractId,
-                weekStart: week.weekStart,
-                weekEnd: week.weekEnd,
-              });
-            }}
-            onSettleClick={(week) => {
-              // Route to /site/attendance scoped to the week. The existing
-              // WeeklySettlementDialog there has the full per-laborer-per-day
-              // data shape that the waterfall row doesn't surface; opening
-              // the dialog directly from here would require a new
-              // settlement-payload RPC. Pattern matches the daily-date and
-              // weekly-week settle CTAs above.
-              setNotice("Opening attendance to settle this week…");
-              router.push(
-                `/site/attendance?weekStart=${week.weekStart}&weekEnd=${week.weekEnd}`
-              );
-            }}
-          />
+        {allLedgerQuery.isError && activeTab === "all" && (
+          <Alert severity="error" sx={{ m: 1.5 }}>
+            Couldn&apos;t load unified ledger:{" "}
+            {(allLedgerQuery.error as Error)?.message ?? "Unknown error"}
+          </Alert>
         )}
 
-        {activeTab === "advances" && (
-          <AdvancesList
-            advances={advancesQuery.data ?? []}
-            isLoading={advancesQuery.isLoading}
-            onRowClick={(adv) => {
-              pane.open({
-                kind: "advance",
-                siteId: selectedSite.id,
-                settlementId: adv.id,
-                settlementRef: adv.settlementRef,
-              });
-            }}
-          />
+        {activeTab === "contract" && (
+          <Box>
+            <SalaryWaterfallList
+              weeks={waterfallQuery.data ?? []}
+              futureCredit={salarySummaryQuery.data?.futureCredit ?? 0}
+              isLoading={waterfallQuery.isLoading}
+              onRowClick={(week) => {
+                pane.open({
+                  kind: "weekly-aggregate",
+                  siteId: selectedSite.id,
+                  subcontractId: selectedSubcontractId,
+                  weekStart: week.weekStart,
+                  weekEnd: week.weekEnd,
+                });
+              }}
+              onSettleClick={(week) => {
+                setSettleDialog({
+                  weekStart: week.weekStart,
+                  weekEnd: week.weekEnd,
+                  suggestedAmount: Math.max(0, week.wagesDue - week.paid),
+                });
+              }}
+            />
+            {(advancesQuery.data?.length ?? 0) > 0 && (
+              <Box sx={{ mt: 1.5 }}>
+                <AdvancesList
+                  advances={advancesQuery.data ?? []}
+                  isLoading={advancesQuery.isLoading}
+                  onRowClick={(adv) => {
+                    pane.open({
+                      kind: "advance",
+                      siteId: selectedSite.id,
+                      settlementId: adv.id,
+                      settlementRef: adv.settlementRef,
+                    });
+                  }}
+                />
+              </Box>
+            )}
+          </Box>
         )}
 
         {activeTab === "daily-market" && (
@@ -371,7 +399,29 @@ export default function PaymentsContent() {
             }
           />
         )}
+
+        {activeTab === "all" && (
+          <PaymentsLedger
+            rows={allLedgerQuery.data ?? []}
+            isLoading={allLedgerQuery.isLoading}
+            selectedEntity={pane.currentEntity}
+            onRowClick={(entity) => pane.open(entity)}
+            onSettleClick={(entity) => handleSettleClick(entity)}
+          />
+        )}
       </Box>
+
+      {settleDialog && (
+        <MestriSettleDialog
+          open
+          onClose={() => setSettleDialog(null)}
+          siteId={selectedSite.id}
+          weekStart={settleDialog.weekStart}
+          weekEnd={settleDialog.weekEnd}
+          suggestedAmount={settleDialog.suggestedAmount}
+          initialSubcontractId={selectedSubcontractId}
+        />
+      )}
 
       <InspectPane
         entity={pane.currentEntity}

@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useMemo } from "react";
 import { Box, Chip, Skeleton, Stack, Typography, useTheme, alpha } from "@mui/material";
 import dayjs from "dayjs";
 import type { WaterfallWeek } from "@/hooks/queries/useSalaryWaterfall";
@@ -45,6 +45,14 @@ export function SalaryWaterfallList({
 }: SalaryWaterfallListProps) {
   const theme = useTheme();
 
+  // Display newest week first. The RPC's allocation algorithm runs oldest-first
+  // (that's the waterfall semantic) — but the user reads weeks newest-down, so
+  // reverse on the client only.
+  const displayWeeks = useMemo(
+    () => [...weeks].sort((a, b) => (a.weekStart < b.weekStart ? 1 : -1)),
+    [weeks]
+  );
+
   if (isLoading) {
     return (
       <Box sx={{ p: 1.5 }}>
@@ -68,7 +76,7 @@ export function SalaryWaterfallList({
   return (
     <Box>
       <Stack divider={<Box sx={{ height: 1, bgcolor: "divider" }} />}>
-        {weeks.map((w) => (
+        {displayWeeks.map((w) => (
           <Box
             key={w.weekStart}
             onClick={() => onRowClick(w)}
