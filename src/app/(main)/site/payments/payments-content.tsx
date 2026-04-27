@@ -348,6 +348,8 @@ export default function PaymentsContent() {
                   subcontractId: selectedSubcontractId,
                   weekStart: week.weekStart,
                   weekEnd: week.weekEnd,
+                  scopeFrom: effectiveFrom,
+                  scopeTo: effectiveTo,
                 });
               }}
               onSettleClick={(week) => {

@@ -26,6 +26,13 @@ export type InspectEntity =
       subcontractId: string | null;    // null when scoped to all subcontracts on the site
       weekStart: string;               // YYYY-MM-DD (Monday)
       weekEnd: string;                 // YYYY-MM-DD (Sunday)
+      // The page's date scope at the moment the pane was opened. The
+      // waterfall is order-dependent — scoping to just a single week
+      // omits later settlements that legitimately filled earlier weeks,
+      // so the pane re-runs the algorithm over the same range the page
+      // saw and then picks the matching week from the result.
+      scopeFrom: string | null;
+      scopeTo: string | null;
     }
   | {
       kind: "advance";

@@ -189,11 +189,15 @@ function WeeklyAggregateSettlement({
   onSettleClick?: (entity: InspectEntity) => void;
 }) {
   const theme = useTheme();
+  // Use the page's scope (scopeFrom/scopeTo) — not the week's own range.
+  // The waterfall is order-dependent: settlements made AFTER this week can
+  // legitimately fill earlier weeks. Re-running with just (weekStart..weekEnd)
+  // sees only that week's settlements and produces wrong allocations.
   const { data: weeks, isLoading } = useSalaryWaterfall({
     siteId: entity.siteId,
     subcontractId: entity.subcontractId,
-    dateFrom: entity.weekStart,
-    dateTo: entity.weekEnd,
+    dateFrom: entity.scopeFrom,
+    dateTo: entity.scopeTo,
   });
 
   if (isLoading) {

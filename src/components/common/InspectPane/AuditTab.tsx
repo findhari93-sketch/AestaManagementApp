@@ -113,11 +113,13 @@ function WeeklyAggregateAudit({
   entity: Extract<InspectEntity, { kind: "weekly-aggregate" }>;
 }) {
   const theme = useTheme();
+  // Use the page's scope so audit history matches the page row (the waterfall
+  // is order-dependent — see SettlementTab.tsx for the longer note).
   const { data: weeks, isLoading } = useSalaryWaterfall({
     siteId: entity.siteId,
     subcontractId: entity.subcontractId,
-    dateFrom: entity.weekStart,
-    dateTo: entity.weekEnd,
+    dateFrom: entity.scopeFrom,
+    dateTo: entity.scopeTo,
   });
 
   if (isLoading) {
