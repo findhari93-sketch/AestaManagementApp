@@ -23,6 +23,13 @@ export interface PaymentsLedgerRow {
   isPending: boolean;
   laborerId?: string;
   siteId: string;
+  // Set on synthetic parent rows produced by the same-week + same-subtype
+  // grouping below. Children retain their original flat shape.
+  subRows?: PaymentsLedgerRow[];
+}
+
+function isGroupParent(r: PaymentsLedgerRow): boolean {
+  return Array.isArray(r.subRows) && r.subRows.length > 0;
 }
 
 function rowToEntity(r: PaymentsLedgerRow): InspectEntity {
@@ -66,6 +73,48 @@ export default function PaymentsLedger({
   const theme = useTheme();
   const selectedKey = selectedEntity ? entityKey(selectedEntity) : null;
 
+  // Collapse weekly rows that share the same week + subtype into one
+  // expandable parent row. Daily/market rows and singleton weekly rows
+  // pass through unchanged.
+  const treeRows = useMemo<PaymentsLedgerRow[]>(() => {
+    const groups = new Map<string, PaymentsLedgerRow[]>();
+    const passthrough: PaymentsLedgerRow[] = [];
+    for (const r of rows) {
+      if (r.type !== "weekly" || !r.weekEnd) {
+        passthrough.push(r);
+        continue;
+      }
+      const key = `${r.date}|${r.weekEnd}|${r.subtype}`;
+      const list = groups.get(key) ?? [];
+      list.push(r);
+      groups.set(key, list);
+    }
+    const out: PaymentsLedgerRow[] = [...passthrough];
+    for (const [key, children] of groups) {
+      if (children.length < 2) {
+        out.push(...children);
+        continue;
+      }
+      const first = children[0];
+      out.push({
+        id: `group:${key}`,
+        settlementRef: null,
+        type: "weekly",
+        subtype: first.subtype,
+        date: first.date,
+        weekEnd: first.weekEnd,
+        forLabel: `${children.length} entries · ${first.subtype}`,
+        amount: children.reduce((s, c) => s + c.amount, 0),
+        isPaid: children.every((c) => c.isPaid),
+        isPending: children.some((c) => c.isPending),
+        laborerId: undefined,
+        siteId: first.siteId,
+        subRows: children,
+      });
+    }
+    return out.sort((a, b) => b.date.localeCompare(a.date));
+  }, [rows]);
+
   const columns = useMemo<MRT_ColumnDef<PaymentsLedgerRow>[]>(
     () => [
       {
@@ -73,7 +122,23 @@ export default function PaymentsLedger({
         header: "Ref",
         size: 130,
         Cell: ({ row }) => {
-          const ref = row.original.settlementRef;
+          const r = row.original;
+          if (isGroupParent(r)) {
+            return (
+              <Chip
+                label={`× ${r.subRows!.length}`}
+                size="small"
+                sx={{
+                  fontWeight: 700,
+                  fontSize: "0.7rem",
+                  bgcolor: theme.palette.action.selected,
+                  color: theme.palette.text.secondary,
+                  border: "none",
+                }}
+              />
+            );
+          }
+          const ref = r.settlementRef;
           if (!ref) {
             return (
               <Typography variant="caption" color="text.disabled">
@@ -120,10 +185,16 @@ export default function PaymentsLedger({
         header: "Type",
         size: 130,
         Cell: ({ row }) => {
-          const isDM = row.original.type === "daily-market";
+          const r = row.original;
+          const isDM = r.type === "daily-market";
+          const label = isGroupParent(r)
+            ? `Weekly (${r.subRows!.length})`
+            : isDM
+              ? "Daily + Mkt"
+              : "Weekly";
           return (
             <Chip
-              label={isDM ? "Daily + Mkt" : "Weekly"}
+              label={label}
               size="small"
               sx={{
                 fontWeight: 600,
@@ -175,6 +246,26 @@ export default function PaymentsLedger({
         size: 110,
         Cell: ({ row }) => {
           const r = row.original;
+          // Group parent with mixed paid/pending children → distinct "Mixed"
+          // pill so the user knows expanding will reveal both states.
+          const isMixed =
+            isGroupParent(r) &&
+            r.subRows!.some((c) => c.isPaid) &&
+            r.subRows!.some((c) => c.isPending);
+          if (isMixed) {
+            return (
+              <Chip
+                label="Mixed"
+                size="small"
+                sx={{
+                  fontWeight: 600,
+                  bgcolor: theme.palette.info.main + "1a",
+                  color: theme.palette.info.dark,
+                  border: "none",
+                }}
+              />
+            );
+          }
           return (
             <Chip
               label={r.isPaid ? "Paid" : "Pending"}
@@ -199,6 +290,9 @@ export default function PaymentsLedger({
         enableColumnFilter: false,
         Cell: ({ row }) => {
           const r = row.original;
+          // Parent rows: no row-level action; user must drill in to act on
+          // a specific child (avoids ambiguous bulk settle).
+          if (isGroupParent(r)) return null;
           if (r.isPending) {
             return (
               <Button
@@ -237,15 +331,35 @@ export default function PaymentsLedger({
   return (
     <DataTable
       columns={columns}
-      data={rows}
+      data={treeRows}
       isLoading={isLoading}
       enableActions={false}
       fillParent
+      enableExpanding
+      getSubRows={(row) => row.subRows}
+      paginateExpandedRows={false}
+      positionExpandColumn="first"
+      getRowId={(row) => row.id}
       initialState={{
         sorting: [{ id: "date", desc: true }],
       }}
       muiTableBodyRowProps={({ row }) => {
         const r = row.original;
+        if (isGroupParent(r)) {
+          // Group header: clicking the row toggles expansion only — never
+          // opens the InspectPane on a synthetic entity. Visually distinct
+          // background so the header reads as a container.
+          return {
+            onClick: row.getToggleExpandedHandler(),
+            sx: {
+              cursor: "pointer",
+              bgcolor: theme.palette.action.hover,
+              borderLeft: "3px solid transparent",
+              "& > td": { fontWeight: 600 },
+              "&:hover": { bgcolor: theme.palette.action.selected },
+            },
+          };
+        }
         const rowKey = entityKey(rowToEntity(r));
         const isSelected = rowKey === selectedKey;
         return {

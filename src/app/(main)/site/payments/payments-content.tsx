@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   Alert,
   Box,
@@ -25,15 +26,15 @@ import { SalarySliceHero } from "@/components/payments/SalarySliceHero";
 import { SalaryWaterfallList } from "@/components/payments/SalaryWaterfallList";
 import { AdvancesList } from "@/components/payments/AdvancesList";
 import { DailyMarketLedger } from "@/components/payments/DailyMarketLedger";
-import { SubcontractContextStrip } from "@/components/payments/SubcontractContextStrip";
 import PaymentsLedger from "@/components/payments/PaymentsLedger";
 import { MestriSettleDialog } from "@/components/payments/MestriSettleDialog";
+import PaymentDialog from "@/components/payments/PaymentDialog";
 import { usePaymentSummary } from "@/hooks/queries/usePaymentSummary";
 import { usePaymentsLedger } from "@/hooks/queries/usePaymentsLedger";
 import { useSalarySliceSummary } from "@/hooks/queries/useSalarySliceSummary";
 import { useSalaryWaterfall } from "@/hooks/queries/useSalaryWaterfall";
 import { useAdvances } from "@/hooks/queries/useAdvances";
-import { useSubcontractSpend } from "@/hooks/queries/useSubcontractSpend";
+import { useDayPendingRecords } from "@/hooks/queries/useDayPendingRecords";
 import { useInspectPane } from "@/hooks/useInspectPane";
 import { InspectPane } from "@/components/common/InspectPane";
 import type { InspectEntity } from "@/components/common/InspectPane";
@@ -60,17 +61,22 @@ export default function PaymentsContent() {
     weekEnd: string;
     suggestedAmount: number;
   }>(null);
+  // In-page settle dialog for a single Daily+Market date. Holds the date so
+  // the records hook can fetch its pending entries; null = closed.
+  const [dayDialog, setDayDialog] = useState<null | { date: string }>(null);
 
   const pane = useInspectPane();
+  const queryClient = useQueryClient();
 
-  // Subcontract scoping picker is intentionally out of scope for this plan;
-  // the page operates against all subcontracts on the site. The
-  // SubcontractContextStrip below renders its fallback layout in this mode
-  // and the new RPCs treat null as "aggregate across all subcontracts".
+  const dayPendingQuery = useDayPendingRecords(
+    dayDialog ? selectedSite?.id : undefined,
+    dayDialog?.date
+  );
+
+  // Subcontract scoping picker isn't surfaced on this page yet — the page
+  // operates against all subcontracts on the site, and the RPCs treat null
+  // as "aggregate across all subcontracts".
   const selectedSubcontractId: string | null = null;
-  const selectedSubcontractTitle: string | null = null;
-
-  const subcontractSpendQuery = useSubcontractSpend(selectedSubcontractId);
 
   const summaryQuery = usePaymentSummary(
     selectedSite?.id,
@@ -121,8 +127,6 @@ export default function PaymentsContent() {
   const handleSettleClick = useCallback(
     (entity: InspectEntity) => {
       // weekly-aggregate: open the in-page MestriSettleDialog scoped to that week.
-      // Other kinds: route to /site/attendance which has the full per-day data
-      // shape needed for the older settlement dialogs.
       if (entity.kind === "weekly-aggregate") {
         const week = waterfallQuery.data?.find(
           (w) => w.weekStart === entity.weekStart
@@ -137,16 +141,27 @@ export default function PaymentsContent() {
         });
         return;
       }
+      // daily-date: open the in-page PaymentDialog. The date's per-laborer
+      // pending records are fetched by useDayPendingRecords keyed off
+      // dayDialog.date and fed into the dialog's `dailyRecords` mode.
+      if (entity.kind === "daily-date") {
+        pane.close();
+        setDayDialog({ date: entity.date });
+        return;
+      }
+      // weekly-week (per-laborer-week): currently no pending entries are
+      // surfaced for this kind in production data, so the redirect path is
+      // preserved as a safety net. If get_payments_ledger ever starts
+      // streaming pending laborer-weeks, build a sibling
+      // useWeekPendingRecords hook + reuse PaymentDialog the same way.
       const url =
-        entity.kind === "daily-date"
-          ? `/site/attendance?date=${entity.date}`
-          : entity.kind === "weekly-week"
-            ? `/site/attendance?weekStart=${entity.weekStart}&laborerId=${entity.laborerId}`
-            : "/site/attendance";
+        entity.kind === "weekly-week"
+          ? `/site/attendance?weekStart=${entity.weekStart}&laborerId=${entity.laborerId}`
+          : "/site/attendance";
       setNotice("Opening attendance to record this settlement…");
       router.push(url);
     },
-    [router, waterfallQuery.data]
+    [router, waterfallQuery.data, pane]
   );
 
   const handleOpenInPage = useCallback(
@@ -205,19 +220,6 @@ export default function PaymentsContent() {
               </IconButton>
             </Tooltip>
           }
-        />
-
-        <SubcontractContextStrip
-          subcontractTitle={selectedSubcontractTitle}
-          totalValue={subcontractSpendQuery.data?.totalValue ?? null}
-          spent={subcontractSpendQuery.data?.spent ?? null}
-          onOpenFullBurnDown={() => {
-            if (selectedSubcontractId) {
-              router.push(`/site/subcontracts?focus=${selectedSubcontractId}`);
-            } else {
-              router.push("/site/subcontracts");
-            }
-          }}
         />
 
         <SalarySliceHero
@@ -422,6 +424,22 @@ export default function PaymentsContent() {
           weekEnd={settleDialog.weekEnd}
           suggestedAmount={settleDialog.suggestedAmount}
           initialSubcontractId={selectedSubcontractId}
+        />
+      )}
+
+      {dayDialog && (
+        <PaymentDialog
+          open
+          onClose={() => setDayDialog(null)}
+          dailyRecords={dayPendingQuery.data ?? []}
+          allowSubcontractLink
+          onSuccess={() => {
+            setDayDialog(null);
+            void queryClient.invalidateQueries({ queryKey: ["payments-ledger"] });
+            void queryClient.invalidateQueries({ queryKey: ["salary-slice-summary"] });
+            void queryClient.invalidateQueries({ queryKey: ["salary-waterfall"] });
+            void queryClient.invalidateQueries({ queryKey: ["payment-summary"] });
+          }}
         />
       )}
 
