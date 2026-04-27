@@ -11,7 +11,7 @@ import {
   alpha,
 } from "@mui/material";
 import dayjs from "dayjs";
-import type { InspectEntity } from "./types";
+import { entitySettlementRef, type InspectEntity } from "./types";
 import { useSettlementDetails } from "@/hooks/queries/useSettlementDetails";
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
@@ -43,10 +43,11 @@ export default function SettlementTab({
   onSettleClick?: (entity: InspectEntity) => void;
 }) {
   const theme = useTheme();
-  const isPending = !entity.settlementRef;
+  const settlementRef = entitySettlementRef(entity);
+  const isPending = !settlementRef;
 
   const { data, isLoading } = useSettlementDetails(
-    entity.settlementRef ?? null,
+    settlementRef,
     entity.siteId
   );
 
@@ -106,7 +107,7 @@ export default function SettlementTab({
               component="span"
               sx={{ fontFamily: "ui-monospace, monospace" }}
             >
-              {entity.settlementRef}
+              {settlementRef ?? "—"}
             </Typography>
           }
         />

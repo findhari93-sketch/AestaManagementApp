@@ -123,6 +123,7 @@ import AuditAvatarGroup from "@/components/common/AuditAvatarGroup";
 import ScopeChip from "@/components/common/ScopeChip";
 import { InspectPane } from "@/components/common/InspectPane";
 import type { InspectEntity } from "@/components/common/InspectPane";
+import { entitySettlementRef } from "@/components/common/InspectPane/types";
 import { useInspectPane } from "@/hooks/useInspectPane";
 import SettleDayButton from "@/components/attendance/SettleDayButton";
 import SettlementRefChip from "@/components/attendance/SettlementRefChip";
@@ -6918,7 +6919,7 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
         onClose={pane.close}
         onTogglePin={pane.togglePin}
         onOpenInPage={(e: InspectEntity) => {
-          const ref = e.settlementRef ?? "";
+          const ref = entitySettlementRef(e) ?? "";
           const url =
             e.kind === "daily-date"
               ? `/site/payments?ref=${ref}&date=${e.date}`

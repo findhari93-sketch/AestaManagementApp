@@ -45,6 +45,7 @@ import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
 import RedirectConfirmDialog from "@/components/common/RedirectConfirmDialog";
 import ScopeChip from "@/components/common/ScopeChip";
 import { InspectPane } from "@/components/common/InspectPane";
+import { entitySettlementRef } from "@/components/common/InspectPane/types";
 import { useInspectPane } from "@/hooks/useInspectPane";
 import { createClient } from "@/lib/supabase/client";
 import { useSite } from "@/contexts/SiteContext";
@@ -1590,10 +1591,11 @@ export default function ExpensesPage() {
         onClose={pane.close}
         onTogglePin={pane.togglePin}
         onOpenInPage={(e) => {
+          const ref = entitySettlementRef(e) ?? "";
           const url =
             e.kind === "daily-date"
-              ? `/site/payments?ref=${e.settlementRef ?? ""}`
-              : `/site/payments?ref=${e.settlementRef ?? ""}`;
+              ? `/site/payments?ref=${ref}&date=${e.date}`
+              : `/site/payments?ref=${ref}`;
           router.push(url);
         }}
       />

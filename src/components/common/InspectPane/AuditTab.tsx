@@ -3,15 +3,16 @@
 import React from "react";
 import { Box, Skeleton, Stack, Typography, useTheme } from "@mui/material";
 import dayjs from "dayjs";
-import type { InspectEntity } from "./types";
+import { entitySettlementRef, type InspectEntity } from "./types";
 import { useSettlementAudit } from "@/hooks/useSettlementAudit";
 
 export default function AuditTab({ entity }: { entity: InspectEntity }) {
   const theme = useTheme();
-  const { data, isLoading } = useSettlementAudit(entity.settlementRef ?? null);
+  const settlementRef = entitySettlementRef(entity);
+  const { data, isLoading } = useSettlementAudit(settlementRef);
 
-  // Pending entity: no settlement row exists yet, so there is nothing to audit.
-  if (!entity.settlementRef) {
+  // Pending entity (or aggregate without ref): no settlement row to audit.
+  if (!settlementRef) {
     return (
       <Box sx={{ p: 2 }}>
         <Typography variant="body2" color="text.secondary">

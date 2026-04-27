@@ -36,6 +36,14 @@ export type InspectEntity =
 
 export type InspectTabKey = "attendance" | "work-updates" | "settlement" | "audit";
 
+// Settlement reference accessor that handles all four entity kinds. Returns
+// null for kinds that don't have a settlement_ref (weekly-aggregate is an
+// aggregate across multiple settlements). Single source of truth — do not
+// duplicate this narrowing at consumer sites.
+export function entitySettlementRef(e: InspectEntity): string | null {
+  return "settlementRef" in e ? (e.settlementRef ?? null) : null;
+}
+
 // Stable identity for an InspectEntity. Used by useInspectPane to detect
 // "open same entity again" and by PaymentsLedger to highlight the matching
 // row. Single source of truth — do not duplicate this logic at consumer

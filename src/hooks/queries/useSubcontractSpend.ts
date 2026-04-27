@@ -7,14 +7,16 @@ export interface SubcontractSpend {
   percentOfTotal: number;
 }
 
+const ZERO: SubcontractSpend = { spent: 0, totalValue: 0, percentOfTotal: 0 };
+
 export function useSubcontractSpend(subcontractId: string | null | undefined) {
   const supabase = createClient();
-  return useQuery<SubcontractSpend | null>({
+  return useQuery<SubcontractSpend>({
     queryKey: ["subcontract-spend", subcontractId],
     enabled: Boolean(subcontractId),
     staleTime: 30_000,
-    queryFn: async () => {
-      if (!subcontractId) return null;
+    queryFn: async (): Promise<SubcontractSpend> => {
+      if (!subcontractId) return ZERO;
 
       const { data: subcontract, error: subErr } = await supabase
         .from("subcontracts")
@@ -32,8 +34,8 @@ export function useSubcontractSpend(subcontractId: string | null | undefined) {
         .eq("contract_id", subcontractId);
       if (expErr) throw expErr;
 
-      const spent = (expenses ?? []).reduce(
-        (s: number, e: { amount: number | string }) => s + Number(e.amount || 0),
+      const spent = (expenses ?? []).reduce<number>(
+        (s, e) => s + Number(e.amount ?? 0),
         0
       );
       const totalValue = Number(subcontract?.total_value || 0);
