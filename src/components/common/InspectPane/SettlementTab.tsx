@@ -317,60 +317,88 @@ function WeeklyAggregateSettlement({
               mb: 1.5,
             }}
           >
-            {week.filledBy.map((f, i) => (
-              <Box
-                key={`${f.ref}-${i}`}
-                sx={{
-                  display: "grid",
-                  gridTemplateColumns: "1fr auto auto",
-                  alignItems: "center",
-                  gap: 1,
-                  py: 0.5,
-                }}
-              >
+            {week.filledBy.map((f, i) => {
+              const isPartialAllocation = f.grossAmount > f.amount + 0.5;
+              return (
                 <Box
-                  component="button"
-                  type="button"
-                  onClick={() => setRefDetail(f.ref)}
+                  key={`${f.ref}-${i}`}
                   sx={{
-                    fontFamily: "ui-monospace, monospace",
-                    fontSize: 11,
-                    color: "primary.main",
-                    background: "transparent",
-                    border: "none",
-                    p: 0,
-                    textAlign: "left",
-                    cursor: "pointer",
-                    fontWeight: 600,
-                    "&:hover": { textDecoration: "underline" },
-                    "&:focus-visible": {
-                      outline: `2px solid ${theme.palette.primary.main}`,
-                      outlineOffset: 2,
-                    },
+                    display: "grid",
+                    gridTemplateColumns: "1fr auto auto",
+                    alignItems: "center",
+                    gap: 1,
+                    py: 0.5,
                   }}
                 >
-                  {f.ref}
+                  <Box
+                    component="button"
+                    type="button"
+                    onClick={() => setRefDetail(f.ref)}
+                    sx={{
+                      fontFamily: "ui-monospace, monospace",
+                      fontSize: 11,
+                      color: "primary.main",
+                      background: "transparent",
+                      border: "none",
+                      p: 0,
+                      textAlign: "left",
+                      cursor: "pointer",
+                      fontWeight: 600,
+                      "&:hover": { textDecoration: "underline" },
+                      "&:focus-visible": {
+                        outline: `2px solid ${theme.palette.primary.main}`,
+                        outlineOffset: 2,
+                      },
+                    }}
+                  >
+                    {f.ref}
+                  </Box>
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    sx={{ fontSize: 11 }}
+                  >
+                    {dayjs(f.settledAt).format("DD MMM")}
+                  </Typography>
+                  <Box sx={{ textAlign: "right", minWidth: 96 }}>
+                    <Typography
+                      variant="body2"
+                      sx={{
+                        fontWeight: 600,
+                        fontVariantNumeric: "tabular-nums",
+                        lineHeight: 1.2,
+                      }}
+                    >
+                      {formatINR(f.amount)}
+                      {isPartialAllocation && (
+                        <Typography
+                          component="span"
+                          variant="caption"
+                          color="text.secondary"
+                          sx={{ fontWeight: 400, fontSize: 10, ml: 0.5 }}
+                        >
+                          to this week
+                        </Typography>
+                      )}
+                    </Typography>
+                    {isPartialAllocation && (
+                      <Typography
+                        variant="caption"
+                        color="text.secondary"
+                        sx={{
+                          display: "block",
+                          fontSize: 10,
+                          fontVariantNumeric: "tabular-nums",
+                          lineHeight: 1.2,
+                        }}
+                      >
+                        of {formatINR(f.grossAmount)} paid
+                      </Typography>
+                    )}
+                  </Box>
                 </Box>
-                <Typography
-                  variant="caption"
-                  color="text.secondary"
-                  sx={{ fontSize: 11 }}
-                >
-                  {dayjs(f.settledAt).format("DD MMM")}
-                </Typography>
-                <Typography
-                  variant="body2"
-                  sx={{
-                    fontWeight: 600,
-                    fontVariantNumeric: "tabular-nums",
-                    minWidth: 80,
-                    textAlign: "right",
-                  }}
-                >
-                  {formatINR(f.amount)}
-                </Typography>
-              </Box>
-            ))}
+              );
+            })}
             {/* Total row at bottom — verifies the sum of allocations to this week */}
             <Box
               sx={{

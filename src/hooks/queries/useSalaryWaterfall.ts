@@ -3,7 +3,12 @@ import { createClient } from "@/lib/supabase/client";
 
 export interface WaterfallFilledBy {
   ref: string;
+  /** Slice allocated to this specific week. */
   amount: number;
+  /** Full settlement_groups.total_amount. When > amount, the overflow filled
+   *  earlier underpaid weeks (carry-forward). Older RPC versions don't
+   *  return this — falls back to `amount`. */
+  grossAmount: number;
   settledAt: string;
 }
 
@@ -50,11 +55,15 @@ export function useSalaryWaterfall(args: UseSalaryWaterfallArgs) {
         paid:         Number(r.paid) || 0,
         status:       r.status as WaterfallWeek["status"],
         filledBy:     Array.isArray(r.filled_by)
-          ? r.filled_by.map((f: any) => ({
-              ref:        String(f.ref),
-              amount:     Number(f.amount) || 0,
-              settledAt:  String(f.settled_at),
-            }))
+          ? r.filled_by.map((f: any) => {
+              const amount = Number(f.amount) || 0;
+              return {
+                ref:         String(f.ref),
+                amount,
+                grossAmount: f.gross_amount != null ? Number(f.gross_amount) : amount,
+                settledAt:   String(f.settled_at),
+              };
+            })
           : [],
       }));
     },
