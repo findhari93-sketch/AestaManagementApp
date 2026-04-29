@@ -30,6 +30,18 @@ export interface UseWorkUpdatesData {
   updates: WorkUpdateCard[];
 }
 
+// Historical photo URLs were stored against the old Cloudflare Workers subdomain
+// (aesta-supabase-proxy.findhari93.workers.dev) which is offline. Rewrite to the
+// current proxy host at read time so legacy rows still render. Safe to remove
+// once the DB has been backfilled and no rows reference the old host.
+const LEGACY_PROXY_HOST = "aesta-supabase-proxy.findhari93.workers.dev";
+const CURRENT_PROXY_HOST = "aesta-supabase-proxy.aestabuilders.workers.dev";
+function normalizePhotoUrl(url: string): string {
+  return url.includes(LEGACY_PROXY_HOST)
+    ? url.replace(LEGACY_PROXY_HOST, CURRENT_PROXY_HOST)
+    : url;
+}
+
 interface DailyWorkSummaryRow {
   date: string;
   work_updates: {
@@ -85,7 +97,8 @@ export function useWorkUpdates(
             note: wu.morning.description ?? "",
             photoUrls: (wu.morning.photos ?? [])
               .map((p) => p?.url)
-              .filter((u): u is string => Boolean(u)),
+              .filter((u): u is string => Boolean(u))
+              .map(normalizePhotoUrl),
             date: row.date,
           });
         }
@@ -99,7 +112,8 @@ export function useWorkUpdates(
             note: wu.evening.summary ?? "",
             photoUrls: (wu.evening.photos ?? [])
               .map((p) => p?.url)
-              .filter((u): u is string => Boolean(u)),
+              .filter((u): u is string => Boolean(u))
+              .map(normalizePhotoUrl),
             date: row.date,
           });
         }
