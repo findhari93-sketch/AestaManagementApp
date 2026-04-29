@@ -75,6 +75,7 @@ import {
   ReceiptLong as ReceiptLongIcon,
   Build as BuildIcon,
   Videocam as VideocamIcon,
+  SmartToy as SmartToyIcon,
 } from "@mui/icons-material";
 import { useRouter, usePathname } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
@@ -407,6 +408,7 @@ export default function MainLayout({
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(
     new Set()
   );
+  const [chatOpen, setChatOpen] = useState(false);
 
   // Snackbar state for refresh feedback
   const [snackbar, setSnackbar] = useState<{
@@ -631,6 +633,24 @@ export default function MainLayout({
           </Tooltip>
         </ListItem>
 
+        {/* AI Assistant Icon */}
+        <ListItem disablePadding sx={{ mb: 1 }}>
+          <Tooltip title="AI Assistant" placement="right">
+            <ListItemButton
+              onClick={() => setChatOpen(true)}
+              sx={{
+                borderRadius: 2,
+                py: 1,
+                justifyContent: "center",
+                color: "primary.main",
+                "&:hover": { bgcolor: "action.hover" },
+              }}
+            >
+              <SmartToyIcon />
+            </ListItemButton>
+          </Tooltip>
+        </ListItem>
+
         {/* Category Icons */}
         {filteredNavCategories.map((category) => (
           <Box key={category.label} sx={{ mb: 0.5 }}>
@@ -836,6 +856,32 @@ export default function MainLayout({
                     pathname === companyDashboard.path)
                     ? 600
                     : 500,
+                fontSize: "0.875rem",
+              }}
+            />
+          </ListItemButton>
+        </ListItem>
+
+        {/* AI Assistant - opens chat drawer */}
+        <ListItem disablePadding sx={{ mb: 1.5 }}>
+          <ListItemButton
+            onClick={() => {
+              setChatOpen(true);
+              if (isMobile) setMobileOpen(false);
+            }}
+            sx={{
+              borderRadius: 2,
+              py: 1.25,
+              "&:hover": { bgcolor: "action.hover" },
+            }}
+          >
+            <ListItemIcon sx={{ color: "primary.main", minWidth: 40 }}>
+              <SmartToyIcon />
+            </ListItemIcon>
+            <ListItemText
+              primary="AI Assistant"
+              primaryTypographyProps={{
+                fontWeight: 500,
                 fontSize: "0.875rem",
               }}
             />
@@ -1379,7 +1425,7 @@ export default function MainLayout({
       <SettlementDialogManager />
 
       {/* Chat Assistant */}
-      <ChatAssistant />
+      <ChatAssistant open={chatOpen} onClose={() => setChatOpen(false)} />
 
       {/* Refresh feedback snackbar */}
       <Snackbar

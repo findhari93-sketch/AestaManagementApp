@@ -1,8 +1,6 @@
 "use client";
 
-import { useState } from "react";
 import {
-  Fab,
   Drawer,
   Box,
   Typography,
@@ -20,8 +18,12 @@ import ChatInput from "./ChatInput";
 import ChatFilters from "./ChatFilters";
 import QuickActionChips from "./QuickActionChips";
 
-export default function ChatAssistant() {
-  const [open, setOpen] = useState(false);
+interface ChatAssistantProps {
+  open: boolean;
+  onClose: () => void;
+}
+
+export default function ChatAssistant({ open, onClose }: ChatAssistantProps) {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("md"));
   const { selectedSite } = useSelectedSite();
@@ -38,35 +40,13 @@ export default function ChatAssistant() {
     initialSiteId: selectedSite?.id,
   });
 
-  const handleOpen = () => setOpen(true);
-  const handleClose = () => setOpen(false);
-
   return (
     <>
-      {/* Floating Action Button */}
-      <Fab
-        color="primary"
-        aria-label="chat assistant"
-        onClick={handleOpen}
-        sx={{
-          position: "fixed",
-          bottom: { xs: 80, md: 24 }, // Above mobile nav on mobile
-          right: 16,
-          zIndex: theme.zIndex.fab,
-          boxShadow: 4,
-          "&:hover": {
-            boxShadow: 6,
-          },
-        }}
-      >
-        <SmartToyIcon />
-      </Fab>
-
       {/* Chat Drawer */}
       <Drawer
         anchor="right"
         open={open}
-        onClose={handleClose}
+        onClose={onClose}
         PaperProps={{
           sx: {
             width: isMobile ? "100%" : 400,
@@ -109,7 +89,7 @@ export default function ChatAssistant() {
                 <DeleteOutlineIcon fontSize="small" />
               </IconButton>
               <IconButton
-                onClick={handleClose}
+                onClick={onClose}
                 size="small"
                 sx={{ color: "white" }}
               >
