@@ -121,7 +121,12 @@
       "mcp__playwright__browser_snapshot",
       "mcp__playwright__browser_click",
       "mcp__playwright__browser_close",
-      "mcp__playwright__browser_press_key"
+      "mcp__playwright__browser_press_key",
+      "PowerShell(Get-Process -Name node -ErrorAction SilentlyContinue | Select-Object Id, CPU, @{n='Mem\\(MB\\)';e={[math]::Round\\($_.WorkingSet64/1MB,1\\)}}, StartTime, ProcessName | Format-Table -AutoSize; Write-Output '---LISTENERS---'; Get-NetTCPConnection -State Listen -LocalPort 3000,3001 -ErrorAction SilentlyContinue | Select-Object LocalAddress, LocalPort, OwningProcess | Format-Table -AutoSize)",
+      "mcp__playwright__browser_resize",
+      "mcp__playwright__browser_wait_for",
+      "Bash(kill %1)",
+      "Bash(awk '{print $2}')"
     ],
     "deny": [],
     "ask": []
