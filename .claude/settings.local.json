@@ -126,7 +126,10 @@
       "mcp__playwright__browser_resize",
       "mcp__playwright__browser_wait_for",
       "Bash(kill %1)",
-      "Bash(awk '{print $2}')"
+      "Bash(awk '{print $2}')",
+      "mcp__playwright__browser_evaluate",
+      "mcp__playwright__browser_file_upload",
+      "Bash(sort -k5 -n -r)"
     ],
     "deny": [],
     "ask": []

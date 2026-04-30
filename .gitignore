@@ -75,3 +75,10 @@ supabase/.temp/
 /payment-dialog-*.png
 /daily-market-*.png
 /date-picker*.png
+/by-settlement*.png
+/lightbox-*.png
+/salary-settlements-*.png
+/settlement-dialog*.png
+
+# Claude scheduled-tasks runtime lock
+.claude/scheduled_tasks.lock
