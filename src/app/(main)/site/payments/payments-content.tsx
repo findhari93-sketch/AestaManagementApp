@@ -261,15 +261,19 @@ export default function PaymentsContent() {
           }
         />
 
-        <SalarySliceHero
-          summary={salarySummaryQuery.data}
-          isLoading={salarySummaryQuery.isLoading}
-        />
+        {!isFullscreen && (
+          <>
+            <SalarySliceHero
+              summary={salarySummaryQuery.data}
+              isLoading={salarySummaryQuery.isLoading}
+            />
 
-        <PendingBanner
-          pendingAmount={summaryQuery.data?.pendingAmount ?? 0}
-          pendingDatesCount={summaryQuery.data?.pendingDatesCount ?? 0}
-        />
+            <PendingBanner
+              pendingAmount={summaryQuery.data?.pendingAmount ?? 0}
+              pendingDatesCount={summaryQuery.data?.pendingDatesCount ?? 0}
+            />
+          </>
+        )}
 
         {highlightRef && (
           <Box
