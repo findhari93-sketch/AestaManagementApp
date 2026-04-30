@@ -289,6 +289,28 @@ export function MestriSettleDialog({
             )}
           />
 
+          {/* Warn when the chosen subcontract has no mestri attached — otherwise
+              the Record button stays disabled with no visible explanation. */}
+          {subcontractId && selectedSubcontract && !selectedSubcontract.laborer_name && (
+            <Alert severity="warning" sx={{ mt: -1 }}>
+              This subcontract has no mestri attached, so it can&apos;t receive a
+              salary payment.{" "}
+              <Box
+                component="a"
+                href="/site/subcontracts"
+                target="_blank"
+                rel="noopener noreferrer"
+                sx={{
+                  fontWeight: 600,
+                  color: "inherit",
+                  textDecoration: "underline",
+                }}
+              >
+                Assign one →
+              </Box>
+            </Alert>
+          )}
+
           {/* Amount + date */}
           <Stack direction="row" spacing={1.5}>
             <TextField
