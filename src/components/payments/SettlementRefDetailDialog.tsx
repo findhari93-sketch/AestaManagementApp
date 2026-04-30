@@ -41,6 +41,8 @@ import {
 } from "@mui/icons-material";
 import { createClient } from "@/lib/supabase/client";
 import dayjs from "dayjs";
+import { sanitizeStorageUrl } from "@/lib/utils/storageUrl";
+import PhotoFullscreenDialog from "@/components/attendance/work-updates/PhotoFullscreenDialog";
 
 interface LaborerPayment {
   laborerId: string;
@@ -221,22 +223,25 @@ async function getSettlementDetailsByReference(
     // share / contract margin. For daily/market settlements they're equal.
     const distributedToLaborers = laborers.reduce((sum, l) => sum + l.amount, 0);
 
-    // Collect proof URLs from both legacy single-URL field and the array field
-    const proofUrls: string[] = [];
+    // Collect proof URLs from both legacy single-URL field and the array field.
+    // sanitizeStorageUrl repairs the doubled-bucket-prefix bug from pre-2026-02-25
+    // uploads (e.g. ".../payment-proofs/payment-proofs/..." → ".../payment-proofs/...").
+    const rawProofUrls: string[] = [];
     if (Array.isArray(sg.proof_urls) && sg.proof_urls.length > 0) {
-      proofUrls.push(...sg.proof_urls.filter((u: any) => typeof u === "string"));
+      rawProofUrls.push(...sg.proof_urls.filter((u: any) => typeof u === "string"));
     } else if (sg.proof_url) {
       try {
         const parsed = JSON.parse(sg.proof_url);
         if (Array.isArray(parsed)) {
-          proofUrls.push(...parsed);
+          rawProofUrls.push(...parsed);
         } else {
-          proofUrls.push(sg.proof_url);
+          rawProofUrls.push(sg.proof_url);
         }
       } catch {
-        proofUrls.push(sg.proof_url);
+        rawProofUrls.push(sg.proof_url);
       }
     }
+    const proofUrls = rawProofUrls.map(sanitizeStorageUrl).filter(Boolean);
 
     return {
       settlementGroupId: sg.id,
@@ -287,6 +292,7 @@ export default function SettlementRefDetailDialog({
   const [laborersExpanded, setLaborersExpanded] = useState(false);
   // Default-expand proofs so the verification screenshot is visible immediately.
   const [proofsExpanded, setProofsExpanded] = useState(true);
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
 
   useEffect(() => {
     const fetchDetails = async () => {
@@ -655,18 +661,30 @@ export default function SettlementRefDetailDialog({
                     {details.proofUrls.map((url, idx) => (
                       <Box
                         key={idx}
-                        component="a"
-                        href={url}
-                        target="_blank"
-                        rel="noopener noreferrer"
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`Open proof ${idx + 1} fullscreen`}
+                        onClick={() => setLightboxIndex(idx)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            setLightboxIndex(idx);
+                          }
+                        }}
                         sx={{
                           display: "block",
                           borderRadius: 1,
                           overflow: "hidden",
                           border: "1px solid",
                           borderColor: "divider",
+                          cursor: "pointer",
                           "&:hover": {
                             borderColor: "primary.main",
+                          },
+                          "&:focus-visible": {
+                            outline: "2px solid",
+                            outlineColor: "primary.main",
+                            outlineOffset: 2,
                           },
                         }}
                       >
@@ -678,6 +696,7 @@ export default function SettlementRefDetailDialog({
                             width: 150,
                             height: 100,
                             objectFit: "cover",
+                            display: "block",
                           }}
                         />
                       </Box>
@@ -759,6 +778,22 @@ export default function SettlementRefDetailDialog({
           Close
         </Button>
       </DialogActions>
+
+      <PhotoFullscreenDialog
+        open={lightboxIndex !== null}
+        onClose={() => setLightboxIndex(null)}
+        photos={(details?.proofUrls ?? []).map((url, i) => ({
+          id: String(i),
+          url,
+          uploadedAt: details?.createdAt ?? "",
+        }))}
+        initialIndex={lightboxIndex ?? 0}
+        title={
+          details
+            ? `Payment Proof — ${details.settlementReference}`
+            : "Payment Proof"
+        }
+      />
     </Dialog>
   );
 }
