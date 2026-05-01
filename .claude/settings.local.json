@@ -138,7 +138,10 @@
       "mcp__claude_ai_Supabase__list_projects",
       "mcp__claude_ai_Supabase__execute_sql",
       "mcp__claude_ai_Supabase__list_tables",
-      "mcp__playwright__browser_tabs"
+      "mcp__playwright__browser_tabs",
+      "Skill(schedule)",
+      "Skill(schedule:*)",
+      "Bash(jobs -p)"
     ],
     "deny": [],
     "ask": []

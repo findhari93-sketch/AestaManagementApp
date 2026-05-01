@@ -21,7 +21,7 @@ describe("SalarySliceHero", () => {
     expect(screen.getByText("Wages Due")).toBeInTheDocument();
     expect(screen.getByText("Paid (waterfall)")).toBeInTheDocument();
     expect(screen.getByText("Advances")).toBeInTheDocument();
-    expect(screen.getByText("Total Cash Out")).toBeInTheDocument();
+    expect(screen.getByText("Total Paid")).toBeInTheDocument();
     expect(screen.getByText("Mestri Owed")).toBeInTheDocument();
     expect(screen.getByText("₹2,34,400")).toBeInTheDocument();
   });

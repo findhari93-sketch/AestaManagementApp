@@ -147,8 +147,7 @@ export function SalarySliceHero({ summary, isLoading }: SalarySliceHeroProps) {
     );
   }
 
-  const totalCashOut =
-    summary.paidToWeeks + summary.advancesTotal + summary.futureCredit;
+  const totalPaid = summary.settlementsTotal + summary.advancesTotal;
   const progressPct =
     summary.wagesDue > 0
       ? Math.min(100, Math.round((summary.paidToWeeks / summary.wagesDue) * 100))
@@ -225,7 +224,7 @@ export function SalarySliceHero({ summary, isLoading }: SalarySliceHeroProps) {
         />
         <KpiTile
           label="Paid (waterfall)"
-          value={formatINR(summary.paidToWeeks)}
+          value={formatINR(summary.settlementsTotal)}
           sub={`${summary.settlementCount} settlements`}
           variant="success"
         />
@@ -236,9 +235,9 @@ export function SalarySliceHero({ summary, isLoading }: SalarySliceHeroProps) {
           variant="warning"
         />
         <KpiTile
-          label="Total Cash Out"
-          value={formatINR(totalCashOut)}
-          sub="paid + advances"
+          label="Total Paid"
+          value={formatINR(totalPaid)}
+          sub="waterfall + advance"
           variant="info"
         />
         <KpiTile

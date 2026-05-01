@@ -28,7 +28,7 @@ import { hasEditPermission } from "@/lib/permissions";
 import type { DateWiseSettlement } from "@/types/payment.types";
 import PageHeader from "@/components/layout/PageHeader";
 import ScopeChip from "@/components/common/ScopeChip";
-import PendingBanner from "@/components/payments/PendingBanner";
+import UnsettledBanner from "@/components/payments/UnsettledBanner";
 import { SalarySliceHero } from "@/components/payments/SalarySliceHero";
 import { SalaryWaterfallList } from "@/components/payments/SalaryWaterfallList";
 import { AdvancesList } from "@/components/payments/AdvancesList";
@@ -262,6 +262,26 @@ export default function PaymentsContent() {
     (r) => r.isPending
   ).length;
 
+  // Contract pending derived from waterfall data: weeks not fully settled and
+  // the rupee gap between wages-due and paid for those weeks.
+  const contractUnsettledWeeks = (waterfallQuery.data ?? []).filter(
+    (w) => w.status !== "settled"
+  );
+  const contractPendingCount = contractUnsettledWeeks.length;
+  const contractPendingAmount = contractUnsettledWeeks.reduce(
+    (sum, w) => sum + Math.max(0, w.wagesDue - w.paid),
+    0
+  );
+
+  // Daily/market pending comes straight from get_payment_summary (which
+  // already excludes contract laborers).
+  const dailyMarketPendingCount = summaryQuery.data?.pendingDatesCount ?? 0;
+  const dailyMarketPendingAmount = summaryQuery.data?.pendingAmount ?? 0;
+
+  const settleDailyMarketInAttendance = useCallback(() => {
+    router.push("/site/attendance?focus=pending");
+  }, [router]);
+
   const handleSettleClick = useCallback(
     (entity: InspectEntity) => {
       // weekly-aggregate: open the in-page MestriSettleDialog scoped to that week.
@@ -331,7 +351,11 @@ export default function PaymentsContent() {
       sx={{
         display: "flex",
         flexDirection: "column",
-        height: "calc(100vh - 64px)",
+        height: {
+          xs: "calc(100vh - 56px - 24px)",
+          sm: "calc(100vh - 64px - 32px)",
+          md: "calc(100vh - 64px - 48px)",
+        },
         ...(isFullscreen && {
           position: "fixed",
           inset: 0,
@@ -359,20 +383,6 @@ export default function PaymentsContent() {
             </Tooltip>
           }
         />
-
-        {!isFullscreen && (
-          <>
-            <SalarySliceHero
-              summary={salarySummaryQuery.data}
-              isLoading={salarySummaryQuery.isLoading}
-            />
-
-            <PendingBanner
-              pendingAmount={summaryQuery.data?.pendingAmount ?? 0}
-              pendingDatesCount={summaryQuery.data?.pendingDatesCount ?? 0}
-            />
-          </>
-        )}
 
         {highlightRef && (
           <Box
@@ -481,6 +491,19 @@ export default function PaymentsContent() {
 
         {activeTab === "contract" && (
           <Box sx={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+            {!isFullscreen && (
+              <Box sx={{ flexShrink: 0 }}>
+                <SalarySliceHero
+                  summary={salarySummaryQuery.data}
+                  isLoading={salarySummaryQuery.isLoading}
+                />
+              </Box>
+            )}
+            <UnsettledBanner
+              count={contractPendingCount}
+              amount={contractPendingAmount}
+              unit="weeks"
+            />
             <Box
               sx={{
                 px: 1.5,
@@ -585,6 +608,13 @@ export default function PaymentsContent() {
 
         {activeTab === "daily-market" && (
           <Box sx={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+            <UnsettledBanner
+              count={dailyMarketPendingCount}
+              amount={dailyMarketPendingAmount}
+              unit="dates"
+              ctaLabel="Settle in Attendance →"
+              onCtaClick={settleDailyMarketInAttendance}
+            />
             <Box
               sx={{
                 px: 1.5,
@@ -656,6 +686,11 @@ export default function PaymentsContent() {
 
         {activeTab === "all" && (
           <Box sx={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+            <UnsettledBanner
+              count={contractPendingCount + dailyMarketPendingCount}
+              amount={contractPendingAmount + dailyMarketPendingAmount}
+              unit="items"
+            />
             <Box
               sx={{
                 px: 1.5,
