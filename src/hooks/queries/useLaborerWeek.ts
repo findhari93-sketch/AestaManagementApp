@@ -56,17 +56,18 @@ export function useLaborerWeek(
     queryKey: ["inspect-laborer-week", siteId, laborerId, weekStart, weekEnd],
     enabled: Boolean(siteId && laborerId && weekStart && weekEnd),
     staleTime: 30_000,
-    queryFn: async (): Promise<LaborerWeekData> => {
+    queryFn: async ({ signal }): Promise<LaborerWeekData> => {
       const { data, error } = await withTimeout(
-        Promise.resolve((supabase as any).rpc(
-          "get_laborer_week_breakdown",
-          {
-            p_site_id: siteId,
-            p_laborer_id: laborerId,
-            p_week_start: weekStart,
-            p_week_end: weekEnd,
-          }
-        )),
+        Promise.resolve(
+          (supabase as any)
+            .rpc("get_laborer_week_breakdown", {
+              p_site_id: siteId,
+              p_laborer_id: laborerId,
+              p_week_start: weekStart,
+              p_week_end: weekEnd,
+            })
+            .abortSignal(signal)
+        ),
         TIMEOUTS.QUERY,
         "Laborer week breakdown query timed out. Please retry.",
       );

@@ -86,7 +86,7 @@ export function useSettlementDetails(
     queryKey: ["inspect-settlement-details", settlementRef, siteId],
     enabled: Boolean(settlementRef),
     staleTime: 60_000,
-    queryFn: async (): Promise<SettlementDetailsData | null> => {
+    queryFn: async ({ signal }): Promise<SettlementDetailsData | null> => {
       if (!settlementRef) return null;
       const { data, error } = await withTimeout(
         Promise.resolve(
@@ -96,6 +96,7 @@ export function useSettlementDetails(
             )
             .eq("settlement_reference", settlementRef)
             .single()
+            .abortSignal(signal)
         ),
         TIMEOUTS.QUERY,
         "Settlement details query timed out. Please retry.",

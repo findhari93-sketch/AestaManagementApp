@@ -71,7 +71,7 @@ export function useWorkUpdates(
     queryKey: ["inspect-work-updates", siteId, dateFrom, dateTo],
     enabled: Boolean(siteId && dateFrom && dateTo),
     staleTime: 30_000,
-    queryFn: async (): Promise<UseWorkUpdatesData> => {
+    queryFn: async ({ signal }): Promise<UseWorkUpdatesData> => {
       const { data, error } = await withTimeout(
         Promise.resolve(
           (supabase.from("daily_work_summary") as any)
@@ -80,6 +80,7 @@ export function useWorkUpdates(
             .gte("date", dateFrom)
             .lte("date", dateTo)
             .order("date", { ascending: true })
+            .abortSignal(signal)
         ),
         TIMEOUTS.QUERY,
         "Work updates query timed out. Please retry.",

@@ -38,7 +38,7 @@ export function useWeekAggregateAttendance(
     ],
     enabled: Boolean(siteId && weekStart && weekEnd),
     staleTime: 15_000,
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       let attendanceQ = supabase
         .from("daily_attendance")
         .select("date, laborer_id, daily_earnings, laborers!inner(laborer_type)")
@@ -56,8 +56,13 @@ export function useWeekAggregateAttendance(
         .gte("date", weekStart!)
         .lte("date", weekEnd!);
 
+      // .abortSignal(signal): cancel underlying fetch when React Query
+      // unsubscribes the observer (e.g. drawer closed).
       const [attendanceRes, holidaysRes] = await withTimeout(
-        Promise.all([attendanceQ, holidaysQ]),
+        Promise.all([
+          attendanceQ.abortSignal(signal),
+          holidaysQ.abortSignal(signal),
+        ]),
         TIMEOUTS.QUERY,
         "Week aggregate attendance query timed out. Please retry.",
       );
