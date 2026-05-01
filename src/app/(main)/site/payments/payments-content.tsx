@@ -23,6 +23,9 @@ import {
 } from "@mui/icons-material";
 import { useSelectedSite } from "@/contexts/SiteContext";
 import { useDateRange } from "@/contexts/DateRangeContext";
+import { useAuth } from "@/contexts/AuthContext";
+import { hasEditPermission } from "@/lib/permissions";
+import type { DateWiseSettlement } from "@/types/payment.types";
 import PageHeader from "@/components/layout/PageHeader";
 import ScopeChip from "@/components/common/ScopeChip";
 import PendingBanner from "@/components/payments/PendingBanner";
@@ -33,8 +36,14 @@ import { DailyMarketLedger } from "@/components/payments/DailyMarketLedger";
 import PaymentsLedger from "@/components/payments/PaymentsLedger";
 import { MestriSettleDialog } from "@/components/payments/MestriSettleDialog";
 import PaymentDialog from "@/components/payments/PaymentDialog";
-import SettlementRefDetailDialog from "@/components/payments/SettlementRefDetailDialog";
+import SettlementRefDetailDialog, {
+  type SettlementDetails,
+} from "@/components/payments/SettlementRefDetailDialog";
 import { SettlementsList } from "@/components/payments/SettlementsList";
+import ContractSettlementEditDialog from "@/components/payments/ContractSettlementEditDialog";
+import DeleteContractSettlementDialog from "@/components/payments/DeleteContractSettlementDialog";
+import DailySettlementEditDialog from "@/components/payments/DailySettlementEditDialog";
+import DeleteDailySettlementDialog from "@/components/payments/DeleteDailySettlementDialog";
 import { usePaymentSummary } from "@/hooks/queries/usePaymentSummary";
 import { usePaymentsLedger } from "@/hooks/queries/usePaymentsLedger";
 import { useSalarySliceSummary } from "@/hooks/queries/useSalarySliceSummary";
@@ -48,6 +57,86 @@ import type { InspectEntity } from "@/components/common/InspectPane";
 
 type ActiveTab = "all" | "contract" | "daily-market";
 type ViewMode = "default" | "by-settlement";
+
+/** Adapter: SettlementDetails (loaded by SettlementRefDetailDialog) →
+ *  DateWiseSettlement (the legacy shape ContractSettlementEditDialog accepts).
+ *  ContractSettlementEditDialog re-fetches its own labor_payments rows from
+ *  settlementGroupId, so we can leave the heavier pieces empty.
+ */
+function settlementDetailsToDateWise(
+  d: SettlementDetails
+): DateWiseSettlement {
+  return {
+    settlementGroupId: d.settlementGroupId,
+    settlementReference: d.settlementReference,
+    settlementDate: d.settlementDate,
+    totalAmount: d.totalAmount,
+    weekAllocations: d.weekAllocations.map((a) => ({
+      weekStart: a.weekStart,
+      weekEnd: a.weekEnd,
+      // ContractSettlementEditDialog reads weekStart/weekEnd/allocatedAmount;
+      // the RPC recomputes everything server-side on amount/type changes, so
+      // the rest of WeekAllocationEntry just needs to satisfy the type.
+      weekLabel: "",
+      allocatedAmount: a.amount,
+      laborerCount: 0,
+      isFullyPaid: false,
+    })),
+    paymentMode: (d.paymentMode as DateWiseSettlement["paymentMode"]) ?? null,
+    paymentChannel:
+      (d.paymentChannel as DateWiseSettlement["paymentChannel"]) ?? "direct",
+    payerSource: d.payerSource,
+    payerName: d.payerName,
+    proofUrls: d.proofUrls,
+    notes: d.notes,
+    subcontractId: d.subcontractId,
+    subcontractTitle: d.subcontractTitle,
+    createdBy: d.createdBy ?? "",
+    createdByName: d.createdByName,
+    createdAt: d.createdAt,
+    isCancelled: d.isCancelled,
+  };
+}
+
+/** Adapter: SettlementDetails → DeleteContractSettlementDialog's local
+ *  SettlementRecord shape. The delete dialog renders weekAllocations in the
+ *  confirm body, so we forward the freshly-fetched ones from the detail load.
+ */
+function settlementDetailsToRecord(d: SettlementDetails) {
+  return {
+    id: d.settlementGroupId,
+    settlementReference: d.settlementReference,
+    settlementDate: d.settlementDate,
+    totalAmount: d.totalAmount,
+    paymentMode: d.paymentMode,
+    paymentChannel: d.paymentChannel,
+    paymentType: d.paymentType,
+    payerSource: d.payerSource,
+    payerName: d.payerName,
+    subcontractId: d.subcontractId,
+    subcontractTitle: d.subcontractTitle,
+    proofUrl: d.proofUrls[0] ?? null,
+    proofUrls: d.proofUrls,
+    notes: d.notes,
+    createdBy: d.createdByName,
+    createdAt: d.createdAt,
+    laborerCount: d.laborerCount,
+    weekAllocations: d.weekAllocations,
+  };
+}
+
+/** Bust every cache that surfaces settlement data anywhere on the payments
+ *  page after an edit or delete. */
+function invalidateSettlementsCaches(
+  queryClient: ReturnType<typeof useQueryClient>
+) {
+  queryClient.invalidateQueries({ queryKey: ["settlements-list"] });
+  queryClient.invalidateQueries({ queryKey: ["salary-waterfall"] });
+  queryClient.invalidateQueries({ queryKey: ["salary-slice-summary"] });
+  queryClient.invalidateQueries({ queryKey: ["payments-ledger"] });
+  queryClient.invalidateQueries({ queryKey: ["payment-summary"] });
+  queryClient.invalidateQueries({ queryKey: ["advances"] });
+}
 
 export default function PaymentsContent() {
   const { selectedSite } = useSelectedSite();
@@ -77,6 +166,16 @@ export default function PaymentsContent() {
     setViewModes((prev) => ({ ...prev, [activeTab]: next }));
   // SET-XXX detail dialog opened from a row click in the by-settlement view.
   const [refDetail, setRefDetail] = useState<string | null>(null);
+  // Edit / Delete targets — populated by the detail dialog's footer buttons.
+  // The detail dialog hands back the fully-loaded SettlementDetails, which we
+  // pipe straight into the Daily edit/delete dialogs (they accept the same
+  // type) and adapt for the Contract edit/delete dialogs (legacy shapes).
+  const [editTarget, setEditTarget] = useState<SettlementDetails | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<SettlementDetails | null>(
+    null
+  );
+  const { userProfile } = useAuth();
+  const canEditSettlements = hasEditPermission(userProfile?.role);
   const [settleDialog, setSettleDialog] = useState<null | {
     weekStart: string;
     weekEnd: string;
@@ -360,28 +459,28 @@ export default function PaymentsContent() {
         </Tabs>
       </Box>
 
-      <Box sx={{ flex: 1, minHeight: 0, overflow: "auto" }}>
+      <Box sx={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
         {(salarySummaryQuery.isError || waterfallQuery.isError || advancesQuery.isError) &&
           activeTab === "contract" && (
-            <Alert severity="error" sx={{ m: 1.5 }}>
+            <Alert severity="error" sx={{ m: 1.5, flexShrink: 0 }}>
               Couldn&apos;t load contract settlement data.
             </Alert>
           )}
         {dailyMarketLedgerQuery.isError && activeTab === "daily-market" && (
-          <Alert severity="error" sx={{ m: 1.5 }}>
+          <Alert severity="error" sx={{ m: 1.5, flexShrink: 0 }}>
             Couldn&apos;t load daily/market ledger:{" "}
             {(dailyMarketLedgerQuery.error as Error)?.message ?? "Unknown error"}
           </Alert>
         )}
         {allLedgerQuery.isError && activeTab === "all" && (
-          <Alert severity="error" sx={{ m: 1.5 }}>
+          <Alert severity="error" sx={{ m: 1.5, flexShrink: 0 }}>
             Couldn&apos;t load unified ledger:{" "}
             {(allLedgerQuery.error as Error)?.message ?? "Unknown error"}
           </Alert>
         )}
 
         {activeTab === "contract" && (
-          <Box>
+          <Box sx={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
             <Box
               sx={{
                 px: 1.5,
@@ -393,6 +492,7 @@ export default function PaymentsContent() {
                 borderBottom: 1,
                 borderColor: "divider",
                 flexWrap: "wrap",
+                flexShrink: 0,
               }}
             >
               <ToggleButtonGroup
@@ -428,61 +528,63 @@ export default function PaymentsContent() {
                 Record mesthri payment
               </Button>
             </Box>
-            {viewMode === "default" ? (
-              <>
-                <SalaryWaterfallList
-                  weeks={waterfallQuery.data ?? []}
-                  futureCredit={salarySummaryQuery.data?.futureCredit ?? 0}
-                  isLoading={waterfallQuery.isLoading}
-                  onRowClick={(week) => {
-                    pane.open({
-                      kind: "weekly-aggregate",
-                      siteId: selectedSite.id,
-                      subcontractId: selectedSubcontractId,
-                      weekStart: week.weekStart,
-                      weekEnd: week.weekEnd,
-                      scopeFrom: effectiveFrom,
-                      scopeTo: effectiveTo,
-                    });
-                  }}
-                  onSettleClick={(week) => {
-                    setSettleDialog({
-                      weekStart: week.weekStart,
-                      weekEnd: week.weekEnd,
-                      suggestedAmount: Math.max(0, week.wagesDue - week.paid),
-                    });
-                  }}
+            <Box sx={{ flex: 1, minHeight: 0, overflow: "auto" }}>
+              {viewMode === "default" ? (
+                <>
+                  <SalaryWaterfallList
+                    weeks={waterfallQuery.data ?? []}
+                    futureCredit={salarySummaryQuery.data?.futureCredit ?? 0}
+                    isLoading={waterfallQuery.isLoading}
+                    onRowClick={(week) => {
+                      pane.open({
+                        kind: "weekly-aggregate",
+                        siteId: selectedSite.id,
+                        subcontractId: selectedSubcontractId,
+                        weekStart: week.weekStart,
+                        weekEnd: week.weekEnd,
+                        scopeFrom: effectiveFrom,
+                        scopeTo: effectiveTo,
+                      });
+                    }}
+                    onSettleClick={(week) => {
+                      setSettleDialog({
+                        weekStart: week.weekStart,
+                        weekEnd: week.weekEnd,
+                        suggestedAmount: Math.max(0, week.wagesDue - week.paid),
+                      });
+                    }}
+                  />
+                  {(advancesQuery.data?.length ?? 0) > 0 && (
+                    <Box sx={{ mt: 1.5 }}>
+                      <AdvancesList
+                        advances={advancesQuery.data ?? []}
+                        isLoading={advancesQuery.isLoading}
+                        onRowClick={(adv) => {
+                          pane.open({
+                            kind: "advance",
+                            siteId: selectedSite.id,
+                            settlementId: adv.id,
+                            settlementRef: adv.settlementRef,
+                          });
+                        }}
+                      />
+                    </Box>
+                  )}
+                </>
+              ) : (
+                <SettlementsList
+                  rows={settlementsListQuery.data ?? []}
+                  isLoading={settlementsListQuery.isLoading}
+                  onRowClick={(row) => setRefDetail(row.ref)}
+                  emptyMessage="No contract settlements recorded for this period."
                 />
-                {(advancesQuery.data?.length ?? 0) > 0 && (
-                  <Box sx={{ mt: 1.5 }}>
-                    <AdvancesList
-                      advances={advancesQuery.data ?? []}
-                      isLoading={advancesQuery.isLoading}
-                      onRowClick={(adv) => {
-                        pane.open({
-                          kind: "advance",
-                          siteId: selectedSite.id,
-                          settlementId: adv.id,
-                          settlementRef: adv.settlementRef,
-                        });
-                      }}
-                    />
-                  </Box>
-                )}
-              </>
-            ) : (
-              <SettlementsList
-                rows={settlementsListQuery.data ?? []}
-                isLoading={settlementsListQuery.isLoading}
-                onRowClick={(row) => setRefDetail(row.ref)}
-                emptyMessage="No contract settlements recorded for this period."
-              />
-            )}
+              )}
+            </Box>
           </Box>
         )}
 
         {activeTab === "daily-market" && (
-          <Box>
+          <Box sx={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
             <Box
               sx={{
                 px: 1.5,
@@ -491,6 +593,7 @@ export default function PaymentsContent() {
                 justifyContent: "flex-start",
                 borderBottom: 1,
                 borderColor: "divider",
+                flexShrink: 0,
               }}
             >
               <ToggleButtonGroup
@@ -517,40 +620,42 @@ export default function PaymentsContent() {
                 </ToggleButton>
               </ToggleButtonGroup>
             </Box>
-            {viewMode === "default" ? (
-              <DailyMarketLedger
-                rows={dailyMarketLedgerQuery.data ?? []}
-                isLoading={dailyMarketLedgerQuery.isLoading}
-                onRowClick={(row) => {
-                  pane.open({
-                    kind: "daily-date",
-                    siteId: selectedSite.id,
-                    date: row.date,
-                    settlementRef: row.settlementRef,
-                  });
-                }}
-                onSettleClick={(row) =>
-                  handleSettleClick({
-                    kind: "daily-date",
-                    siteId: selectedSite.id,
-                    date: row.date,
-                    settlementRef: row.settlementRef,
-                  })
-                }
-              />
-            ) : (
-              <SettlementsList
-                rows={settlementsListQuery.data ?? []}
-                isLoading={settlementsListQuery.isLoading}
-                onRowClick={(row) => setRefDetail(row.ref)}
-                emptyMessage="No daily/market settlements recorded for this period."
-              />
-            )}
+            <Box sx={{ flex: 1, minHeight: 0, overflow: "auto" }}>
+              {viewMode === "default" ? (
+                <DailyMarketLedger
+                  rows={dailyMarketLedgerQuery.data ?? []}
+                  isLoading={dailyMarketLedgerQuery.isLoading}
+                  onRowClick={(row) => {
+                    pane.open({
+                      kind: "daily-date",
+                      siteId: selectedSite.id,
+                      date: row.date,
+                      settlementRef: row.settlementRef,
+                    });
+                  }}
+                  onSettleClick={(row) =>
+                    handleSettleClick({
+                      kind: "daily-date",
+                      siteId: selectedSite.id,
+                      date: row.date,
+                      settlementRef: row.settlementRef,
+                    })
+                  }
+                />
+              ) : (
+                <SettlementsList
+                  rows={settlementsListQuery.data ?? []}
+                  isLoading={settlementsListQuery.isLoading}
+                  onRowClick={(row) => setRefDetail(row.ref)}
+                  emptyMessage="No daily/market settlements recorded for this period."
+                />
+              )}
+            </Box>
           </Box>
         )}
 
         {activeTab === "all" && (
-          <Box>
+          <Box sx={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
             <Box
               sx={{
                 px: 1.5,
@@ -559,6 +664,7 @@ export default function PaymentsContent() {
                 justifyContent: "flex-start",
                 borderBottom: 1,
                 borderColor: "divider",
+                flexShrink: 0,
               }}
             >
               <ToggleButtonGroup
@@ -586,20 +692,24 @@ export default function PaymentsContent() {
               </ToggleButtonGroup>
             </Box>
             {viewMode === "default" ? (
-              <PaymentsLedger
-                rows={allLedgerQuery.data ?? []}
-                isLoading={allLedgerQuery.isLoading}
-                selectedEntity={pane.currentEntity}
-                onRowClick={(entity) => pane.open(entity)}
-                onSettleClick={(entity) => handleSettleClick(entity)}
-              />
+              <Box sx={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+                <PaymentsLedger
+                  rows={allLedgerQuery.data ?? []}
+                  isLoading={allLedgerQuery.isLoading}
+                  selectedEntity={pane.currentEntity}
+                  onRowClick={(entity) => pane.open(entity)}
+                  onSettleClick={(entity) => handleSettleClick(entity)}
+                />
+              </Box>
             ) : (
-              <SettlementsList
-                rows={settlementsListQuery.data ?? []}
-                isLoading={settlementsListQuery.isLoading}
-                onRowClick={(row) => setRefDetail(row.ref)}
-                emptyMessage="No settlements recorded for this period."
-              />
+              <Box sx={{ flex: 1, minHeight: 0, overflow: "auto" }}>
+                <SettlementsList
+                  rows={settlementsListQuery.data ?? []}
+                  isLoading={settlementsListQuery.isLoading}
+                  onRowClick={(row) => setRefDetail(row.ref)}
+                  emptyMessage="No settlements recorded for this period."
+                />
+              </Box>
             )}
           </Box>
         )}
@@ -632,8 +742,86 @@ export default function PaymentsContent() {
         open={refDetail !== null}
         settlementReference={refDetail}
         onClose={() => setRefDetail(null)}
+        canEdit={canEditSettlements}
+        onEdit={(details) => {
+          setRefDetail(null);
+          setEditTarget(details);
+        }}
+        onDelete={(details) => {
+          setRefDetail(null);
+          setDeleteTarget(details);
+        }}
       />
 
+      {/* Edit dialog — Contract or Daily depending on the settlement type.
+          Detection mirrors useSettlementsList.ts (any labor_payment with
+          is_under_contract=true makes it a contract settlement). */}
+      {editTarget && editTarget.isContract && (
+        <ContractSettlementEditDialog
+          open
+          onClose={() => setEditTarget(null)}
+          settlement={settlementDetailsToDateWise(editTarget)}
+          onSuccess={() => {
+            setEditTarget(null);
+            invalidateSettlementsCaches(queryClient);
+            setNotice("Settlement updated");
+          }}
+          onDelete={(s) => {
+            // ContractSettlementEditDialog re-emits the original payload it
+            // received (DateWiseSettlement), but we only kept the upstream
+            // SettlementDetails. Hand the same SettlementDetails to the
+            // delete dialog directly — its shape is what we adapt from.
+            void s;
+            const target = editTarget;
+            setEditTarget(null);
+            setDeleteTarget(target);
+          }}
+        />
+      )}
+      {editTarget && !editTarget.isContract && (
+        <DailySettlementEditDialog
+          open
+          onClose={() => setEditTarget(null)}
+          settlement={editTarget}
+          onSuccess={() => {
+            setEditTarget(null);
+            invalidateSettlementsCaches(queryClient);
+            setNotice("Settlement updated");
+          }}
+          onDelete={(details) => {
+            setEditTarget(null);
+            setDeleteTarget(details);
+          }}
+        />
+      )}
+
+      {/* Delete dialog — same contract-vs-daily branch. The delete dialogs
+          handle the cascade themselves (cancel labor_payments, reset
+          attendance.is_paid, refund engineer wallet). */}
+      {deleteTarget && deleteTarget.isContract && (
+        <DeleteContractSettlementDialog
+          open
+          onClose={() => setDeleteTarget(null)}
+          settlement={settlementDetailsToRecord(deleteTarget)}
+          onSuccess={() => {
+            setDeleteTarget(null);
+            invalidateSettlementsCaches(queryClient);
+            setNotice("Settlement deleted");
+          }}
+        />
+      )}
+      {deleteTarget && !deleteTarget.isContract && (
+        <DeleteDailySettlementDialog
+          open
+          onClose={() => setDeleteTarget(null)}
+          settlement={deleteTarget}
+          onSuccess={() => {
+            setDeleteTarget(null);
+            invalidateSettlementsCaches(queryClient);
+            setNotice("Settlement deleted");
+          }}
+        />
+      )}
 
       {dayDialog && (
         <PaymentDialog

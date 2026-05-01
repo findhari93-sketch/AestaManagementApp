@@ -76,9 +76,18 @@ export interface SettlementDetails {
   notes: string | null;
   subcontractId: string | null;
   subcontractTitle: string | null;
+  createdBy: string | null;
   createdByName: string | null;
   createdAt: string;
   isCancelled: boolean;
+  /** True if any linked labor_payment row has is_under_contract=true. Matches
+   * the same heuristic used by useSettlementsList so edit/delete dispatch
+   * picks the right contract-vs-daily dialog flavour. */
+  isContract: boolean;
+  /** Week-by-week breakdown of how this settlement filled the salary waterfall.
+   * Empty for daily/market settlements. Used by DeleteContractSettlementDialog
+   * to show the cascade impact in the confirm body. */
+  weekAllocations: { weekStart: string; weekEnd: string; amount: number }[];
   laborers: LaborerPayment[];
 }
 
@@ -173,6 +182,7 @@ async function getSettlementDetailsByReference(
         subcontract_id,
         is_cancelled,
         created_at,
+        created_by,
         created_by_name,
         subcontracts(title)
       `
@@ -218,10 +228,30 @@ async function getSettlementDetailsByReference(
       paymentType: p.payment_type || "salary",
     }));
 
+    // Match useSettlementsList's heuristic: any labor_payment with
+    // is_under_contract=true makes the whole settlement a contract one.
+    const isContract = (payments || []).some(
+      (p: any) => p.is_under_contract === true
+    );
+
     // Sum of labor_payments — for contract settlements this is the portion
     // distributed to laborers; the difference vs total_amount is the mesthri's
     // share / contract margin. For daily/market settlements they're equal.
     const distributedToLaborers = laborers.reduce((sum, l) => sum + l.amount, 0);
+
+    // Week-by-week waterfall breakdown for the confirm body of the delete
+    // dialog. Cheap join-less query keyed by settlement_group_id. Empty for
+    // daily/market settlements (they don't write payment_week_allocations).
+    const { data: allocRows } = await supabase
+      .from("payment_week_allocations")
+      .select("week_start, week_end, amount")
+      .eq("settlement_group_id", sg.id)
+      .order("week_start", { ascending: true });
+    const weekAllocations = (allocRows || []).map((a: any) => ({
+      weekStart: a.week_start,
+      weekEnd: a.week_end,
+      amount: Number(a.amount) || 0,
+    }));
 
     // Collect proof URLs from both legacy single-URL field and the array field.
     // sanitizeStorageUrl repairs the doubled-bucket-prefix bug from pre-2026-02-25
@@ -263,9 +293,12 @@ async function getSettlementDetailsByReference(
       notes: sg.notes,
       subcontractId: sg.subcontract_id,
       subcontractTitle: (sg as any).subcontracts?.title || null,
+      createdBy: sg.created_by ?? null,
       createdByName: sg.created_by_name,
       createdAt: sg.created_at,
       isCancelled: sg.is_cancelled,
+      isContract,
+      weekAllocations,
       laborers,
     };
   } catch (err: any) {
