@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
+import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import {
   Box,
   Button,
@@ -74,6 +75,13 @@ export default function SiteSubcontractsPage() {
   const { selectedSite } = useSite();
   const supabase = createClient();
   const isMobile = useIsMobile();
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+  const editIdFromUrl = searchParams.get("edit");
+  // Track which deep-link we've already opened so a closed dialog doesn't
+  // re-open on every render while ?edit=… is still in the URL.
+  const consumedEditIdRef = useRef<string | null>(null);
 
   const [subcontracts, setSubcontracts] = useState<SubcontractWithDetails[]>(
     []
@@ -142,7 +150,7 @@ export default function SiteSubcontractsPage() {
           .order("name"),
         supabase
           .from("laborers")
-          .select("id, name")
+          .select("id, name, team_id")
           .eq("status", "active")
           .order("name"),
         supabase
@@ -229,6 +237,21 @@ export default function SiteSubcontractsPage() {
       fetchSubcontracts();
     }
   }, [activeTab, selectedSite, teams, laborers]);
+
+  // Deep-link: open the edit dialog when /site/subcontracts?edit=<id> is hit.
+  // Used by the "Assign one →" alert in MestriSettleDialog so the user lands
+  // directly on the right subcontract instead of having to find it manually.
+  useEffect(() => {
+    if (!editIdFromUrl) return;
+    if (consumedEditIdRef.current === editIdFromUrl) return;
+    if (subcontracts.length === 0) return;
+    const target = subcontracts.find((s) => s.id === editIdFromUrl);
+    if (!target) return;
+    consumedEditIdRef.current = editIdFromUrl;
+    handleOpenDialog(target);
+    // Strip ?edit=… from the URL so a refresh doesn't keep re-opening it.
+    router.replace(pathname);
+  }, [editIdFromUrl, subcontracts, router, pathname]);
 
   // Auto-calculate total value for rate-based contracts
   useEffect(() => {
@@ -320,8 +343,12 @@ export default function SiteSubcontractsPage() {
         site_id: selectedSite.id, // Auto-set from selected site
         contract_type: form.contract_type,
         team_id: form.contract_type === "mesthri" ? form.team_id : null,
-        laborer_id:
-          form.contract_type === "specialist" ? form.laborer_id : null,
+        // For specialist contracts, laborer_id is the contract holder.
+        // For mesthri contracts, laborer_id (when set) is the head mestri who
+        // receives team-wage settlements via the salary waterfall RPC. The
+        // schema CHECK constraint requires team_id for mesthri contracts but
+        // allows laborer_id alongside it.
+        laborer_id: form.laborer_id || null,
         title: form.title,
         description: form.description || null,
         scope_of_work: form.scope_of_work || null,
@@ -354,6 +381,15 @@ export default function SiteSubcontractsPage() {
         ) as { error: any };
 
         if (result.error) throw result.error;
+      }
+
+      // Notify other open tabs (e.g. /site/payments' MestriSettleDialog) that
+      // subcontracts changed, so their useSiteSubcontracts cache invalidates
+      // immediately instead of waiting on staleTime + window-focus refetch.
+      if (typeof BroadcastChannel !== "undefined") {
+        const bc = new BroadcastChannel("subcontracts-changed");
+        bc.postMessage({ siteId: selectedSite.id, at: Date.now() });
+        bc.close();
       }
 
       handleCloseDialog(); // Close dialog immediately for better UX
@@ -910,7 +946,17 @@ export default function SiteSubcontractsPage() {
                     <Select
                       value={form.team_id}
                       onChange={(e) =>
-                        setForm({ ...form, team_id: e.target.value })
+                        setForm({
+                          ...form,
+                          team_id: e.target.value,
+                          // Clear stale head-mestri pick if it doesn't belong
+                          // to the newly selected team.
+                          laborer_id:
+                            laborers.find((l) => l.id === form.laborer_id)
+                              ?.team_id === e.target.value
+                              ? form.laborer_id
+                              : "",
+                        })
                       }
                       label="Team"
                     >
@@ -940,6 +986,52 @@ export default function SiteSubcontractsPage() {
                   </FormControl>
                 )}
               </Grid>
+              {/* Head Mestri picker — required for salary settlements via the
+                  waterfall RPC (the team's "mestri" is the laborer who actually
+                  receives the wages on behalf of the team). Optional at the
+                  schema level so existing mesthri contracts still save. */}
+              {form.contract_type === "mesthri" && form.team_id && (
+                <Grid size={{ xs: 12 }}>
+                  <FormControl fullWidth>
+                    <InputLabel shrink>Head Mestri (Laborer)</InputLabel>
+                    <Select
+                      value={form.laborer_id}
+                      onChange={(e) =>
+                        setForm({ ...form, laborer_id: e.target.value })
+                      }
+                      label="Head Mestri (Laborer)"
+                      displayEmpty
+                      notched
+                    >
+                      <MenuItem value="">
+                        <em>None — block salary settlements</em>
+                      </MenuItem>
+                      {(() => {
+                        const teamMembers = laborers.filter(
+                          (l) => l.team_id === form.team_id
+                        );
+                        const pool =
+                          teamMembers.length > 0 ? teamMembers : laborers;
+                        return pool.map((laborer) => (
+                          <MenuItem key={laborer.id} value={laborer.id}>
+                            {laborer.name}
+                            {teamMembers.length === 0 ? " (any)" : ""}
+                          </MenuItem>
+                        ));
+                      })()}
+                    </Select>
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      sx={{ mt: 0.5, ml: 1.5 }}
+                    >
+                      Required for the &quot;Record mesthri payment&quot;
+                      waterfall on /site/payments. If no team members appear,
+                      pick any active laborer as the wage recipient.
+                    </Typography>
+                  </FormControl>
+                </Grid>
+              )}
             </Grid>
 
             <TextField

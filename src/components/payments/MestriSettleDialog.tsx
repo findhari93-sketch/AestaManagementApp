@@ -136,6 +136,48 @@ export function MestriSettleDialog({
     }
   }, [open, initialSubcontractId, suggestedAmount, isDateOnly]);
 
+  // Force-refresh the subcontracts cache while the dialog is open. The
+  // "Assign one →" alert deep-links to /site/subcontracts in a new tab; when
+  // the user assigns a head mestri there and returns, this tab's cache is
+  // still within useSiteSubcontracts' 5-min staleTime, so the default
+  // refetchOnWindowFocus skips the refetch and the alert keeps showing.
+  //
+  // We listen on three channels for max coverage:
+  //   1. BroadcastChannel("subcontracts-changed") — explicit cross-tab signal
+  //      posted by the subcontracts edit form after a successful save. Most
+  //      reliable; doesn't depend on tab focus.
+  //   2. visibilitychange — fires when the user switches back to this tab.
+  //   3. window.focus — fallback for environments where visibilitychange is
+  //      flaky (some embedded webviews / older Safari).
+  // Plus an immediate invalidate on dialog open to flush any stale data
+  // from a prior session.
+  useEffect(() => {
+    if (!open) return;
+    const invalidate = () =>
+      queryClient.invalidateQueries({
+        queryKey: ["subcontracts", "site", siteId],
+      });
+    invalidate();
+
+    const onVisible = () => {
+      if (document.visibilityState === "visible") invalidate();
+    };
+    window.addEventListener("focus", invalidate);
+    document.addEventListener("visibilitychange", onVisible);
+
+    let bc: BroadcastChannel | null = null;
+    if (typeof BroadcastChannel !== "undefined") {
+      bc = new BroadcastChannel("subcontracts-changed");
+      bc.onmessage = () => invalidate();
+    }
+
+    return () => {
+      window.removeEventListener("focus", invalidate);
+      document.removeEventListener("visibilitychange", onVisible);
+      bc?.close();
+    };
+  }, [open, siteId, queryClient]);
+
   // Auto-pick the subcontract if there's only one on the site (saves a click)
   useEffect(() => {
     if (
@@ -297,7 +339,10 @@ export function MestriSettleDialog({
               salary payment.{" "}
               <Box
                 component="a"
-                href="/site/subcontracts"
+                // Deep-links to the subcontracts page with ?edit=<id> so the
+                // user lands directly on this subcontract's edit dialog and
+                // can pick a Head Mestri without hunting for the row.
+                href={`/site/subcontracts?edit=${subcontractId}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 sx={{
