@@ -79,6 +79,8 @@ supabase/.temp/
 /lightbox-*.png
 /salary-settlements-*.png
 /settlement-dialog*.png
+/dialog-*.png
+/subcontracts-*.png
 
 # Claude scheduled-tasks runtime lock
 .claude/scheduled_tasks.lock

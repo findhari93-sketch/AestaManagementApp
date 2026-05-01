@@ -129,7 +129,16 @@
       "Bash(awk '{print $2}')",
       "mcp__playwright__browser_evaluate",
       "mcp__playwright__browser_file_upload",
-      "Bash(sort -k5 -n -r)"
+      "Bash(sort -k5 -n -r)",
+      "Bash(jobs -l)",
+      "WebSearch",
+      "WebFetch(domain:developers.cloudflare.com)",
+      "Bash(npm run *)",
+      "Read(//c/Users/Haribabu/AppData/Local/Temp/**)",
+      "mcp__claude_ai_Supabase__list_projects",
+      "mcp__claude_ai_Supabase__execute_sql",
+      "mcp__claude_ai_Supabase__list_tables",
+      "mcp__playwright__browser_tabs"
     ],
     "deny": [],
     "ask": []
