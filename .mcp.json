@@ -8,6 +8,31 @@
       "type": "stdio",
       "command": "npx",
       "args": ["-y", "@playwright/mcp@latest"]
+    },
+    "supabase": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@supabase/mcp-server-supabase@latest",
+        "--project-ref=ocutbpoaibjxtyjkrnda"
+      ],
+      "env": {
+        "SUPABASE_ACCESS_TOKEN": "${SUPABASE_ACCESS_TOKEN}"
+      }
+    },
+    "cloudflare": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@cloudflare/mcp-server-cloudflare@latest",
+        "run",
+        "816cbcd84b2213dee67be1ada89acc15"
+      ],
+      "env": {
+        "CLOUDFLARE_API_TOKEN": "${CLOUDFLARE_API_TOKEN_AESTA}"
+      }
     }
   }
 }
