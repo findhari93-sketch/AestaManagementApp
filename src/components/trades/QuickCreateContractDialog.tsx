@@ -22,9 +22,13 @@ import {
   Alert,
   CircularProgress,
   InputAdornment,
+  Collapse,
+  Link as MuiLink,
 } from "@mui/material";
+import { Add as AddIcon, Close as CloseIcon } from "@mui/icons-material";
 import { useQueryClient } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase/client";
+import { useSelectedCompany } from "@/contexts/CompanyContext/SelectedCompanyContext";
 import type { LaborTrackingMode } from "@/types/trade.types";
 
 interface TeamOption {
@@ -56,6 +60,7 @@ export function QuickCreateContractDialog({
 }: QuickCreateContractDialogProps) {
   const supabase = createClient();
   const queryClient = useQueryClient();
+  const { selectedCompany } = useSelectedCompany();
 
   const [contractType, setContractType] = useState<"mesthri" | "specialist">(
     "mesthri"
@@ -74,6 +79,18 @@ export function QuickCreateContractDialog({
   const [error, setError] = useState<string | null>(null);
   const [optionsLoading, setOptionsLoading] = useState(false);
 
+  // Inline-create state for team and laborer
+  const [showNewTeam, setShowNewTeam] = useState(false);
+  const [newTeamLeader, setNewTeamLeader] = useState("");
+  const [newTeamName, setNewTeamName] = useState("");
+  const [newTeamPhone, setNewTeamPhone] = useState("");
+  const [creatingTeam, setCreatingTeam] = useState(false);
+
+  const [showNewLaborer, setShowNewLaborer] = useState(false);
+  const [newLaborerName, setNewLaborerName] = useState("");
+  const [newLaborerPhone, setNewLaborerPhone] = useState("");
+  const [creatingLaborer, setCreatingLaborer] = useState(false);
+
   // Reset state every time dialog opens
   useEffect(() => {
     if (!open) return;
@@ -84,6 +101,13 @@ export function QuickCreateContractDialog({
     setTotalValue("");
     setLaborTrackingMode("mesthri_only");
     setError(null);
+    setShowNewTeam(false);
+    setNewTeamLeader("");
+    setNewTeamName("");
+    setNewTeamPhone("");
+    setShowNewLaborer(false);
+    setNewLaborerName("");
+    setNewLaborerPhone("");
 
     setOptionsLoading(true);
     Promise.all([
@@ -132,6 +156,103 @@ export function QuickCreateContractDialog({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [contractType, selectedTeamId, selectedLaborerId]);
+
+  const handleCreateTeam = async () => {
+    setError(null);
+    if (!newTeamLeader.trim()) {
+      setError("Leader name is required to create a team");
+      return;
+    }
+    if (!selectedCompany?.id) {
+      setError("No active company selected");
+      return;
+    }
+    setCreatingTeam(true);
+    try {
+      const sb = supabase as any;
+      const teamName =
+        newTeamName.trim() || `${newTeamLeader.trim()} ${tradeName} Team`;
+      const insertRes = await sb
+        .from("teams")
+        .insert({
+          name: teamName,
+          leader_name: newTeamLeader.trim(),
+          leader_phone: newTeamPhone.trim() || null,
+          status: "active",
+          company_id: selectedCompany.id,
+        })
+        .select("id, name, leader_name")
+        .single();
+      if (insertRes.error) throw insertRes.error;
+      const created = insertRes.data as {
+        id: string;
+        name: string;
+        leader_name: string | null;
+      };
+      // Add to local options + auto-select + auto-fill title
+      setTeams((prev) => [
+        ...prev,
+        {
+          id: created.id,
+          name: created.name,
+          leaderName: created.leader_name,
+        },
+      ]);
+      setSelectedTeamId(created.id);
+      if (!title) {
+        setTitle(`${tradeName} — ${created.leader_name ?? created.name}`);
+      }
+      setShowNewTeam(false);
+      setNewTeamLeader("");
+      setNewTeamName("");
+      setNewTeamPhone("");
+    } catch (e: any) {
+      setError(`Failed to create team: ${e.message ?? String(e)}`);
+    } finally {
+      setCreatingTeam(false);
+    }
+  };
+
+  const handleCreateLaborer = async () => {
+    setError(null);
+    if (!newLaborerName.trim()) {
+      setError("Specialist name is required");
+      return;
+    }
+    if (!selectedCompany?.id) {
+      setError("No active company selected");
+      return;
+    }
+    setCreatingLaborer(true);
+    try {
+      const sb = supabase as any;
+      const insertRes = await sb
+        .from("laborers")
+        .insert({
+          name: newLaborerName.trim(),
+          phone: newLaborerPhone.trim() || null,
+          status: "active",
+          employment_type: "specialist",
+          laborer_type: "contract",
+          category_id: tradeCategoryId,
+          company_id: selectedCompany.id,
+        })
+        .select("id, name")
+        .single();
+      if (insertRes.error) throw insertRes.error;
+      const created = insertRes.data as { id: string; name: string };
+      setLaborers((prev) => [...prev, { id: created.id, name: created.name }]);
+      setSelectedLaborerId(created.id);
+      if (!title) setTitle(`${tradeName} — ${created.name}`);
+      setShowNewLaborer(false);
+      setNewLaborerName("");
+      setNewLaborerPhone("");
+    } catch (e: any) {
+      setError(`Failed to create specialist: ${e.message ?? String(e)}`);
+    } finally {
+      setCreatingLaborer(false);
+    }
+  };
 
   const canSubmit = useMemo(() => {
     if (submitting) return false;
@@ -259,27 +380,187 @@ export function QuickCreateContractDialog({
             </FormControl>
 
             {contractType === "mesthri" ? (
-              <Autocomplete
-                options={teams}
-                getOptionLabel={(t) => t.leaderName ?? t.name}
-                value={teams.find((t) => t.id === selectedTeamId) ?? null}
-                onChange={(_, v) => setSelectedTeamId(v?.id ?? null)}
-                renderInput={(params) => (
-                  <TextField {...params} label="Mesthri team" required />
+              <Box>
+                <Autocomplete
+                  options={teams}
+                  getOptionLabel={(t) => t.leaderName ?? t.name}
+                  value={teams.find((t) => t.id === selectedTeamId) ?? null}
+                  onChange={(_, v) => setSelectedTeamId(v?.id ?? null)}
+                  renderInput={(params) => (
+                    <TextField {...params} label="Mesthri team" required />
+                  )}
+                  slotProps={{ popper: { disablePortal: false } }}
+                  noOptionsText={
+                    <MuiLink
+                      component="button"
+                      type="button"
+                      onClick={() => setShowNewTeam(true)}
+                      sx={{ display: "inline-flex", alignItems: "center", gap: 0.5 }}
+                    >
+                      <AddIcon fontSize="small" /> Create new team
+                    </MuiLink>
+                  }
+                />
+                {!showNewTeam && (
+                  <Button
+                    size="small"
+                    startIcon={<AddIcon />}
+                    onClick={() => setShowNewTeam(true)}
+                    sx={{ mt: 0.5 }}
+                  >
+                    Mesthri not in the list? Add a new team
+                  </Button>
                 )}
-                slotProps={{ popper: { disablePortal: false } }}
-              />
+                <Collapse in={showNewTeam}>
+                  <Box
+                    sx={{
+                      mt: 1,
+                      p: 1.5,
+                      border: "1px dashed",
+                      borderColor: "divider",
+                      borderRadius: 1.5,
+                    }}
+                  >
+                    <Stack
+                      direction="row"
+                      alignItems="center"
+                      justifyContent="space-between"
+                      sx={{ mb: 1 }}
+                    >
+                      <Typography variant="subtitle2">New mesthri team</Typography>
+                      <Button
+                        size="small"
+                        startIcon={<CloseIcon fontSize="small" />}
+                        onClick={() => setShowNewTeam(false)}
+                        disabled={creatingTeam}
+                      >
+                        Cancel
+                      </Button>
+                    </Stack>
+                    <Stack spacing={1.5}>
+                      <TextField
+                        label="Mesthri (leader) name"
+                        value={newTeamLeader}
+                        onChange={(e) => setNewTeamLeader(e.target.value)}
+                        size="small"
+                        required
+                        autoFocus
+                        helperText='e.g. "Asis"'
+                      />
+                      <TextField
+                        label="Team name (optional)"
+                        value={newTeamName}
+                        onChange={(e) => setNewTeamName(e.target.value)}
+                        size="small"
+                        helperText={`Defaults to "${newTeamLeader || "<leader>"} ${tradeName} Team"`}
+                      />
+                      <TextField
+                        label="Leader phone (optional)"
+                        value={newTeamPhone}
+                        onChange={(e) =>
+                          setNewTeamPhone(e.target.value.replace(/[^0-9+\- ]/g, ""))
+                        }
+                        size="small"
+                      />
+                      <Button
+                        variant="outlined"
+                        onClick={handleCreateTeam}
+                        disabled={creatingTeam || !newTeamLeader.trim()}
+                        startIcon={creatingTeam ? <CircularProgress size={14} /> : <AddIcon />}
+                      >
+                        {creatingTeam ? "Creating…" : "Create team"}
+                      </Button>
+                    </Stack>
+                  </Box>
+                </Collapse>
+              </Box>
             ) : (
-              <Autocomplete
-                options={laborers}
-                getOptionLabel={(l) => l.name}
-                value={laborers.find((l) => l.id === selectedLaborerId) ?? null}
-                onChange={(_, v) => setSelectedLaborerId(v?.id ?? null)}
-                renderInput={(params) => (
-                  <TextField {...params} label="Specialist" required />
+              <Box>
+                <Autocomplete
+                  options={laborers}
+                  getOptionLabel={(l) => l.name}
+                  value={laborers.find((l) => l.id === selectedLaborerId) ?? null}
+                  onChange={(_, v) => setSelectedLaborerId(v?.id ?? null)}
+                  renderInput={(params) => (
+                    <TextField {...params} label="Specialist" required />
+                  )}
+                  slotProps={{ popper: { disablePortal: false } }}
+                  noOptionsText={
+                    <MuiLink
+                      component="button"
+                      type="button"
+                      onClick={() => setShowNewLaborer(true)}
+                      sx={{ display: "inline-flex", alignItems: "center", gap: 0.5 }}
+                    >
+                      <AddIcon fontSize="small" /> Create new specialist
+                    </MuiLink>
+                  }
+                />
+                {!showNewLaborer && (
+                  <Button
+                    size="small"
+                    startIcon={<AddIcon />}
+                    onClick={() => setShowNewLaborer(true)}
+                    sx={{ mt: 0.5 }}
+                  >
+                    Specialist not in the list? Add a new one
+                  </Button>
                 )}
-                slotProps={{ popper: { disablePortal: false } }}
-              />
+                <Collapse in={showNewLaborer}>
+                  <Box
+                    sx={{
+                      mt: 1,
+                      p: 1.5,
+                      border: "1px dashed",
+                      borderColor: "divider",
+                      borderRadius: 1.5,
+                    }}
+                  >
+                    <Stack
+                      direction="row"
+                      alignItems="center"
+                      justifyContent="space-between"
+                      sx={{ mb: 1 }}
+                    >
+                      <Typography variant="subtitle2">New {tradeName.toLowerCase()} specialist</Typography>
+                      <Button
+                        size="small"
+                        startIcon={<CloseIcon fontSize="small" />}
+                        onClick={() => setShowNewLaborer(false)}
+                        disabled={creatingLaborer}
+                      >
+                        Cancel
+                      </Button>
+                    </Stack>
+                    <Stack spacing={1.5}>
+                      <TextField
+                        label="Specialist name"
+                        value={newLaborerName}
+                        onChange={(e) => setNewLaborerName(e.target.value)}
+                        size="small"
+                        required
+                        autoFocus
+                      />
+                      <TextField
+                        label="Phone (optional)"
+                        value={newLaborerPhone}
+                        onChange={(e) =>
+                          setNewLaborerPhone(e.target.value.replace(/[^0-9+\- ]/g, ""))
+                        }
+                        size="small"
+                      />
+                      <Button
+                        variant="outlined"
+                        onClick={handleCreateLaborer}
+                        disabled={creatingLaborer || !newLaborerName.trim()}
+                        startIcon={creatingLaborer ? <CircularProgress size={14} /> : <AddIcon />}
+                      >
+                        {creatingLaborer ? "Creating…" : "Create specialist"}
+                      </Button>
+                    </Stack>
+                  </Box>
+                </Collapse>
+              </Box>
             )}
 
             <TextField
