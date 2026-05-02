@@ -2,18 +2,26 @@
 
 import React from "react";
 import { Box, Skeleton, Typography, useTheme } from "@mui/material";
-import type { SalarySliceSummary } from "@/hooks/queries/useSalarySliceSummary";
 import { KpiTile, formatINR, type KpiTileProps } from "./KpiTile";
 
-interface SalarySliceHeroProps {
-  summary: SalarySliceSummary | undefined;
+interface DailyMarketHeroProps {
+  paidAmount: number;
+  paidCount: number;
+  pendingAmount: number;
+  pendingCount: number;
   isLoading: boolean;
 }
 
-export function SalarySliceHero({ summary, isLoading }: SalarySliceHeroProps) {
+export function DailyMarketHero({
+  paidAmount,
+  paidCount,
+  pendingAmount,
+  pendingCount,
+  isLoading,
+}: DailyMarketHeroProps) {
   const theme = useTheme();
 
-  if (isLoading || !summary) {
+  if (isLoading) {
     return (
       <Box
         sx={{
@@ -29,14 +37,14 @@ export function SalarySliceHero({ summary, isLoading }: SalarySliceHeroProps) {
             display: "grid",
             gridTemplateColumns: {
               xs: "repeat(2, 1fr)",
-              sm: "repeat(3, 1fr)",
-              md: "repeat(5, 1fr)",
+              sm: "repeat(2, 1fr)",
+              md: "repeat(4, 1fr)",
             },
             gap: 1.25,
             mb: 1.5,
           }}
         >
-          {[0, 1, 2, 3, 4].map((i) => (
+          {[0, 1, 2, 3].map((i) => (
             <Skeleton
               key={i}
               variant="rounded"
@@ -50,10 +58,11 @@ export function SalarySliceHero({ summary, isLoading }: SalarySliceHeroProps) {
     );
   }
 
-  const totalPaid = summary.settlementsTotal + summary.advancesTotal;
+  const wagesDue = paidAmount + pendingAmount;
+  const totalDates = paidCount + pendingCount;
   const progressPct =
-    summary.wagesDue > 0
-      ? Math.min(100, Math.round((summary.paidToWeeks / summary.wagesDue) * 100))
+    wagesDue > 0
+      ? Math.min(100, Math.round((paidAmount / wagesDue) * 100))
       : 0;
   const progressColor =
     progressPct < 50
@@ -66,21 +75,21 @@ export function SalarySliceHero({ summary, isLoading }: SalarySliceHeroProps) {
   let statusVariant: KpiTileProps["variant"];
   let statusValue: string;
   let statusSub: string;
-  if (summary.futureCredit > 0) {
-    statusLabel = "Excess Paid";
-    statusVariant = "info";
-    statusValue = formatINR(summary.futureCredit);
-    statusSub = "rolls forward to future work";
-  } else if (summary.mestriOwed > 0) {
-    statusLabel = "Mestri Owed";
-    statusVariant = "error";
-    statusValue = formatINR(summary.mestriOwed);
-    statusSub = "due based on work done";
-  } else {
+  if (pendingAmount === 0 && wagesDue > 0) {
     statusLabel = "Settled";
     statusVariant = "success";
     statusValue = "₹0";
     statusSub = "fully paid up";
+  } else if (pendingCount > 0) {
+    statusLabel = "Pending";
+    statusVariant = "warning";
+    statusValue = `${pendingCount} ${pendingCount === 1 ? "date" : "dates"}`;
+    statusSub = "awaiting settlement";
+  } else {
+    statusLabel = "No Wages";
+    statusVariant = "neutral";
+    statusValue = "—";
+    statusSub = "no attendance in range";
   }
 
   return (
@@ -103,7 +112,7 @@ export function SalarySliceHero({ summary, isLoading }: SalarySliceHeroProps) {
           mb: 1,
         }}
       >
-        Salary slice — payments to mestri
+        Daily + Market — wages per attendance
       </Typography>
 
       <Box
@@ -111,8 +120,8 @@ export function SalarySliceHero({ summary, isLoading }: SalarySliceHeroProps) {
           display: "grid",
           gridTemplateColumns: {
             xs: "repeat(2, 1fr)",
-            sm: "repeat(3, 1fr)",
-            md: "repeat(5, 1fr)",
+            sm: "repeat(2, 1fr)",
+            md: "repeat(4, 1fr)",
           },
           gap: 1.25,
           mb: 1.5,
@@ -120,28 +129,22 @@ export function SalarySliceHero({ summary, isLoading }: SalarySliceHeroProps) {
       >
         <KpiTile
           label="Wages Due"
-          value={formatINR(summary.wagesDue)}
+          value={formatINR(wagesDue)}
           sub="based on attendance"
-          formula={`${summary.weeksCount} weeks`}
+          formula={`${totalDates} ${totalDates === 1 ? "date" : "dates"}`}
           variant="neutral"
         />
         <KpiTile
-          label="Paid (waterfall)"
-          value={formatINR(summary.settlementsTotal)}
-          sub={`${summary.settlementCount} settlements`}
+          label="Paid"
+          value={formatINR(paidAmount)}
+          sub={`${paidCount} ${paidCount === 1 ? "date" : "dates"} settled`}
           variant="success"
         />
         <KpiTile
-          label="Advances"
-          value={formatINR(summary.advancesTotal)}
-          sub={`${summary.advanceCount} records · separate`}
+          label="Pending"
+          value={formatINR(pendingAmount)}
+          sub={`${pendingCount} ${pendingCount === 1 ? "date" : "dates"} unsettled`}
           variant="warning"
-        />
-        <KpiTile
-          label="Total Paid"
-          value={formatINR(totalPaid)}
-          sub="waterfall + advance"
-          variant="info"
         />
         <KpiTile
           label={statusLabel}
@@ -155,7 +158,7 @@ export function SalarySliceHero({ summary, isLoading }: SalarySliceHeroProps) {
         <Typography
           sx={{ fontSize: 11, color: "text.secondary", minWidth: 110 }}
         >
-          Salary progress
+          Settled progress
         </Typography>
         <Box
           sx={{

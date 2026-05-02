@@ -2,18 +2,34 @@
 
 import React from "react";
 import { Box, Skeleton, Typography, useTheme } from "@mui/material";
-import type { SalarySliceSummary } from "@/hooks/queries/useSalarySliceSummary";
 import { KpiTile, formatINR, type KpiTileProps } from "./KpiTile";
 
-interface SalarySliceHeroProps {
-  summary: SalarySliceSummary | undefined;
+interface AllSettlementsHeroProps {
+  contractWagesDue: number;
+  contractSettlementsTotal: number;
+  contractSettlementCount: number;
+  contractAdvances: number;
+  contractAdvanceCount: number;
+  dailyMarketAmount: number;
+  dailyMarketCount: number;
+  pendingAmount: number;
   isLoading: boolean;
 }
 
-export function SalarySliceHero({ summary, isLoading }: SalarySliceHeroProps) {
+export function AllSettlementsHero({
+  contractWagesDue,
+  contractSettlementsTotal,
+  contractSettlementCount,
+  contractAdvances,
+  contractAdvanceCount,
+  dailyMarketAmount,
+  dailyMarketCount,
+  pendingAmount,
+  isLoading,
+}: AllSettlementsHeroProps) {
   const theme = useTheme();
 
-  if (isLoading || !summary) {
+  if (isLoading) {
     return (
       <Box
         sx={{
@@ -50,10 +66,18 @@ export function SalarySliceHero({ summary, isLoading }: SalarySliceHeroProps) {
     );
   }
 
-  const totalPaid = summary.settlementsTotal + summary.advancesTotal;
+  const wagesDue = contractWagesDue + dailyMarketAmount + pendingAmount;
+  const settlementsTotal = contractSettlementsTotal + dailyMarketAmount;
+  const settlementCount = contractSettlementCount + dailyMarketCount;
+  const totalPaid = settlementsTotal + contractAdvances;
+
+  const excess = Math.max(0, totalPaid - wagesDue);
+  const owed = Math.max(0, wagesDue - totalPaid);
+
+  const paidToCover = Math.min(totalPaid, wagesDue);
   const progressPct =
-    summary.wagesDue > 0
-      ? Math.min(100, Math.round((summary.paidToWeeks / summary.wagesDue) * 100))
+    wagesDue > 0
+      ? Math.min(100, Math.round((paidToCover / wagesDue) * 100))
       : 0;
   const progressColor =
     progressPct < 50
@@ -66,15 +90,15 @@ export function SalarySliceHero({ summary, isLoading }: SalarySliceHeroProps) {
   let statusVariant: KpiTileProps["variant"];
   let statusValue: string;
   let statusSub: string;
-  if (summary.futureCredit > 0) {
+  if (excess > 0) {
     statusLabel = "Excess Paid";
     statusVariant = "info";
-    statusValue = formatINR(summary.futureCredit);
+    statusValue = formatINR(excess);
     statusSub = "rolls forward to future work";
-  } else if (summary.mestriOwed > 0) {
+  } else if (owed > 0) {
     statusLabel = "Mestri Owed";
     statusVariant = "error";
-    statusValue = formatINR(summary.mestriOwed);
+    statusValue = formatINR(owed);
     statusSub = "due based on work done";
   } else {
     statusLabel = "Settled";
@@ -103,7 +127,7 @@ export function SalarySliceHero({ summary, isLoading }: SalarySliceHeroProps) {
           mb: 1,
         }}
       >
-        Salary slice — payments to mestri
+        All salary settlements — combined
       </Typography>
 
       <Box
@@ -120,27 +144,26 @@ export function SalarySliceHero({ summary, isLoading }: SalarySliceHeroProps) {
       >
         <KpiTile
           label="Wages Due"
-          value={formatINR(summary.wagesDue)}
+          value={formatINR(wagesDue)}
           sub="based on attendance"
-          formula={`${summary.weeksCount} weeks`}
           variant="neutral"
         />
         <KpiTile
-          label="Paid (waterfall)"
-          value={formatINR(summary.settlementsTotal)}
-          sub={`${summary.settlementCount} settlements`}
+          label="Paid (settlements)"
+          value={formatINR(settlementsTotal)}
+          sub={`${settlementCount} ${settlementCount === 1 ? "settlement" : "settlements"}`}
           variant="success"
         />
         <KpiTile
           label="Advances"
-          value={formatINR(summary.advancesTotal)}
-          sub={`${summary.advanceCount} records · separate`}
+          value={formatINR(contractAdvances)}
+          sub={`${contractAdvanceCount} ${contractAdvanceCount === 1 ? "record" : "records"} · separate`}
           variant="warning"
         />
         <KpiTile
           label="Total Paid"
           value={formatINR(totalPaid)}
-          sub="waterfall + advance"
+          sub="settlements + advances"
           variant="info"
         />
         <KpiTile

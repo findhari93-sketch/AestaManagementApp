@@ -30,6 +30,8 @@ import PageHeader from "@/components/layout/PageHeader";
 import ScopeChip from "@/components/common/ScopeChip";
 import UnsettledBanner from "@/components/payments/UnsettledBanner";
 import { SalarySliceHero } from "@/components/payments/SalarySliceHero";
+import { DailyMarketHero } from "@/components/payments/DailyMarketHero";
+import { AllSettlementsHero } from "@/components/payments/AllSettlementsHero";
 import { SalaryWaterfallList } from "@/components/payments/SalaryWaterfallList";
 import { AdvancesList } from "@/components/payments/AdvancesList";
 import { DailyMarketLedger } from "@/components/payments/DailyMarketLedger";
@@ -608,6 +610,13 @@ export default function PaymentsContent() {
 
         {activeTab === "daily-market" && (
           <Box sx={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+            <DailyMarketHero
+              paidAmount={summaryQuery.data?.dailyMarketAmount ?? 0}
+              paidCount={summaryQuery.data?.dailyMarketCount ?? 0}
+              pendingAmount={summaryQuery.data?.pendingAmount ?? 0}
+              pendingCount={summaryQuery.data?.pendingDatesCount ?? 0}
+              isLoading={summaryQuery.isLoading}
+            />
             <UnsettledBanner
               count={dailyMarketPendingCount}
               amount={dailyMarketPendingAmount}
@@ -686,6 +695,17 @@ export default function PaymentsContent() {
 
         {activeTab === "all" && (
           <Box sx={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+            <AllSettlementsHero
+              contractWagesDue={salarySummaryQuery.data?.wagesDue ?? 0}
+              contractSettlementsTotal={salarySummaryQuery.data?.settlementsTotal ?? 0}
+              contractSettlementCount={salarySummaryQuery.data?.settlementCount ?? 0}
+              contractAdvances={salarySummaryQuery.data?.advancesTotal ?? 0}
+              contractAdvanceCount={salarySummaryQuery.data?.advanceCount ?? 0}
+              dailyMarketAmount={summaryQuery.data?.dailyMarketAmount ?? 0}
+              dailyMarketCount={summaryQuery.data?.dailyMarketCount ?? 0}
+              pendingAmount={summaryQuery.data?.pendingAmount ?? 0}
+              isLoading={summaryQuery.isLoading || salarySummaryQuery.isLoading}
+            />
             <UnsettledBanner
               count={contractPendingCount + dailyMarketPendingCount}
               amount={contractPendingAmount + dailyMarketPendingAmount}
