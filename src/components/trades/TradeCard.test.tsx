@@ -70,7 +70,54 @@ describe("TradeCard", () => {
       />
     );
     expect(screen.getByText("Asis Mesthri")).toBeInTheDocument();
-    expect(screen.getByText(/2,50,000/)).toBeInTheDocument();
+    // Quoted figure appears in the row's Quoted column
+    expect(screen.getAllByText(/2,50,000/).length).toBeGreaterThan(0);
+  });
+
+  it("shows Paid and Balance from reconciliation map", () => {
+    const trade = makeTrade({
+      contracts: [
+        {
+          id: "k1",
+          siteId: "s1",
+          tradeCategoryId: "p1",
+          title: "Asis Painting",
+          laborTrackingMode: "mesthri_only",
+          isInHouse: false,
+          contractType: "mesthri",
+          status: "active",
+          totalValue: 200000,
+          mesthriOrSpecialistName: "Asis Mesthri",
+          createdAt: "2026-05-02T00:00:00Z",
+        },
+      ],
+    });
+    const reconciliations = new Map([
+      [
+        "k1",
+        {
+          subcontractId: "k1",
+          quotedAmount: 200000,
+          amountPaid: 50000,
+          amountPaidSubcontractPayments: 50000,
+          amountPaidSettlements: 0,
+          impliedLaborValueDetailed: 0,
+          impliedLaborValueHeadcount: 0,
+        },
+      ],
+    ]);
+    render(
+      <TradeCard
+        trade={trade}
+        reconciliations={reconciliations}
+        onContractClick={() => {}}
+        onAddClick={() => {}}
+      />
+    );
+    // Both "₹50,000" (Paid) and "₹1,50,000" (Balance) appear; use getAllByText
+    // since "50,000" matches both. Distinct rendering is the visual guarantee.
+    expect(screen.getAllByText(/50,000/).length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText(/1,50,000/)).toBeInTheDocument();  // Balance
   });
 
   it("fires onContractClick when an active contract row is clicked", () => {
@@ -99,7 +146,7 @@ describe("TradeCard", () => {
         onAddClick={() => {}}
       />
     );
-    fireEvent.click(screen.getByRole("button", { name: /asis mesthri/i }));
+    fireEvent.click(screen.getByText(/asis mesthri/i));
     expect(onContractClick).toHaveBeenCalledWith("k1");
   });
 

@@ -49,3 +49,26 @@ export interface Trade {
   category: TradeCategory;
   contracts: TradeContract[];
 }
+
+/**
+ * Per-contract reconciliation snapshot from v_subcontract_reconciliation.
+ * Hub cards show quoted/paid/balance and the variance traffic light.
+ */
+export interface ContractReconciliation {
+  subcontractId: string;
+  quotedAmount: number;
+  amountPaid: number;
+  amountPaidSubcontractPayments: number;
+  amountPaidSettlements: number;
+  impliedLaborValueDetailed: number;
+  impliedLaborValueHeadcount: number;
+}
+
+/** Days worked count derived from daily_attendance + subcontract_payments dates. */
+export interface ContractActivity {
+  subcontractId: string;
+  /** Distinct date count from daily_attendance (detailed mode). */
+  attendanceDays: number;
+  /** Distinct date count from subcontract_payments (mesthri-only / proxy when no attendance). */
+  paymentDays: number;
+}
