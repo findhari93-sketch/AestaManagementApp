@@ -151,7 +151,14 @@
       "Bash(mv 20260501110300_backfill_payment_week_allocations_to_sun_sat.sql 20260501120300_backfill_payment_week_allocations_to_sun_sat.sql)",
       "Bash(mv 20260501110400_align_payment_week_allocations_comments_to_sun_sat.sql 20260501120400_align_payment_week_allocations_comments_to_sun_sat.sql)",
       "PowerShell($tok = [Environment]::GetEnvironmentVariable\\(\"CLOUDFLARE_API_TOKEN_AESTA\", \"User\"\\); if \\($null -eq $tok -or $tok -eq \"\"\\) { \"ENV_VAR_MISSING_OR_EMPTY\" } else { \"ENV_VAR_PRESENT, length=\" + $tok.Length + \", prefix=\" + $tok.Substring\\(0, [Math]::Min\\(4, $tok.Length\\)\\) + \"...\" }; Write-Output \"---\"; Write-Output \\(\"Node: \" + \\(node -v\\)\\); Write-Output \\(\"npm: \" + \\(npm -v\\)\\))",
-      "PowerShell($env:CLOUDFLARE_API_TOKEN = [Environment]::GetEnvironmentVariable\\(\"CLOUDFLARE_API_TOKEN_AESTA\", \"User\"\\); $req = '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{},\"clientInfo\":{\"name\":\"verify\",\"version\":\"0.0.1\"}}}'; $req | & npx -y \"@cloudflare/mcp-server-cloudflare@latest\" run \"816cbcd84b2213dee67be1ada89acc15\" 2>&1 | Select-Object -First 5)"
+      "PowerShell($env:CLOUDFLARE_API_TOKEN = [Environment]::GetEnvironmentVariable\\(\"CLOUDFLARE_API_TOKEN_AESTA\", \"User\"\\); $req = '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{},\"clientInfo\":{\"name\":\"verify\",\"version\":\"0.0.1\"}}}'; $req | & npx -y \"@cloudflare/mcp-server-cloudflare@latest\" run \"816cbcd84b2213dee67be1ada89acc15\" 2>&1 | Select-Object -First 5)",
+      "Bash(Get-ChildItem -Path . -Directory)",
+      "Bash(awk '{print $NF}')",
+      "Bash(python -c ' *)",
+      "Bash(python -c \"data = open\\(r'C:\\\\Users\\\\Haribabu\\\\.claude\\\\projects\\\\c--Users-Haribabu-Documents-AppsCopilot-AestaManagementApp\\\\8eb46202-2c4a-42a2-b630-a05518f52fad\\\\tool-results\\\\mcp-supabase-get_advisors-1777696706140.txt'\\).read\\(\\); print\\(data[0:80000]\\)\")",
+      "Bash(python -c \"data = open\\(r'C:\\\\Users\\\\Haribabu\\\\.claude\\\\projects\\\\c--Users-Haribabu-Documents-AppsCopilot-AestaManagementApp\\\\8eb46202-2c4a-42a2-b630-a05518f52fad\\\\tool-results\\\\mcp-supabase-get_advisors-1777696706140.txt'\\).read\\(\\); print\\(data[80000:160000]\\)\")",
+      "Bash(python -c \"with open\\(r'src/types/database.types.ts', 'rb'\\) as f: d=f.read\\(\\); print\\('size_bytes=', len\\(d\\)\\); print\\('first_100=', d[:100]\\); print\\('newline_count=', d.count\\(b'\\\\n'\\)\\)\")",
+      "Bash(python -c \"import sys; d=sys.stdin.buffer.read\\(\\); print\\('size=', len\\(d\\)\\); print\\('newline_count=', d.count\\(b'\\\\n'\\)\\)\")"
     ],
     "deny": [],
     "ask": []
