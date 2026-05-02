@@ -308,6 +308,7 @@ export default function QueryProvider({
     >
       <SyncInitializer queryClient={queryClient} />
       <IdleRecoveryHandler queryClient={queryClient} />
+      <NetworkRecoveryHandler queryClient={queryClient} />
       {children}
     </PersistQueryClientProvider>
   );
@@ -452,3 +453,115 @@ function IdleRecoveryHandler({ queryClient }: { queryClient: QueryClient }) {
 
 // RouteChangeHandler REMOVED - was causing refetch cascade on every navigation
 // React Query's built-in staleTime handles data freshness automatically
+
+/**
+ * Recovers the supabase client + React Query state after the network changes
+ * underneath us (Wi-Fi swap, VPN toggle, mobile→Wi-Fi handover, BFCache restore,
+ * laptop wake on a different network). The browser surfaces these as
+ * `net::ERR_NETWORK_CHANGED` on in-flight requests; the supabase auth-refresh
+ * promise can hang mid-flight, the realtime WebSocket dies, and subsequent
+ * postgrest queries stall behind a poisoned connection pool. Hard refresh is
+ * the user's only recovery today — this handler reproduces that recovery in-place.
+ *
+ * Why React Query's `refetchOnReconnect` isn't enough:
+ * - It only fires on `online` events, which depend on `navigator.onLine` flipping.
+ * - On Wi-Fi-to-Wi-Fi or VPN-on/off, `onLine` stays true the whole time.
+ *
+ * Recovery sequence:
+ *  1. cancelQueries — drop zombie fetches waiting on dead sockets.
+ *  2. supabase.auth.refreshSession with a 5s race — replaces a possibly-hung
+ *     refresh promise; on timeout we still proceed to step 3 and let the
+ *     QueryCache.onError 401-retry path handle re-auth.
+ *  3. invalidateQueries({ refetchType: "active" }) — refetch visible data
+ *     with whatever auth state we have now.
+ *
+ * Listeners:
+ * - window "online" — covers true offline→online transitions.
+ * - navigator.connection "change" filtered by effectiveType — catches network
+ *   swaps where onLine stays true. We ignore rtt/downlink jitter to avoid
+ *   thrashing on flaky mobile networks.
+ * - window "pageshow" with persisted=true — BFCache restoration.
+ *
+ * 3-second debounce coalesces rapid event bursts (network change can fire
+ * multiple events in close succession).
+ */
+function NetworkRecoveryHandler({ queryClient }: { queryClient: QueryClient }) {
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    let lastRecoveryAt = 0;
+    let lastEffectiveType: string | undefined;
+    const RECOVERY_DEBOUNCE_MS = 3000;
+    const REFRESH_RACE_MS = 5000;
+
+    const recover = async (reason: string) => {
+      const now = Date.now();
+      if (now - lastRecoveryAt < RECOVERY_DEBOUNCE_MS) return;
+      lastRecoveryAt = now;
+
+      console.warn(`[NetworkRecovery] Recovering due to: ${reason}`);
+
+      try {
+        await queryClient.cancelQueries();
+      } catch (err) {
+        console.warn("[NetworkRecovery] cancelQueries threw:", err);
+      }
+
+      try {
+        const supabase = createClient();
+        await Promise.race([
+          supabase.auth.refreshSession(),
+          new Promise<void>((resolve) =>
+            setTimeout(resolve, REFRESH_RACE_MS),
+          ),
+        ]);
+      } catch (err) {
+        console.warn("[NetworkRecovery] refreshSession threw:", err);
+      }
+
+      queryClient.invalidateQueries({ refetchType: "active" });
+    };
+
+    const handleOnline = () => {
+      void recover("online event");
+    };
+
+    type NetworkInformation = {
+      addEventListener?: (type: string, listener: () => void) => void;
+      removeEventListener?: (type: string, listener: () => void) => void;
+      effectiveType?: string;
+    };
+    const connection = (
+      navigator as Navigator & { connection?: NetworkInformation }
+    ).connection;
+    lastEffectiveType = connection?.effectiveType;
+
+    const handleConnectionChange = () => {
+      const newType = connection?.effectiveType;
+      // Only recover on actual connection-type change (4g→wifi, wifi→3g),
+      // not on every rtt/downlink jitter while on the same network.
+      if (lastEffectiveType !== undefined && lastEffectiveType !== newType) {
+        void recover(
+          `connection change ${lastEffectiveType} → ${newType ?? "unknown"}`,
+        );
+      }
+      lastEffectiveType = newType;
+    };
+
+    const handlePageShow = (e: PageTransitionEvent) => {
+      if (e.persisted) void recover("BFCache restore");
+    };
+
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("pageshow", handlePageShow);
+    connection?.addEventListener?.("change", handleConnectionChange);
+
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("pageshow", handlePageShow);
+      connection?.removeEventListener?.("change", handleConnectionChange);
+    };
+  }, [queryClient]);
+
+  return null;
+}
