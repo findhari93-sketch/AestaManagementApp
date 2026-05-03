@@ -63,10 +63,17 @@ function formatDate(iso: string): string {
 }
 
 const PAYMENT_TYPE_LABEL: Record<string, string> = {
+  // Direct subcontract_payments types
   weekly_advance: "Daily/Weekly",
-  part_payment: "Part",
+  part_payment: "Part payment",
   milestone: "Milestone",
-  final_settlement: "Final",
+  final_settlement: "Final settlement",
+  // Settlement_groups types — these produce a single "Salary settlement"
+  // / "Advance settlement" chip; the redundant source chip is suppressed
+  // when we already convey settlement-ness via the type label.
+  salary: "Salary settlement",
+  advance: "Advance settlement",
+  other: "Settlement",
 };
 
 export function ExpandableContractRow({
@@ -321,18 +328,24 @@ export function ExpandableContractRow({
                       "&:last-child": { borderBottom: "none" },
                     }}
                   >
-                    <Box sx={{ flex: 1, display: "flex", alignItems: "center", gap: 1 }}>
+                    <Box sx={{ flex: 1, display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
                       <Typography variant="body2" sx={{ width: 70 }}>
                         {formatDate(p.paymentDate)}
                       </Typography>
                       <Chip
                         label={PAYMENT_TYPE_LABEL[p.paymentType] ?? p.paymentType}
                         size="small"
-                        variant="outlined"
+                        variant={p.source === "settlement" ? "filled" : "outlined"}
+                        color={p.source === "settlement" ? "info" : "default"}
                       />
                       {p.paymentMode && (
                         <Typography variant="caption" color="text.secondary">
                           {p.paymentMode}
+                        </Typography>
+                      )}
+                      {p.reference && (
+                        <Typography variant="caption" color="text.secondary" sx={{ fontFamily: "monospace" }}>
+                          {p.reference}
                         </Typography>
                       )}
                     </Box>
@@ -364,7 +377,10 @@ export function ExpandableContractRow({
         siteId={contract.siteId}
         contractId={contract.id}
         contractTitle={`${contract.title} · ${contractLabel(contract)}`}
-        remainingBalance={Math.max(0, balance)}
+        // Pass real signed balance — dialog renders "X over quote" or "X
+        // remaining" so the engineer sees the current state honestly,
+        // including over-paid contracts where balance < 0.
+        remainingBalance={balance}
       />
     </Box>
   );

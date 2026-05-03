@@ -30,19 +30,16 @@ export function ReconciliationStrip({
 }: ReconciliationStripProps) {
   const quoted = reconciliation?.quotedAmount ?? fallbackQuoted;
   const paid = reconciliation?.amountPaid ?? 0;
-  // For mesthri-only contracts, "labor done" isn't tracked, so the variance
-  // basis is paid vs quoted. For detailed/headcount, use implied labor value
-  // (paid vs labor done) — that's the more useful "is the mesthri paid ahead
-  // for the work he's actually completed?" question.
-  const laborDone =
-    laborTrackingMode === "detailed"
-      ? reconciliation?.impliedLaborValueDetailed ?? 0
-      : laborTrackingMode === "headcount"
-      ? reconciliation?.impliedLaborValueHeadcount ?? 0
-      : 0;
-
-  const useLabor = laborTrackingMode !== "mesthri_only" && laborDone > 0;
-  const basis = useLabor ? laborDone : quoted;
+  // Variance basis policy:
+  //  - mesthri_only: paid vs quoted (no labor data)
+  //  - detailed:    paid vs quoted (attendance/settlement classification can
+  //                 drift across contracts in production data; using labor
+  //                 done here produces alarming-but-wrong ratios)
+  //  - headcount:   paid vs implied labor value (per-role × per-day data is
+  //                 self-contained per contract by construction — reliable)
+  const headcountLaborDone = reconciliation?.impliedLaborValueHeadcount ?? 0;
+  const useLabor = laborTrackingMode === "headcount" && headcountLaborDone > 0;
+  const basis = useLabor ? headcountLaborDone : quoted;
   const basisLabel = useLabor ? "Labor done" : "Quoted";
   const variance = basis > 0 ? paid - basis : 0;
   const variancePct = basis > 0 ? Math.round((variance / basis) * 100) : 0;
@@ -67,9 +64,9 @@ export function ReconciliationStrip({
       : `Paid behind by ₹${formatINR(-variance)} (${Math.abs(variancePct)}% under ${basisLabel.toLowerCase()})`;
 
   const tooltip =
-    laborTrackingMode === "mesthri_only"
-      ? "Variance compares paid vs the quoted lump sum. Headcount/detailed contracts compare paid vs labor done (more accurate)."
-      : `Variance compares paid (₹${formatINR(paid)}) vs ${basisLabel.toLowerCase()} (₹${formatINR(basis)}).`;
+    laborTrackingMode === "headcount"
+      ? `Headcount mode: variance compares paid (₹${formatINR(paid)}) vs labor done (₹${formatINR(basis)}) computed from per-role daily counts.`
+      : `Variance compares paid (₹${formatINR(paid)}) vs the quoted lump sum (₹${formatINR(basis)}). For detailed-attendance contracts, labor variance is intentionally not used here because attendance/settlement classification can drift across contracts in legacy data.`;
 
   return (
     <Tooltip title={tooltip} placement="top" arrow>

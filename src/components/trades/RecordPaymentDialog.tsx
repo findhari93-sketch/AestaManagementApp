@@ -37,7 +37,7 @@ interface RecordPaymentDialogProps {
   siteId: string;
   contractId: string;
   contractTitle: string;
-  /** Live remaining balance (quoted - paid). Drives the preset chips. */
+  /** Live signed balance (quoted - paid). Negative = over-paid. */
   remainingBalance: number;
 }
 
@@ -116,7 +116,8 @@ export function RecordPaymentDialog({
   }, [open]);
 
   const presets = useMemo(() => {
-    // Sensible amount chips based on remaining balance
+    // Sensible amount chips when there's still balance to pay.
+    // Over-paid contracts (balance <= 0) get no preset chips.
     const out: Array<{ label: string; value: number }> = [];
     if (remainingBalance > 0) {
       const round = (n: number) => Math.max(100, Math.round(n / 100) * 100);
@@ -126,6 +127,13 @@ export function RecordPaymentDialog({
     }
     return out;
   }, [remainingBalance]);
+
+  const balanceLine =
+    remainingBalance > 0
+      ? `Remaining balance ₹${formatINR(remainingBalance)}`
+      : remainingBalance < 0
+      ? `Over-paid by ₹${formatINR(-remainingBalance)} vs quote`
+      : `On quote · no remaining balance`;
 
   const amountNum = Number(amount || "0");
   const canSubmit =
@@ -185,7 +193,7 @@ export function RecordPaymentDialog({
       <DialogTitle>
         Record payment
         <Typography variant="caption" color="text.secondary" component="div">
-          {contractTitle} · Remaining balance ₹{formatINR(remainingBalance)}
+          {contractTitle} · {balanceLine}
         </Typography>
       </DialogTitle>
       <DialogContent dividers>
