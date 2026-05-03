@@ -35,6 +35,7 @@ import { AllSettlementsHero } from "@/components/payments/AllSettlementsHero";
 import { SalaryWaterfallList } from "@/components/payments/SalaryWaterfallList";
 import { AdvancesList } from "@/components/payments/AdvancesList";
 import { DailyMarketLedger } from "@/components/payments/DailyMarketLedger";
+import { DailyMarketWeeklyList } from "@/components/payments/DailyMarketWeeklyList";
 import PaymentsLedger from "@/components/payments/PaymentsLedger";
 import { MestriSettleDialog } from "@/components/payments/MestriSettleDialog";
 import PaymentDialog from "@/components/payments/PaymentDialog";
@@ -48,6 +49,7 @@ import DailySettlementEditDialog from "@/components/payments/DailySettlementEdit
 import DeleteDailySettlementDialog from "@/components/payments/DeleteDailySettlementDialog";
 import { usePaymentSummary } from "@/hooks/queries/usePaymentSummary";
 import { usePaymentsLedger } from "@/hooks/queries/usePaymentsLedger";
+import { useDailyMarketWeeklyList } from "@/hooks/queries/useDailyMarketWeeklyList";
 import { useSalarySliceSummary } from "@/hooks/queries/useSalarySliceSummary";
 import { useSalaryWaterfall } from "@/hooks/queries/useSalaryWaterfall";
 import { useAdvances } from "@/hooks/queries/useAdvances";
@@ -58,7 +60,14 @@ import { InspectPane } from "@/components/common/InspectPane";
 import type { InspectEntity } from "@/components/common/InspectPane";
 
 type ActiveTab = "all" | "contract" | "daily-market";
-type ViewMode = "default" | "by-settlement";
+// "default"        — natural default for each tab (waterfall for contract,
+//                    by-week for daily-market, unified ledger for all).
+// "by-settlement"  — flat chronological settlement_groups list.
+// "by-week"        — daily-market only: weekly waterfall mirroring the
+//                    contract experience but with per-date settlement
+//                    granularity.
+// "by-date"        — daily-market only: legacy flat per-date list.
+type ViewMode = "default" | "by-settlement" | "by-week" | "by-date";
 
 /** Adapter: SettlementDetails (loaded by SettlementRefDetailDialog) →
  *  DateWiseSettlement (the legacy shape ContractSettlementEditDialog accepts).
@@ -160,7 +169,10 @@ export default function PaymentsContent() {
   // chronological list of settlement_groups rows for verification.
   const [viewModes, setViewModes] = useState<Record<ActiveTab, ViewMode>>({
     contract: "default",
-    "daily-market": "default",
+    // Daily + Market lands on the new By-Week view by default — feature
+    // parity with Contract Settlement's weekly waterfall, with per-date
+    // settlement granularity surfaced via a 7-dot Sun-Sat strip.
+    "daily-market": "by-week",
     all: "default",
   });
   const viewMode = viewModes[activeTab];
@@ -235,6 +247,15 @@ export default function PaymentsContent() {
     dateTo: effectiveTo,
     status: "all",
     type: "daily-market",
+  });
+
+  // Client-side weekly roll-up over the same ledger rows. Cheap; no extra
+  // round-trip — the underlying usePaymentsLedger query is already cached
+  // by the call above with identical args.
+  const dailyMarketWeeklyListQuery = useDailyMarketWeeklyList({
+    siteId: selectedSite?.id,
+    dateFrom: effectiveFrom,
+    dateTo: effectiveTo,
   });
 
   const allLedgerQuery = usePaymentsLedger({
@@ -331,7 +352,9 @@ export default function PaymentsContent() {
           ? `/site/attendance?date=${entity.date}`
           : entity.kind === "weekly-week"
             ? `/site/attendance?weekStart=${entity.weekStart}&laborerId=${entity.laborerId}`
-            : "/site/attendance";
+            : entity.kind === "daily-market-weekly"
+              ? `/site/attendance?weekStart=${entity.weekStart}&weekEnd=${entity.weekEnd}`
+              : "/site/attendance";
       router.push(url);
     },
     [router]
@@ -645,9 +668,15 @@ export default function PaymentsContent() {
               isLoading={summaryQuery.isLoading}
             />
             <UnsettledBanner
-              count={dailyMarketPendingCount}
+              count={
+                viewMode === "by-week"
+                  ? (dailyMarketWeeklyListQuery.data ?? []).filter(
+                      (w) => w.pendingDates > 0
+                    ).length
+                  : dailyMarketPendingCount
+              }
               amount={dailyMarketPendingAmount}
-              unit="dates"
+              unit={viewMode === "by-week" ? "weeks" : "dates"}
               ctaLabel="Settle in Attendance →"
               onCtaClick={settleDailyMarketInAttendance}
             />
@@ -679,7 +708,15 @@ export default function PaymentsContent() {
                   },
                 }}
               >
-                <ToggleButton value="default" aria-label="By date">
+                <ToggleButton value="by-week" aria-label="By week">
+                  <Box component="span" sx={{ display: { xs: "inline", sm: "none" } }}>
+                    📊 Week
+                  </Box>
+                  <Box component="span" sx={{ display: { xs: "none", sm: "inline" } }}>
+                    📊 By week
+                  </Box>
+                </ToggleButton>
+                <ToggleButton value="by-date" aria-label="By date">
                   <Box component="span" sx={{ display: { xs: "inline", sm: "none" } }}>
                     📅 Date
                   </Box>
@@ -698,7 +735,28 @@ export default function PaymentsContent() {
               </ToggleButtonGroup>
             </Box>
             <Box sx={{ flex: 1, minHeight: 0, overflow: "auto" }}>
-              {viewMode === "default" ? (
+              {viewMode === "by-week" ? (
+                <DailyMarketWeeklyList
+                  rows={dailyMarketWeeklyListQuery.data}
+                  isLoading={dailyMarketWeeklyListQuery.isLoading}
+                  onRowClick={(week) => {
+                    pane.open({
+                      kind: "daily-market-weekly",
+                      siteId: selectedSite.id,
+                      weekStart: week.weekStart,
+                      weekEnd: week.weekEnd,
+                      scopeFrom: effectiveFrom,
+                      scopeTo: effectiveTo,
+                    });
+                  }}
+                  onSettlePending={() => {
+                    // v1: nudge user to the by-date view rather than building a
+                    // bulk-settle flow (recent mesthri ledger fixes are still
+                    // fragile — keep settlement writes one-at-a-time for now).
+                    setViewMode("by-date");
+                  }}
+                />
+              ) : viewMode === "by-date" ? (
                 <DailyMarketLedger
                   rows={dailyMarketLedgerQuery.data ?? []}
                   isLoading={dailyMarketLedgerQuery.isLoading}
