@@ -3,6 +3,7 @@
 import React from "react";
 import { Box, Skeleton, Typography, useTheme } from "@mui/material";
 import { KpiTile, formatINR, type KpiTileProps } from "./KpiTile";
+import { MobileCollapsibleHero } from "./MobileCollapsibleHero";
 
 interface DailyMarketHeroProps {
   paidAmount: number;
@@ -93,14 +94,13 @@ export function DailyMarketHero({
   }
 
   return (
-    <Box
-      sx={{
-        p: { xs: 1.5, sm: 2 },
-        mb: 1.5,
-        bgcolor: "background.paper",
-        border: `1px solid ${theme.palette.divider}`,
-        borderRadius: 1.5,
-      }}
+    <MobileCollapsibleHero
+      storageKey="payments.hero.daily-market.expanded"
+      statusLabel={statusLabel}
+      statusValue={statusValue}
+      statusVariant={statusVariant}
+      progressPct={progressPct}
+      progressColor={progressColor}
     >
       <Typography
         sx={{
@@ -190,6 +190,6 @@ export function DailyMarketHero({
           {progressPct}%
         </Typography>
       </Box>
-    </Box>
+    </MobileCollapsibleHero>
   );
 }

@@ -508,15 +508,15 @@ export default function PaymentsContent() {
             />
             <Box
               sx={{
-                px: 1.5,
+                px: { xs: 1, sm: 1.5 },
                 py: 1,
                 display: "flex",
                 justifyContent: "space-between",
                 alignItems: "center",
-                gap: 1,
+                gap: 0.75,
                 borderBottom: 1,
                 borderColor: "divider",
-                flexWrap: "wrap",
+                flexWrap: "nowrap",
                 flexShrink: 0,
               }}
             >
@@ -527,20 +527,33 @@ export default function PaymentsContent() {
                 onChange={(_, v) => v && setViewMode(v as ViewMode)}
                 aria-label="View mode"
                 sx={{
+                  flexShrink: 1,
+                  minWidth: 0,
                   "& .MuiToggleButton-root": {
-                    fontSize: 11,
+                    fontSize: { xs: 10.5, sm: 11 },
                     fontWeight: 600,
                     textTransform: "none",
                     py: 0.25,
-                    px: 1.25,
+                    px: { xs: 0.75, sm: 1.25 },
+                    whiteSpace: "nowrap",
                   },
                 }}
               >
                 <ToggleButton value="default" aria-label="Weekly waterfall">
-                  📊 Weekly waterfall
+                  <Box component="span" sx={{ display: { xs: "inline", sm: "none" } }}>
+                    📊 Weekly
+                  </Box>
+                  <Box component="span" sx={{ display: { xs: "none", sm: "inline" } }}>
+                    📊 Weekly waterfall
+                  </Box>
                 </ToggleButton>
                 <ToggleButton value="by-settlement" aria-label="By settlement">
-                  📜 By settlement
+                  <Box component="span" sx={{ display: { xs: "inline", sm: "none" } }}>
+                    📜 Settled
+                  </Box>
+                  <Box component="span" sx={{ display: { xs: "none", sm: "inline" } }}>
+                    📜 By settlement
+                  </Box>
                 </ToggleButton>
               </ToggleButtonGroup>
               <Button
@@ -549,8 +562,22 @@ export default function PaymentsContent() {
                 size="small"
                 startIcon={<AddIcon />}
                 onClick={() => setRecordPaymentOpen(true)}
+                sx={{
+                  flexShrink: 0,
+                  whiteSpace: "nowrap",
+                  px: { xs: 1, sm: 1.5 },
+                  fontSize: { xs: 11, sm: 13 },
+                  "& .MuiButton-startIcon": {
+                    mr: { xs: 0.25, sm: 1 },
+                  },
+                }}
               >
-                Record mesthri payment
+                <Box component="span" sx={{ display: { xs: "inline", sm: "none" } }}>
+                  Record
+                </Box>
+                <Box component="span" sx={{ display: { xs: "none", sm: "inline" } }}>
+                  Record mesthri payment
+                </Box>
               </Button>
             </Box>
             <Box sx={{ flex: 1, minHeight: 0, overflow: "auto" }}>
@@ -643,19 +670,30 @@ export default function PaymentsContent() {
                 aria-label="View mode"
                 sx={{
                   "& .MuiToggleButton-root": {
-                    fontSize: 11,
+                    fontSize: { xs: 10.5, sm: 11 },
                     fontWeight: 600,
                     textTransform: "none",
                     py: 0.25,
-                    px: 1.25,
+                    px: { xs: 0.75, sm: 1.25 },
+                    whiteSpace: "nowrap",
                   },
                 }}
               >
                 <ToggleButton value="default" aria-label="By date">
-                  📅 By date
+                  <Box component="span" sx={{ display: { xs: "inline", sm: "none" } }}>
+                    📅 Date
+                  </Box>
+                  <Box component="span" sx={{ display: { xs: "none", sm: "inline" } }}>
+                    📅 By date
+                  </Box>
                 </ToggleButton>
                 <ToggleButton value="by-settlement" aria-label="By settlement">
-                  📜 By settlement
+                  <Box component="span" sx={{ display: { xs: "inline", sm: "none" } }}>
+                    📜 Settled
+                  </Box>
+                  <Box component="span" sx={{ display: { xs: "none", sm: "inline" } }}>
+                    📜 By settlement
+                  </Box>
                 </ToggleButton>
               </ToggleButtonGroup>
             </Box>
@@ -730,19 +768,30 @@ export default function PaymentsContent() {
                 aria-label="View mode"
                 sx={{
                   "& .MuiToggleButton-root": {
-                    fontSize: 11,
+                    fontSize: { xs: 10.5, sm: 11 },
                     fontWeight: 600,
                     textTransform: "none",
                     py: 0.25,
-                    px: 1.25,
+                    px: { xs: 0.75, sm: 1.25 },
+                    whiteSpace: "nowrap",
                   },
                 }}
               >
                 <ToggleButton value="default" aria-label="Unified ledger">
-                  📋 Unified ledger
+                  <Box component="span" sx={{ display: { xs: "inline", sm: "none" } }}>
+                    📋 Ledger
+                  </Box>
+                  <Box component="span" sx={{ display: { xs: "none", sm: "inline" } }}>
+                    📋 Unified ledger
+                  </Box>
                 </ToggleButton>
                 <ToggleButton value="by-settlement" aria-label="By settlement">
-                  📜 By settlement
+                  <Box component="span" sx={{ display: { xs: "inline", sm: "none" } }}>
+                    📜 Settled
+                  </Box>
+                  <Box component="span" sx={{ display: { xs: "none", sm: "inline" } }}>
+                    📜 By settlement
+                  </Box>
                 </ToggleButton>
               </ToggleButtonGroup>
             </Box>
@@ -904,6 +953,7 @@ export default function PaymentsContent() {
         onTogglePin={pane.togglePin}
         onOpenInPage={handleOpenInPage}
         onSettleClick={handleSettleClick}
+        zIndex={isFullscreen ? 1400 : undefined}
       />
 
       <Snackbar

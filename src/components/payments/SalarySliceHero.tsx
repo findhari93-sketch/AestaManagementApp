@@ -4,6 +4,7 @@ import React from "react";
 import { Box, Skeleton, Typography, useTheme } from "@mui/material";
 import type { SalarySliceSummary } from "@/hooks/queries/useSalarySliceSummary";
 import { KpiTile, formatINR, type KpiTileProps } from "./KpiTile";
+import { MobileCollapsibleHero } from "./MobileCollapsibleHero";
 
 interface SalarySliceHeroProps {
   summary: SalarySliceSummary | undefined;
@@ -84,14 +85,13 @@ export function SalarySliceHero({ summary, isLoading }: SalarySliceHeroProps) {
   }
 
   return (
-    <Box
-      sx={{
-        p: { xs: 1.5, sm: 2 },
-        mb: 1.5,
-        bgcolor: "background.paper",
-        border: `1px solid ${theme.palette.divider}`,
-        borderRadius: 1.5,
-      }}
+    <MobileCollapsibleHero
+      storageKey="payments.hero.contract.expanded"
+      statusLabel={statusLabel}
+      statusValue={statusValue}
+      statusVariant={statusVariant}
+      progressPct={progressPct}
+      progressColor={progressColor}
     >
       <Typography
         sx={{
@@ -187,6 +187,6 @@ export function SalarySliceHero({ summary, isLoading }: SalarySliceHeroProps) {
           {progressPct}%
         </Typography>
       </Box>
-    </Box>
+    </MobileCollapsibleHero>
   );
 }

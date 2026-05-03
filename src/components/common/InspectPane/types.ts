@@ -76,4 +76,9 @@ export interface InspectPaneProps {
   onTogglePin: () => void;
   onOpenInPage: (entity: InspectEntity) => void;
   onSettleClick?: (entity: InspectEntity) => void;
+  // Override the Drawer's stacking context. Needed when the pane sits inside
+  // a fullscreen container that creates its own stacking context at the same
+  // z-index as the MUI default modal (1300) — without this the temporary
+  // mobile drawer renders below its host on Chromium.
+  zIndex?: number;
 }

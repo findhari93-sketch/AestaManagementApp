@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useMemo } from "react";
-import { Box, Chip, Skeleton, Stack, Typography, useTheme, alpha } from "@mui/material";
+import { Box, Chip, Skeleton, Typography, useTheme, alpha } from "@mui/material";
 import dayjs from "dayjs";
 import type { WaterfallWeek } from "@/hooks/queries/useSalaryWaterfall";
 
@@ -74,8 +74,7 @@ export function SalaryWaterfallList({
   }
 
   return (
-    <Box>
-      <Stack divider={<Box sx={{ height: 1, bgcolor: "divider" }} />}>
+    <Box sx={{ p: { xs: 1, sm: 1.25 }, display: "flex", flexDirection: "column", gap: 1 }}>
         {displayWeeks.map((w) => (
           <Box
             key={w.weekStart}
@@ -83,7 +82,16 @@ export function SalaryWaterfallList({
             sx={{
               px: { xs: 1.25, sm: 1.75 }, py: 1.25,
               cursor: "pointer",
-              "&:hover": { bgcolor: "action.hover" },
+              bgcolor: "background.paper",
+              border: 1,
+              borderColor: "divider",
+              borderRadius: 1.5,
+              transition: "box-shadow 120ms, border-color 120ms",
+              "&:hover": {
+                bgcolor: "action.hover",
+                boxShadow: 1,
+                borderColor: alpha(theme.palette.primary.main, 0.4),
+              },
             }}
           >
             <Box sx={{
@@ -200,7 +208,8 @@ export function SalaryWaterfallList({
           <Box sx={{
             px: { xs: 1.25, sm: 1.75 }, py: 1.25,
             bgcolor: alpha(theme.palette.info.main, 0.05),
-            borderTop: `1px dashed ${theme.palette.info.main}`,
+            border: `1px dashed ${theme.palette.info.main}`,
+            borderRadius: 1.5,
           }}>
             <Box sx={{
               display: "flex", justifyContent: "space-between", alignItems: "center",
@@ -222,7 +231,6 @@ export function SalaryWaterfallList({
             </Typography>
           </Box>
         )}
-      </Stack>
     </Box>
   );
 }

@@ -50,6 +50,7 @@ export function InspectPane(props: InspectPaneProps) {
     onTogglePin,
     onOpenInPage,
     onSettleClick,
+    zIndex,
   } = props;
 
   const theme = useTheme();
@@ -122,9 +123,11 @@ export function InspectPane(props: InspectPaneProps) {
           borderLeft: `1px solid ${theme.palette.divider}`,
           boxShadow: isMobile ? undefined : 8,
           background: theme.palette.background.paper,
+          ...(zIndex !== undefined ? { zIndex } : {}),
         },
       }}
       sx={{
+        ...(zIndex !== undefined ? { zIndex } : {}),
         // Persistent drawer should NOT dim background.
         ...(isMobile
           ? {}
