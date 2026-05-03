@@ -66,6 +66,7 @@ import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSite } from "@/contexts/SiteContext";
+import { useSelectedCompany } from "@/contexts/CompanyContext";
 import PageHeader from "@/components/layout/PageHeader";
 import type { Database } from "@/types/database.types";
 import dayjs from "dayjs";
@@ -148,6 +149,7 @@ export default function CompanySitesPage() {
 
   const { userProfile } = useAuth();
   const { refreshSites: refreshSiteContext } = useSite();
+  const { selectedCompany } = useSelectedCompany();
   const supabase = createClient();
 
   const [form, setForm] = useState({
@@ -725,6 +727,18 @@ export default function CompanySitesPage() {
       return;
     }
 
+    // sites.company_id is NOT NULL in the schema. When creating a NEW site,
+    // we must have a current company in context. Editing an existing site
+    // doesn't change company_id, so the guard only applies to inserts.
+    if (!editingSite && !selectedCompany?.id) {
+      setSnackbar({
+        open: true,
+        message: "No company selected. Please pick a company before creating a site.",
+        severity: "error",
+      });
+      return;
+    }
+
     try {
       setLoading(true);
       const mutationClient = supabase as any;
@@ -753,6 +767,8 @@ export default function CompanySitesPage() {
       };
 
       const insertPayload: Database["public"]["Tables"]["sites"]["Insert"] = {
+        // Guarded above: when editingSite is null, selectedCompany must exist.
+        company_id: selectedCompany!.id,
         name: form.name,
         address: form.address || "",
         city: form.city || "",

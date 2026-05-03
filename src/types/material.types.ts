@@ -129,6 +129,7 @@ export interface Vendor {
   upi_id: string | null;
   qr_code_url: string | null;
   shop_photo_url: string | null;
+  serving_locations: string[] | null;
 }
 
 // ============================================
