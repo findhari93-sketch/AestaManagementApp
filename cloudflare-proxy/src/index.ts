@@ -5,11 +5,26 @@
  * This bypasses ISP-level blocks on *.supabase.co domains in India.
  *
  * Handles: REST API, Auth, Storage (uploads/downloads), Realtime WebSocket
+ *
+ * Edge cache: GET /rest/v1/<table> for tables in CACHEABLE_TABLES is cached
+ * for CACHE_TTL_SECONDS keyed only by URL. Safe because each listed table has
+ * an RLS SELECT policy with USING (true), so every caller sees the same rows.
  */
 
 interface Env {
   SUPABASE_URL: string;
 }
+
+// Tables whose SELECT response is the same for every caller (verified RLS).
+// Add a name here only if a `USING (true)` SELECT policy applies to all roles.
+const CACHEABLE_TABLES = new Set<string>([
+  "materials",
+  "labor_categories",
+  "labor_roles",
+  "vendors",
+]);
+
+const CACHE_TTL_SECONDS = 60;
 
 // All headers that Supabase client sends
 const ALLOWED_HEADERS = [
@@ -32,7 +47,7 @@ const ALLOWED_HEADERS = [
 ].join(", ");
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     const supabaseOrigin = new URL(env.SUPABASE_URL);
 
@@ -65,7 +80,22 @@ export default {
     const headers = new Headers(request.headers);
     headers.set("Host", supabaseOrigin.host);
 
+    const cacheableTable = getCacheableTableName(request.method, url);
+
     try {
+      // Edge cache lookup for safe-to-cache GETs
+      if (cacheableTable) {
+        const cacheKey = new Request(url.toString(), { method: "GET" });
+        const cache = caches.default;
+        const cached = await cache.match(cacheKey);
+        if (cached) {
+          const hit = new Response(cached.body, cached);
+          setCorsHeaders(hit.headers, request);
+          hit.headers.set("X-Edge-Cache", "HIT");
+          return hit;
+        }
+      }
+
       const response = await fetch(targetUrl.toString(), {
         method: request.method,
         headers,
@@ -78,6 +108,20 @@ export default {
       // Build response with CORS headers
       const responseHeaders = new Headers(response.headers);
       setCorsHeaders(responseHeaders, request);
+
+      // Edge cache store for safe-to-cache GETs
+      if (cacheableTable && response.ok) {
+        responseHeaders.set("Cache-Control", `public, max-age=${CACHE_TTL_SECONDS}`);
+        responseHeaders.set("X-Edge-Cache", "MISS");
+        const cloned = new Response(response.body, {
+          status: response.status,
+          statusText: response.statusText,
+          headers: responseHeaders,
+        });
+        const cacheKey = new Request(url.toString(), { method: "GET" });
+        ctx.waitUntil(caches.default.put(cacheKey, cloned.clone()));
+        return cloned;
+      }
 
       return new Response(response.body, {
         status: response.status,
@@ -122,6 +166,19 @@ function setCorsHeaders(headers: Headers, request: Request): void {
   headers.set("Access-Control-Allow-Headers", ALLOWED_HEADERS);
   headers.set("Access-Control-Expose-Headers", "Content-Range, Range, x-supabase-api-version, content-range");
   headers.set("Access-Control-Allow-Credentials", "true");
+}
+
+/**
+ * Returns the table name if the request targets a cacheable PostgREST list endpoint,
+ * or null. Only matches GET /rest/v1/<table> with a single path segment after the
+ * version prefix — RPC calls and joined paths fall through to the regular proxy.
+ */
+function getCacheableTableName(method: string, url: URL): string | null {
+  if (method !== "GET") return null;
+  const m = url.pathname.match(/^\/rest\/v1\/([^/]+)$/);
+  if (!m) return null;
+  const table = m[1];
+  return CACHEABLE_TABLES.has(table) ? table : null;
 }
 
 function getCorsHeadersObj(request: Request): Record<string, string> {
