@@ -42,6 +42,7 @@ import { useSelectedSite, useSitesData } from "@/contexts/SiteContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useRouter } from "next/navigation";
 import PageHeader from "@/components/layout/PageHeader";
+import SiteMoneyMiniCard from "@/components/site/SiteMoneyMiniCard";
 import { createClient } from "@/lib/supabase/client";
 import dayjs from "dayjs";
 import {
@@ -276,6 +277,13 @@ export default function DashboardContent({
         <Alert severity="error" sx={{ mb: 3 }}>
           {(statsError as Error).message}
         </Alert>
+      )}
+
+      {/* Site Money Overview — condensed 3-tile rollup */}
+      {siteId && (
+        <Box sx={{ mb: 3 }}>
+          <SiteMoneyMiniCard siteId={siteId} />
+        </Box>
       )}
 
       {/* Stats Cards */}
