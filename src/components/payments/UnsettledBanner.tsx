@@ -12,6 +12,12 @@ interface UnsettledBannerProps {
   unit: UnsettledUnit;
   ctaLabel?: string;
   onCtaClick?: () => void;
+  /** When provided AND > 0, the banner renders an inline "Legacy: N unit · ₹X"
+   *  segment in front of the existing "N unit unsettled · ₹X pending" line.
+   *  Used for sites in audit mode so the user can see both pools at a glance.
+   *  Setting either to 0 hides the legacy segment. */
+  legacyCount?: number;
+  legacyAmount?: number;
 }
 
 function formatINR(n: number): string {
@@ -31,9 +37,13 @@ export default function UnsettledBanner({
   unit,
   ctaLabel,
   onCtaClick,
+  legacyCount,
+  legacyAmount,
 }: UnsettledBannerProps) {
   const theme = useTheme();
-  if (count <= 0) return null;
+  const hasLegacy = (legacyCount ?? 0) > 0 && (legacyAmount ?? 0) > 0;
+  // Hide the strip only when BOTH pools are empty.
+  if (count <= 0 && !hasLegacy) return null;
 
   return (
     <Box
@@ -61,23 +71,42 @@ export default function UnsettledBanner({
           color: "text.primary",
         }}
       >
-        <Box component="span" sx={{ fontWeight: 700 }}>
-          {count}
-        </Box>{" "}
-        {pluralize(unit, count)} unsettled
-        <Box
-          component="span"
-          sx={{ color: "text.secondary", mx: 0.75 }}
-          aria-hidden
-        >
-          ·
-        </Box>
-        <Box component="span" sx={{ fontWeight: 600 }}>
-          {formatINR(amount)}
-        </Box>{" "}
-        <Box component="span" sx={{ color: "text.secondary" }}>
-          pending
-        </Box>
+        {hasLegacy && (
+          <>
+            <Box component="span" sx={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.4, color: "warning.dark", mr: 0.5 }}>
+              Legacy:
+            </Box>
+            <Box component="span" sx={{ fontWeight: 700 }}>
+              {legacyCount}
+            </Box>{" "}
+            {pluralize(unit, legacyCount ?? 0)}
+            <Box component="span" sx={{ color: "text.secondary", mx: 0.5 }} aria-hidden>·</Box>
+            <Box component="span" sx={{ fontWeight: 600 }}>
+              {formatINR(legacyAmount ?? 0)}
+            </Box>
+            {count > 0 && (
+              <Box component="span" sx={{ color: "text.secondary", mx: 0.75 }} aria-hidden>┃</Box>
+            )}
+          </>
+        )}
+        {count > 0 && (
+          <>
+            {hasLegacy && (
+              <Box component="span" sx={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.4, color: "text.secondary", mr: 0.5 }}>
+                Current:
+              </Box>
+            )}
+            <Box component="span" sx={{ fontWeight: 700 }}>
+              {count}
+            </Box>{" "}
+            {pluralize(unit, count)} unsettled
+            <Box component="span" sx={{ color: "text.secondary", mx: 0.75 }} aria-hidden>·</Box>
+            <Box component="span" sx={{ fontWeight: 600 }}>
+              {formatINR(amount)}
+            </Box>{" "}
+            <Box component="span" sx={{ color: "text.secondary" }}>pending</Box>
+          </>
+        )}
       </Typography>
       <Box sx={{ flex: 1 }} />
       {ctaLabel && onCtaClick && (

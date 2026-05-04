@@ -152,6 +152,8 @@ import {
 import { useAuth } from "@/contexts/AuthContext";
 import { useDateRange } from "@/contexts/DateRangeContext";
 import PageHeader from "@/components/layout/PageHeader";
+import { useSiteAuditState } from "@/hooks/queries/useSiteAuditState";
+import { LegacyAuditBanner } from "@/components/audit";
 import AttendanceSkeleton from "./attendance-skeleton";
 import { hasEditPermission } from "@/lib/permissions";
 import { useSearchParams, useRouter } from "next/navigation";
@@ -327,6 +329,7 @@ interface WeeklySummary {
 
 export default function AttendanceContent({ initialData }: AttendanceContentProps) {
   const { selectedSite, loading: siteLoading } = useSite();
+  const auditState = useSiteAuditState();
   const { userProfile, loading: authLoading } = useAuth();
   const { formatForApi, isAllTime, setPickerContainer } = useDateRange();
   const supabase = createClient();
@@ -2851,6 +2854,12 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
             </Tooltip>
           }
         />
+        {auditState.isAuditing && auditState.dataStartedAt && selectedSite && (
+          <LegacyAuditBanner
+            siteName={selectedSite.name}
+            cutoffDate={auditState.dataStartedAt}
+          />
+        )}
       </Box>
 
       {/* Back button when coming from settlement page */}

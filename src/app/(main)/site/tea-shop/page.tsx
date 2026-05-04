@@ -51,6 +51,8 @@ import { useSite } from "@/contexts/SiteContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useDateRange } from "@/contexts/DateRangeContext";
 import PageHeader from "@/components/layout/PageHeader";
+import { useSiteAuditState } from "@/hooks/queries/useSiteAuditState";
+import { LegacyAuditBanner } from "@/components/audit";
 import { hasEditPermission } from "@/lib/permissions";
 import TeaShopEntryDialog from "@/components/tea-shop/TeaShopEntryDialog";
 import AuditAvatarGroup from "@/components/common/AuditAvatarGroup";
@@ -119,6 +121,7 @@ function TabPanel(props: TabPanelProps) {
 
 export default function TeaShopPage() {
   const { selectedSite } = useSite();
+  const auditState = useSiteAuditState();
   const { userProfile } = useAuth();
   const { formatForApi, isAllTime } = useDateRange();
   const supabase = createClient();
@@ -838,6 +841,12 @@ export default function TeaShopPage() {
           </Box>
         }
       />
+      {auditState.isAuditing && auditState.dataStartedAt && selectedSite && (
+        <LegacyAuditBanner
+          siteName={selectedSite.name}
+          cutoffDate={auditState.dataStartedAt}
+        />
+      )}
 
       {/* Summary Cards - All Time Stats */}
       <Box sx={{ mb: 0.5, display: 'flex', alignItems: 'center', gap: 1 }}>

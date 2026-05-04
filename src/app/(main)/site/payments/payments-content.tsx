@@ -271,6 +271,25 @@ export default function PaymentsContent() {
   const legacyWeeksPending = legacyWeeks.filter(
     (w) => w.status !== "settled"
   ).length;
+  // Per-week unpaid balance for the contract pool (drives Contract-tab Legacy KPI segment).
+  const legacyContractPendingAmount = legacyWeeks.reduce(
+    (sum, w) => sum + Math.max(0, w.wagesDue - w.paid),
+    0
+  );
+
+  // Legacy daily-market pending stats (drives Daily+Market and All tab Legacy
+  // KPI segments). Date scope intentionally NOT applied — legacy is always the
+  // full pre-cutoff history. Disabled when not in audit mode.
+  const legacyPaymentSummaryQuery = usePaymentSummary(
+    auditState.isAuditing ? selectedSite?.id : undefined,
+    null,
+    null,
+    "legacy"
+  );
+  const legacyDailyMarketPendingCount =
+    legacyPaymentSummaryQuery.data?.pendingDatesCount ?? 0;
+  const legacyDailyMarketPendingAmount =
+    legacyPaymentSummaryQuery.data?.pendingAmount ?? 0;
 
   const advancesQuery = useAdvances({
     siteId: selectedSite?.id,
@@ -629,6 +648,8 @@ export default function PaymentsContent() {
               count={contractPendingCount}
               amount={contractPendingAmount}
               unit="weeks"
+              legacyCount={legacyWeeksPending}
+              legacyAmount={legacyContractPendingAmount}
             />
             <Box
               sx={{
@@ -778,6 +799,12 @@ export default function PaymentsContent() {
               }
               amount={dailyMarketPendingAmount}
               unit={viewMode === "by-week" ? "weeks" : "dates"}
+              legacyCount={
+                viewMode === "by-week" ? undefined : legacyDailyMarketPendingCount
+              }
+              legacyAmount={
+                viewMode === "by-week" ? undefined : legacyDailyMarketPendingAmount
+              }
               ctaLabel="Settle in Attendance →"
               onCtaClick={settleDailyMarketInAttendance}
             />
@@ -907,6 +934,10 @@ export default function PaymentsContent() {
               count={contractPendingCount + dailyMarketPendingCount}
               amount={contractPendingAmount + dailyMarketPendingAmount}
               unit="items"
+              legacyCount={legacyWeeksPending + legacyDailyMarketPendingCount}
+              legacyAmount={
+                legacyContractPendingAmount + legacyDailyMarketPendingAmount
+              }
             />
             <Box
               sx={{

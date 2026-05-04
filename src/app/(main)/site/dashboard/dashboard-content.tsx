@@ -42,6 +42,8 @@ import { useSelectedSite, useSitesData } from "@/contexts/SiteContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useRouter } from "next/navigation";
 import PageHeader from "@/components/layout/PageHeader";
+import { useSiteAuditState } from "@/hooks/queries/useSiteAuditState";
+import { LegacyAuditBanner } from "@/components/audit";
 import SiteMoneyMiniCard from "@/components/site/SiteMoneyMiniCard";
 import { createClient } from "@/lib/supabase/client";
 import dayjs from "dayjs";
@@ -66,6 +68,7 @@ export default function DashboardContent({
   initialData,
 }: DashboardContentProps) {
   const { selectedSite } = useSelectedSite();
+  const auditState = useSiteAuditState();
   const { loading: siteLoading } = useSitesData();
   const { userProfile, loading: authLoading } = useAuth();
   const router = useRouter();
@@ -272,6 +275,12 @@ export default function DashboardContent({
         subtitle={`${selectedSite?.name || "Loading..."} • Welcome back, ${userProfile?.name || "User"}`}
         showBack={false}
       />
+      {auditState.isAuditing && auditState.dataStartedAt && selectedSite && (
+        <LegacyAuditBanner
+          siteName={selectedSite.name}
+          cutoffDate={auditState.dataStartedAt}
+        />
+      )}
 
       {statsError && (
         <Alert severity="error" sx={{ mb: 3 }}>

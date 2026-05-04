@@ -52,6 +52,8 @@ import { useSite } from "@/contexts/SiteContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useDateRange } from "@/contexts/DateRangeContext";
 import PageHeader from "@/components/layout/PageHeader";
+import { useSiteAuditState } from "@/hooks/queries/useSiteAuditState";
+import { LegacyAuditBanner } from "@/components/audit";
 import { hasEditPermission } from "@/lib/permissions";
 import { supabaseQueryWithTimeout } from "@/lib/utils/supabaseQuery";
 import type { Database } from "@/types/database.types";
@@ -91,6 +93,7 @@ interface ExpenseWithCategory extends Expense {
 
 export default function ExpensesPage() {
   const { selectedSite } = useSite();
+  const auditState = useSiteAuditState();
   const { userProfile } = useAuth();
   const { formatForApi, isAllTime } = useDateRange();
   const supabase = createClient();
@@ -938,6 +941,12 @@ export default function ExpensesPage() {
           </Box>
         }
       />
+      {auditState.isAuditing && auditState.dataStartedAt && selectedSite && (
+        <LegacyAuditBanner
+          siteName={selectedSite.name}
+          cutoffDate={auditState.dataStartedAt}
+        />
+      )}
 
       {/* Unified Expense Summary */}
       <Card sx={{ mb: 3 }}>
