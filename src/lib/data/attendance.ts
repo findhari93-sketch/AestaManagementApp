@@ -95,13 +95,16 @@ export async function getAttendancePageData(
       .gte("date", defaultDateFrom)
       .lte("date", defaultDateTo),
 
-    // Tea shop allocations (this site's share of group entries from other sites)
-    // Note: We fetch all allocations and filter by date client-side since Supabase
-    // doesn't support filtering on nested relation fields like entry.date
+    // Tea shop allocations (this site's share of group entries from other sites).
+    // Filter on the inner-joined entry's date so the server returns only rows in range.
+    // PostgREST supports dotted filters on embedded resources; with !inner, parent rows
+    // whose embedded entry falls outside the range are excluded.
     (supabase as any)
       .from("tea_shop_entry_allocations")
       .select("allocated_amount, allocation_percentage, entry_id, entry:tea_shop_entries!inner(id, date, total_amount, is_group_entry, site_group_id)")
-      .eq("site_id", siteId),
+      .eq("site_id", siteId)
+      .gte("entry.date", defaultDateFrom)
+      .lte("entry.date", defaultDateTo),
 
     // Recent and upcoming holidays (30 days range)
     supabase
