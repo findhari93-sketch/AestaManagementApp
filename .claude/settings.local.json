@@ -187,7 +187,15 @@
       "PowerShell(npx supabase start 2>&1)",
       "PowerShell(docker version --format '{{.Server.Version}}')",
       "PowerShell(npx --no-install supabase stop --no-backup 2>&1)",
-      "Bash(wait b1c7ju6gk *)"
+      "Bash(wait b1c7ju6gk *)",
+      "mcp__vercel__list_deployments",
+      "mcp__vercel__list_projects",
+      "mcp__vercel__get_deployment",
+      "mcp__vercel__list_teams",
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\Haribabu\\\\Documents\\\\AppsCopilot\\\\AestaManagementApp\\\\cloudflare-proxy\" -Recurse -File)",
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\Haribabu\\\\Documents\\\\AppsCopilot\\\\AestaManagementApp\" -Recurse -Filter \"*payment*\" -ErrorAction SilentlyContinue)",
+      "Bash(jobs)",
+      "PowerShell(try { \\(Invoke-WebRequest -UseBasicParsing -TimeoutSec 5 http://localhost:3000/dev-login\\).StatusCode } catch { $_.Exception.Message }; try { \\(Invoke-WebRequest -UseBasicParsing -TimeoutSec 5 http://localhost:3001/dev-login\\).StatusCode } catch { $_.Exception.Message })"
     ],
     "deny": [],
     "ask": []

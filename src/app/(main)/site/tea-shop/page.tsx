@@ -60,6 +60,9 @@ import ConfirmDialog from "@/components/common/ConfirmDialog";
 import TeaShopSettlementDialog from "@/components/tea-shop/TeaShopSettlementDialog";
 import GroupTeaShopEntryDialog from "@/components/tea-shop/GroupTeaShopEntryDialog";
 import GroupTeaShopSettlementDialog from "@/components/tea-shop/GroupTeaShopSettlementDialog";
+import UnlinkedTeaSettlementsGroup, {
+  type UnlinkedTeaSettlementRowData,
+} from "@/components/tea-shop/UnlinkedTeaSettlementsGroup";
 import type { Database } from "@/types/database.types";
 
 type TeaShopAccount = Database["public"]["Tables"]["tea_shop_accounts"]["Row"];
@@ -90,6 +93,7 @@ import {
   useCombinedTeaShopSettlements,
   type CombinedTeaShopEntry,
 } from "@/hooks/queries/useCombinedTeaShop";
+import { useCombinedTeaShopEntriesInfinite } from "@/hooks/queries/useCombinedTeaShopEntriesInfinite";
 import { queryKeys } from "@/lib/cache/keys";
 import {
   useTeaShopForSite,
@@ -116,6 +120,44 @@ function TabPanel(props: TabPanelProps) {
     <div hidden={value !== index} {...other}>
       {value === index && <Box sx={{ pt: 2 }}>{children}</Box>}
     </div>
+  );
+}
+
+function LoadOlderSentinel({
+  onVisible,
+  fetching,
+  hasMore,
+}: {
+  onVisible: () => void;
+  fetching: boolean;
+  hasMore: boolean;
+}) {
+  const ref = React.useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || !hasMore || fetching) return;
+    const obs = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) onVisible();
+      },
+      { rootMargin: "200px" }
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [onVisible, fetching, hasMore]);
+  return (
+    <Box
+      ref={ref}
+      sx={{ display: "flex", justifyContent: "center", py: 2 }}
+    >
+      {fetching ? (
+        <CircularProgress size={20} />
+      ) : hasMore ? (
+        <Typography variant="caption" color="text.secondary">
+          Scroll for older weeks
+        </Typography>
+      ) : null}
+    </Box>
   );
 }
 
@@ -176,8 +218,16 @@ export default function TeaShopPage() {
     return selectedSite?.id;
   }, [selectedSite?.id]);
 
-  // Date-filtered entries for the table display
-  const { data: combinedEntriesData, isLoading: combinedEntriesLoading } = useCombinedTeaShopEntries(
+  // Date-filtered entries for the table — paginated weekly (newest first) so the
+  // table renders fast even on All Time. Summary cards still use all-time data
+  // below; this hook only feeds the visible rows.
+  const {
+    data: combinedEntriesInfinite,
+    isLoading: combinedEntriesLoading,
+    fetchNextPage: fetchOlderEntries,
+    hasNextPage: hasOlderEntries,
+    isFetchingNextPage: fetchingOlderEntries,
+  } = useCombinedTeaShopEntriesInfinite(
     isInGroup ? siteGroupId : undefined,
     {
       filterBySiteId: effectiveFilterBySiteId,
@@ -185,6 +235,26 @@ export default function TeaShopPage() {
       dateTo: isAllTime ? undefined : dateTo ?? undefined,
     }
   );
+  const combinedEntriesData = useMemo<CombinedTeaShopEntry[] | undefined>(
+    () =>
+      combinedEntriesInfinite
+        ? combinedEntriesInfinite.pages.flatMap((p) => p.entries)
+        : undefined,
+    [combinedEntriesInfinite]
+  );
+
+  // Bootstrap to 2 weeks on first load so the table doesn't look almost-empty
+  // when the latest week happens to have few rows.
+  const bootstrappedRef = React.useRef<string | null>(null);
+  useEffect(() => {
+    const pageCount = combinedEntriesInfinite?.pages.length || 0;
+    const bootstrapKey = `${siteGroupId || ""}|${effectiveFilterBySiteId || ""}|${dateFrom || ""}|${dateTo || ""}`;
+    if (bootstrappedRef.current === bootstrapKey) return;
+    if (pageCount === 1 && hasOlderEntries && !fetchingOlderEntries) {
+      bootstrappedRef.current = bootstrapKey;
+      fetchOlderEntries();
+    }
+  }, [combinedEntriesInfinite, hasOlderEntries, fetchingOlderEntries, fetchOlderEntries, siteGroupId, effectiveFilterBySiteId, dateFrom, dateTo]);
   // ALL TIME entries for THIS SITE - used for summary stats (Total Spent, Pending)
   // This ensures the summary shows per-site totals, not group totals
   const { data: allTimeEntriesData } = useCombinedTeaShopEntries(
@@ -765,6 +835,25 @@ export default function TeaShopPage() {
       s.site_id === effectiveFilterBySiteId || s.source === "group"
     );
   }, [isInGroup, settlements, combinedSettlementsData, effectiveFilterBySiteId]);
+
+  // Settlements missing a subcontract link — surfaced at the top of the
+  // Settlements tab so users can fix them without hunting through the table.
+  const unlinkedSettlements = useMemo<UnlinkedTeaSettlementRowData[]>(() => {
+    return (filteredSettlements ?? [])
+      .filter((s: any) => !s.subcontract_id && !s.is_cancelled)
+      .map((s: any) => ({
+        id: s.id,
+        payment_date: s.payment_date,
+        amount_paid: s.amount_paid,
+        subcontract_id: s.subcontract_id ?? null,
+        site_id: s.site_id ?? null,
+        site_name: s.site_name ?? null,
+        source: s.source,
+        settlement_reference: s.settlement_reference ?? null,
+        payer_type: s.payer_type ?? null,
+        is_cancelled: s.is_cancelled ?? false,
+      }));
+  }, [filteredSettlements]);
 
   if (!selectedSite) {
     return (
@@ -1371,7 +1460,7 @@ export default function TeaShopPage() {
                         </TableRow>
                       );
                     })}
-                    {combinedEntries.length === 0 && (
+                    {combinedEntries.length === 0 && !fetchingOlderEntries && (
                       <TableRow>
                         <TableCell colSpan={isInGroup ? 7 : 6} align="center" sx={{ py: 4 }}>
                           <Typography color="text.secondary">
@@ -1384,10 +1473,30 @@ export default function TeaShopPage() {
                 </Table>
               </TableContainer>
             )}
+
+            {/* Scroll sentinel — loads older weeks one at a time as the user scrolls */}
+            {isInGroup && (hasOlderEntries || fetchingOlderEntries) && (
+              <LoadOlderSentinel
+                onVisible={fetchOlderEntries}
+                fetching={fetchingOlderEntries}
+                hasMore={!!hasOlderEntries}
+              />
+            )}
           </TabPanel>
 
           {/* Settlements Tab */}
           <TabPanel value={tabValue} index={1}>
+            <UnlinkedTeaSettlementsGroup
+              rows={unlinkedSettlements}
+              fallbackSiteId={selectedSite?.id}
+              siteGroupId={isInGroup ? siteGroupId : undefined}
+              onRowClick={(r) => {
+                const original = (filteredSettlements ?? []).find(
+                  (s: any) => s.id === r.id,
+                );
+                if (original) handleEditSettlement(original as TeaShopSettlement);
+              }}
+            />
             <Box sx={{ mb: 2 }}>
               <Chip
                 label={`${filteredSettlements?.length || 0} records`}

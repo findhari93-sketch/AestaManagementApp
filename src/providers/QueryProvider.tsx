@@ -8,7 +8,11 @@ import { shouldPersistQuery } from "@/lib/cache/keys";
 import { initBackgroundSync, stopBackgroundSync } from "@/lib/cache/sync";
 import { useSelectedSite } from "@/contexts/SiteContext";
 import { useTab } from "@/providers/TabProvider";
-import { SessionExpiredError, createClient } from "@/lib/supabase/client";
+import { SessionExpiredError } from "@/lib/supabase/client";
+import {
+  refreshSessionDeduped,
+  setSessionManagerQueryClient,
+} from "@/lib/auth/sessionManager";
 
 /**
  * Checks if an error is a session/auth related error that should redirect to login.
@@ -38,6 +42,25 @@ function isSessionError(error: unknown): boolean {
     ) {
       return true;
     }
+    // Supabase Auth's /auth/v1/token endpoint returns 400 (not 401) when the
+    // refresh token has been rotated or used. Without recognizing this, the app
+    // gets stuck after long idle periods because retry handlers blanket-skip 400.
+    if (err.status === 400) {
+      const code = String(
+        (err as { code?: unknown; error?: unknown }).code ||
+          (err as { error?: unknown }).error ||
+          ""
+      ).toLowerCase();
+      if (
+        code === "invalid_grant" ||
+        message.includes("invalid grant") ||
+        message.includes("invalid_grant") ||
+        message.includes("already been used") ||
+        message.includes("already used")
+      ) {
+        return true;
+      }
+    }
   }
 
   return false;
@@ -51,10 +74,6 @@ function redirectToLogin(): void {
     window.location.href = "/login?session_expired=true";
   }
 }
-
-// Module-level dedup flag for token refresh from QueryCache.onError
-let _isRefreshingToken = false;
-let _refreshTokenPromise: Promise<boolean> | null = null;
 
 export default function QueryProvider({
   children,
@@ -78,45 +97,16 @@ export default function QueryProvider({
           "- attempting session refresh"
         );
 
-        // Deduplicate: if a refresh is already in progress, wait for it
-        if (!_isRefreshingToken) {
-          _isRefreshingToken = true;
-          _refreshTokenPromise = (async () => {
-            try {
-              const supabase = createClient();
-              const { error: refreshError } =
-                await supabase.auth.refreshSession();
-              if (refreshError) {
-                console.error(
-                  "[QueryCache] Session refresh failed:",
-                  refreshError
-                );
-                // Permanent failure - redirect to login
-                const msg = refreshError.message?.toLowerCase() || "";
-                if (
-                  msg.includes("invalid refresh token") ||
-                  msg.includes("refresh token not found") ||
-                  msg.includes("expired")
-                ) {
-                  redirectToLogin();
-                }
-                return false;
-              }
-              console.log(
-                "[QueryCache] Session refreshed successfully after query auth error"
-              );
-              return true;
-            } catch (err) {
-              console.error("[QueryCache] Session refresh threw:", err);
-              return false;
-            } finally {
-              _isRefreshingToken = false;
-              _refreshTokenPromise = null;
-            }
-          })();
-        }
+        // Single deduped refresh shared with SessionManager + every other handler.
+        // Concurrent calls return the same in-flight promise, preventing the
+        // refresh-token-rotation race that surfaces as 400 invalid_grant.
+        const refreshed = await refreshSessionDeduped();
 
-        const refreshed = await _refreshTokenPromise;
+        if (!refreshed) {
+          // Hard failure (invalid_grant / expired refresh token). Redirect.
+          redirectToLogin();
+          return;
+        }
 
         if (refreshed && clientRef.current) {
           // Re-trigger just this failed query after token is ready
@@ -137,18 +127,26 @@ export default function QueryProvider({
           staleTime: 5 * 60 * 1000, // 5 minutes - data considered fresh (increased to reduce refetches)
           gcTime: 30 * 60 * 1000, // 30 minutes - cache garbage collection
           retry: (failureCount, error: any) => {
-            // Don't retry on 400 Bad Request - these are programming errors
+            // 400 from /auth/v1/token is a session error — let the auth-retry
+            // path below handle it. Other 400s are genuine programming errors.
             if (error?.status === 400 || error?.message?.includes("400")) {
-              console.error(
-                "[QueryClient] 400 Bad Request - not retrying:",
-                error
-              );
-              return false;
+              if (!isSessionError(error)) {
+                console.error(
+                  "[QueryClient] 400 Bad Request - not retrying:",
+                  error
+                );
+                return false;
+              }
             }
-            // Allow ONE retry on 401/403 - session may have been refreshed
-            // by SessionManager's idle-recovery or QueryCache.onError handler.
-            // If retry also fails, QueryCache.onError handles the final attempt.
-            if (error?.status === 401 || error?.status === 403) {
+            // Allow ONE retry on 401/403 (or 400 invalid_grant) - session may
+            // have been refreshed by SessionManager's idle-recovery or
+            // QueryCache.onError handler. If retry also fails, QueryCache.onError
+            // handles the final attempt.
+            if (
+              error?.status === 401 ||
+              error?.status === 403 ||
+              (error?.status === 400 && isSessionError(error))
+            ) {
               if (failureCount < 1) {
                 console.warn(
                   "[QueryClient] Auth error - will retry once after delay"
@@ -161,7 +159,11 @@ export default function QueryProvider({
           },
           retryDelay: (attemptIndex, error: any) => {
             // For auth errors, use a longer delay to allow session refresh to complete
-            if (error?.status === 401 || error?.status === 403) {
+            if (
+              error?.status === 401 ||
+              error?.status === 403 ||
+              (error?.status === 400 && isSessionError(error))
+            ) {
               return 2000; // 2 seconds - enough time for token refresh
             }
             return Math.min(1000 * 2 ** attemptIndex, 30000); // Exponential backoff
@@ -189,15 +191,25 @@ export default function QueryProvider({
             // 409 = Conflict (unique constraint violation, already exists)
             // 422 = Validation error
             if (status === 400 || status === 409 || status === 422) {
-              console.warn(
-                `[QueryClient] Mutation failed with ${status} - not retrying`
-              );
-              return false;
+              // Session-error 400s (e.g. /auth/v1/token invalid_grant) fall
+              // through to the 401/403 retry path below.
+              if (status === 400 && isSessionError(error)) {
+                // fall through
+              } else {
+                console.warn(
+                  `[QueryClient] Mutation failed with ${status} - not retrying`
+                );
+                return false;
+              }
             }
-            // Allow ONE retry on 401/403 - session may have been refreshed
-            // by SessionManager or QueryCache.onError handler during the delay.
-            // This matches the query retry behavior (lines 148-158 above).
-            if (status === 401 || status === 403) {
+            // Allow ONE retry on 401/403 (or 400 invalid_grant) - session may
+            // have been refreshed by SessionManager or QueryCache.onError handler
+            // during the delay. Matches the query retry behavior above.
+            if (
+              status === 401 ||
+              status === 403 ||
+              (status === 400 && isSessionError(error))
+            ) {
               if (failureCount < 1) {
                 console.warn(
                   "[QueryClient] Mutation auth error - will retry once after session refresh"
@@ -212,7 +224,11 @@ export default function QueryProvider({
           retryDelay: (attemptIndex, error: any) => {
             const status = error?.status || error?.code;
             // For auth errors, wait longer to allow session refresh to complete
-            if (status === 401 || status === 403) {
+            if (
+              status === 401 ||
+              status === 403 ||
+              (status === 400 && isSessionError(error))
+            ) {
               return 2500; // 2.5 seconds - enough for token refresh
             }
             return 1000;
@@ -221,48 +237,11 @@ export default function QueryProvider({
           onError: async (error) => {
             if (!isSessionError(error)) return;
 
-            // Try to refresh session first before redirecting
-            // This gives the retry mechanism a fresh token to work with
-            if (!_isRefreshingToken) {
-              _isRefreshingToken = true;
-              _refreshTokenPromise = (async () => {
-                try {
-                  const supabase = createClient();
-                  const { error: refreshError } =
-                    await supabase.auth.refreshSession();
-                  if (refreshError) {
-                    console.error(
-                      "[QueryClient] Mutation session refresh failed:",
-                      refreshError
-                    );
-                    const msg = refreshError.message?.toLowerCase() || "";
-                    if (
-                      msg.includes("invalid refresh token") ||
-                      msg.includes("refresh token not found") ||
-                      msg.includes("expired")
-                    ) {
-                      redirectToLogin();
-                    }
-                    return false;
-                  }
-                  console.log(
-                    "[QueryClient] Session refreshed after mutation auth error"
-                  );
-                  return true;
-                } catch (err) {
-                  console.error("[QueryClient] Session refresh threw:", err);
-                  return false;
-                } finally {
-                  _isRefreshingToken = false;
-                  _refreshTokenPromise = null;
-                }
-              })();
-            }
-
-            const refreshed = await _refreshTokenPromise;
+            // Single deduped refresh — shared with QueryCache.onError, SessionManager,
+            // and NetworkRecoveryHandler. Eliminates the concurrent-refresh race that
+            // produces 400 invalid_grant from /auth/v1/token.
+            const refreshed = await refreshSessionDeduped();
             if (!refreshed) {
-              // Only redirect if refresh completely failed
-              // (retry mechanism will use the refreshed token if available)
               console.warn(
                 "[QueryClient] Session refresh failed after mutation error - redirecting to login"
               );
@@ -278,6 +257,13 @@ export default function QueryProvider({
   });
 
   const [persister] = useState(() => createIDBPersister());
+
+  // Hand the QueryClient to SessionManager so its visibility-wake recovery can
+  // cancelQueries() before the deduped refresh, preventing zombie fetches with
+  // stale tokens from racing the refresh.
+  useEffect(() => {
+    setSessionManagerQueryClient(queryClient);
+  }, [queryClient]);
 
   return (
     <PersistQueryClientProvider
@@ -508,11 +494,10 @@ function NetworkRecoveryHandler({ queryClient }: { queryClient: QueryClient }) {
       }
 
       try {
-        const supabase = createClient();
         await Promise.race([
-          supabase.auth.refreshSession(),
-          new Promise<void>((resolve) =>
-            setTimeout(resolve, REFRESH_RACE_MS),
+          refreshSessionDeduped(),
+          new Promise<boolean>((resolve) =>
+            setTimeout(() => resolve(false), REFRESH_RACE_MS),
           ),
         ]);
       } catch (err) {

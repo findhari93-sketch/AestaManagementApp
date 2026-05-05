@@ -832,13 +832,17 @@ export default function PaymentsContent() {
 
         {activeTab === "daily-market" && (
           <Box sx={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-            <DailyMarketHero
-              paidAmount={summaryQuery.data?.dailyMarketAmount ?? 0}
-              paidCount={summaryQuery.data?.dailyMarketCount ?? 0}
-              pendingAmount={summaryQuery.data?.pendingAmount ?? 0}
-              pendingCount={summaryQuery.data?.pendingDatesCount ?? 0}
-              isLoading={summaryQuery.isLoading}
-            />
+            {!isFullscreen && (
+              <Box sx={{ flexShrink: 0 }}>
+                <DailyMarketHero
+                  paidAmount={summaryQuery.data?.dailyMarketAmount ?? 0}
+                  paidCount={summaryQuery.data?.dailyMarketCount ?? 0}
+                  pendingAmount={summaryQuery.data?.pendingAmount ?? 0}
+                  pendingCount={summaryQuery.data?.pendingDatesCount ?? 0}
+                  isLoading={summaryQuery.isLoading}
+                />
+              </Box>
+            )}
             <UnsettledBanner
               count={
                 viewMode === "by-week"
@@ -984,17 +988,21 @@ export default function PaymentsContent() {
 
         {activeTab === "all" && (
           <Box sx={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-            <AllSettlementsHero
-              contractWagesDue={salarySummaryQuery.data?.wagesDue ?? 0}
-              contractSettlementsTotal={salarySummaryQuery.data?.settlementsTotal ?? 0}
-              contractSettlementCount={salarySummaryQuery.data?.settlementCount ?? 0}
-              contractAdvances={salarySummaryQuery.data?.advancesTotal ?? 0}
-              contractAdvanceCount={salarySummaryQuery.data?.advanceCount ?? 0}
-              dailyMarketAmount={summaryQuery.data?.dailyMarketAmount ?? 0}
-              dailyMarketCount={summaryQuery.data?.dailyMarketCount ?? 0}
-              pendingAmount={summaryQuery.data?.pendingAmount ?? 0}
-              isLoading={summaryQuery.isLoading || salarySummaryQuery.isLoading}
-            />
+            {!isFullscreen && (
+              <Box sx={{ flexShrink: 0 }}>
+                <AllSettlementsHero
+                  contractWagesDue={salarySummaryQuery.data?.wagesDue ?? 0}
+                  contractSettlementsTotal={salarySummaryQuery.data?.settlementsTotal ?? 0}
+                  contractSettlementCount={salarySummaryQuery.data?.settlementCount ?? 0}
+                  contractAdvances={salarySummaryQuery.data?.advancesTotal ?? 0}
+                  contractAdvanceCount={salarySummaryQuery.data?.advanceCount ?? 0}
+                  dailyMarketAmount={summaryQuery.data?.dailyMarketAmount ?? 0}
+                  dailyMarketCount={summaryQuery.data?.dailyMarketCount ?? 0}
+                  pendingAmount={summaryQuery.data?.pendingAmount ?? 0}
+                  isLoading={summaryQuery.isLoading || salarySummaryQuery.isLoading}
+                />
+              </Box>
+            )}
             <UnsettledBanner
               count={contractPendingCount + dailyMarketPendingCount}
               amount={contractPendingAmount + dailyMarketPendingAmount}

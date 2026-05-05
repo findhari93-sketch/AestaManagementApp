@@ -86,6 +86,8 @@ interface AllocationPreview {
   isFullyPaid: boolean;
   siteName?: string; // For group mode
   isGroupEntry?: boolean; // Whether this is a group entry (split across sites)
+  allocationId?: string; // Per-site row id on tea_shop_entry_allocations (group entries only)
+  siteId?: string; // Site this allocation slice applies to (group entries only)
 }
 
 // Generate settlement reference in TSS-YYMMDD-NNN format
@@ -137,6 +139,11 @@ export default function TeaShopSettlementDialog({
   // Subcontracts for linking
   const [subcontracts, setSubcontracts] = useState<SubcontractOption[]>([]);
   const [selectedSubcontractId, setSelectedSubcontractId] = useState<string>("");
+
+  // Soft confirm shown before saving a brand-new settlement with no subcontract.
+  // Tea-shop settlements should almost always be linked to a subcontract; this
+  // catches the common oversight at create time.
+  const [showNoLinkConfirm, setShowNoLinkConfirm] = useState(false);
 
   // Unsettled entries for waterfall (fetched fresh)
   const [unsettledEntries, setUnsettledEntries] = useState<TeaShopEntry[]>([]);
@@ -194,9 +201,21 @@ export default function TeaShopSettlementDialog({
         setSettlementMode("waterfall");
       }
       setError(null);
+      setShowNoLinkConfirm(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, settlement]); // Exclude pendingBalance to allow user overrides and prevent loop
+
+  // Auto-suggest subcontract when the site has exactly one active option.
+  // Only fires in create mode and only when nothing is selected yet, so the
+  // user's deliberate pick (or a deliberate "leave empty") is never clobbered.
+  useEffect(() => {
+    if (!open || isEditMode) return;
+    if (selectedSubcontractId) return;
+    if (subcontracts.length === 1) {
+      setSelectedSubcontractId(subcontracts[0].id);
+    }
+  }, [open, isEditMode, subcontracts, selectedSubcontractId]);
 
   const fetchEngineers = async () => {
     if (!selectedSite) return;
@@ -287,13 +306,19 @@ export default function TeaShopSettlementDialog({
         });
 
         // 2. Fetch group entries with their allocations for the target site(s)
+        // Pull allocation-level paid columns so we can use them as the source of truth
+        // (proportional re-derivation from entry-level amount_paid was incorrect when
+        // historical settlements split paid amounts non-proportionally across sites).
         const { data: groupEntries } = await (supabase as any)
           .from("tea_shop_entries")
           .select(`
             *,
             allocations:tea_shop_entry_allocations(
+              id,
               site_id,
               allocated_amount,
+              amount_paid,
+              is_fully_paid,
               day_units_sum,
               worker_count
             )
@@ -305,7 +330,8 @@ export default function TeaShopSettlementDialog({
         // Process group entries - include only if they have allocation for target site(s)
         const processedGroupEntries: any[] = [];
         (groupEntries || []).forEach((entry: any) => {
-          // Skip fully paid entries
+          // Skip fully paid entries up front; allocation-level state is only consulted
+          // for entries still owing something at entry level
           if (entry.is_fully_paid === true) return;
 
           const allocs = entry.allocations || [];
@@ -313,25 +339,23 @@ export default function TeaShopSettlementDialog({
           if (filterBySiteId && filterBySiteId !== "all") {
             // Filtering to specific site - find allocation for this site
             const siteAlloc = allocs.find((a: any) => a.site_id === filterBySiteId);
-            if (siteAlloc && siteAlloc.allocated_amount > 0) {
-              // Calculate proportional amount_paid for this site
-              const totalEntryAmount = entry.total_amount || 0;
+            if (siteAlloc && (siteAlloc.allocated_amount || 0) > 0) {
               const siteAmount = siteAlloc.allocated_amount || 0;
-              const ratio = totalEntryAmount > 0 ? siteAmount / totalEntryAmount : 0;
-              const siteAmountPaid = Math.round((entry.amount_paid || 0) * ratio);
+              const siteAmountPaid = siteAlloc.amount_paid || 0;
               const siteRemaining = siteAmount - siteAmountPaid;
 
-              // Only include if there's still unpaid amount for this site
-              if (siteRemaining > 0) {
+              // Only include if this site's allocation is not fully paid
+              if (siteAlloc.is_fully_paid !== true && siteRemaining > 0) {
                 processedGroupEntries.push({
                   ...entry,
                   // Override with site-specific values for waterfall calculation
                   site_id: filterBySiteId,
                   site_name: siteNameMap.get(filterBySiteId) || "Unknown",
                   total_amount: siteAmount, // Use site's allocated portion
-                  amount_paid: siteAmountPaid, // Use proportional paid amount
-                  original_total_amount: totalEntryAmount,
+                  amount_paid: siteAmountPaid, // Allocation-level paid (truth)
+                  original_total_amount: entry.total_amount || 0,
                   isGroupEntry: true,
+                  allocationId: siteAlloc.id,
                 });
               }
             }
@@ -412,6 +436,8 @@ export default function TeaShopSettlementDialog({
         isFullyPaid: toAllocate >= entryRemaining,
         siteName: (entry as any).site_name, // Include site name for group mode
         isGroupEntry: (entry as any).isGroupEntry, // Include group entry flag
+        allocationId: (entry as any).allocationId, // Per-site allocation row to update on save
+        siteId: (entry as any).site_id, // Site this allocation belongs to (group mode)
       });
 
       remaining -= toAllocate;
@@ -424,7 +450,7 @@ export default function TeaShopSettlementDialog({
   const totalAllocated = allocationPreview.reduce((sum, a) => sum + a.allocatedAmount, 0);
   const balanceRemaining = Math.max(0, pendingBalance - amountPaying);
 
-  const handleSave = async () => {
+  const handleSave = async (bypassNoLinkConfirm = false) => {
     if (amountPaying <= 0) {
       setError("Please enter amount to pay");
       return;
@@ -437,6 +463,14 @@ export default function TeaShopSettlementDialog({
 
     if (paymentMode !== "cash" && !proofUrl) {
       setError("Please upload payment proof screenshot (required for non-cash payments)");
+      return;
+    }
+
+    // Soft confirm before saving a brand-new settlement with no subcontract
+    // link. Skipped on edit (user is consciously editing the row) and bypassed
+    // when the user has already clicked "Save anyway" in the confirm dialog.
+    if (!isEditMode && !selectedSubcontractId && !bypassNoLinkConfirm) {
+      setShowNoLinkConfirm(true);
       return;
     }
 
@@ -572,15 +606,52 @@ export default function TeaShopSettlementDialog({
             console.error(`Error upserting allocation for entry ${alloc.entryId}:`, allocError);
           }
 
-          // Update entry with new payment info
-          const newPaid = alloc.previouslyPaid + alloc.allocatedAmount;
-          await (supabase
-            .from("tea_shop_entries") as any)
-            .update({
-              amount_paid: newPaid,
-              is_fully_paid: alloc.isFullyPaid,
-            })
-            .eq("id", alloc.entryId);
+          if (alloc.isGroupEntry && alloc.allocationId) {
+            // Group entry: update only the per-site allocation row, not entry-level
+            // (entry-level paid is recomputed from sum of allocations on read).
+            // Also bump entry-level so legacy code paths that read it stay consistent.
+            const newAllocPaid = alloc.previouslyPaid + alloc.allocatedAmount;
+            await (supabase
+              .from("tea_shop_entry_allocations") as any)
+              .update({
+                amount_paid: newAllocPaid,
+                is_fully_paid: alloc.isFullyPaid,
+              })
+              .eq("id", alloc.allocationId);
+
+            // Recompute entry-level totals from the canonical allocation rows so
+            // legacy entry-level reads stay correct.
+            const { data: allAllocs } = await (supabase
+              .from("tea_shop_entry_allocations") as any)
+              .select("amount_paid, allocated_amount, is_fully_paid")
+              .eq("entry_id", alloc.entryId);
+
+            const sumPaid = (allAllocs || []).reduce(
+              (s: number, a: any) => s + (a.amount_paid || 0),
+              0
+            );
+            const allFullyPaid = (allAllocs || []).every(
+              (a: any) => a.is_fully_paid === true
+            );
+
+            await (supabase
+              .from("tea_shop_entries") as any)
+              .update({
+                amount_paid: sumPaid,
+                is_fully_paid: allFullyPaid,
+              })
+              .eq("id", alloc.entryId);
+          } else {
+            // Individual (non-group) entry: update entry-level only
+            const newPaid = alloc.previouslyPaid + alloc.allocatedAmount;
+            await (supabase
+              .from("tea_shop_entries") as any)
+              .update({
+                amount_paid: newPaid,
+                is_fully_paid: alloc.isFullyPaid,
+              })
+              .eq("id", alloc.entryId);
+          }
         }
       }
 
@@ -1016,12 +1087,51 @@ export default function TeaShopSettlementDialog({
         </Button>
         <Button
           variant="contained"
-          onClick={handleSave}
+          onClick={() => handleSave()}
           disabled={loading || amountPaying <= 0}
         >
           {loading ? <CircularProgress size={24} /> : isEditMode ? "Update Settlement" : "Record Payment"}
         </Button>
       </DialogActions>
+
+      {/* Soft confirm: stacked dialog shown when the user is about to save a
+          new tea-shop settlement without picking a subcontract. Tea-shop costs
+          should almost always be linked to a subcontract, so we surface the
+          warning here rather than relying on the "Unlinked" group to catch it
+          after the fact. */}
+      <Dialog
+        open={showNoLinkConfirm}
+        onClose={() => setShowNoLinkConfirm(false)}
+        maxWidth="xs"
+      >
+        <DialogTitle>Settle without subcontract link?</DialogTitle>
+        <DialogContent dividers>
+          <Typography variant="body2" sx={{ mb: 1 }}>
+            This tea-shop settlement isn&apos;t linked to any subcontract. Most
+            tea expenses belong to one — leaving it unlinked makes the payment
+            harder to reconcile against subcontract balances later.
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            If this is intentional (e.g. a general site expense), continue.
+            Otherwise, go back and pick a subcontract.
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, py: 1.5 }}>
+          <Button onClick={() => setShowNoLinkConfirm(false)}>
+            Go back
+          </Button>
+          <Button
+            color="warning"
+            variant="contained"
+            onClick={() => {
+              setShowNoLinkConfirm(false);
+              void handleSave(true);
+            }}
+          >
+            Yes, settle anyway
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Dialog>
   );
 }

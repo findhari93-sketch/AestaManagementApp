@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/client";
+import type { QueryClient } from "@tanstack/react-query";
 
 /**
  * Centralized Session Manager
@@ -22,6 +23,13 @@ const ACTIVITY_DEBOUNCE = 2000; // 2 seconds
 const SESSION_CHECK_DEBOUNCE = 30000; // 30 seconds - trust a verified session for this long
 const SESSION_CHECK_TIMEOUT = 4000; // 4 seconds - if slow, proceed and let Supabase 401 handle it
 const SESSION_CHECK_TIMEOUT_POST_IDLE = 8000; // 8 seconds - longer after idle for slow mobile networks
+const VISIBILITY_REFRESH_THRESHOLD = 5 * 60 * 1000; // 5 minutes - re-auth on tab return if hidden longer than this
+
+// Module-level singleton in-flight refresh. ALL callers (SessionManager methods,
+// QueryProvider error handlers, NetworkRecoveryHandler) funnel through this so
+// concurrent refresh calls cannot race and trigger refresh-token-rotation reuse
+// detection (which surfaces as a 400 invalid_grant from /auth/v1/token).
+let _refreshInFlight: Promise<boolean> | null = null;
 
 type SessionManagerState = {
   isInitialized: boolean;
@@ -31,6 +39,8 @@ type SessionManagerState = {
   // refreshTimer: ReturnType<typeof setInterval> | null; // REMOVED
   proactiveRefreshTimer: ReturnType<typeof setInterval> | null;
   activityTimer: ReturnType<typeof setTimeout> | null;
+  hiddenAt: number | null; // Set when document.visibilityState transitions to "hidden"
+  queryClient: QueryClient | null;
 };
 
 class SessionManager {
@@ -42,7 +52,18 @@ class SessionManager {
     // refreshTimer: null,
     proactiveRefreshTimer: null,
     activityTimer: null,
+    hiddenAt: null,
+    queryClient: null,
   };
+
+  /**
+   * Hand the QueryClient to the session manager so it can cancel/invalidate
+   * queries during the visibility-wake recovery sequence. Called once from
+   * QueryProvider after the client is constructed.
+   */
+  setQueryClient(qc: QueryClient): void {
+    this.state.queryClient = qc;
+  }
 
   /**
    * Initialize the session manager
@@ -66,6 +87,9 @@ class SessionManager {
 
     // Setup activity tracking
     this.setupActivityTracking();
+
+    // Setup tab visibility tracking — the primary wake-from-idle signal
+    this.setupVisibilityTracking();
 
     console.log("[SessionManager] Initialized with proactive refresh timer");
   }
@@ -93,6 +117,8 @@ class SessionManager {
     }
 
     this.cleanupActivityTracking();
+    this.cleanupVisibilityTracking();
+    this.state.hiddenAt = null;
 
     this.state.isInitialized = false;
     console.log("[SessionManager] Stopped");
@@ -114,34 +140,57 @@ class SessionManager {
   }
 
   /**
-   * Manually refresh session
-   * Returns true if successful, false otherwise
+   * Manually refresh session.
+   * Returns true if successful, false otherwise.
+   *
+   * Routes through refreshSessionDeduped() so concurrent callers (SDK auto-refresh,
+   * QueryCache.onError, mutation onError, NetworkRecoveryHandler, visibility wake)
+   * never trigger refresh-token-rotation reuse detection (Supabase 400 invalid_grant).
    */
   async refreshSession(): Promise<boolean> {
-    try {
-      const supabase = createClient();
-      const { data: { session } } = await supabase.auth.getSession();
+    return this.refreshSessionDeduped();
+  }
 
-      if (!session) {
-        console.warn("[SessionManager] No session to refresh");
-        return false;
-      }
-
-      const { error } = await supabase.auth.refreshSession();
-
-      if (error) {
-        console.error("[SessionManager] Failed to refresh:", error);
-        // Dispatch event so UI can show warning
-        this.dispatchRefreshFailedEvent(error.message);
-        return false;
-      }
-
-      console.log("[SessionManager] Session refreshed successfully");
-      return true;
-    } catch (err) {
-      console.error("[SessionManager] Refresh error:", err);
-      return false;
+  /**
+   * Single source of truth for token refresh. Holds a module-level in-flight
+   * promise so all callers share the same outcome. Dispatches refresh-failed
+   * event on hard failures (UI banner). The caller is responsible for deciding
+   * whether to redirect to login on a hard failure (e.g. invalid_grant 400).
+   */
+  async refreshSessionDeduped(): Promise<boolean> {
+    if (_refreshInFlight) {
+      return _refreshInFlight;
     }
+
+    _refreshInFlight = (async (): Promise<boolean> => {
+      try {
+        const supabase = createClient();
+        const { data: { session } } = await supabase.auth.getSession();
+
+        if (!session) {
+          console.warn("[SessionManager] No session to refresh");
+          return false;
+        }
+
+        const { error } = await supabase.auth.refreshSession();
+
+        if (error) {
+          console.error("[SessionManager] Failed to refresh:", error);
+          this.dispatchRefreshFailedEvent(error.message);
+          return false;
+        }
+
+        console.log("[SessionManager] Session refreshed successfully");
+        return true;
+      } catch (err) {
+        console.error("[SessionManager] Refresh error:", err);
+        return false;
+      } finally {
+        _refreshInFlight = null;
+      }
+    })();
+
+    return _refreshInFlight;
   }
 
   /**
@@ -179,9 +228,9 @@ class SessionManager {
 
       // After idle wake: force a full token refresh (not just cached getSession)
       if (needsRefresh) {
-        const { error: refreshError } = await supabase.auth.refreshSession();
-        if (refreshError) {
-          console.error("[SessionManager] Post-idle refresh failed:", refreshError);
+        const ok = await this.refreshSessionDeduped();
+        if (!ok) {
+          console.error("[SessionManager] Post-idle refresh failed");
           throw new Error("Session expired. Please log in again.");
         }
         console.log("[SessionManager] Post-idle session refresh successful");
@@ -208,9 +257,9 @@ class SessionManager {
         const fiveMinutesFromNow = Math.floor(Date.now() / 1000) + 300;
         if (expiresAt < fiveMinutesFromNow) {
           console.log("[SessionManager] Session expiring soon, refreshing...");
-          const { error: refreshError } = await supabase.auth.refreshSession();
-          if (refreshError) {
-            console.error("[SessionManager] Session refresh failed:", refreshError);
+          const ok = await this.refreshSessionDeduped();
+          if (!ok) {
+            console.error("[SessionManager] Session refresh failed before mutation");
             throw new Error("Session expired. Please log in again.");
           }
           console.log("[SessionManager] Session refreshed before mutation");
@@ -288,17 +337,104 @@ class SessionManager {
         // Refresh if within buffer period (15 minutes)
         if (timeUntilExpiry < EXPIRY_BUFFER && timeUntilExpiry > 0) {
           console.log(`[SessionManager] Proactive refresh - ${Math.round(timeUntilExpiry / 60)} min until expiry`);
-          const { error } = await supabase.auth.refreshSession();
-          if (error) {
-            console.error("[SessionManager] Proactive refresh failed:", error);
-            this.dispatchRefreshFailedEvent(error.message);
-          } else {
+          const ok = await this.refreshSessionDeduped();
+          if (ok) {
             console.log("[SessionManager] Proactive refresh successful");
           }
         }
       }
     } catch (err) {
       console.error("[SessionManager] Proactive refresh error:", err);
+    }
+  }
+
+  private setupVisibilityTracking(): void {
+    if (typeof document === "undefined") return;
+    document.addEventListener("visibilitychange", this.handleVisibilityChange);
+  }
+
+  private cleanupVisibilityTracking(): void {
+    if (typeof document === "undefined") return;
+    document.removeEventListener("visibilitychange", this.handleVisibilityChange);
+  }
+
+  /**
+   * Primary wake-from-idle handler. Browsers throttle setInterval/setTimeout
+   * to ~1/min while the tab is hidden, so the SDK's autoRefreshToken and our
+   * proactive timer both miss the actual expiry window. visibilitychange is
+   * the only event guaranteed to fire on tab return.
+   *
+   * On hidden→visible transition where hidden duration exceeds the threshold:
+   *   1. Cancel in-flight queries (they're carrying a stale Authorization).
+   *   2. Force a single deduped refresh.
+   *   3. On success → dispatch session-restored-after-idle so IdleRecoveryHandler
+   *      invalidates active queries with the fresh token.
+   *   4. On failure that looks like invalid_grant → redirect to login (the
+   *      refresh token is unrecoverable; a hard reload is the only path back).
+   */
+  private handleVisibilityChange = (): void => {
+    if (typeof document === "undefined") return;
+
+    if (document.visibilityState === "hidden") {
+      this.state.hiddenAt = Date.now();
+      // Pause proactive timer — throttled in background anyway, and contributes
+      // to the refresh race when it eventually fires alongside SDK auto-refresh.
+      if (this.state.proactiveRefreshTimer) {
+        clearInterval(this.state.proactiveRefreshTimer);
+        this.state.proactiveRefreshTimer = null;
+      }
+      return;
+    }
+
+    if (document.visibilityState !== "visible") return;
+
+    const hiddenAt = this.state.hiddenAt;
+    this.state.hiddenAt = null;
+
+    // Restart proactive timer
+    if (!this.state.proactiveRefreshTimer && this.state.isInitialized) {
+      this.startProactiveRefreshTimer();
+    }
+
+    if (hiddenAt === null) return;
+    const hiddenDuration = Date.now() - hiddenAt;
+    if (hiddenDuration < VISIBILITY_REFRESH_THRESHOLD) return;
+
+    console.log(
+      `[SessionManager] Tab visible after ${Math.round(hiddenDuration / 60000)} min hidden — refreshing session`
+    );
+
+    void this.recoverFromIdleWake();
+  };
+
+  private async recoverFromIdleWake(): Promise<void> {
+    const qc = this.state.queryClient;
+
+    // Drop zombie fetches before they complete with the stale token and pollute
+    // the cache or trigger 401-handling races against our refresh.
+    if (qc) {
+      try {
+        await qc.cancelQueries();
+      } catch (err) {
+        console.warn("[SessionManager] cancelQueries threw:", err);
+      }
+    }
+
+    const ok = await this.refreshSessionDeduped();
+
+    if (ok) {
+      this.state.lastSessionCheckTime = Date.now();
+      this.state.needsRefreshOnNextMutation = false;
+      this.dispatchSessionRestoredEvent();
+      return;
+    }
+
+    // Refresh failed. If it's an unrecoverable refresh-token state (rotated /
+    // reused / expired), the only path back is a fresh login. Anything else —
+    // transient network — will recover on the next user action.
+    console.error("[SessionManager] Idle-wake refresh failed — redirecting to login");
+    if (typeof window !== "undefined") {
+      window.location.href = "/login?session_expired=true";
     }
   }
 
@@ -371,6 +507,8 @@ export default sessionManager;
 export const initializeSessionManager = () => sessionManager.initialize();
 export const stopSessionManager = () => sessionManager.stop();
 export const refreshSession = () => sessionManager.refreshSession();
+export const refreshSessionDeduped = () => sessionManager.refreshSessionDeduped();
+export const setSessionManagerQueryClient = (qc: QueryClient) => sessionManager.setQueryClient(qc);
 export const ensureFreshSession = () => sessionManager.ensureFreshSession();
 export const isUserIdle = () => sessionManager.isUserIdle();
 export const getLastActivity = () => sessionManager.getLastActivity();
