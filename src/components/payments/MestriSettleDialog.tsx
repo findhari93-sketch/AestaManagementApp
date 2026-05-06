@@ -30,6 +30,8 @@ import type {
   PaymentChannel,
   PaymentMode,
 } from "@/types/payment.types";
+import type { PayerSource } from "@/types/settlement.types";
+import PayerSourceSelector from "@/components/settlement/PayerSourceSelector";
 
 interface MestriSettleDialogProps {
   open: boolean;
@@ -65,13 +67,6 @@ const PAYMENT_MODES: { value: PaymentMode; label: string }[] = [
 const PAYMENT_CHANNELS: { value: PaymentChannel; label: string }[] = [
   { value: "direct", label: "Direct (company)" },
   { value: "engineer_wallet", label: "From engineer wallet" },
-];
-
-const PAYER_SOURCES: { value: string; label: string }[] = [
-  { value: "company", label: "Company" },
-  { value: "site_cash", label: "Site cash" },
-  { value: "engineer_own", label: "Engineer (own funds)" },
-  { value: "custom", label: "Custom payer" },
 ];
 
 const PAYMENT_TYPES: { value: ContractPaymentType; label: string }[] = [
@@ -121,7 +116,7 @@ export function MestriSettleDialog({
   const [paymentType, setPaymentType] = useState<ContractPaymentType>("salary");
   const [paymentMode, setPaymentMode] = useState<PaymentMode>("cash");
   const [paymentChannel, setPaymentChannel] = useState<PaymentChannel>("direct");
-  const [payerSource, setPayerSource] = useState<string>("site_cash");
+  const [payerSource, setPayerSource] = useState<PayerSource>("own_money");
   const [customPayerName, setCustomPayerName] = useState<string>("");
   const [notes, setNotes] = useState<string>("");
   const [proofFile, setProofFile] = useState<UploadedFile | null>(null);
@@ -138,7 +133,7 @@ export function MestriSettleDialog({
       setPaymentType("salary");
       setPaymentMode("cash");
       setPaymentChannel("direct");
-      setPayerSource("site_cash");
+      setPayerSource("own_money");
       setCustomPayerName("");
       setNotes("");
       setProofFile(null);
@@ -271,7 +266,9 @@ export function MestriSettleDialog({
         paymentChannel,
         payerSource,
         customPayerName:
-          payerSource === "custom" ? customPayerName : undefined,
+          payerSource === "custom" || payerSource === "other_site_money"
+            ? customPayerName
+            : undefined,
         subcontractId: selectedSubcontract.id,
         proofUrl: proofFile?.url || undefined,
         notes: notes || undefined,
@@ -494,33 +491,14 @@ export function MestriSettleDialog({
             </Box>
           )}
 
-          {/* Payer source */}
-          <TextField
-            id="mestri-payer-source"
-            name="mestri-payer-source"
-            label="Paid by"
-            size="small"
-            select
+          {/* Payer source — canonical 6-option selector with collapse for custom/other-site name */}
+          <PayerSourceSelector
             value={payerSource}
-            onChange={(e) => setPayerSource(e.target.value)}
-          >
-            {PAYER_SOURCES.map((p) => (
-              <MenuItem key={p.value} value={p.value}>
-                {p.label}
-              </MenuItem>
-            ))}
-          </TextField>
-
-          {payerSource === "custom" && (
-            <TextField
-              id="mestri-custom-payer"
-              name="mestri-custom-payer"
-              label="Custom payer name"
-              size="small"
-              value={customPayerName}
-              onChange={(e) => setCustomPayerName(e.target.value)}
-            />
-          )}
+            customName={customPayerName}
+            onChange={setPayerSource}
+            onCustomNameChange={setCustomPayerName}
+            compact
+          />
 
           {/* Notes */}
           <TextField

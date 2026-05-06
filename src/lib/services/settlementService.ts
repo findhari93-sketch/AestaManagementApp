@@ -1004,7 +1004,9 @@ export async function processContractPayment(
         p_payment_channel: config.paymentChannel,
         p_payment_mode: config.paymentMode,
         p_payer_source: config.payerSource,
-        p_payer_name: config.payerSource === "custom" ? config.customPayerName : null,
+        p_payer_name: config.payerSource === "custom" || config.payerSource === "other_site_money"
+          ? config.customPayerName
+          : null,
         p_proof_url: config.proofUrl || null,
         p_notes: config.notes || null,
         p_subcontract_id: config.subcontractId || null,
