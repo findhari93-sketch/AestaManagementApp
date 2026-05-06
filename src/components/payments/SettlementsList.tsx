@@ -40,6 +40,7 @@ function getPayerSourceLabel(source: string | null): string {
     case "mothers_money": return "Amma";
     case "trust_account": return "Trust";
     case "other_site_money": return "Other site";
+    case "custom": return "Other";
     default: return source;
   }
 }
