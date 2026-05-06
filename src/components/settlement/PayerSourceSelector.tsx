@@ -20,6 +20,16 @@ import {
   Savings as TrustIcon,
 } from "@mui/icons-material";
 import type { PayerSource } from "@/types/settlement.types";
+import { usePayerSources } from "@/hooks/queries/usePayerSources";
+
+const ICON_BY_NAME: Record<string, React.ReactNode> = {
+  AccountBalance: <OwnMoneyIcon fontSize="small" />,
+  Business: <ClientIcon fontSize="small" />,
+  Person: <PersonIcon fontSize="small" />,
+  Edit: <CustomIcon fontSize="small" />,
+  LocationOn: <SiteIcon fontSize="small" />,
+  Savings: <TrustIcon fontSize="small" />,
+};
 
 interface PayerSourceSelectorProps {
   value: PayerSource;
@@ -28,6 +38,14 @@ interface PayerSourceSelectorProps {
   onCustomNameChange: (name: string) => void;
   disabled?: boolean;
   compact?: boolean;
+  /**
+   * When provided, render options from the per-site payer_sources
+   * registry instead of the hardcoded 6. Falls back to hardcoded if
+   * the registry returns empty (defensive — shouldn't fire post-
+   * Slice 1 migration). The 4 other callers of this component will
+   * migrate in Slice 2 when the settings page lands.
+   */
+  siteId?: string;
 }
 
 const PAYER_OPTIONS: { value: PayerSource; label: string; shortLabel: string; icon: React.ReactNode }[] = [
@@ -46,9 +64,26 @@ export default function PayerSourceSelector({
   onCustomNameChange,
   disabled = false,
   compact = false,
+  siteId,
 }: PayerSourceSelectorProps) {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
+
+  // Registry-aware option list. When siteId is provided and the
+  // registry has rows, prefer those; otherwise fall back to the
+  // hardcoded 6. The fallback covers (a) legacy callers that don't
+  // pass siteId, (b) the brief loading window on a fresh fetch, and
+  // (c) defensive recovery if the registry is somehow empty.
+  const { data: registryRows } = usePayerSources(siteId);
+  const options =
+    siteId && registryRows && registryRows.length > 0
+      ? registryRows.map((r) => ({
+          value: r.key as PayerSource,
+          label: r.label,
+          shortLabel: r.label.split(" ")[0] ?? r.label,
+          icon: r.icon ? ICON_BY_NAME[r.icon] ?? null : null,
+        }))
+      : PAYER_OPTIONS;
 
   return (
     <Box sx={{ mb: compact ? 1.5 : 2 }}>
@@ -89,7 +124,7 @@ export default function PayerSourceSelector({
           },
         }}
       >
-        {PAYER_OPTIONS.map((opt) => (
+        {options.map((opt) => (
           <ToggleButton
             key={opt.value}
             value={opt.value}
