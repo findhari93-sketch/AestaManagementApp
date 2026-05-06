@@ -16,6 +16,7 @@ import type {
   PaymentWeekAllocation,
 } from "@/types/payment.types";
 import type { PayerSource, SettlementRecord } from "@/types/settlement.types";
+import { requiresPayerName } from "@/types/settlement.types";
 import type { BatchAllocation } from "@/types/wallet.types";
 import { recordWalletSpending } from "./walletService";
 
@@ -322,9 +323,7 @@ export async function processSettlement(
         p_payment_channel: config.paymentChannel,
         p_payment_mode: config.paymentMode,
         p_payer_source: config.payerSource,
-        p_payer_name: config.payerSource === "custom" || config.payerSource === "other_site_money"
-          ? config.customPayerName
-          : null,
+        p_payer_name: requiresPayerName(config.payerSource) ? config.customPayerName : null,
         p_proof_url: config.proofUrl || null,
         p_notes: config.notes || null,
         p_subcontract_id: effectiveSubcontractId || null,
@@ -585,9 +584,7 @@ export async function processWeeklySettlement(
         p_payment_channel: config.paymentChannel,
         p_payment_mode: config.paymentMode,
         p_payer_source: config.payerSource,
-        p_payer_name: config.payerSource === "custom" || config.payerSource === "other_site_money"
-          ? config.customPayerName
-          : null,
+        p_payer_name: requiresPayerName(config.payerSource) ? config.customPayerName : null,
         p_proof_url: config.proofUrl || null,
         p_notes: config.notes ? `Weekly (${config.dateFrom} - ${config.dateTo}): ${config.notes}` : `Weekly settlement (${config.dateFrom} - ${config.dateTo})`,
         p_subcontract_id: config.subcontractId || null,
@@ -1004,9 +1001,7 @@ export async function processContractPayment(
         p_payment_channel: config.paymentChannel,
         p_payment_mode: config.paymentMode,
         p_payer_source: config.payerSource,
-        p_payer_name: config.payerSource === "custom" || config.payerSource === "other_site_money"
-          ? config.customPayerName
-          : null,
+        p_payer_name: requiresPayerName(config.payerSource) ? config.customPayerName : null,
         p_proof_url: config.proofUrl || null,
         p_notes: config.notes || null,
         p_subcontract_id: config.subcontractId || null,
@@ -1874,9 +1869,7 @@ export async function processWaterfallContractPayment(
         p_payment_channel: config.paymentChannel,
         p_payment_mode: normalizedPaymentMode,
         p_payer_source: config.payerSource,
-        p_payer_name: config.payerSource === "custom" || config.payerSource === "other_site_money"
-          ? config.customPayerName
-          : null,
+        p_payer_name: requiresPayerName(config.payerSource) ? config.customPayerName : null,
         p_proof_url: config.proofUrl || null,
         p_notes: notesText,
         p_subcontract_id: config.subcontractId || null,
@@ -2283,9 +2276,7 @@ export async function processDateWiseContractSettlement(
         p_payment_channel: config.paymentChannel,
         p_payment_mode: config.paymentMode,
         p_payer_source: config.payerSource,
-        p_payer_name: config.payerSource === "custom" || config.payerSource === "other_site_money"
-          ? config.customPayerName
-          : null,
+        p_payer_name: requiresPayerName(config.payerSource) ? config.customPayerName : null,
         p_proof_url: config.proofUrls?.[0] || null,
         p_notes: config.notes || null,
         p_subcontract_id: config.subcontractId || null,

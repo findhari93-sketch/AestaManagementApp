@@ -11,6 +11,19 @@ export type SettlementMode = "upi" | "cash";
 // Payer source - tracks whose money was used for settlement
 export type PayerSource = "own_money" | "amma_money" | "client_money" | "other_site_money" | "custom" | "mothers_money" | "trust_account";
 
+/**
+ * True when the picker's selected source requires the user to type
+ * a payer name (e.g. "Other" needs a free-text payer name; "Other Site"
+ * needs a site name). Mirrors the inline guard pattern that was
+ * duplicated across 5 callsites in settlementService.ts before this
+ * helper existed. Slice 2 of the payer-source registry will replace
+ * the hardcoded body with a registry lookup of the row's
+ * `requires_name` column.
+ */
+export function requiresPayerName(source: string): boolean {
+  return source === "custom" || source === "other_site_money";
+}
+
 export interface PayerInfo {
   source: PayerSource;
   customName?: string;
