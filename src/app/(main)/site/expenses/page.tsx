@@ -40,6 +40,7 @@ import {
   ChevronRight,
   Fullscreen as FullscreenIcon,
   FullscreenExit as FullscreenExitIcon,
+  WarningAmber,
 } from "@mui/icons-material";
 import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
 import RedirectConfirmDialog from "@/components/common/RedirectConfirmDialog";
@@ -757,13 +758,15 @@ export default function ExpensesPage() {
         header: "Type",
         size: 130,
         filterVariant: "select",
-        filterSelectOptions: ["Daily Salary", "Contract Salary", "Advance", "Direct Payment", "Material", "Machinery", "General", "Miscellaneous", "Tea & Snacks"],
+        filterSelectOptions: ["Daily Salary", "Contract Salary", "Advance", "Excess", "Unlinked Salary", "Direct Payment", "Material", "Machinery", "General", "Miscellaneous", "Tea & Snacks"],
         Cell: ({ cell }) => {
           const type = cell.getValue<string>();
           const colorMap: Record<string, "primary" | "secondary" | "warning" | "info" | "success" | "default" | "error"> = {
             "Daily Salary": "primary",
             "Contract Salary": "secondary",
             "Advance": "warning",
+            "Excess": "warning",
+            "Unlinked Salary": "error",
             "Direct Payment": "secondary",
             "Material": "info",
             "Machinery": "success",
@@ -1035,14 +1038,20 @@ export default function ExpensesPage() {
                           },
                         }}
                       >
-                        <Typography
-                          variant="caption"
-                          color="text.secondary"
-                          noWrap
-                          sx={{ display: "block", mb: 0.25 }}
-                        >
-                          {type}
-                        </Typography>
+                        <Box sx={{ display: "flex", alignItems: "center", gap: 0.5, mb: 0.25 }}>
+                          <Typography
+                            variant="caption"
+                            color="text.secondary"
+                            noWrap
+                          >
+                            {type}
+                          </Typography>
+                          {type === "Unlinked Salary" && (
+                            <Tooltip title="These salary settlements aren't linked to any attendance row. Filter the table by 'Unlinked Salary' to investigate and clean up.">
+                              <WarningAmber sx={{ fontSize: 14, color: "warning.main" }} />
+                            </Tooltip>
+                          )}
+                        </Box>
                         <Typography variant="subtitle1" fontWeight={600}>
                           ₹{data.amount.toLocaleString("en-IN")}
                         </Typography>
