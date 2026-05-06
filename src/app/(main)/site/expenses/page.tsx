@@ -56,6 +56,10 @@ import { useSiteAuditState } from "@/hooks/queries/useSiteAuditState";
 import { LegacyAuditBanner } from "@/components/audit";
 import { hasEditPermission } from "@/lib/permissions";
 import { supabaseQueryWithTimeout } from "@/lib/utils/supabaseQuery";
+import {
+  mergeContractSalaryWithAdvance,
+  type ExpenseBreakdownEntry,
+} from "@/lib/utils/expenseBreakdown";
 import type { Database } from "@/types/database.types";
 
 type Expense = Database["public"]["Tables"]["expenses"]["Row"];
@@ -145,7 +149,7 @@ export default function ExpensesPage() {
     clearedCount: number;
     pending: number;
     pendingCount: number;
-    breakdown: Record<string, { amount: number; count: number }>;
+    breakdown: Record<string, ExpenseBreakdownEntry>;
   }
   const [scopeSummary, setScopeSummary] = useState<ScopeSummary | null>(null);
 
@@ -613,7 +617,7 @@ export default function ExpensesPage() {
       acc[type].amount += e.amount;
       acc[type].count += 1;
       return acc;
-    }, {} as Record<string, { amount: number; count: 0 }>);
+    }, {} as Record<string, ExpenseBreakdownEntry>);
 
     return {
       total,
@@ -899,6 +903,8 @@ export default function ExpensesPage() {
       </Box>
     );
 
+  const displayBreakdown = mergeContractSalaryWithAdvance(stats.categoryBreakdown);
+
   return (
     <Box
       sx={{
@@ -993,7 +999,7 @@ export default function ExpensesPage() {
             </Box>
 
             {/* Middle: Breakdown */}
-            {Object.keys(stats.categoryBreakdown).length > 0 && (
+            {Object.keys(displayBreakdown).length > 0 && (
               <Box sx={{ flex: 1 }}>
                 <Typography
                   variant="caption"
@@ -1010,7 +1016,7 @@ export default function ExpensesPage() {
                 </Typography>
                 <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1.5 }}>
                   {/* Show all expense types */}
-                  {Object.entries(stats.categoryBreakdown)
+                  {Object.entries(displayBreakdown)
                     .sort(([, a], [, b]) => b.amount - a.amount)
                     .map(([type, data]) => (
                       <Box
@@ -1042,6 +1048,9 @@ export default function ExpensesPage() {
                         </Typography>
                         <Typography variant="caption" color="text.disabled">
                           {data.count} rec
+                          {data.advanceCount != null && (
+                            <> · {data.advanceCount} advance</>
+                          )}
                         </Typography>
                       </Box>
                     ))}
