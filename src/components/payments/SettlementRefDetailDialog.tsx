@@ -239,19 +239,32 @@ async function getSettlementDetailsByReference(
     // share / contract margin. For daily/market settlements they're equal.
     const distributedToLaborers = laborers.reduce((sum, l) => sum + l.amount, 0);
 
-    // Week-by-week waterfall breakdown for the confirm body of the delete
-    // dialog. Cheap join-less query keyed by settlement_group_id. Empty for
-    // daily/market settlements (they don't write payment_week_allocations).
-    const { data: allocRows } = await supabase
-      .from("payment_week_allocations")
-      .select("week_start, week_end, amount")
-      .eq("settlement_group_id", sg.id)
-      .order("week_start", { ascending: true });
-    const weekAllocations = (allocRows || []).map((a: any) => ({
-      weekStart: a.week_start,
-      weekEnd: a.week_end,
-      amount: Number(a.amount) || 0,
-    }));
+    // Week-by-week waterfall breakdown for the confirm body. Joined via
+    // labor_payment_id (the actual FK) since payment_week_allocations has no
+    // settlement_group_id column. Empty for daily/market settlements (they
+    // don't write payment_week_allocations).
+    const laborPaymentIds = (payments || []).map((p: any) => p.id);
+    let weekAllocations: { weekStart: string; weekEnd: string; amount: number }[] = [];
+    if (laborPaymentIds.length > 0) {
+      const { data: allocRows } = await supabase
+        .from("payment_week_allocations")
+        .select("week_start, week_end, allocated_amount")
+        .in("labor_payment_id", laborPaymentIds)
+        .order("week_start", { ascending: true });
+      // One settlement can allocate to the same week from multiple labor_payments;
+      // sum allocated_amount per (week_start, week_end) so the UI shows totals.
+      const byWeek = new Map<string, { weekStart: string; weekEnd: string; amount: number }>();
+      for (const a of (allocRows || []) as any[]) {
+        const key = `${a.week_start}|${a.week_end}`;
+        const amt = Number(a.allocated_amount) || 0;
+        const cur = byWeek.get(key);
+        if (cur) cur.amount += amt;
+        else byWeek.set(key, { weekStart: a.week_start, weekEnd: a.week_end, amount: amt });
+      }
+      weekAllocations = [...byWeek.values()].sort((x, y) =>
+        x.weekStart.localeCompare(y.weekStart)
+      );
+    }
 
     // Collect proof URLs from both legacy single-URL field and the array field.
     // sanitizeStorageUrl repairs the doubled-bucket-prefix bug from pre-2026-02-25
