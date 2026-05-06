@@ -195,7 +195,8 @@
       "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\Haribabu\\\\Documents\\\\AppsCopilot\\\\AestaManagementApp\\\\cloudflare-proxy\" -Recurse -File)",
       "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\Haribabu\\\\Documents\\\\AppsCopilot\\\\AestaManagementApp\" -Recurse -Filter \"*payment*\" -ErrorAction SilentlyContinue)",
       "Bash(jobs)",
-      "PowerShell(try { \\(Invoke-WebRequest -UseBasicParsing -TimeoutSec 5 http://localhost:3000/dev-login\\).StatusCode } catch { $_.Exception.Message }; try { \\(Invoke-WebRequest -UseBasicParsing -TimeoutSec 5 http://localhost:3001/dev-login\\).StatusCode } catch { $_.Exception.Message })"
+      "PowerShell(try { \\(Invoke-WebRequest -UseBasicParsing -TimeoutSec 5 http://localhost:3000/dev-login\\).StatusCode } catch { $_.Exception.Message }; try { \\(Invoke-WebRequest -UseBasicParsing -TimeoutSec 5 http://localhost:3001/dev-login\\).StatusCode } catch { $_.Exception.Message })",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\Haribabu\\\\Documents\\\\AppsCopilot\\\\AestaManagementApp\" -Recurse -Include \"*legacy*\", \"*audit*\" -Filter \"*.tsx\")"
     ],
     "deny": [],
     "ask": []

@@ -63,7 +63,8 @@ import { InspectPane } from "@/components/common/InspectPane";
 import type { InspectEntity } from "@/components/common/InspectPane";
 import { useSiteAuditState } from "@/hooks/queries/useSiteAuditState";
 import { useOpeningBalances } from "@/hooks/queries/useOpeningBalances";
-import { LegacyAuditBanner, LegacyBand, OpeningBalanceRow, ReconcileDialog } from "@/components/audit";
+import { useLegacyMesthriSummary } from "@/hooks/queries/useLegacyMesthriSummary";
+import { LegacyAuditBanner, LegacyBand, MesthriLegacySummaryCard, OpeningBalanceRow, ReconcileDialog } from "@/components/audit";
 
 type ActiveTab = "all" | "contract" | "daily-market";
 // "default"        — natural default for each tab (waterfall for contract,
@@ -313,6 +314,13 @@ export default function PaymentsContent() {
     auditState.isReconciled ? selectedSite?.id : undefined
   );
   const openingBalances = openingBalancesQuery.data ?? [];
+
+  // Per-mesthri summaries — populated by a Mode C reconcile. Empty array for
+  // sites reconciled with Mode A or Mode B. Drives the MesthriLegacySummaryCard.
+  const legacyMesthriSummaryQuery = useLegacyMesthriSummary(
+    auditState.isReconciled ? selectedSite?.id : undefined
+  );
+  const legacyMesthriSummaries = legacyMesthriSummaryQuery.data ?? [];
 
   const advancesQuery = useAdvances({
     siteId: selectedSite?.id,
@@ -648,11 +656,26 @@ export default function PaymentsContent() {
         </Box>
       )}
 
-      {auditState.isReconciled && auditState.dataStartedAt && openingBalances.length > 0 && (
+      {auditState.isReconciled && auditState.dataStartedAt && legacyMesthriSummaries.length > 0 && selectedSite && (
+        <Box sx={{ flexShrink: 0, px: 1.5, pt: 1 }}>
+          <MesthriLegacySummaryCard
+            cutoffDate={auditState.dataStartedAt}
+            summaries={legacyMesthriSummaries}
+            siteId={selectedSite.id}
+            siteName={selectedSite.name ?? "this site"}
+            canReopen={canEditSettlements}
+          />
+        </Box>
+      )}
+
+      {auditState.isReconciled && auditState.dataStartedAt && openingBalances.length > 0 && selectedSite && (
         <Box sx={{ flexShrink: 0, px: 1.5, pt: 1 }}>
           <OpeningBalanceRow
             cutoffDate={auditState.dataStartedAt}
             balances={openingBalances}
+            siteId={selectedSite.id}
+            siteName={selectedSite.name ?? "this site"}
+            canReopen={canEditSettlements}
           />
         </Box>
       )}

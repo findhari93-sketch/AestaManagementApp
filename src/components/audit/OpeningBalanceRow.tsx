@@ -5,6 +5,8 @@ import {
   Box,
   Collapse,
   IconButton,
+  Menu,
+  MenuItem,
   Typography,
   alpha,
   useTheme,
@@ -13,12 +15,18 @@ import {
   ExpandMore as ExpandMoreIcon,
   ExpandLess as ExpandLessIcon,
   PushPinOutlined,
+  MoreVert as MoreVertIcon,
+  LockOpenOutlined,
 } from "@mui/icons-material";
 import type { OpeningBalance } from "@/hooks/queries/useOpeningBalances";
+import ReopenAuditConfirmDialog from "./ReopenAuditConfirmDialog";
 
 interface OpeningBalanceRowProps {
   cutoffDate: string;
   balances: OpeningBalance[];
+  siteId?: string;
+  siteName?: string;
+  canReopen?: boolean;
 }
 
 function formatINR(n: number): string {
@@ -40,10 +48,16 @@ function formatDate(iso: string): string {
 export default function OpeningBalanceRow({
   cutoffDate,
   balances,
+  siteId,
+  siteName,
+  canReopen = false,
 }: OpeningBalanceRowProps) {
   const theme = useTheme();
   const [expanded, setExpanded] = useState(false);
+  const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
+  const [reopenOpen, setReopenOpen] = useState(false);
   if (balances.length === 0) return null;
+  const showReopen = canReopen && Boolean(siteId);
 
   const totalOwed = balances.reduce((s, b) => s + b.openingWagesOwed, 0);
   const totalPaid = balances.reduce((s, b) => s + b.openingPaid, 0);
@@ -54,6 +68,7 @@ export default function OpeningBalanceRow({
   };
 
   return (
+    <>
     <Box
       sx={{
         mb: 1,
@@ -64,67 +79,87 @@ export default function OpeningBalanceRow({
       }}
     >
       <Box
-        component="button"
-        type="button"
-        onClick={() => setExpanded((v) => !v)}
-        aria-expanded={expanded}
-        aria-label={expanded ? "Collapse opening balance" : "Expand opening balance"}
         sx={{
-          width: "100%",
           display: "flex",
           alignItems: "center",
           gap: 1,
           px: 1.5,
           py: 0.875,
           bgcolor: tone.bg,
-          border: 0,
-          cursor: "pointer",
-          textAlign: "left",
-          font: "inherit",
         }}
       >
-        <PushPinOutlined sx={{ fontSize: 16, color: tone.fg }} />
-        <Typography
-          sx={{
-            fontSize: 11,
-            fontWeight: 700,
-            textTransform: "uppercase",
-            letterSpacing: 0.4,
-            color: tone.fg,
-            flexShrink: 0,
-          }}
-        >
-          Opening balance
-        </Typography>
-        <Typography sx={{ fontSize: 12, color: "text.secondary", flexShrink: 0 }}>
-          as of {formatDate(cutoffDate)}
-        </Typography>
         <Box
+          component="button"
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          aria-expanded={expanded}
+          aria-label={expanded ? "Collapse opening balance" : "Expand opening balance"}
           sx={{
             flex: 1,
             display: "flex",
-            justifyContent: "flex-end",
             alignItems: "center",
-            gap: 1.5,
-            fontSize: 12,
-            color: "text.secondary",
-            fontVariantNumeric: "tabular-nums",
+            gap: 1,
+            border: 0,
+            bgcolor: "transparent",
+            cursor: "pointer",
+            textAlign: "left",
+            font: "inherit",
+            p: 0,
           }}
         >
-          <span>{balances.length} {balances.length === 1 ? "laborer" : "laborers"}</span>
-          <span aria-hidden>·</span>
-          <span>{formatINR(totalOwed)} owed</span>
-          <span aria-hidden>·</span>
-          <span>{formatINR(totalPaid)} paid</span>
+          <PushPinOutlined sx={{ fontSize: 16, color: tone.fg }} />
+          <Typography
+            sx={{
+              fontSize: 11,
+              fontWeight: 700,
+              textTransform: "uppercase",
+              letterSpacing: 0.4,
+              color: tone.fg,
+              flexShrink: 0,
+            }}
+          >
+            Opening balance
+          </Typography>
+          <Typography sx={{ fontSize: 12, color: "text.secondary", flexShrink: 0 }}>
+            as of {formatDate(cutoffDate)}
+          </Typography>
+          <Box
+            sx={{
+              flex: 1,
+              display: "flex",
+              justifyContent: "flex-end",
+              alignItems: "center",
+              gap: 1.5,
+              fontSize: 12,
+              color: "text.secondary",
+              fontVariantNumeric: "tabular-nums",
+            }}
+          >
+            <span>{balances.length} {balances.length === 1 ? "laborer" : "laborers"}</span>
+            <span aria-hidden>·</span>
+            <span>{formatINR(totalOwed)} owed</span>
+            <span aria-hidden>·</span>
+            <span>{formatINR(totalPaid)} paid</span>
+          </Box>
+          <IconButton
+            size="small"
+            component="span"
+            tabIndex={-1}
+            sx={{ p: 0.25, color: "text.secondary", flexShrink: 0 }}
+          >
+            {expanded ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
+          </IconButton>
         </Box>
-        <IconButton
-          size="small"
-          component="span"
-          tabIndex={-1}
-          sx={{ p: 0.25, color: "text.secondary", flexShrink: 0 }}
-        >
-          {expanded ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
-        </IconButton>
+        {showReopen && (
+          <IconButton
+            size="small"
+            onClick={(e) => setMenuAnchor(e.currentTarget)}
+            aria-label="Opening balance actions"
+            sx={{ p: 0.5, color: "text.secondary", flexShrink: 0 }}
+          >
+            <MoreVertIcon fontSize="small" />
+          </IconButton>
+        )}
       </Box>
 
       <Collapse in={expanded} unmountOnExit>
@@ -170,11 +205,39 @@ export default function OpeningBalanceRow({
             }}
           >
             Non-allocatable. Future mesthri payments do not fill these — they are a frozen
-            record of pre-app balances. To re-open the audit, run
-            reopen_audit_after_opening_balance_reconcile via SQL.
+            record of pre-app balances.{showReopen ? " Use the menu to re-open the audit if you need to redo the reconcile." : ""}
           </Box>
         </Box>
       </Collapse>
     </Box>
+
+    {showReopen && (
+      <>
+        <Menu
+          anchorEl={menuAnchor}
+          open={Boolean(menuAnchor)}
+          onClose={() => setMenuAnchor(null)}
+          anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
+          transformOrigin={{ vertical: "top", horizontal: "right" }}
+        >
+          <MenuItem
+            onClick={() => {
+              setMenuAnchor(null);
+              setReopenOpen(true);
+            }}
+          >
+            <LockOpenOutlined fontSize="small" sx={{ mr: 1 }} />
+            Re-open audit
+          </MenuItem>
+        </Menu>
+        <ReopenAuditConfirmDialog
+          open={reopenOpen}
+          onClose={() => setReopenOpen(false)}
+          siteId={siteId as string}
+          siteName={siteName ?? "this site"}
+        />
+      </>
+    )}
+    </>
   );
 }
