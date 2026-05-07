@@ -27,6 +27,7 @@ import {
   Add as AddIcon,
   Payment as PaymentIcon,
   ReceiptLong as ReceiptLongIcon,
+  TaskAlt as TaskAltIcon,
 } from "@mui/icons-material";
 import { useQueryClient } from "@tanstack/react-query";
 import type {
@@ -38,7 +39,9 @@ import { useContractPayments } from "@/hooks/queries/useContractPayments";
 import { ReconciliationStrip } from "./ReconciliationStrip";
 import { RecordPaymentDialog } from "./RecordPaymentDialog";
 import { HeadcountEntryInline } from "./HeadcountEntryInline";
+import { WeeklyHeadcountSettleDialog } from "./WeeklyHeadcountSettleDialog";
 import MiscExpenseDialog from "@/components/expenses/MiscExpenseDialog";
+import { MestriSettleDialog } from "@/components/payments/MestriSettleDialog";
 
 interface ExpandableContractRowProps {
   contract: TradeContract;
@@ -91,6 +94,10 @@ export function ExpandableContractRow({
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
   const [extraDialogOpen, setExtraDialogOpen] = useState(false);
+  // Settle flow: tracks WHICH dialog the dispatcher opened. mode-aware.
+  const [settleDialog, setSettleDialog] = useState<
+    null | "weekly_headcount" | "mesthri_payment" | "mesthri_settle"
+  >(null);
   const menuOpen = Boolean(menuAnchor);
   const queryClient = useQueryClient();
 
@@ -109,6 +116,24 @@ export function ExpandableContractRow({
   const quoted = reconciliation?.quotedAmount ?? contract.totalValue ?? 0;
   const paid = (reconciliation?.amountPaid ?? 0) + extrasTotal;
   const balance = quoted - paid;
+
+  // Settle dispatcher — chooses the right dialog by labor_tracking_mode.
+  // In-house Civil contracts have no quote and no mesthri to settle, so
+  // we hide the Settle button entirely for them.
+  const canSettle = !contract.isInHouse;
+  const dispatchSettle = () => {
+    if (contract.laborTrackingMode === "headcount") {
+      setSettleDialog("weekly_headcount");
+    } else if (contract.laborTrackingMode === "detailed") {
+      // Civil-style flow: reuse the production MestriSettleDialog which
+      // already handles weekly waterfall + sub-contract scoping.
+      setSettleDialog("mesthri_settle");
+    } else {
+      // mesthri_only: open RecordPaymentDialog with weekly_advance preset
+      // and a sensible amount (1/4 of remaining balance, rounded to ₹100).
+      setSettleDialog("mesthri_payment");
+    }
+  };
   const days =
     contract.laborTrackingMode === "mesthri_only"
       ? activity?.paymentDays ?? 0
@@ -236,6 +261,19 @@ export function ExpandableContractRow({
         onClose={() => setMenuAnchor(null)}
         onClick={(e) => e.stopPropagation()}
       >
+        {canSettle && (
+          <MenuItem
+            onClick={() => {
+              setMenuAnchor(null);
+              dispatchSettle();
+            }}
+          >
+            <ListItemIcon>
+              <TaskAltIcon fontSize="small" color="primary" />
+            </ListItemIcon>
+            <ListItemText>Settle for the week</ListItemText>
+          </MenuItem>
+        )}
         <MenuItem
           onClick={() => {
             setMenuAnchor(null);
@@ -317,7 +355,7 @@ export function ExpandableContractRow({
               sx={{ mb: 0.75 }}
             >
               <Typography variant="subtitle2">Payments ledger</Typography>
-              <Stack direction="row" spacing={1}>
+              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
                 <Button
                   size="small"
                   variant="outlined"
@@ -331,7 +369,7 @@ export function ExpandableContractRow({
                 </Button>
                 <Button
                   size="small"
-                  variant="contained"
+                  variant="outlined"
                   startIcon={<AddIcon />}
                   onClick={(e) => {
                     e.stopPropagation();
@@ -340,6 +378,20 @@ export function ExpandableContractRow({
                 >
                   Record payment
                 </Button>
+                {canSettle && (
+                  <Button
+                    size="small"
+                    variant="contained"
+                    color="primary"
+                    startIcon={<TaskAltIcon />}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      dispatchSettle();
+                    }}
+                  >
+                    Settle
+                  </Button>
+                )}
               </Stack>
             </Stack>
 
@@ -453,6 +505,82 @@ export function ExpandableContractRow({
           }}
         />
       )}
+
+      {/* Settle dispatcher — exactly one of three dialogs based on mode. */}
+      {settleDialog === "weekly_headcount" && (
+        <WeeklyHeadcountSettleDialog
+          open={true}
+          onClose={() => setSettleDialog(null)}
+          onSaved={() => {
+            /* invalidation handled inside */
+          }}
+          siteId={contract.siteId}
+          contractId={contract.id}
+          contractTitle={`${contract.title} · ${contractLabel(contract)}`}
+        />
+      )}
+      {settleDialog === "mesthri_payment" && (
+        <RecordPaymentDialog
+          open={true}
+          onClose={() => setSettleDialog(null)}
+          onSaved={() => {
+            /* invalidation handled inside */
+          }}
+          siteId={contract.siteId}
+          contractId={contract.id}
+          contractTitle={`${contract.title} · ${contractLabel(contract)}`}
+          remainingBalance={balance}
+          // Mesthri-only Settle: default the type to weekly_advance and
+          // pre-fill ¼ of the remaining balance (rounded to nearest ₹100)
+          // as a sensible week's worth. Engineer can edit before submit.
+          defaultPaymentType="weekly_advance"
+          defaultAmount={
+            balance > 0
+              ? Math.max(100, Math.round(balance / 4 / 100) * 100)
+              : 0
+          }
+          titleOverride="Settle for the week"
+        />
+      )}
+      {settleDialog === "mesthri_settle" && (
+        <MestriSettleDialog
+          open={true}
+          onClose={() => setSettleDialog(null)}
+          siteId={contract.siteId}
+          // Pre-scope to this contract so the engineer doesn't have to
+          // pick from the site-wide list again.
+          initialSubcontractId={contract.id}
+          // fill-week mode needs week boundaries — use the current Sun-Sat
+          // window per project convention.
+          mode="fill-week"
+          weekStart={currentWeekStartStr()}
+          weekEnd={currentWeekEndStr()}
+        />
+      )}
     </Box>
   );
+}
+
+/* Current Sun-Sat week boundaries — duplicated in 3 places already across
+ * the app, but tiny enough to inline rather than reach for weekUtils here.
+ * Kept consistent with src/lib/utils/weekUtils.ts:weekStartOf/weekEndOf. */
+function currentWeekStartStr(): string {
+  const d = new Date();
+  const dow = d.getDay(); // 0 = Sunday
+  const start = new Date(d);
+  start.setDate(d.getDate() - dow);
+  return formatYMD(start);
+}
+function currentWeekEndStr(): string {
+  const d = new Date();
+  const dow = d.getDay();
+  const end = new Date(d);
+  end.setDate(d.getDate() + (6 - dow));
+  return formatYMD(end);
+}
+function formatYMD(d: Date): string {
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
 }

@@ -39,6 +39,14 @@ interface RecordPaymentDialogProps {
   contractTitle: string;
   /** Live signed balance (quoted - paid). Negative = over-paid. */
   remainingBalance: number;
+  /**
+   * When invoked from the Settle dispatcher (Slice D) we pre-pick the type
+   * and amount so the engineer can confirm with one tap. Optional.
+   */
+  defaultPaymentType?: ContractPaymentType;
+  defaultAmount?: number;
+  /** Heading override — Settle flows want "Settle Asis for the week" etc. */
+  titleOverride?: string;
 }
 
 const PAYMENT_TYPES: Array<{
@@ -88,12 +96,19 @@ export function RecordPaymentDialog({
   contractId,
   contractTitle,
   remainingBalance,
+  defaultPaymentType,
+  defaultAmount,
+  titleOverride,
 }: RecordPaymentDialogProps) {
   const supabase = createClient();
   const queryClient = useQueryClient();
 
-  const [paymentType, setPaymentType] = useState<ContractPaymentType>("weekly_advance");
-  const [amount, setAmount] = useState("");
+  const [paymentType, setPaymentType] = useState<ContractPaymentType>(
+    defaultPaymentType ?? "weekly_advance"
+  );
+  const [amount, setAmount] = useState(
+    defaultAmount && defaultAmount > 0 ? String(defaultAmount) : ""
+  );
   const [paymentDate, setPaymentDate] = useState(todayISO());
   const [paymentMode, setPaymentMode] = useState<PaymentMode>("cash");
   const [paymentChannel, setPaymentChannel] = useState<PaymentChannel>("via_site_engineer");
@@ -104,8 +119,8 @@ export function RecordPaymentDialog({
 
   useEffect(() => {
     if (!open) return;
-    setPaymentType("weekly_advance");
-    setAmount("");
+    setPaymentType(defaultPaymentType ?? "weekly_advance");
+    setAmount(defaultAmount && defaultAmount > 0 ? String(defaultAmount) : "");
     setPaymentDate(todayISO());
     setPaymentMode("cash");
     setPaymentChannel("via_site_engineer");
@@ -113,7 +128,7 @@ export function RecordPaymentDialog({
     setComments("");
     setError(null);
     setSubmitting(false);
-  }, [open]);
+  }, [open, defaultPaymentType, defaultAmount]);
 
   const presets = useMemo(() => {
     // Sensible amount chips when there's still balance to pay.
@@ -191,7 +206,7 @@ export function RecordPaymentDialog({
   return (
     <Dialog open={open} onClose={submitting ? undefined : onClose} fullWidth maxWidth="sm">
       <DialogTitle>
-        Record payment
+        {titleOverride ?? "Record payment"}
         <Typography variant="caption" color="text.secondary" component="div">
           {contractTitle} · {balanceLine}
         </Typography>
