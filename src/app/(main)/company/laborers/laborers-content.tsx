@@ -41,6 +41,7 @@ import type { Tables } from "@/types/database.types";
 import type { LaborersPageData, LaborerWithDetails } from "@/lib/data/laborers";
 import LaborerPhotoUploader from "@/components/laborers/LaborerPhotoUploader";
 import RateCascadeDialog from "@/components/laborers/RateCascadeDialog";
+import LaborerProfileDrawer from "@/components/laborers/LaborerProfileDrawer";
 import type { LaborerRateCascadeResult } from "@/lib/services/laborerService";
 import dayjs from "dayjs";
 
@@ -78,6 +79,15 @@ export default function LaborersContent({ initialData }: LaborersContentProps) {
     oldRate: number;
     newRate: number;
   } | null>(null);
+
+  const [profileLaborerId, setProfileLaborerId] = useState<string | null>(null);
+  const profileLaborer = useMemo(
+    () =>
+      profileLaborerId
+        ? laborers.find((l) => l.id === profileLaborerId) ?? null
+        : null,
+    [profileLaborerId, laborers]
+  );
 
   const { userProfile } = useAuth();
   const { selectedCompany } = useSelectedCompany();
@@ -461,10 +471,16 @@ export default function LaborersContent({ initialData }: LaborersContentProps) {
         header: "",
         size: isMobile ? 70 : 100,
         Cell: ({ row }) => (
-          <Box sx={{ display: "flex", gap: 0.25 }}>
+          <Box
+            sx={{ display: "flex", gap: 0.25 }}
+            onClick={(e) => e.stopPropagation()}
+          >
             <IconButton
               size="small"
-              onClick={() => handleOpenDialog(row.original)}
+              onClick={(e) => {
+                e.stopPropagation();
+                handleOpenDialog(row.original);
+              }}
               disabled={!canEdit}
             >
               <EditIcon fontSize="small" />
@@ -473,7 +489,10 @@ export default function LaborersContent({ initialData }: LaborersContentProps) {
               <IconButton
                 size="small"
                 color="warning"
-                onClick={() => handleDeactivateClick(row.original)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleDeactivateClick(row.original);
+                }}
                 disabled={!canEdit}
               >
                 <BlockIcon fontSize="small" />
@@ -528,6 +547,19 @@ export default function LaborersContent({ initialData }: LaborersContentProps) {
           right: ["mrt-row-actions"],
         }}
         mobileHiddenColumns={["phone", "joining_date"]}
+        muiTableBodyRowProps={({ row }) => ({
+          onClick: () => setProfileLaborerId(row.original.id),
+          sx: {
+            cursor: "pointer",
+            bgcolor:
+              profileLaborerId === row.original.id
+                ? alpha(theme.palette.primary.main, 0.08)
+                : "inherit",
+            "&:hover": {
+              bgcolor: alpha(theme.palette.primary.main, 0.06),
+            },
+          },
+        })}
       />
 
       <Dialog
@@ -987,6 +1019,22 @@ export default function LaborersContent({ initialData }: LaborersContentProps) {
       >
         <AddIcon />
       </Fab>
+
+      <LaborerProfileDrawer
+        open={Boolean(profileLaborerId)}
+        laborer={profileLaborer}
+        teams={teams}
+        canEdit={canEdit}
+        onClose={() => setProfileLaborerId(null)}
+        onEdit={(l) => {
+          setProfileLaborerId(null);
+          handleOpenDialog(l);
+        }}
+        onDeactivate={(l) => {
+          setProfileLaborerId(null);
+          handleDeactivateClick(l);
+        }}
+      />
 
       {rateCascadeContext && (
         <RateCascadeDialog
