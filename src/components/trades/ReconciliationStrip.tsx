@@ -17,6 +17,14 @@ interface ReconciliationStripProps {
   laborTrackingMode: LaborTrackingMode;
   /** Live total quoted (falls back to reconciliation.quotedAmount). */
   fallbackQuoted?: number;
+  /**
+   * Sum of misc_expenses (extras: snacks, fuel, small materials) recorded
+   * against this contract. Live-computed from the unified ledger in
+   * ExpandableContractRow, since v_subcontract_reconciliation does not
+   * (yet) union misc_expenses. Counts toward "amount paid out" alongside
+   * subcontract_payments and settlement_groups.
+   */
+  extrasTotal?: number;
 }
 
 function formatINR(n: number): string {
@@ -27,9 +35,12 @@ export function ReconciliationStrip({
   reconciliation,
   laborTrackingMode,
   fallbackQuoted = 0,
+  extrasTotal = 0,
 }: ReconciliationStripProps) {
   const quoted = reconciliation?.quotedAmount ?? fallbackQuoted;
-  const paid = reconciliation?.amountPaid ?? 0;
+  const baseAmountPaid = reconciliation?.amountPaid ?? 0;
+  // Total money out = direct payments + settlements (from view) + extras (client-side).
+  const paid = baseAmountPaid + extrasTotal;
   // Variance basis policy:
   //  - mesthri_only: paid vs quoted (no labor data)
   //  - detailed:    paid vs quoted (attendance/settlement classification can
@@ -63,10 +74,15 @@ export function ReconciliationStrip({
       ? `Paid ahead by ₹${formatINR(variance)} (${Math.abs(variancePct)}% over ${basisLabel.toLowerCase()})`
       : `Paid behind by ₹${formatINR(-variance)} (${Math.abs(variancePct)}% under ${basisLabel.toLowerCase()})`;
 
+  const paidBreakdown =
+    extrasTotal > 0
+      ? `(₹${formatINR(baseAmountPaid)} payments + ₹${formatINR(extrasTotal)} extras)`
+      : "";
+
   const tooltip =
     laborTrackingMode === "headcount"
-      ? `Headcount mode: variance compares paid (₹${formatINR(paid)}) vs labor done (₹${formatINR(basis)}) computed from per-role daily counts.`
-      : `Variance compares paid (₹${formatINR(paid)}) vs the quoted lump sum (₹${formatINR(basis)}). For detailed-attendance contracts, labor variance is intentionally not used here because attendance/settlement classification can drift across contracts in legacy data.`;
+      ? `Headcount mode: variance compares paid ₹${formatINR(paid)} ${paidBreakdown} vs labor done ₹${formatINR(basis)} computed from per-role daily counts.`
+      : `Variance compares paid ₹${formatINR(paid)} ${paidBreakdown} vs the quoted lump sum (₹${formatINR(basis)}). For detailed-attendance contracts, labor variance is intentionally not used here because attendance/settlement classification can drift across contracts in legacy data.`;
 
   return (
     <Tooltip title={tooltip} placement="top" arrow>

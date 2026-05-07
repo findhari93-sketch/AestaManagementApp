@@ -55,6 +55,13 @@ interface MiscExpenseDialogProps {
   onClose: () => void;
   expense?: MiscExpense | null; // For edit mode
   onSuccess?: () => void;
+  /**
+   * When opening this dialog from a trade workspace (or anywhere already
+   * scoped to a contract), preselect the "Link to Subcontract" field. The
+   * user can still change it. Ignored in edit mode (the existing expense's
+   * subcontract_id wins).
+   */
+  defaultSubcontractId?: string;
 }
 
 export default function MiscExpenseDialog({
@@ -62,6 +69,7 @@ export default function MiscExpenseDialog({
   onClose,
   expense,
   onSuccess,
+  defaultSubcontractId,
 }: MiscExpenseDialogProps) {
   const isEditMode = !!expense;
   const { userProfile } = useAuth();
@@ -150,14 +158,16 @@ export default function MiscExpenseDialog({
         setCreateWalletTransaction(true);
         setPayerSource("own_money");
         setCustomPayerName("");
-        setSubcontractId("");
+        // Preselect contract when opened from a contract-scoped surface
+        // (e.g. /site/trades expanded row); user can still change it.
+        setSubcontractId(defaultSubcontractId || "");
         setNotes("");
         setProofUrl(null);
         setBatchAllocations([]);
       }
       setError(null);
     }
-  }, [open, expense, isEditMode]);
+  }, [open, expense, isEditMode, defaultSubcontractId]);
 
   const fetchCategories = async () => {
     try {

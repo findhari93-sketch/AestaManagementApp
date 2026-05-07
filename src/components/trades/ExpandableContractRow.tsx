@@ -26,7 +26,9 @@ import {
   DeleteOutline as DeleteIcon,
   Add as AddIcon,
   Payment as PaymentIcon,
+  ReceiptLong as ReceiptLongIcon,
 } from "@mui/icons-material";
+import { useQueryClient } from "@tanstack/react-query";
 import type {
   ContractActivity,
   ContractReconciliation,
@@ -36,6 +38,7 @@ import { useContractPayments } from "@/hooks/queries/useContractPayments";
 import { ReconciliationStrip } from "./ReconciliationStrip";
 import { RecordPaymentDialog } from "./RecordPaymentDialog";
 import { HeadcountEntryInline } from "./HeadcountEntryInline";
+import MiscExpenseDialog from "@/components/expenses/MiscExpenseDialog";
 
 interface ExpandableContractRowProps {
   contract: TradeContract;
@@ -87,15 +90,24 @@ export function ExpandableContractRow({
 }: ExpandableContractRowProps) {
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
+  const [extraDialogOpen, setExtraDialogOpen] = useState(false);
   const menuOpen = Boolean(menuAnchor);
+  const queryClient = useQueryClient();
 
   // Only fetch payments when row is expanded — avoids N+1 fetch on the hub
   const { data: payments, isLoading: paymentsLoading } = useContractPayments(
     expanded ? contract.id : undefined
   );
 
+  // Sum extras client-side from the unified ledger so the strip + header
+  // numbers reflect snacks/fuel/materials immediately after one is recorded.
+  // The reconciliation view itself doesn't include misc_expenses (yet).
+  const extrasTotal = (payments ?? [])
+    .filter((p) => p.source === "extra")
+    .reduce((sum, p) => sum + p.amount, 0);
+
   const quoted = reconciliation?.quotedAmount ?? contract.totalValue ?? 0;
-  const paid = reconciliation?.amountPaid ?? 0;
+  const paid = (reconciliation?.amountPaid ?? 0) + extrasTotal;
   const balance = quoted - paid;
   const days =
     contract.laborTrackingMode === "mesthri_only"
@@ -235,6 +247,17 @@ export function ExpandableContractRow({
           </ListItemIcon>
           <ListItemText>Record payment</ListItemText>
         </MenuItem>
+        <MenuItem
+          onClick={() => {
+            setMenuAnchor(null);
+            setExtraDialogOpen(true);
+          }}
+        >
+          <ListItemIcon>
+            <ReceiptLongIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>Add extra (snacks, fuel, materials)</ListItemText>
+        </MenuItem>
         {onView && (
           <MenuItem
             onClick={() => {
@@ -274,6 +297,7 @@ export function ExpandableContractRow({
             reconciliation={reconciliation}
             laborTrackingMode={contract.laborTrackingMode}
             fallbackQuoted={contract.totalValue}
+            extrasTotal={extrasTotal}
           />
 
           {/* Headcount entry — only for headcount mode */}
@@ -293,17 +317,30 @@ export function ExpandableContractRow({
               sx={{ mb: 0.75 }}
             >
               <Typography variant="subtitle2">Payments ledger</Typography>
-              <Button
-                size="small"
-                variant="contained"
-                startIcon={<AddIcon />}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setPaymentDialogOpen(true);
-                }}
-              >
-                Record payment
-              </Button>
+              <Stack direction="row" spacing={1}>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={<ReceiptLongIcon />}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setExtraDialogOpen(true);
+                  }}
+                >
+                  Add extra
+                </Button>
+                <Button
+                  size="small"
+                  variant="contained"
+                  startIcon={<AddIcon />}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setPaymentDialogOpen(true);
+                  }}
+                >
+                  Record payment
+                </Button>
+              </Stack>
             </Stack>
 
             {paymentsLoading ? (
@@ -335,8 +372,17 @@ export function ExpandableContractRow({
                       <Chip
                         label={PAYMENT_TYPE_LABEL[p.paymentType] ?? p.paymentType}
                         size="small"
-                        variant={p.source === "settlement" ? "filled" : "outlined"}
-                        color={p.source === "settlement" ? "info" : "default"}
+                        variant={p.source === "direct" ? "outlined" : "filled"}
+                        // direct → default outlined, settlement → info-blue,
+                        // extra (snacks/fuel/materials) → warning-amber so the
+                        // engineer can spot non-labor money flow at a glance.
+                        color={
+                          p.source === "settlement"
+                            ? "info"
+                            : p.source === "extra"
+                            ? "warning"
+                            : "default"
+                        }
                       />
                       {p.paymentMode && (
                         <Typography variant="caption" color="text.secondary">
@@ -382,6 +428,31 @@ export function ExpandableContractRow({
         // including over-paid contracts where balance < 0.
         remainingBalance={balance}
       />
+
+      {/* Misc expense (extra) dialog — preselects this contract and refreshes
+          the contract ledger + reconciliation when an extra is saved.
+          Gated on extraDialogOpen so the dialog's hook tree (useAuth, etc.)
+          only runs when the user actually clicks Add extra. Keeps the Card
+          render path light and avoids forcing an AuthProvider into unrelated
+          unit tests of TradeCard. */}
+      {extraDialogOpen && (
+        <MiscExpenseDialog
+          open={extraDialogOpen}
+          onClose={() => setExtraDialogOpen(false)}
+          defaultSubcontractId={contract.id}
+          onSuccess={() => {
+            queryClient.invalidateQueries({
+              queryKey: ["contract-payments", contract.id],
+            });
+            queryClient.invalidateQueries({
+              queryKey: ["trade-reconciliations", "site", contract.siteId],
+            });
+            queryClient.invalidateQueries({
+              queryKey: ["trade-activity", "site", contract.siteId],
+            });
+          }}
+        />
+      )}
     </Box>
   );
 }

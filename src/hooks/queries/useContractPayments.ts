@@ -14,11 +14,15 @@ export type PaymentChannel =
   | "mesthri_at_office"
   | "company_direct_online";
 
-/** Source identifies whether a ledger entry came from subcontract_payments
- *  (a direct payment to the mesthri) or settlement_groups (a multi-laborer
- *  salary settlement that happens to be classified to this contract). The
- *  inline ledger renders both together so users see the full money flow. */
-export type LedgerSource = "direct" | "settlement";
+/** Source identifies where a ledger entry originated. The inline ledger
+ *  renders all three together so the engineer sees every flow of money
+ *  out toward this contract.
+ *  - direct      = subcontract_payments (mesthri-direct payment / advance)
+ *  - settlement  = settlement_groups (multi-laborer salary settlement
+ *                  classified to this contract)
+ *  - extra       = misc_expenses (snacks, fuel, small materials bought
+ *                  with engineer/company cash, allocated to the contract) */
+export type LedgerSource = "direct" | "settlement" | "extra";
 
 export interface ContractLedgerEntry {
   id: string;
@@ -56,10 +60,24 @@ interface RawSettlementRow {
   settlement_reference: string | null;
 }
 
+interface RawExtraRow {
+  id: string;
+  amount: number | string;
+  date: string;
+  payment_mode: string | null;
+  payer_source: string | null;
+  reference_number: string | null;
+  description: string | null;
+  notes: string | null;
+  category_id: string | null;
+  category_name?: string | null;
+}
+
 /**
  * Unified ledger for a single contract: subcontract_payments + non-cancelled
- * settlement_groups merged into one chronological timeline (newest first).
- * Used by the inline payments list on the trade card.
+ * settlement_groups + non-cancelled misc_expenses (extras like snacks,
+ * paint thinner, fuel) merged into one chronological timeline (newest
+ * first). Used by the inline payments list on the trade card.
  */
 export function useContractPayments(contractId: string | undefined) {
   const supabase = createClient();
@@ -71,7 +89,7 @@ export function useContractPayments(contractId: string | undefined) {
       if (!contractId) return [];
       const sb = supabase as any;
 
-      const [paymentsRes, settlementsRes] = await Promise.all([
+      const [paymentsRes, settlementsRes, extrasRes] = await Promise.all([
         sb
           .from("subcontract_payments")
           .select(
@@ -86,9 +104,17 @@ export function useContractPayments(contractId: string | undefined) {
           )
           .eq("subcontract_id", contractId)
           .eq("is_cancelled", false),
+        sb
+          .from("misc_expenses")
+          .select(
+            "id, amount, date, payment_mode, payer_source, reference_number, description, notes, category_id, category:expense_categories(name)"
+          )
+          .eq("subcontract_id", contractId)
+          .eq("is_cancelled", false),
       ]);
       if (paymentsRes.error) throw paymentsRes.error;
       if (settlementsRes.error) throw settlementsRes.error;
+      if (extrasRes.error) throw extrasRes.error;
 
       const direct: ContractLedgerEntry[] = (
         (paymentsRes.data ?? []) as RawPaymentRow[]
@@ -118,7 +144,23 @@ export function useContractPayments(contractId: string | undefined) {
         notes: null,
       }));
 
-      return [...direct, ...settlements].sort((a, b) => {
+      const extras: ContractLedgerEntry[] = (
+        (extrasRes.data ?? []) as Array<RawExtraRow & { category: { name: string } | null }>
+      ).map((r) => ({
+        id: `me:${r.id}`,
+        source: "extra" as const,
+        amount: Number(r.amount ?? 0),
+        paymentDate: r.date,
+        // Use the category name as the display "type" so a chip says
+        // "Tea & Snacks" or "Food & Meals" instead of an opaque "Extra".
+        paymentType: r.category?.name ?? "Other",
+        paymentMode: (r.payment_mode as PaymentMode) ?? null,
+        paymentChannel: r.payer_source,
+        reference: r.reference_number,
+        notes: r.description ?? r.notes,
+      }));
+
+      return [...direct, ...settlements, ...extras].sort((a, b) => {
         if (a.paymentDate !== b.paymentDate) {
           return a.paymentDate < b.paymentDate ? 1 : -1;
         }
