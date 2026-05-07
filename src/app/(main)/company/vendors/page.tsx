@@ -1,52 +1,59 @@
 "use client";
 
-import { useMemo, useState, useCallback, useDeferredValue } from "react";
+import { useMemo, useState, useCallback, useDeferredValue, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import {
+  Alert,
   Box,
   Button,
-  Chip,
-  IconButton,
-  Typography,
-  TextField,
-  InputAdornment,
   Fab,
-  Tooltip,
-  Rating,
-  Link,
-  Tabs,
+  Pagination,
+  Skeleton,
+  Snackbar,
   Tab,
-  Avatar,
-  Dialog,
-  DialogTitle,
-  DialogContent,
+  Tabs,
+  Typography,
 } from "@mui/material";
 import {
   Add as AddIcon,
-  Edit as EditIcon,
-  Delete as DeleteIcon,
-  Search as SearchIcon,
-  Phone as PhoneIcon,
-  WhatsApp as WhatsAppIcon,
-  Inventory as InventoryIcon,
+  Star as StarIcon,
+  CreditCard as CreditIcon,
+  AccountBalance as UpiIcon,
+  LocalShipping as TransportIcon,
+  Image as ImageIcon,
 } from "@mui/icons-material";
-import DataTable, { type MRT_ColumnDef, type PaginationState } from "@/components/common/DataTable";
 import PageHeader from "@/components/layout/PageHeader";
 import { useAuth } from "@/contexts/AuthContext";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { hasEditPermission } from "@/lib/permissions";
-import {
-  usePaginatedVendors,
-  useDeleteVendor,
-} from "@/hooks/queries/useVendors";
+import { usePaginatedVendors, useDeleteVendor } from "@/hooks/queries/useVendors";
 import { useMaterialCategories } from "@/hooks/queries/useMaterials";
 import { useVendorMaterialCounts } from "@/hooks/queries/useVendorInventory";
 import VendorDialog from "@/components/materials/VendorDialog";
 import ConfirmDialog from "@/components/common/ConfirmDialog";
-import type { VendorWithCategories, VendorType } from "@/types/material.types";
+import { VendorQuoteDialog } from "@/components/shared/VendorQuoteDialog";
+import { FilterBar, type FilterChipDef } from "@/components/common/FilterBar";
+import { ViewToggle, type ViewMode } from "@/components/common/ViewToggle";
+import { VendorListRow } from "@/components/vendors/VendorListRow";
+import { VendorGridCard } from "@/components/vendors/VendorGridCard";
+import { VendorInspectPane } from "@/components/vendors/VendorInspectPane";
+import { MaterialInspectPane } from "@/components/materials/MaterialInspectPane";
+import { InspectPaneBreadcrumb } from "@/components/shared/InspectPaneBreadcrumb";
+import { useInspectStack } from "@/components/shared/useInspectStack";
+import type {
+  MaterialWithDetails,
+  VendorWithCategories,
+  VendorType,
+} from "@/types/material.types";
 
-// Vendor category tabs based on building material types
-type VendorTabId = "all" | "rental" | "civil" | "steel" | "electrical_plumbing" | "hardware" | "finishing";
+type VendorTabId =
+  | "all"
+  | "rental"
+  | "civil"
+  | "steel"
+  | "electrical_plumbing"
+  | "hardware"
+  | "finishing";
 
 interface VendorTab {
   id: VendorTabId;
@@ -58,79 +65,200 @@ interface VendorTab {
 const VENDOR_TABS: VendorTab[] = [
   { id: "all", label: "All Vendors" },
   { id: "rental", label: "Rental", vendorType: "rental_store" },
-  { id: "civil", label: "Civil", categoryNames: ["cement", "brick", "block", "sand", "aggregate", "binding"] },
-  { id: "steel", label: "Steel & Metals", categoryNames: ["steel", "metal", "iron", "tmt"] },
-  { id: "electrical_plumbing", label: "Electrical & Plumbing", categoryNames: ["electrical", "plumbing", "wiring", "pipe"] },
+  {
+    id: "civil",
+    label: "Civil",
+    categoryNames: ["cement", "brick", "block", "sand", "aggregate", "binding"],
+  },
+  {
+    id: "steel",
+    label: "Steel & Metals",
+    categoryNames: ["steel", "metal", "iron", "tmt"],
+  },
+  {
+    id: "electrical_plumbing",
+    label: "Electrical & Plumbing",
+    categoryNames: ["electrical", "plumbing", "wiring", "pipe"],
+  },
   { id: "hardware", label: "Hardware", categoryNames: ["hardware"] },
-  { id: "finishing", label: "Finishing", categoryNames: ["paint", "tile", "sanitary", "flooring", "finishing"] },
+  {
+    id: "finishing",
+    label: "Finishing",
+    categoryNames: ["paint", "tile", "sanitary", "flooring", "finishing"],
+  },
 ];
+
+const SORT_OPTIONS = [
+  { value: "alphabetical", label: "Alphabetical" },
+  { value: "rating", label: "Top rated" },
+  { value: "most_materials", label: "Most materials" },
+  { value: "recently_added", label: "Recently added" },
+];
+
+const PAGE_SIZE = 50;
+const VIEW_MODE_KEY = "vendors_view_mode";
+
+type FilterKey =
+  | "top_rated"
+  | "accepts_credit"
+  | "accepts_upi"
+  | "provides_transport"
+  | "has_photo";
 
 export default function VendorsPage() {
   const router = useRouter();
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [editingVendor, setEditingVendor] = useState<VendorWithCategories | null>(null);
-  const [searchInput, setSearchInput] = useState("");
-  const [pagination, setPagination] = useState<PaginationState>({ pageIndex: 0, pageSize: 50 });
-  const [selectedTab, setSelectedTab] = useState<VendorTabId>("all");
-  const [deleteConfirm, setDeleteConfirm] = useState<{ open: boolean; vendor: VendorWithCategories | null }>({
-    open: false,
-    vendor: null,
-  });
-  const [photoPreview, setPhotoPreview] = useState<{ open: boolean; url: string; name: string }>({
-    open: false,
-    url: "",
-    name: "",
-  });
-
   const { userProfile } = useAuth();
   const isMobile = useIsMobile();
   const canEdit = hasEditPermission(userProfile?.role);
 
-  // Debounce search input
-  const deferredSearch = useDeferredValue(searchInput);
+  const [selectedTab, setSelectedTab] = useState<VendorTabId>("all");
+  const [searchInput, setSearchInput] = useState("");
+  const [sortBy, setSortBy] = useState<string>("alphabetical");
+  const [pageIndex, setPageIndex] = useState(0);
+  // Default to "list" for SSR; rehydrate from localStorage after mount.
+  const [viewMode, setViewMode] = useState<ViewMode>("list");
+  useEffect(() => {
+    const saved = window.localStorage.getItem(VIEW_MODE_KEY);
+    if (saved === "grid" || saved === "table" || saved === "list") {
+      setViewMode(saved);
+    }
+  }, []);
+  const [activeFilters, setActiveFilters] = useState<Set<FilterKey>>(new Set());
 
-  // Get current tab configuration
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editingVendor, setEditingVendor] = useState<VendorWithCategories | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<{
+    open: boolean;
+    vendor: VendorWithCategories | null;
+  }>({ open: false, vendor: null });
+  const [snackbar, setSnackbar] = useState<{
+    open: boolean;
+    message: string;
+    severity: "success" | "error";
+  }>({ open: false, message: "", severity: "success" });
+
+  // Quote dialog (Slice 4) — locked to either material or vendor
+  const [quoteCtx, setQuoteCtx] = useState<{
+    lockedMaterial: MaterialWithDetails | null;
+    lockedVendor: VendorWithCategories | null;
+  } | null>(null);
+
+  // Inspect stack (Slice 5)
+  const inspect = useInspectStack();
+  const top = inspect.top;
+  const trail = inspect.trail;
+  const breadcrumb = trail.length > 0 ? (
+    <InspectPaneBreadcrumb
+      trail={trail}
+      onJumpTo={inspect.popTo}
+      onBack={inspect.back}
+    />
+  ) : null;
+
+  const deferredSearch = useDeferredValue(searchInput);
   const currentTab = VENDOR_TABS.find((t) => t.id === selectedTab) || VENDOR_TABS[0];
 
-  // Server-side paginated vendors with search and tab filtering
+  const pagination = useMemo(() => ({ pageIndex, pageSize: PAGE_SIZE }), [pageIndex]);
   const { data: paginatedData, isLoading } = usePaginatedVendors(
     pagination,
-    undefined, // categoryId
+    undefined,
     deferredSearch.length >= 2 ? deferredSearch : undefined,
-    currentTab.vendorType, // vendorType filter for rental tab
-    currentTab.categoryNames // categoryNames filter for category tabs
+    currentTab.vendorType,
+    currentTab.categoryNames
   );
-
-  const vendors = paginatedData?.data || [];
+  const allVendors = paginatedData?.data || [];
   const totalCount = paginatedData?.totalCount || 0;
-
-  // Handle tab change - reset pagination
-  const handleTabChange = useCallback((_event: React.SyntheticEvent, newValue: VendorTabId) => {
-    setSelectedTab(newValue);
-    setPagination((prev) => ({ ...prev, pageIndex: 0 }));
-  }, []);
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
 
   const { data: categories = [] } = useMaterialCategories();
   const { data: materialCounts = {} } = useVendorMaterialCounts();
   const deleteVendor = useDeleteVendor();
 
-  // Handle pagination change
-  const handlePaginationChange = useCallback((newPagination: PaginationState) => {
-    setPagination(newPagination);
+  const visibleVendors = useMemo(() => {
+    const sorted =
+      sortBy === "alphabetical" || sortBy === "recently_added"
+        ? allVendors
+        : [...allVendors].sort((a, b) => {
+            switch (sortBy) {
+              case "rating": {
+                const ar = a.rating ?? 0;
+                const br = b.rating ?? 0;
+                if (br !== ar) return br - ar;
+                return a.name.localeCompare(b.name);
+              }
+              case "most_materials": {
+                const am = materialCounts[a.id] || 0;
+                const bm = materialCounts[b.id] || 0;
+                if (bm !== am) return bm - am;
+                return a.name.localeCompare(b.name);
+              }
+              default:
+                return 0;
+            }
+          });
+
+    if (activeFilters.size === 0) return sorted;
+    return sorted.filter((v) => {
+      if (activeFilters.has("top_rated") && (v.rating ?? 0) < 4) return false;
+      if (activeFilters.has("accepts_credit") && !v.accepts_credit) return false;
+      if (activeFilters.has("accepts_upi") && !v.accepts_upi) return false;
+      if (activeFilters.has("provides_transport") && !v.provides_transport) return false;
+      if (activeFilters.has("has_photo") && !v.shop_photo_url) return false;
+      return true;
+    });
+  }, [allVendors, sortBy, materialCounts, activeFilters]);
+
+  const filterChips: FilterChipDef[] = useMemo(
+    () => [
+      { key: "top_rated", label: "Top rated", icon: <StarIcon sx={{ fontSize: 14 }} />, active: activeFilters.has("top_rated") },
+      { key: "accepts_credit", label: "Accepts credit", icon: <CreditIcon sx={{ fontSize: 14 }} />, active: activeFilters.has("accepts_credit") },
+      { key: "accepts_upi", label: "Accepts UPI", icon: <UpiIcon sx={{ fontSize: 14 }} />, active: activeFilters.has("accepts_upi") },
+      { key: "provides_transport", label: "Provides transport", icon: <TransportIcon sx={{ fontSize: 14 }} />, active: activeFilters.has("provides_transport") },
+      { key: "has_photo", label: "Has photo", icon: <ImageIcon sx={{ fontSize: 14 }} />, active: activeFilters.has("has_photo") },
+    ],
+    [activeFilters]
+  );
+
+  const handleTabChange = useCallback(
+    (_: React.SyntheticEvent, newValue: VendorTabId) => {
+      setSelectedTab(newValue);
+      setPageIndex(0);
+    },
+    []
+  );
+
+  const handleViewModeChange = useCallback((mode: ViewMode) => {
+    setViewMode(mode);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(VIEW_MODE_KEY, mode);
+    }
   }, []);
 
-  const handleOpenDialog = useCallback((vendor?: VendorWithCategories) => {
-    if (vendor) {
-      setEditingVendor(vendor);
-    } else {
-      setEditingVendor(null);
-    }
+  const handleFilterToggle = useCallback((key: string) => {
+    setActiveFilters((prev) => {
+      const next = new Set(prev);
+      const k = key as FilterKey;
+      if (next.has(k)) next.delete(k);
+      else next.add(k);
+      return next;
+    });
+    setPageIndex(0);
+  }, []);
+
+  const handleRowClick = useCallback(
+    (v: VendorWithCategories) =>
+      inspect.openRoot({ kind: "vendor", id: v.id, title: v.name }),
+    [inspect]
+  );
+
+  const handleOpenAdd = useCallback(() => {
+    setEditingVendor(null);
     setDialogOpen(true);
   }, []);
 
-  const handleCloseDialog = useCallback(() => {
-    setDialogOpen(false);
-    setEditingVendor(null);
+  const handleOpenEdit = useCallback((vendor: VendorWithCategories) => {
+    setEditingVendor(vendor);
+    setDialogOpen(true);
   }, []);
 
   const handleDeleteClick = useCallback((vendor: VendorWithCategories) => {
@@ -139,202 +267,41 @@ export default function VendorsPage() {
 
   const handleDeleteConfirm = useCallback(async () => {
     if (!deleteConfirm.vendor) return;
+    const name = deleteConfirm.vendor.name;
     try {
       await deleteVendor.mutateAsync(deleteConfirm.vendor.id);
       setDeleteConfirm({ open: false, vendor: null });
-    } catch (error) {
-      console.error("Failed to delete vendor:", error);
+      if (top?.kind === "vendor" && top.id === deleteConfirm.vendor.id) {
+        inspect.close();
+      }
+      setSnackbar({ open: true, message: `"${name}" deleted`, severity: "success" });
+    } catch (err) {
+      setDeleteConfirm({ open: false, vendor: null });
+      setSnackbar({
+        open: true,
+        message: `Failed to delete: ${err instanceof Error ? err.message : "Unknown error"}`,
+        severity: "error",
+      });
     }
-  }, [deleteConfirm.vendor, deleteVendor]);
+  }, [deleteConfirm.vendor, deleteVendor, inspect, top]);
 
-  const handleDeleteCancel = useCallback(() => {
-    setDeleteConfirm({ open: false, vendor: null });
+  const handleAddMaterial = useCallback((vendor: VendorWithCategories) => {
+    setQuoteCtx({ lockedMaterial: null, lockedVendor: vendor });
   }, []);
 
-  // Table columns
-  const columns = useMemo<MRT_ColumnDef<VendorWithCategories>[]>(
-    () => [
-      {
-        accessorKey: "name",
-        header: "Vendor Name",
-        size: 220,
-        Cell: ({ row }) => (
-          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-            <Avatar
-              {...(row.original.shop_photo_url ? { src: row.original.shop_photo_url } : {})}
-              sx={{
-                width: 36,
-                height: 36,
-                cursor: row.original.shop_photo_url ? "pointer" : "default",
-                bgcolor: row.original.shop_photo_url ? undefined : "primary.light",
-              }}
-              onClick={(e) => {
-                if (row.original.shop_photo_url) {
-                  e.stopPropagation();
-                  setPhotoPreview({
-                    open: true,
-                    url: row.original.shop_photo_url,
-                    name: row.original.shop_name || row.original.name,
-                  });
-                }
-              }}
-            >
-              {row.original.name.charAt(0).toUpperCase()}
-            </Avatar>
-            <Box>
-              <Link
-                component="button"
-                variant="body2"
-                fontWeight={500}
-                onClick={() => router.push(`/company/vendors/${row.original.id}`)}
-                sx={{ textAlign: "left", cursor: "pointer" }}
-              >
-                {row.original.name}
-              </Link>
-              {row.original.code && (
-                <Typography variant="caption" color="text.secondary" display="block">
-                  {row.original.code}
-                </Typography>
-              )}
-            </Box>
-          </Box>
-        ),
-      },
-      {
-        accessorKey: "contact_person",
-        header: "Contact",
-        size: 150,
-        Cell: ({ row }) => (
-          <Box>
-            <Typography variant="body2">
-              {row.original.contact_person || "-"}
-            </Typography>
-            {row.original.phone && (
-              <Box sx={{ display: "flex", alignItems: "center", gap: 0.5, mt: 0.5 }}>
-                <PhoneIcon fontSize="small" sx={{ fontSize: 14 }} color="action" />
-                <Typography variant="caption" color="text.secondary">
-                  {row.original.phone}
-                </Typography>
-                {row.original.whatsapp_number && (
-                  <Tooltip title="WhatsApp">
-                    <WhatsAppIcon
-                      fontSize="small"
-                      sx={{ fontSize: 14, color: "success.main", ml: 0.5 }}
-                    />
-                  </Tooltip>
-                )}
-              </Box>
-            )}
-          </Box>
-        ),
-      },
-      {
-        accessorKey: "city",
-        header: "Location",
-        size: 120,
-        Cell: ({ row }) => row.original.city || "-",
-      },
-      {
-        id: "materials",
-        header: "Materials",
-        size: 100,
-        enableSorting: false,
-        Cell: ({ row }) => {
-          const count = materialCounts[row.original.id] || 0;
-          return count > 0 ? (
-            <Chip
-              icon={<InventoryIcon />}
-              label={count}
-              size="small"
-              color="primary"
-              variant="outlined"
-              onClick={() => router.push(`/company/vendors/${row.original.id}?tab=materials`)}
-              clickable
-            />
-          ) : (
-            <Typography variant="caption" color="text.secondary">
-              None
-            </Typography>
-          );
-        },
-      },
-      {
-        accessorKey: "categories",
-        header: "Categories",
-        size: 200,
-        enableSorting: false,
-        Cell: ({ row }) => {
-          const cats = row.original.categories || [];
-          if (cats.length === 0) return "-";
-          return (
-            <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
-              {cats.slice(0, 2).map((cat) => (
-                <Chip
-                  key={cat?.id}
-                  label={cat?.name}
-                  size="small"
-                  variant="outlined"
-                />
-              ))}
-              {cats.length > 2 && (
-                <Chip label={`+${cats.length - 2}`} size="small" />
-              )}
-            </Box>
-          );
-        },
-      },
-      {
-        accessorKey: "rating",
-        header: "Rating",
-        size: 100,
-        Cell: ({ row }) =>
-          row.original.rating ? (
-            <Rating
-              value={row.original.rating}
-              precision={0.5}
-              size="small"
-              readOnly
-            />
-          ) : (
-            "-"
-          ),
-      },
-      {
-        accessorKey: "gst_number",
-        header: "GST",
-        size: 150,
-        Cell: ({ row }) => row.original.gst_number || "-",
-      },
-    ],
-    [materialCounts, router]
+  const handleAddVendorQuote = useCallback((material: MaterialWithDetails) => {
+    setQuoteCtx({ lockedMaterial: material, lockedVendor: null });
+  }, []);
+
+  const handleOpenInPage = useCallback(
+    (vendor: VendorWithCategories) => router.push(`/company/vendors/${vendor.id}`),
+    [router]
   );
 
-  // Row actions
-  const renderRowActions = useCallback(
-    ({ row }: { row: { original: VendorWithCategories } }) => (
-      <Box sx={{ display: "flex", gap: 0.5 }}>
-        <Tooltip title="Edit">
-          <IconButton
-            size="small"
-            onClick={() => handleOpenDialog(row.original)}
-            disabled={!canEdit}
-          >
-            <EditIcon fontSize="small" />
-          </IconButton>
-        </Tooltip>
-        <Tooltip title="Delete">
-          <IconButton
-            size="small"
-            onClick={() => handleDeleteClick(row.original)}
-            disabled={!canEdit}
-            color="error"
-          >
-            <DeleteIcon fontSize="small" />
-          </IconButton>
-        </Tooltip>
-      </Box>
-    ),
-    [handleOpenDialog, handleDeleteClick, canEdit]
+  const handleOpenMaterialPage = useCallback(
+    (material: MaterialWithDetails) =>
+      router.push(`/company/materials/${material.id}`),
+    [router]
   );
 
   return (
@@ -343,128 +310,256 @@ export default function VendorsPage() {
         title="Vendors & Suppliers"
         actions={
           !isMobile && canEdit ? (
-            <Button
-              variant="contained"
-              startIcon={<AddIcon />}
-              onClick={() => handleOpenDialog()}
-            >
+            <Button variant="contained" startIcon={<AddIcon />} onClick={handleOpenAdd}>
               Add Vendor
             </Button>
           ) : null
         }
       />
 
-      {/* Category Tabs */}
-      <Box sx={{ borderBottom: 1, borderColor: "divider", mb: 2 }}>
+      <Box sx={{ borderBottom: 1, borderColor: "divider", mb: 0.5 }}>
         <Tabs
           value={selectedTab}
           onChange={handleTabChange}
           variant={isMobile ? "scrollable" : "standard"}
           scrollButtons={isMobile ? "auto" : false}
           allowScrollButtonsMobile
+          sx={{
+            minHeight: 40,
+            "& .MuiTab-root": {
+              minHeight: 40,
+              fontSize: 13,
+              fontWeight: 600,
+              textTransform: "none",
+              letterSpacing: 0.2,
+            },
+          }}
         >
-          {VENDOR_TABS.map((tab) => (
-            <Tab key={tab.id} value={tab.id} label={tab.label} />
+          {VENDOR_TABS.map((t) => (
+            <Tab key={t.id} value={t.id} label={t.label} />
           ))}
         </Tabs>
       </Box>
 
-      {/* Search */}
-      <Box sx={{ mb: 2, display: "flex", alignItems: "center", gap: 2 }}>
-        <TextField
-          id="vendor-search"
-          size="small"
-          placeholder="Search vendors (min 2 chars)..."
-          value={searchInput}
-          onChange={(e) => {
-            setSearchInput(e.target.value);
-            setPagination(prev => ({ ...prev, pageIndex: 0 }));
+      <FilterBar
+        searchValue={searchInput}
+        onSearchChange={(v) => {
+          setSearchInput(v);
+          setPageIndex(0);
+        }}
+        searchPlaceholder="Search vendors (min 2 chars)…"
+        filterChips={filterChips}
+        onFilterChipToggle={handleFilterToggle}
+        sortOptions={SORT_OPTIONS}
+        sortValue={sortBy}
+        onSortChange={(v) => {
+          setSortBy(v);
+          setPageIndex(0);
+        }}
+        viewToggle={
+          <ViewToggle
+            value={viewMode}
+            onChange={handleViewModeChange}
+            modes={["list", "grid"]}
+          />
+        }
+      />
+
+      <Box sx={{ px: { xs: 1, sm: 1.5 }, mb: 0.75 }}>
+        <Typography
+          sx={{
+            fontSize: 10.5,
+            color: "text.secondary",
+            textTransform: "uppercase",
+            letterSpacing: 0.4,
           }}
-          slotProps={{
-            input: {
-              startAdornment: (
-                <InputAdornment position="start">
-                  <SearchIcon fontSize="small" />
-                </InputAdornment>
-              ),
-            },
-          }}
-          sx={{ minWidth: 300 }}
-        />
-        <Typography variant="caption" color="text.secondary">
+        >
           {totalCount} vendor{totalCount !== 1 ? "s" : ""}
+          {activeFilters.size > 0 ? ` · ${visibleVendors.length} match filters` : ""}
         </Typography>
       </Box>
 
-      {/* Data Table with Server-Side Pagination */}
-      <DataTable
-        columns={columns}
-        data={vendors}
-        isLoading={isLoading}
-        enableRowActions={canEdit}
-        renderRowActions={renderRowActions}
-        mobileHiddenColumns={["gst_number", "rating", "categories"]}
-        initialState={{
-          sorting: [{ id: "name", desc: false }],
-        }}
-        // Server-side pagination
-        manualPagination={true}
-        rowCount={totalCount}
-        pagination={pagination}
-        onPaginationChange={handlePaginationChange}
-      />
+      <Box sx={{ px: { xs: 1, sm: 1.5 }, pb: 12 }}>
+        {isLoading ? (
+          <ListSkeleton viewMode={viewMode} />
+        ) : visibleVendors.length === 0 ? (
+          <Box sx={{ p: 6, textAlign: "center" }}>
+            <Typography variant="body2" color="text.secondary">
+              No vendors match your filters.
+            </Typography>
+          </Box>
+        ) : viewMode === "list" ? (
+          <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+            {visibleVendors.map((v) => (
+              <VendorListRow
+                key={v.id}
+                vendor={v}
+                materialCount={materialCounts[v.id] || 0}
+                selected={top?.kind === "vendor" && top.id === v.id}
+                canEdit={canEdit}
+                onClick={() => handleRowClick(v)}
+                onView={() => handleOpenInPage(v)}
+                onEdit={() => handleOpenEdit(v)}
+                onDelete={() => handleDeleteClick(v)}
+                onAddMaterial={() => handleAddMaterial(v)}
+              />
+            ))}
+          </Box>
+        ) : (
+          <Box
+            sx={{
+              display: "grid",
+              gridTemplateColumns: {
+                xs: "repeat(2, 1fr)",
+                sm: "repeat(3, 1fr)",
+                md: "repeat(4, 1fr)",
+                lg: "repeat(5, 1fr)",
+              },
+              gap: 1.25,
+            }}
+          >
+            {visibleVendors.map((v) => (
+              <VendorGridCard
+                key={v.id}
+                vendor={v}
+                materialCount={materialCounts[v.id] || 0}
+                selected={top?.kind === "vendor" && top.id === v.id}
+                onClick={() => handleRowClick(v)}
+              />
+            ))}
+          </Box>
+        )}
 
-      {/* Mobile FAB */}
-      {isMobile && canEdit && (
+        {totalCount > PAGE_SIZE ? (
+          <Box sx={{ display: "flex", justifyContent: "center", mt: 2 }}>
+            <Pagination
+              size="small"
+              count={totalPages}
+              page={pageIndex + 1}
+              onChange={(_, p) => setPageIndex(p - 1)}
+              color="primary"
+            />
+          </Box>
+        ) : null}
+      </Box>
+
+      {isMobile && canEdit ? (
         <Fab
           color="primary"
           sx={{ position: "fixed", bottom: 16, right: 16 }}
-          onClick={() => handleOpenDialog()}
+          onClick={handleOpenAdd}
         >
           <AddIcon />
         </Fab>
-      )}
+      ) : null}
 
-      {/* Vendor Dialog */}
+      {/* Inspect pane (Slice 5 stack) */}
+      {top?.kind === "vendor" ? (
+        <VendorInspectPane
+          vendorId={top.id}
+          isOpen
+          onClose={inspect.close}
+          onEdit={handleOpenEdit}
+          onOpenInPage={handleOpenInPage}
+          onAddMaterial={handleAddMaterial}
+          onMaterialClick={(materialId, materialName) =>
+            inspect.push({ kind: "material", id: materialId, title: materialName })
+          }
+          breadcrumb={breadcrumb}
+          canEdit={canEdit}
+        />
+      ) : null}
+      {top?.kind === "material" ? (
+        <MaterialInspectPane
+          materialId={top.id}
+          isOpen
+          onClose={inspect.close}
+          onOpenInPage={handleOpenMaterialPage}
+          onAddVendorQuote={handleAddVendorQuote}
+          onVendorClick={(vendorId, vendorName) =>
+            inspect.push({ kind: "vendor", id: vendorId, title: vendorName })
+          }
+          breadcrumb={breadcrumb}
+          canEdit={canEdit}
+        />
+      ) : null}
+
       <VendorDialog
         open={dialogOpen}
-        onClose={handleCloseDialog}
+        onClose={() => {
+          setDialogOpen(false);
+          setEditingVendor(null);
+        }}
         vendor={editingVendor}
         categories={categories}
       />
 
-      {/* Delete Confirmation Dialog */}
+      <VendorQuoteDialog
+        open={quoteCtx !== null}
+        onClose={() => setQuoteCtx(null)}
+        lockedMaterial={quoteCtx?.lockedMaterial ?? null}
+        lockedVendor={quoteCtx?.lockedVendor ?? null}
+        onSaved={() =>
+          setSnackbar({ open: true, message: "Material quote saved", severity: "success" })
+        }
+      />
+
       <ConfirmDialog
         open={deleteConfirm.open}
         title="Delete Vendor"
-        message={`Are you sure you want to delete "${deleteConfirm.vendor?.name}"? This vendor will be removed from the active list.`}
+        message={`Delete "${deleteConfirm.vendor?.name}"? This vendor will be removed from the active list.`}
         confirmText="Delete"
         confirmColor="error"
         isLoading={deleteVendor.isPending}
         onConfirm={handleDeleteConfirm}
-        onCancel={handleDeleteCancel}
+        onCancel={() => setDeleteConfirm({ open: false, vendor: null })}
       />
 
-      {/* Photo Preview Dialog */}
-      <Dialog
-        open={photoPreview.open}
-        onClose={() => setPhotoPreview({ open: false, url: "", name: "" })}
-        maxWidth="md"
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={4000}
+        onClose={() => setSnackbar((s) => ({ ...s, open: false }))}
+        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
       >
-        <DialogTitle>{photoPreview.name}</DialogTitle>
-        <DialogContent>
-          <Box
-            component="img"
-            src={photoPreview.url}
-            alt={photoPreview.name}
-            sx={{
-              width: "100%",
-              maxHeight: "70vh",
-              objectFit: "contain",
-            }}
-          />
-        </DialogContent>
-      </Dialog>
+        <Alert
+          onClose={() => setSnackbar((s) => ({ ...s, open: false }))}
+          severity={snackbar.severity}
+          variant="filled"
+          sx={{ width: "100%" }}
+        >
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
+    </Box>
+  );
+}
+
+function ListSkeleton({ viewMode }: { viewMode: ViewMode }) {
+  if (viewMode === "grid") {
+    return (
+      <Box
+        sx={{
+          display: "grid",
+          gridTemplateColumns: {
+            xs: "repeat(2, 1fr)",
+            sm: "repeat(3, 1fr)",
+            md: "repeat(4, 1fr)",
+            lg: "repeat(5, 1fr)",
+          },
+          gap: 1.25,
+        }}
+      >
+        {Array.from({ length: 10 }).map((_, i) => (
+          <Skeleton key={i} variant="rounded" height={210} />
+        ))}
+      </Box>
+    );
+  }
+  return (
+    <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+      {Array.from({ length: 6 }).map((_, i) => (
+        <Skeleton key={i} variant="rounded" height={84} />
+      ))}
     </Box>
   );
 }

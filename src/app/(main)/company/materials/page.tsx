@@ -1,43 +1,32 @@
 "use client";
 
-import { useMemo, useState, useCallback, useDeferredValue } from "react";
+import { useMemo, useState, useCallback, useDeferredValue, useEffect } from "react";
 import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
+  Alert,
   Box,
   Button,
-  Chip,
-  IconButton,
-  Typography,
-  TextField,
-  InputAdornment,
   Fab,
-  Tooltip,
-  Link,
-  Tabs,
-  Tab,
-  FormControl,
-  Select,
-  MenuItem,
-  InputLabel,
+  Pagination,
+  Skeleton,
   Snackbar,
-  Alert,
+  Tab,
+  Tabs,
+  Typography,
 } from "@mui/material";
 import {
   Add as AddIcon,
-  Edit as EditIcon,
-  Delete as DeleteIcon,
-  Search as SearchIcon,
-  Store as StoreIcon,
   Whatshot as FireIcon,
-  Visibility as ViewIcon,
+  Image as ImageIcon,
+  Store as StoreIcon,
+  AutoAwesome as VariantsIcon,
+  PriceChange as PriceMissingIcon,
 } from "@mui/icons-material";
-import DataTable, { type MRT_ColumnDef, type PaginationState } from "@/components/common/DataTable";
 import PageHeader from "@/components/layout/PageHeader";
 import { useAuth } from "@/contexts/AuthContext";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { hasEditPermission } from "@/lib/permissions";
-import { formatCurrency, formatDate } from "@/lib/formatters";
 import {
   usePaginatedMaterials,
   useMaterialCategories,
@@ -48,41 +37,24 @@ import { useMaterialVendorCounts } from "@/hooks/queries/useVendorInventory";
 import {
   useMaterialOrderStats,
   useMaterialBestPrices,
-  useMaterialAuditInfo,
 } from "@/hooks/queries/useMaterialOrderStats";
+import { FilterBar, type FilterChipDef } from "@/components/common/FilterBar";
+import { ViewToggle, type ViewMode } from "@/components/common/ViewToggle";
+import { MaterialListRow } from "@/components/materials/MaterialListRow";
+import { MaterialGridCard } from "@/components/materials/MaterialGridCard";
+import { MaterialInspectPane } from "@/components/materials/MaterialInspectPane";
+import { VendorInspectPane } from "@/components/vendors/VendorInspectPane";
+import ConfirmDialog from "@/components/common/ConfirmDialog";
+import { VendorQuoteDialog } from "@/components/shared/VendorQuoteDialog";
+import { InspectPaneBreadcrumb } from "@/components/shared/InspectPaneBreadcrumb";
+import { useInspectStack } from "@/components/shared/useInspectStack";
+import type { MaterialWithDetails, VendorWithCategories } from "@/types/material.types";
+
 const MaterialDialog = dynamic(
   () => import("@/components/materials/MaterialDialog"),
   { ssr: false }
 );
-import VendorDrawer from "@/components/materials/VendorDrawer";
-import VariantSubTable from "@/components/materials/VariantSubTable";
-import BrandSubTable from "@/components/materials/BrandSubTable";
-import ConfirmDialog from "@/components/common/ConfirmDialog";
-import type {
-  MaterialWithDetails,
-  MaterialUnit,
-} from "@/types/material.types";
 
-const UNIT_LABELS: Record<MaterialUnit, string> = {
-  kg: "Kg",
-  g: "Gram",
-  ton: "Ton",
-  liter: "Ltr",
-  ml: "ml",
-  piece: "Pcs",
-  bag: "Bag",
-  bundle: "Bundle",
-  sqft: "Sqft",
-  sqm: "Sqm",
-  cft: "Cft",
-  cum: "Cum",
-  nos: "Nos",
-  rmt: "Rmt",
-  box: "Box",
-  set: "Set",
-};
-
-// Category tab mapping - which category codes belong to which tab
 const CATEGORY_TAB_MAPPING: Record<string, string[]> = {
   civil: ["CEM", "STL", "AGG", "BRK"],
   electrical: ["ELC"],
@@ -91,7 +63,7 @@ const CATEGORY_TAB_MAPPING: Record<string, string[]> = {
   doors_windows: ["WOD", "GLS"],
   hardware: ["HRD", "MSC"],
   tiles: ["TIL"],
-  all: [], // All categories
+  all: [],
 };
 
 const CATEGORY_TABS = [
@@ -106,22 +78,42 @@ const CATEGORY_TABS = [
 ];
 
 const SORT_OPTIONS: { value: MaterialSortOption; label: string }[] = [
-  { value: "frequently_used", label: "Frequently Used" },
+  { value: "frequently_used", label: "Frequently used" },
   { value: "alphabetical", label: "Alphabetical" },
-  { value: "recently_added", label: "Recently Added" },
-  { value: "most_vendors", label: "Most Vendors" },
-  { value: "lowest_price", label: "Lowest Price" },
+  { value: "recently_added", label: "Recently added" },
+  { value: "most_vendors", label: "Most vendors" },
+  { value: "lowest_price", label: "Lowest price" },
 ];
+
+const PAGE_SIZE = 50;
+const VIEW_MODE_KEY = "materials_view_mode";
+
+type FilterKey = "frequent" | "has_image" | "has_vendors" | "has_variants" | "missing_price";
 
 export default function MaterialsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [editingMaterial, setEditingMaterial] = useState<MaterialWithDetails | null>(null);
+  const { userProfile } = useAuth();
+  const isMobile = useIsMobile();
+  const canEdit = hasEditPermission(userProfile?.role);
+
   const [selectedTab, setSelectedTab] = useState<string>(searchParams.get("tab") || "all");
   const [searchInput, setSearchInput] = useState("");
   const [sortBy, setSortBy] = useState<MaterialSortOption>("alphabetical");
-  const [vendorDrawerMaterial, setVendorDrawerMaterial] = useState<MaterialWithDetails | null>(null);
+  const [pageIndex, setPageIndex] = useState(0);
+  // Default to "list" for SSR; rehydrate from localStorage after mount to avoid
+  // hydration mismatches in ToggleButtonGroup's aria-pressed.
+  const [viewMode, setViewMode] = useState<ViewMode>("list");
+  useEffect(() => {
+    const saved = window.localStorage.getItem(VIEW_MODE_KEY);
+    if (saved === "grid" || saved === "table" || saved === "list") {
+      setViewMode(saved);
+    }
+  }, []);
+  const [activeFilters, setActiveFilters] = useState<Set<FilterKey>>(new Set());
+
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editingMaterial, setEditingMaterial] = useState<MaterialWithDetails | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<{ open: boolean; material: MaterialWithDetails | null }>({
     open: false,
     material: null,
@@ -131,137 +123,157 @@ export default function MaterialsPage() {
     message: "",
     severity: "success",
   });
-  // Server-side pagination state
-  const [pagination, setPagination] = useState<PaginationState>({ pageIndex: 0, pageSize: 50 });
 
-  const { userProfile } = useAuth();
-  const isMobile = useIsMobile();
-  const canEdit = hasEditPermission(userProfile?.role);
+  // Quote dialog (Slice 4) — locked to either material or vendor
+  const [quoteCtx, setQuoteCtx] = useState<{
+    lockedMaterial: MaterialWithDetails | null;
+    lockedVendor: VendorWithCategories | null;
+  } | null>(null);
 
-  // Debounce search input for server-side filtering
+  // Inspect stack (Slice 5)
+  const inspect = useInspectStack();
+  const top = inspect.top;
+  const trail = inspect.trail;
+  const breadcrumb = trail.length > 0 ? (
+    <InspectPaneBreadcrumb
+      trail={trail}
+      onJumpTo={inspect.popTo}
+      onBack={inspect.back}
+    />
+  ) : null;
+
   const deferredSearch = useDeferredValue(searchInput);
 
-  // Fetch categories first (needed for tab filtering)
   const { data: categories = [] } = useMaterialCategories();
-
-  // Get category IDs for selected tab
   const tabCategoryIds = useMemo(() => {
     if (selectedTab === "all") return null;
-
-    const categoryCodes = CATEGORY_TAB_MAPPING[selectedTab] || [];
+    const codes = CATEGORY_TAB_MAPPING[selectedTab] || [];
     return categories
-      .filter((c) => categoryCodes.includes(c.code || "") || categoryCodes.some((code) => c.code?.startsWith(code + "-")))
+      .filter(
+        (c) =>
+          codes.includes(c.code || "") ||
+          codes.some((code) => c.code?.startsWith(code + "-"))
+      )
       .map((c) => c.id);
   }, [selectedTab, categories]);
 
-  // Fetch paginated materials with server-side filtering
+  const pagination = useMemo(() => ({ pageIndex, pageSize: PAGE_SIZE }), [pageIndex]);
   const { data: paginatedData, isLoading } = usePaginatedMaterials(
     pagination,
     tabCategoryIds,
     deferredSearch.length >= 2 ? deferredSearch : undefined,
     sortBy
   );
-
   const materials = paginatedData?.data || [];
   const totalCount = paginatedData?.totalCount || 0;
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
 
-  // Defer loading of supplementary data until materials are loaded
-  const materialsReady = !isLoading && materials.length > 0;
   const { data: vendorCounts = {} } = useMaterialVendorCounts();
   const { data: orderStats } = useMaterialOrderStats();
   const { data: bestPrices } = useMaterialBestPrices();
-  const { data: auditInfo } = useMaterialAuditInfo();
   const deleteMaterial = useDeleteMaterial();
 
-  // Reset pagination when filters change
-  const handleTabChange = useCallback((event: React.SyntheticEvent, newValue: string) => {
-    setSelectedTab(newValue);
-    setPagination(prev => ({ ...prev, pageIndex: 0 })); // Reset to first page
-    // Update URL without navigation
-    const params = new URLSearchParams(window.location.search);
-    if (newValue === "all") {
-      params.delete("tab");
-    } else {
-      params.set("tab", newValue);
+  const visibleMaterials = useMemo(() => {
+    const sorted =
+      sortBy === "alphabetical" || sortBy === "recently_added"
+        ? materials
+        : [...materials].sort((a, b) => {
+            switch (sortBy) {
+              case "frequently_used": {
+                const aOrders = orderStats?.get(a.id)?.order_count || 0;
+                const bOrders = orderStats?.get(b.id)?.order_count || 0;
+                if (bOrders !== aOrders) return bOrders - aOrders;
+                return a.name.localeCompare(b.name);
+              }
+              case "most_vendors": {
+                const aV = vendorCounts[a.id] || 0;
+                const bV = vendorCounts[b.id] || 0;
+                if (bV !== aV) return bV - aV;
+                return a.name.localeCompare(b.name);
+              }
+              case "lowest_price": {
+                const aP = bestPrices?.get(a.id)?.unit_price ?? Number.MAX_SAFE_INTEGER;
+                const bP = bestPrices?.get(b.id)?.unit_price ?? Number.MAX_SAFE_INTEGER;
+                if (aP !== bP) return aP - bP;
+                return a.name.localeCompare(b.name);
+              }
+              default:
+                return 0;
+            }
+          });
+
+    if (activeFilters.size === 0) return sorted;
+    return sorted.filter((m) => {
+      const isFrequent = (orderStats?.get(m.id)?.order_count || 0) >= 3;
+      const vendorN = vendorCounts[m.id] || 0;
+      const hasImage = !!m.image_url;
+      const hasVariants = (m.variant_count || 0) > 0;
+      const hasPrice = bestPrices?.get(m.id)?.unit_price != null;
+      if (activeFilters.has("frequent") && !isFrequent) return false;
+      if (activeFilters.has("has_image") && !hasImage) return false;
+      if (activeFilters.has("has_vendors") && vendorN === 0) return false;
+      if (activeFilters.has("has_variants") && !hasVariants) return false;
+      if (activeFilters.has("missing_price") && hasPrice) return false;
+      return true;
+    });
+  }, [materials, sortBy, orderStats, vendorCounts, bestPrices, activeFilters]);
+
+  const filterChips: FilterChipDef[] = useMemo(
+    () => [
+      { key: "frequent", label: "Frequently ordered", icon: <FireIcon sx={{ fontSize: 14 }} />, active: activeFilters.has("frequent") },
+      { key: "has_image", label: "Has image", icon: <ImageIcon sx={{ fontSize: 14 }} />, active: activeFilters.has("has_image") },
+      { key: "has_vendors", label: "Has vendors", icon: <StoreIcon sx={{ fontSize: 14 }} />, active: activeFilters.has("has_vendors") },
+      { key: "has_variants", label: "Has variants", icon: <VariantsIcon sx={{ fontSize: 14 }} />, active: activeFilters.has("has_variants") },
+      { key: "missing_price", label: "Missing price", icon: <PriceMissingIcon sx={{ fontSize: 14 }} />, active: activeFilters.has("missing_price") },
+    ],
+    [activeFilters]
+  );
+
+  const handleTabChange = useCallback(
+    (_: React.SyntheticEvent, newValue: string) => {
+      setSelectedTab(newValue);
+      setPageIndex(0);
+      const params = new URLSearchParams(window.location.search);
+      if (newValue === "all") params.delete("tab");
+      else params.set("tab", newValue);
+      const url = params.toString() ? `?${params.toString()}` : window.location.pathname;
+      window.history.replaceState({}, "", url);
+    },
+    []
+  );
+
+  const handleViewModeChange = useCallback((mode: ViewMode) => {
+    setViewMode(mode);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(VIEW_MODE_KEY, mode);
     }
-    const newUrl = params.toString() ? `?${params.toString()}` : window.location.pathname;
-    window.history.replaceState({}, "", newUrl);
   }, []);
 
-  // Handle pagination change
-  const handlePaginationChange = useCallback((newPagination: PaginationState) => {
-    setPagination(newPagination);
+  const handleFilterToggle = useCallback((key: string) => {
+    setActiveFilters((prev) => {
+      const next = new Set(prev);
+      const k = key as FilterKey;
+      if (next.has(k)) next.delete(k);
+      else next.add(k);
+      return next;
+    });
+    setPageIndex(0);
   }, []);
 
-  // Client-side sorting for sort options that need supplementary data
-  // Server-side handles: alphabetical, recently_added
-  // Client-side handles: frequently_used, most_vendors, lowest_price
-  const sortedMaterials = useMemo(() => {
-    // If using server-side sort options, return as-is
-    if (sortBy === "alphabetical" || sortBy === "recently_added") {
-      return materials;
-    }
+  const handleRowClick = useCallback(
+    (m: MaterialWithDetails) =>
+      inspect.openRoot({ kind: "material", id: m.id, title: m.name }),
+    [inspect]
+  );
 
-    // Client-side sort for options requiring supplementary data
-    return [...materials].sort((a, b) => {
-      switch (sortBy) {
-        case "frequently_used": {
-          const aOrders = orderStats?.get(a.id)?.order_count || 0;
-          const bOrders = orderStats?.get(b.id)?.order_count || 0;
-          if (bOrders !== aOrders) return bOrders - aOrders;
-          return a.name.localeCompare(b.name);
-        }
-        case "most_vendors": {
-          const aVendors = vendorCounts[a.id] || 0;
-          const bVendors = vendorCounts[b.id] || 0;
-          if (bVendors !== aVendors) return bVendors - aVendors;
-          return a.name.localeCompare(b.name);
-        }
-        case "lowest_price": {
-          const aPrice = bestPrices?.get(a.id)?.unit_price || 999999;
-          const bPrice = bestPrices?.get(b.id)?.unit_price || 999999;
-          if (aPrice !== bPrice) return aPrice - bPrice;
-          return a.name.localeCompare(b.name);
-        }
-        default:
-          return 0;
-      }
-    });
-  }, [materials, sortBy, orderStats, vendorCounts, bestPrices]);
-
-  // Add variant/brand count display text to materials (variant_count already from server)
-  const materialsWithVariantText = useMemo(() => {
-    return sortedMaterials.map((material) => {
-      const variantCount = material.variant_count || 0;
-      const brandCount = material.brands?.filter(b => b.is_active)?.length || 0;
-
-      // Determine if row can expand (has variants OR brands)
-      const canExpand = variantCount > 0 || brandCount > 0;
-
-      return {
-        ...material,
-        _variantText: variantCount > 0
-          ? `${variantCount} variant${variantCount !== 1 ? "s" : ""}`
-          : null,
-        _variantCount: variantCount,
-        _brandCount: brandCount,
-        _canExpand: canExpand,
-      };
-    });
-  }, [sortedMaterials]);
-
-  const handleOpenDialog = useCallback((material?: MaterialWithDetails) => {
-    if (material) {
-      setEditingMaterial(material);
-    } else {
-      setEditingMaterial(null);
-    }
+  const handleOpenAdd = useCallback(() => {
+    setEditingMaterial(null);
     setDialogOpen(true);
   }, []);
 
-  const handleCloseDialog = useCallback(() => {
-    setDialogOpen(false);
-    setEditingMaterial(null);
+  const handleOpenEdit = useCallback((material: MaterialWithDetails) => {
+    setEditingMaterial(material);
+    setDialogOpen(true);
   }, []);
 
   const handleDeleteClick = useCallback((material: MaterialWithDetails) => {
@@ -270,302 +282,40 @@ export default function MaterialsPage() {
 
   const handleDeleteConfirm = useCallback(async () => {
     if (!deleteConfirm.material) return;
-    const materialName = deleteConfirm.material.name;
+    const name = deleteConfirm.material.name;
     try {
       await deleteMaterial.mutateAsync(deleteConfirm.material.id);
       setDeleteConfirm({ open: false, material: null });
-      setSnackbar({
-        open: true,
-        message: `"${materialName}" deleted successfully`,
-        severity: "success",
-      });
-    } catch (error) {
-      console.error("Failed to delete material:", error);
+      if (top?.kind === "material" && top.id === deleteConfirm.material.id) {
+        inspect.close();
+      }
+      setSnackbar({ open: true, message: `"${name}" deleted`, severity: "success" });
+    } catch (err) {
       setDeleteConfirm({ open: false, material: null });
       setSnackbar({
         open: true,
-        message: `Failed to delete material: ${error instanceof Error ? error.message : "Unknown error"}`,
+        message: `Failed to delete: ${err instanceof Error ? err.message : "Unknown error"}`,
         severity: "error",
       });
     }
-  }, [deleteConfirm.material, deleteMaterial]);
+  }, [deleteConfirm.material, deleteMaterial, inspect, top]);
 
-  const handleDeleteCancel = useCallback(() => {
-    setDeleteConfirm({ open: false, material: null });
+  const handleAddVendorQuote = useCallback((material: MaterialWithDetails) => {
+    setQuoteCtx({ lockedMaterial: material, lockedVendor: null });
   }, []);
 
-  const handleSnackbarClose = useCallback(() => {
-    setSnackbar((prev) => ({ ...prev, open: false }));
+  const handleAddMaterialToVendor = useCallback((vendor: VendorWithCategories) => {
+    setQuoteCtx({ lockedMaterial: null, lockedVendor: vendor });
   }, []);
 
-  const handleOpenVendorDrawer = useCallback((material: MaterialWithDetails) => {
-    setVendorDrawerMaterial(material);
-  }, []);
-
-  const handleCloseVendorDrawer = useCallback(() => {
-    setVendorDrawerMaterial(null);
-  }, []);
-
-  const handleCreatePO = useCallback((vendorId: string, materialId: string) => {
-    // Navigate to PO creation with pre-selected vendor and material
-    router.push(`/company/purchase-orders/new?vendor=${vendorId}&material=${materialId}`);
-  }, [router]);
-
-  // Table columns
-  const columns = useMemo<MRT_ColumnDef<MaterialWithDetails & { _variantText?: string | null; _variantCount?: number; _brandCount?: number; _canExpand?: boolean }>[]>(
-    () => [
-      {
-        accessorKey: "name",
-        header: "Material",
-        size: 280,
-        Cell: ({ row }) => {
-          const isFrequent = (orderStats?.get(row.original.id)?.order_count || 0) >= 3;
-          const audit = auditInfo?.get(row.original.id);
-
-          return (
-            <Tooltip
-              title={
-                audit ? (
-                  <Box>
-                    <Typography variant="caption" display="block">
-                      Created by: {audit.created_by_name || "Unknown"}
-                    </Typography>
-                    <Typography variant="caption" display="block">
-                      Created: {formatDate(audit.created_at)}
-                    </Typography>
-                    <Typography variant="caption" display="block">
-                      Last edited: {formatDate(audit.updated_at)}
-                    </Typography>
-                  </Box>
-                ) : (
-                  ""
-                )
-              }
-              arrow
-              placement="top"
-            >
-              <Box>
-                <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-                  {isFrequent && (
-                    <FireIcon
-                      fontSize="small"
-                      sx={{ color: "warning.main", fontSize: "1rem" }}
-                    />
-                  )}
-                  <Link
-                    component="button"
-                    variant="body2"
-                    fontWeight={500}
-                    onClick={() => router.push(`/company/materials/${row.original.id}`)}
-                    sx={{ textAlign: "left", cursor: "pointer" }}
-                  >
-                    {row.original.name}
-                  </Link>
-                </Box>
-                {row.original.code && (
-                  <Typography variant="caption" color="text.secondary" display="block">
-                    {row.original.code}
-                  </Typography>
-                )}
-              </Box>
-            </Tooltip>
-          );
-        },
-      },
-      {
-        accessorKey: "unit",
-        header: "Unit",
-        size: 70,
-        Cell: ({ row }) => UNIT_LABELS[row.original.unit] || row.original.unit,
-      },
-      {
-        id: "variants",
-        header: "Sizes/Variants",
-        size: 160,
-        enableSorting: false,
-        Cell: ({ row }) => {
-          const variantText = row.original._variantText;
-          const variantCount = row.original._variantCount || 0;
-
-          if (!variantText && variantCount === 0) {
-            return <Typography variant="caption" color="text.secondary">-</Typography>;
-          }
-
-          return (
-            <Tooltip title={variantText || ""} placement="top">
-              <Typography
-                variant="body2"
-                sx={{
-                  maxWidth: 150,
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {variantText || `${variantCount} variant${variantCount !== 1 ? "s" : ""}`}
-              </Typography>
-            </Tooltip>
-          );
-        },
-      },
-      {
-        id: "vendors",
-        header: "Vendors",
-        size: 90,
-        enableSorting: false,
-        Cell: ({ row }) => {
-          const count = vendorCounts[row.original.id] || 0;
-
-          return count > 0 ? (
-            <Chip
-              icon={<StoreIcon />}
-              label={count}
-              size="small"
-              color="primary"
-              variant="outlined"
-              onClick={(e) => {
-                e.stopPropagation();
-                handleOpenVendorDrawer(row.original);
-              }}
-              clickable
-            />
-          ) : (
-            <Button
-              size="small"
-              variant="text"
-              onClick={(e) => {
-                e.stopPropagation();
-                handleOpenVendorDrawer(row.original);
-              }}
-              sx={{ minWidth: 0, p: 0.5, fontSize: "0.75rem" }}
-            >
-              Add
-            </Button>
-          );
-        },
-      },
-      {
-        id: "best_price",
-        header: "Best Price",
-        size: 130,
-        enableSorting: false,
-        Cell: ({ row }) => {
-          const priceInfo = bestPrices?.get(row.original.id);
-
-          if (!priceInfo) {
-            return <Typography variant="caption" color="text.secondary">-</Typography>;
-          }
-
-          return (
-            <Tooltip title={`${priceInfo.vendor_name}${priceInfo.price_includes_gst ? " (incl. GST)" : ""}`}>
-              <Box>
-                <Typography variant="body2" fontWeight={500} color="success.main">
-                  {formatCurrency(priceInfo.unit_price)}
-                </Typography>
-                <Typography
-                  variant="caption"
-                  color="text.secondary"
-                  sx={{
-                    maxWidth: 100,
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                    display: "block",
-                  }}
-                >
-                  {priceInfo.vendor_name}
-                </Typography>
-              </Box>
-            </Tooltip>
-          );
-        },
-      },
-      {
-        accessorKey: "brands",
-        header: "Brands",
-        size: 160,
-        enableSorting: false,
-        Cell: ({ row }) => {
-          const brands = row.original.brands?.filter((b) => b.is_active) || [];
-
-          if (brands.length === 0) {
-            return <Typography variant="caption" color="text.secondary">-</Typography>;
-          }
-
-          // Format brand label with variant name if present
-          const formatBrandLabel = (brand: typeof brands[0]) => {
-            if (brand.variant_name) {
-              return `${brand.brand_name} ${brand.variant_name}`;
-            }
-            return brand.brand_name;
-          };
-
-          // Get unique brand names (for display count)
-          const uniqueBrandNames = new Set(brands.map(b => b.brand_name));
-          const brandCount = uniqueBrandNames.size;
-
-          return (
-            <Tooltip
-              title={brands.map(b => formatBrandLabel(b)).join(", ")}
-              placement="top"
-            >
-              <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
-                {brands.slice(0, 2).map((brand) => (
-                  <Chip
-                    key={brand.id}
-                    label={formatBrandLabel(brand)}
-                    size="small"
-                    color={brand.is_preferred ? "primary" : "default"}
-                    variant={brand.is_preferred ? "filled" : "outlined"}
-                    sx={{ maxWidth: 120, "& .MuiChip-label": { overflow: "hidden", textOverflow: "ellipsis" } }}
-                  />
-                ))}
-                {brands.length > 2 && (
-                  <Chip label={`+${brands.length - 2}`} size="small" />
-                )}
-              </Box>
-            </Tooltip>
-          );
-        },
-      },
-    ],
-    [vendorCounts, router, orderStats, bestPrices, auditInfo, handleOpenVendorDrawer]
+  const handleOpenInPage = useCallback(
+    (material: MaterialWithDetails) => router.push(`/company/materials/${material.id}`),
+    [router]
   );
 
-  // Row actions
-  const renderRowActions = useCallback(
-    ({ row }: { row: { original: MaterialWithDetails } }) => (
-      <Box sx={{ display: "flex", gap: 0.5 }}>
-        <Tooltip title="View Details">
-          <IconButton
-            size="small"
-            onClick={() => router.push(`/company/materials/${row.original.id}`)}
-          >
-            <ViewIcon fontSize="small" />
-          </IconButton>
-        </Tooltip>
-        <Tooltip title="Edit">
-          <IconButton
-            size="small"
-            onClick={() => handleOpenDialog(row.original)}
-            disabled={!canEdit}
-          >
-            <EditIcon fontSize="small" />
-          </IconButton>
-        </Tooltip>
-        <Tooltip title="Delete">
-          <IconButton
-            size="small"
-            onClick={() => handleDeleteClick(row.original)}
-            disabled={!canEdit}
-            color="error"
-          >
-            <DeleteIcon fontSize="small" />
-          </IconButton>
-        </Tooltip>
-      </Box>
-    ),
-    [handleOpenDialog, handleDeleteClick, canEdit, router]
+  const handleOpenVendorPage = useCallback(
+    (vendor: VendorWithCategories) => router.push(`/company/vendors/${vendor.id}`),
+    [router]
   );
 
   return (
@@ -574,184 +324,241 @@ export default function MaterialsPage() {
         title="Material Catalog"
         actions={
           !isMobile && canEdit ? (
-            <Button
-              variant="contained"
-              startIcon={<AddIcon />}
-              onClick={() => handleOpenDialog()}
-            >
+            <Button variant="contained" startIcon={<AddIcon />} onClick={handleOpenAdd}>
               Add Material
             </Button>
           ) : null
         }
       />
 
-      {/* Category Tabs */}
-      <Box sx={{ borderBottom: 1, borderColor: "divider", mb: 2 }}>
+      <Box sx={{ borderBottom: 1, borderColor: "divider", mb: 0.5 }}>
         <Tabs
           value={selectedTab}
           onChange={handleTabChange}
           variant={isMobile ? "scrollable" : "standard"}
           scrollButtons={isMobile ? "auto" : false}
           allowScrollButtonsMobile
+          sx={{
+            minHeight: 40,
+            "& .MuiTab-root": {
+              minHeight: 40,
+              fontSize: 13,
+              fontWeight: 600,
+              textTransform: "none",
+              letterSpacing: 0.2,
+            },
+          }}
         >
-          {CATEGORY_TABS.map((tab) => (
-            <Tab key={tab.id} value={tab.id} label={tab.label} />
+          {CATEGORY_TABS.map((t) => (
+            <Tab key={t.id} value={t.id} label={t.label} />
           ))}
         </Tabs>
       </Box>
 
-      {/* Search and Sort */}
-      <Box
-        sx={{
-          display: "flex",
-          gap: 2,
-          mb: 2,
-          flexDirection: isMobile ? "column" : "row",
-          alignItems: isMobile ? "stretch" : "center",
+      <FilterBar
+        searchValue={searchInput}
+        onSearchChange={(v) => {
+          setSearchInput(v);
+          setPageIndex(0);
         }}
-      >
-        <TextField
-          size="small"
-          placeholder="Search materials (min 2 chars)..."
-          value={searchInput}
-          onChange={(e) => {
-            setSearchInput(e.target.value);
-            setPagination(prev => ({ ...prev, pageIndex: 0 })); // Reset to first page on search
-          }}
-          slotProps={{
-            input: {
-              startAdornment: (
-                <InputAdornment position="start">
-                  <SearchIcon fontSize="small" />
-                </InputAdornment>
-              ),
-            },
-          }}
-          sx={{ minWidth: 250, flex: 1 }}
-        />
-        <FormControl size="small" sx={{ minWidth: 180 }}>
-          <InputLabel>Sort by</InputLabel>
-          <Select
-            value={sortBy}
-            label="Sort by"
-            onChange={(e) => {
-              setSortBy(e.target.value as MaterialSortOption);
-              setPagination(prev => ({ ...prev, pageIndex: 0 })); // Reset to first page on sort change
-            }}
-          >
-            {SORT_OPTIONS.map((opt) => (
-              <MenuItem key={opt.value} value={opt.value}>
-                {opt.label}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-      </Box>
+        searchPlaceholder="Search materials (min 2 chars)…"
+        filterChips={filterChips}
+        onFilterChipToggle={handleFilterToggle}
+        sortOptions={SORT_OPTIONS}
+        sortValue={sortBy}
+        onSortChange={(v) => {
+          setSortBy(v as MaterialSortOption);
+          setPageIndex(0);
+        }}
+        viewToggle={
+          <ViewToggle
+            value={viewMode}
+            onChange={handleViewModeChange}
+            modes={["list", "grid"]}
+          />
+        }
+      />
 
-      {/* Legend */}
-      <Box sx={{ display: "flex", gap: 2, mb: 1, alignItems: "center" }}>
-        <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-          <FireIcon fontSize="small" sx={{ color: "warning.main" }} />
-          <Typography variant="caption" color="text.secondary">
-            Frequently ordered
-          </Typography>
-        </Box>
-        <Typography variant="caption" color="text.secondary">
+      <Box sx={{ px: { xs: 1, sm: 1.5 }, mb: 0.75 }}>
+        <Typography
+          sx={{
+            fontSize: 10.5,
+            color: "text.secondary",
+            textTransform: "uppercase",
+            letterSpacing: 0.4,
+          }}
+        >
           {totalCount} material{totalCount !== 1 ? "s" : ""}
+          {activeFilters.size > 0 ? ` · ${visibleMaterials.length} match filters` : ""}
         </Typography>
       </Box>
 
-      {/* Data Table with Server-Side Pagination */}
-      <DataTable
-        columns={columns}
-        data={materialsWithVariantText}
-        isLoading={isLoading}
-        enableRowActions={canEdit}
-        renderRowActions={renderRowActions}
-        mobileHiddenColumns={["variants", "best_price", "brands"]}
-        enableSorting={false}
-        // Server-side pagination
-        manualPagination={true}
-        rowCount={totalCount}
-        pagination={pagination}
-        onPaginationChange={handlePaginationChange}
-        // Expandable rows for materials with variants OR brands
-        enableExpanding={true}
-        positionExpandColumn="first"
-        getRowCanExpand={(row) => row.original._canExpand === true}
-        renderDetailPanel={({ row }) => {
-          if (!row.original._canExpand) return null;
-          // Show variant sub-table if has variants, otherwise show brand sub-table
-          if ((row.original._variantCount ?? 0) > 0) {
-            return (
-              <VariantSubTable
-                parentMaterial={row.original}
-                onEditVariant={(variant) => handleOpenDialog(variant)}
-              />
-            );
-          }
-          if ((row.original._brandCount ?? 0) > 0) {
-            return <BrandSubTable material={row.original} onOpenVendorDrawer={handleOpenVendorDrawer} />;
-          }
-          return null;
-        }}
-        muiExpandButtonProps={({ row }) => ({
-          sx: {
-            // Show expand button only for rows that can expand
-            visibility: row.original._canExpand ? "visible" : "hidden",
-          },
-        })}
-      />
+      <Box sx={{ px: { xs: 1, sm: 1.5 }, pb: 12 }}>
+        {isLoading ? (
+          <ListSkeleton viewMode={viewMode} />
+        ) : visibleMaterials.length === 0 ? (
+          <Box sx={{ p: 6, textAlign: "center" }}>
+            <Typography variant="body2" color="text.secondary">
+              No materials match your filters.
+            </Typography>
+          </Box>
+        ) : viewMode === "list" ? (
+          <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+            {visibleMaterials.map((m) => {
+              const isFrequent = (orderStats?.get(m.id)?.order_count || 0) >= 3;
+              const bp = bestPrices?.get(m.id);
+              const variantCount = m.variant_count || 0;
+              const brandCount = (m.brands || []).filter((b) => b.is_active).length;
+              return (
+                <MaterialListRow
+                  key={m.id}
+                  material={m}
+                  variantCount={variantCount}
+                  brandCount={brandCount}
+                  vendorCount={vendorCounts[m.id] || 0}
+                  bestPrice={bp?.unit_price}
+                  bestPriceVendor={bp?.vendor_name}
+                  isFrequent={isFrequent}
+                  selected={top?.kind === "material" && top.id === m.id}
+                  canEdit={canEdit}
+                  onClick={() => handleRowClick(m)}
+                  onView={() => handleOpenInPage(m)}
+                  onEdit={() => handleOpenEdit(m)}
+                  onDelete={() => handleDeleteClick(m)}
+                  onAddVendorQuote={() => handleAddVendorQuote(m)}
+                />
+              );
+            })}
+          </Box>
+        ) : (
+          <Box
+            sx={{
+              display: "grid",
+              gridTemplateColumns: {
+                xs: "repeat(2, 1fr)",
+                sm: "repeat(3, 1fr)",
+                md: "repeat(4, 1fr)",
+                lg: "repeat(5, 1fr)",
+              },
+              gap: 1.25,
+            }}
+          >
+            {visibleMaterials.map((m) => {
+              const isFrequent = (orderStats?.get(m.id)?.order_count || 0) >= 3;
+              const bp = bestPrices?.get(m.id);
+              const variantCount = m.variant_count || 0;
+              const brandCount = (m.brands || []).filter((b) => b.is_active).length;
+              return (
+                <MaterialGridCard
+                  key={m.id}
+                  material={m}
+                  variantCount={variantCount}
+                  brandCount={brandCount}
+                  vendorCount={vendorCounts[m.id] || 0}
+                  bestPrice={bp?.unit_price}
+                  isFrequent={isFrequent}
+                  selected={top?.kind === "material" && top.id === m.id}
+                  onClick={() => handleRowClick(m)}
+                />
+              );
+            })}
+          </Box>
+        )}
 
-      {/* Mobile FAB */}
-      {isMobile && canEdit && (
+        {totalCount > PAGE_SIZE ? (
+          <Box sx={{ display: "flex", justifyContent: "center", mt: 2 }}>
+            <Pagination
+              size="small"
+              count={totalPages}
+              page={pageIndex + 1}
+              onChange={(_, p) => setPageIndex(p - 1)}
+              color="primary"
+            />
+          </Box>
+        ) : null}
+      </Box>
+
+      {isMobile && canEdit ? (
         <Fab
           color="primary"
           sx={{ position: "fixed", bottom: 16, right: 16 }}
-          onClick={() => handleOpenDialog()}
+          onClick={handleOpenAdd}
         >
           <AddIcon />
         </Fab>
-      )}
+      ) : null}
 
-      {/* Material Dialog */}
+      {/* Inspect pane — material or vendor based on stack top (Slice 5) */}
+      {top?.kind === "material" ? (
+        <MaterialInspectPane
+          materialId={top.id}
+          isOpen
+          onClose={inspect.close}
+          onEdit={handleOpenEdit}
+          onOpenInPage={handleOpenInPage}
+          onAddVendorQuote={handleAddVendorQuote}
+          onVendorClick={(vendorId, vendorName) =>
+            inspect.push({ kind: "vendor", id: vendorId, title: vendorName })
+          }
+          breadcrumb={breadcrumb}
+          canEdit={canEdit}
+        />
+      ) : null}
+      {top?.kind === "vendor" ? (
+        <VendorInspectPane
+          vendorId={top.id}
+          isOpen
+          onClose={inspect.close}
+          onOpenInPage={handleOpenVendorPage}
+          onAddMaterial={handleAddMaterialToVendor}
+          onMaterialClick={(materialId, materialName) =>
+            inspect.push({ kind: "material", id: materialId, title: materialName })
+          }
+          breadcrumb={breadcrumb}
+          canEdit={canEdit}
+        />
+      ) : null}
+
       <MaterialDialog
         open={dialogOpen}
-        onClose={handleCloseDialog}
+        onClose={() => {
+          setDialogOpen(false);
+          setEditingMaterial(null);
+        }}
         material={editingMaterial}
         categories={categories}
-        onEditVariant={handleOpenDialog}
+        onEditVariant={handleOpenEdit}
       />
 
-      {/* Vendor Drawer */}
-      <VendorDrawer
-        open={!!vendorDrawerMaterial}
-        onClose={handleCloseVendorDrawer}
-        material={vendorDrawerMaterial}
-        onCreatePO={handleCreatePO}
+      <VendorQuoteDialog
+        open={quoteCtx !== null}
+        onClose={() => setQuoteCtx(null)}
+        lockedMaterial={quoteCtx?.lockedMaterial ?? null}
+        lockedVendor={quoteCtx?.lockedVendor ?? null}
+        onSaved={() =>
+          setSnackbar({ open: true, message: "Vendor quote saved", severity: "success" })
+        }
       />
 
-      {/* Delete Confirmation Dialog */}
       <ConfirmDialog
         open={deleteConfirm.open}
         title="Delete Material"
-        message={`Are you sure you want to delete "${deleteConfirm.material?.name}"? This action cannot be undone.`}
+        message={`Delete "${deleteConfirm.material?.name}"? This action cannot be undone.`}
         confirmText="Delete"
         confirmColor="error"
         isLoading={deleteMaterial.isPending}
         onConfirm={handleDeleteConfirm}
-        onCancel={handleDeleteCancel}
+        onCancel={() => setDeleteConfirm({ open: false, material: null })}
       />
 
-      {/* Feedback Snackbar */}
       <Snackbar
         open={snackbar.open}
         autoHideDuration={4000}
-        onClose={handleSnackbarClose}
+        onClose={() => setSnackbar((s) => ({ ...s, open: false }))}
         anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
       >
         <Alert
-          onClose={handleSnackbarClose}
+          onClose={() => setSnackbar((s) => ({ ...s, open: false }))}
           severity={snackbar.severity}
           variant="filled"
           sx={{ width: "100%" }}
@@ -759,6 +566,36 @@ export default function MaterialsPage() {
           {snackbar.message}
         </Alert>
       </Snackbar>
+    </Box>
+  );
+}
+
+function ListSkeleton({ viewMode }: { viewMode: ViewMode }) {
+  if (viewMode === "grid") {
+    return (
+      <Box
+        sx={{
+          display: "grid",
+          gridTemplateColumns: {
+            xs: "repeat(2, 1fr)",
+            sm: "repeat(3, 1fr)",
+            md: "repeat(4, 1fr)",
+            lg: "repeat(5, 1fr)",
+          },
+          gap: 1.25,
+        }}
+      >
+        {Array.from({ length: 10 }).map((_, i) => (
+          <Skeleton key={i} variant="rounded" height={210} />
+        ))}
+      </Box>
+    );
+  }
+  return (
+    <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+      {Array.from({ length: 6 }).map((_, i) => (
+        <Skeleton key={i} variant="rounded" height={84} />
+      ))}
     </Box>
   );
 }
