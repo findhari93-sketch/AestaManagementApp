@@ -493,6 +493,7 @@ export function MestriSettleDialog({
 
           {/* Payer source — canonical 6-option selector with collapse for custom/other-site name */}
           <PayerSourceSelector
+            siteId={siteId}
             value={payerSource}
             customName={customPayerName}
             onChange={setPayerSource}
