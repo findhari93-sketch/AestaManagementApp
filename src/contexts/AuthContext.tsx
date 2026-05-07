@@ -109,10 +109,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     initializeAuth();
 
-    // Safety timeout: if onAuthStateChange hasn't fired within 5 seconds
-    // (e.g., network issue preventing token refresh), force loading=false
-    // to prevent the app from being stuck in a loading state forever.
-    const safetyTimeout = setTimeout(() => {
+    // Safety timeout: if onAuthStateChange hasn't fired INITIAL_SESSION within
+    // 5 seconds, attempt a direct session+profile recovery before clearing the
+    // loading gate. Without recovery, downstream providers (SiteProvider) see
+    // authLoading=false with userProfile=null and clear their state — leaving
+    // a second tab stuck on "No sites available" when cross-tab Supabase auth
+    // lock contention or a slow proxy delays the SDK's INITIAL_SESSION emit.
+    const safetyTimeout = setTimeout(async () => {
+      if (!mounted) return;
+
+      if (!userProfileRef.current) {
+        console.warn("[AuthContext] Safety timeout - attempting profile recovery");
+        const recovery = (async () => {
+          const {
+            data: { session },
+          } = await supabase.auth.getSession();
+          if (!mounted || userProfileRef.current) return;
+          if (session?.user) {
+            setUser(session.user);
+            await fetchUserProfile(session.user.id);
+            initializeSessionManager();
+          }
+        })();
+        await Promise.race([
+          recovery,
+          new Promise<void>((resolve) => setTimeout(resolve, 3000)),
+        ]).catch((err) => {
+          console.error("[AuthContext] Safety timeout recovery failed:", err);
+        });
+      }
+
       if (mounted) {
         setLoading((prev) => {
           if (prev) {
