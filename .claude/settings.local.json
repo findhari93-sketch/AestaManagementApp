@@ -207,12 +207,17 @@
       "PowerShell(docker exec supabase_db_AestaManagementApp psql -U postgres -d postgres -c \"\\\\d companies\" 2>&1)",
       "PowerShell(docker exec supabase_db_AestaManagementApp psql -U postgres -d postgres -c \"SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name LIKE '%compan%';\" 2>&1)",
       "mcp__playwright__browser_type",
-      "mcp__playwright__browser_run_code_unsafe"
+      "mcp__playwright__browser_run_code_unsafe",
+      "Bash(rm expenses-v2-*.png expenses-v2-*.jpeg expenses-v2-*.md && echo \"removed\")",
+      "Read(//c/Program Files/**)",
+      "Bash(find / -path \"*bsn57b228.output\" 2>/dev/null | head -3)",
+      "Read(//c//**)"
     ],
     "deny": [],
     "ask": [],
     "additionalDirectories": [
-      "C:\\Users\\Haribabu\\AppData\\Local\\ms-playwright\\mcp-chrome-8c851e6"
+      "C:\\Users\\Haribabu\\AppData\\Local\\ms-playwright\\mcp-chrome-8c851e6",
+      "C:\\Users\\Haribabu\\Documents\\AppsCopilot\\AestaManagementApp"
     ]
   }
 }
