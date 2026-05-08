@@ -90,40 +90,53 @@ export function MaterialGridCard({
         },
       }}
     >
+      {/* Image area: fixed 4:3 aspect via padding-top trick (works regardless
+          of image natural aspect ratio or row stretch behavior). */}
       <Box
         sx={{
           position: "relative",
-          aspectRatio: "4 / 3",
+          width: "100%",
+          pt: "75%", // 4:3 — height = width * 3/4
           bgcolor: alpha(theme.palette.primary.main, 0.04),
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
           borderBottom: 1,
           borderColor: "divider",
+          flexShrink: 0,
+          overflow: "hidden",
         }}
       >
-        {material.image_url && !imgFailed ? (
-          <Box
-            component="img"
-            src={material.image_url}
-            alt={material.name}
-            loading="lazy"
-            onError={() => setImgFailed(true)}
-            sx={{
-              width: "100%",
-              height: "100%",
-              objectFit: "cover",
-            }}
-          />
-        ) : (
-          <EntityImageAvatar
-            src={null}
-            name={material.name}
-            size={72}
-            fallbackIcon={<InventoryIcon />}
-            tint="primary"
-          />
-        )}
+        <Box
+          sx={{
+            position: "absolute",
+            inset: 0,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          {material.image_url && !imgFailed ? (
+            <Box
+              component="img"
+              src={material.image_url}
+              alt={material.name}
+              loading="lazy"
+              onError={() => setImgFailed(true)}
+              sx={{
+                width: "100%",
+                height: "100%",
+                objectFit: "cover",
+                display: "block",
+              }}
+            />
+          ) : (
+            <EntityImageAvatar
+              src={null}
+              name={material.name}
+              size={72}
+              fallbackIcon={<InventoryIcon />}
+              tint="primary"
+            />
+          )}
+        </Box>
 
         {isFrequent ? (
           <Tooltip title="Frequently ordered" placement="top">

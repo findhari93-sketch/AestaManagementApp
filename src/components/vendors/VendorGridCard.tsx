@@ -63,36 +63,47 @@ export function VendorGridCard({
         },
       }}
     >
+      {/* Image area: fixed 4:3 aspect via padding-top trick. */}
       <Box
         sx={{
           position: "relative",
-          aspectRatio: "4 / 3",
+          width: "100%",
+          pt: "75%",
           bgcolor: alpha(theme.palette.secondary.main, 0.04),
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
           borderBottom: 1,
           borderColor: "divider",
+          flexShrink: 0,
+          overflow: "hidden",
         }}
       >
-        {vendor.shop_photo_url && !imgFailed ? (
-          <Box
-            component="img"
-            src={vendor.shop_photo_url}
-            alt={vendor.name}
-            loading="lazy"
-            onError={() => setImgFailed(true)}
-            sx={{ width: "100%", height: "100%", objectFit: "cover" }}
-          />
-        ) : (
-          <EntityImageAvatar
-            src={null}
-            name={vendor.name}
-            size={72}
-            fallbackIcon={<StorefrontIcon />}
-            tint="secondary"
-          />
-        )}
+        <Box
+          sx={{
+            position: "absolute",
+            inset: 0,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          {vendor.shop_photo_url && !imgFailed ? (
+            <Box
+              component="img"
+              src={vendor.shop_photo_url}
+              alt={vendor.name}
+              loading="lazy"
+              onError={() => setImgFailed(true)}
+              sx={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+            />
+          ) : (
+            <EntityImageAvatar
+              src={null}
+              name={vendor.name}
+              size={72}
+              fallbackIcon={<StorefrontIcon />}
+              tint="secondary"
+            />
+          )}
+        </Box>
 
         {vendor.rating != null && vendor.rating > 0 ? (
           <Box
