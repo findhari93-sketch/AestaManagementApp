@@ -1,29 +1,38 @@
 "use client";
 
 import React from "react";
-import { useRouter } from "next/navigation";
 import { Box, Stack, Chip, Typography, Skeleton } from "@mui/material";
 import { useSiteTrades } from "@/hooks/queries/useTrades";
+import type { TradeContract } from "@/types/trade.types";
+
+/**
+ * Slice E — controlled trade chip filter at the top of /site/attendance.
+ *
+ * Civil chip = the existing per-laborer civil attendance flow renders below
+ * (parent decides). Non-civil chips = parent renders TradeAttendanceView
+ * scoped to the trade's selected contract. Auto-selects the only contract
+ * if a trade has just one; sub-picker chips appear when a trade has 2+.
+ *
+ * Self-hides when no non-civil contracts exist on this site, so civil-only
+ * sites stay clutter-free.
+ */
+export type TradeChipSelection =
+  | { kind: "civil" }
+  | { kind: "trade"; categoryId: string; tradeName: string; contractId: string };
 
 interface TradeChipFilterProps {
   siteId: string | undefined;
+  selected: TradeChipSelection;
+  onChange: (next: TradeChipSelection) => void;
 }
 
-/**
- * Slice C — trade chip filter at the top of /site/attendance.
- *
- * Default: "Civil" chip is selected and the existing per-laborer civil
- * attendance flow renders below unchanged. Tapping a non-civil chip
- * navigates to `/site/trades` where every contract has its own richer
- * entry experience (work updates, headcount, extras, settle) — the
- * supervisor's natural per-trade surface lives there.
- *
- * Only chips for trade categories that have at least one active contract
- * on the current site are shown, plus Civil (always). This keeps the
- * filter focused on what's actually happening on this site today.
- */
-export function TradeChipFilter({ siteId }: TradeChipFilterProps) {
-  const router = useRouter();
+const CIVIL_SENTINEL = "__civil__";
+
+export function TradeChipFilter({
+  siteId,
+  selected,
+  onChange,
+}: TradeChipFilterProps) {
   const { data: trades, isLoading } = useSiteTrades(siteId);
 
   if (!siteId) return null;
@@ -36,25 +45,46 @@ export function TradeChipFilter({ siteId }: TradeChipFilterProps) {
     );
   }
 
-  // Show Civil + any non-civil trade with active contracts. In-house Civil is
-  // always represented by the Civil chip; non-civil chips only appear if
-  // there's actually work to do for that trade on this site.
+  // Civil + non-civil trades that have at least one active contract
   const visibleTrades = (trades ?? []).filter((t) => {
     if (t.category.name === "Civil") return true;
     return t.contracts.length > 0;
   });
 
-  // If there are no non-civil trades active, hide the chip bar entirely —
-  // the page is purely civil-shaped and the chip would be noise.
-  const hasNonCivil = visibleTrades.some((t) => t.category.name !== "Civil");
+  const hasNonCivil = visibleTrades.some(
+    (t) => t.category.name !== "Civil" && t.contracts.length > 0
+  );
   if (!hasNonCivil) return null;
 
-  const handleNonCivilClick = (tradeName: string) => {
-    // Pass the trade name as a focus hint so /site/trades can scroll to /
-    // expand the right card (Slice C polish — the page reads ?focus=…).
-    const slug = tradeName.toLowerCase();
-    router.push(`/site/trades?focus=${encodeURIComponent(slug)}`);
+  // Resolve sub-picker visibility: when the selected trade has >1 active
+  // contract, render a second chip row to switch contractor.
+  const selectedTradeContracts: TradeContract[] | null =
+    selected.kind === "trade"
+      ? (trades ?? []).find((t) => t.category.id === selected.categoryId)
+          ?.contracts ?? null
+      : null;
+  const showSubPicker =
+    selectedTradeContracts !== null && selectedTradeContracts.length > 1;
+
+  const handleTradeChipClick = (
+    categoryId: string,
+    tradeName: string,
+    contracts: TradeContract[]
+  ) => {
+    if (contracts.length === 0) return;
+    onChange({
+      kind: "trade",
+      categoryId,
+      tradeName,
+      // Auto-select first contract; user can switch via sub-picker if >1.
+      contractId: contracts[0].id,
+    });
   };
+
+  const helperText =
+    selected.kind === "civil"
+      ? "Civil work uses this page. Tap any other trade to record headcount / photos / payments here."
+      : `${selected.tradeName} attendance — same page, transformed for this trade. Tap Civil to return.`;
 
   return (
     <Box sx={{ mb: 2 }}>
@@ -64,27 +94,74 @@ export function TradeChipFilter({ siteId }: TradeChipFilterProps) {
       <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
         {visibleTrades.map((trade) => {
           const isCivil = trade.category.name === "Civil";
+          const isSelected = isCivil
+            ? selected.kind === "civil"
+            : selected.kind === "trade" && selected.categoryId === trade.category.id;
           return (
             <Chip
               key={trade.category.id}
               label={
-                isCivil
-                  ? "Civil"
-                  : `${trade.category.name} (${trade.contracts.length})`
+                isCivil ? "Civil" : `${trade.category.name} (${trade.contracts.length})`
               }
-              color={isCivil ? "primary" : "default"}
-              variant={isCivil ? "filled" : "outlined"}
+              color={isSelected ? "primary" : "default"}
+              variant={isSelected ? "filled" : "outlined"}
               onClick={
-                isCivil ? undefined : () => handleNonCivilClick(trade.category.name)
+                isCivil
+                  ? () => onChange({ kind: "civil" })
+                  : () =>
+                      handleTradeChipClick(
+                        trade.category.id,
+                        trade.category.name,
+                        trade.contracts
+                      )
               }
-              sx={{ cursor: isCivil ? "default" : "pointer" }}
+              sx={{ cursor: "pointer" }}
+              data-testid={isCivil ? "trade-chip-civil" : `trade-chip-${trade.category.name.toLowerCase()}`}
             />
           );
         })}
       </Stack>
+
+      {showSubPicker && selected.kind === "trade" && (
+        <Stack
+          direction="row"
+          spacing={1}
+          flexWrap="wrap"
+          useFlexGap
+          sx={{ mt: 1, pl: 1.5, borderLeft: "2px solid", borderColor: "primary.light" }}
+        >
+          <Typography variant="caption" sx={{ alignSelf: "center", mr: 0.5 }}>
+            Contract:
+          </Typography>
+          {(selectedTradeContracts ?? []).map((c) => {
+            const label = c.isInHouse
+              ? "In-house"
+              : c.mesthriOrSpecialistName ?? c.title;
+            const isPicked = selected.contractId === c.id;
+            return (
+              <Chip
+                key={c.id}
+                label={label}
+                size="small"
+                color={isPicked ? "primary" : "default"}
+                variant={isPicked ? "filled" : "outlined"}
+                onClick={() =>
+                  onChange({
+                    kind: "trade",
+                    categoryId: selected.categoryId,
+                    tradeName: selected.tradeName,
+                    contractId: c.id,
+                  })
+                }
+                sx={{ cursor: "pointer" }}
+              />
+            );
+          })}
+        </Stack>
+      )}
+
       <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>
-        Civil work uses this page. Tap any other trade to record headcount /
-        photos / payments in its dedicated workspace.
+        {helperText}
       </Typography>
     </Box>
   );

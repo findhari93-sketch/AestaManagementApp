@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import {
   Box,
   Grid,
@@ -30,7 +30,6 @@ import PageHeader from "@/components/layout/PageHeader";
 
 export default function TradesPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const queryClient = useQueryClient();
   const supabase = createClient();
   const { selectedSite } = useSelectedSite();
@@ -40,10 +39,8 @@ export default function TradesPage() {
   const { data: reconciliations } = useSiteTradeReconciliations(siteId);
   const { data: activity } = useSiteTradeActivity(siteId);
 
-  // Slice C — when /site/attendance navigates here via a trade chip
-  // (?focus=painting), auto-expand the first active contract for that
-  // trade and scroll its card into view. Runs once when trades load.
-  const focus = searchParams?.get("focus")?.toLowerCase();
+  // (Slice C's ?focus auto-expand is now obsolete — Slice E moved trade
+  // attendance entry to /site/attendance itself, no nav-out from chips.)
 
   // Lookup map: tradeCategoryId -> tradeName, used by the create dialog
   const categoryNameById = useMemo(() => {
@@ -59,25 +56,6 @@ export default function TradesPage() {
 
   // Single-expanded state across all trade cards
   const [expandedContractId, setExpandedContractId] = useState<string | null>(null);
-
-  // Auto-expand the first active contract for the focused trade when arriving
-  // from /site/attendance with a ?focus=<trade> query param. Only runs once
-  // per focus value so the user can collapse/re-expand freely afterward.
-  const focusAppliedRef = React.useRef<string | null>(null);
-  useEffect(() => {
-    if (!focus || !trades || trades.length === 0) return;
-    if (focusAppliedRef.current === focus) return;
-    const target = trades.find((t) => t.category.name.toLowerCase() === focus);
-    if (target && target.contracts.length > 0) {
-      setExpandedContractId(target.contracts[0].id);
-      // Scroll the focused card into view on next paint.
-      requestAnimationFrame(() => {
-        const el = document.getElementById(`trade-card-${target.category.id}`);
-        el?.scrollIntoView({ behavior: "smooth", block: "start" });
-      });
-      focusAppliedRef.current = focus;
-    }
-  }, [focus, trades]);
 
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);

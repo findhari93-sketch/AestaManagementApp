@@ -152,7 +152,11 @@ import {
 import { useAuth } from "@/contexts/AuthContext";
 import { useDateRange } from "@/contexts/DateRangeContext";
 import PageHeader from "@/components/layout/PageHeader";
-import { TradeChipFilter } from "@/components/attendance/TradeChipFilter";
+import {
+  TradeChipFilter,
+  type TradeChipSelection,
+} from "@/components/attendance/TradeChipFilter";
+import { TradeAttendanceView } from "@/components/attendance/trade-view/TradeAttendanceView";
 import { useSiteAuditState } from "@/hooks/queries/useSiteAuditState";
 import { LegacyAuditBanner } from "@/components/audit";
 import AttendanceSkeleton from "./attendance-skeleton";
@@ -336,6 +340,12 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
   const supabase = createClient();
   const isMobile = useIsMobile();
   const searchParams = useSearchParams();
+
+  // Slice E — chip filter state lives here so we can early-return to the
+  // TradeAttendanceView when a non-civil chip is selected. Default = civil
+  // (preserves the existing 7000-line page exactly as before).
+  const [tradeChipSelection, setTradeChipSelection] =
+    React.useState<TradeChipSelection>({ kind: "civil" });
   const router = useRouter();
   const theme = useTheme();
 
@@ -2837,6 +2847,21 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
     );
   }
 
+  // Slice E — when supervisor picked a non-civil chip, the page transforms
+  // in place into the per-contract trade attendance view (KPI strip + week
+  // table + per-day drawer). This early-return keeps the entire civil JSX
+  // below untouched. Picking the Civil chip from the trade view sets the
+  // selection back to {kind:"civil"} → re-renders this function → falls
+  // through to the existing return.
+  if (tradeChipSelection.kind === "trade") {
+    return (
+      <TradeAttendanceView
+        selection={tradeChipSelection}
+        onChipChange={setTradeChipSelection}
+      />
+    );
+  }
+
   return (
     <Box
       ref={tableContainerRef}
@@ -2894,13 +2919,15 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
             cutoffDate={auditState.dataStartedAt}
           />
         )}
-        {/* Slice C — trade chip filter. Default Civil chip preserves the
-            existing flow on this page; non-civil chips navigate to
-            /site/trades?focus=<trade> where each contract has its own
-            richer entry experience (work updates, headcount, payments,
-            settle). The bar self-hides when no non-civil contracts exist
-            on this site, so civil-only sites stay clutter-free. */}
-        <TradeChipFilter siteId={selectedSite?.id} />
+        {/* Slice E — trade chip filter (controlled). Civil chip = this page
+            unchanged. Non-civil chip = parent early-returns to
+            TradeAttendanceView. The bar self-hides when no non-civil
+            contracts exist, so civil-only sites stay clutter-free. */}
+        <TradeChipFilter
+          siteId={selectedSite?.id}
+          selected={tradeChipSelection}
+          onChange={setTradeChipSelection}
+        />
       </Box>
 
       {/* Back button when coming from settlement page */}

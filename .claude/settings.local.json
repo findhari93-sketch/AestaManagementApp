@@ -211,7 +211,8 @@
       "Bash(rm expenses-v2-*.png expenses-v2-*.jpeg expenses-v2-*.md && echo \"removed\")",
       "Read(//c/Program Files/**)",
       "Bash(find / -path \"*bsn57b228.output\" 2>/dev/null | head -3)",
-      "Read(//c//**)"
+      "Read(//c//**)",
+      "mcp__playwright__browser_fill_form"
     ],
     "deny": [],
     "ask": [],
