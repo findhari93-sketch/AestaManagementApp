@@ -75,6 +75,12 @@ export default function DashboardContent({
   const queryClient = useQueryClient();
   const supabase = createClient();
 
+  useEffect(() => {
+    if (!authLoading && userProfile?.role === "site_engineer") {
+      router.replace("/site/today");
+    }
+  }, [authLoading, userProfile?.role, router]);
+
   // Use client-side siteId (may differ if user switched sites after page load)
   const siteId = selectedSite?.id;
 

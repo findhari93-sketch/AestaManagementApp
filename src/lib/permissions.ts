@@ -21,6 +21,14 @@ export const hasAdminPermission = (role: UserRole | string | undefined | null): 
 };
 
 /**
+ * Site engineers must go through the Material Request flow; only admin/office
+ * may create Purchase Orders directly. Mirrored by RLS on `purchase_orders` insert.
+ */
+export const canCreatePurchaseOrders = (role: UserRole | string | undefined | null): boolean => {
+  return role === "admin" || role === "office";
+};
+
+/**
  * Check if user can manage users
  * Temporarily allowing all authenticated users during development
  */

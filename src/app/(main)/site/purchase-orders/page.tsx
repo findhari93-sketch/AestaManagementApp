@@ -47,7 +47,7 @@ import MaterialWorkflowBar from "@/components/materials/MaterialWorkflowBar";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSite } from "@/contexts/SiteContext";
 import { useIsMobile } from "@/hooks/useIsMobile";
-import { hasAdminPermission, hasEditPermission } from "@/lib/permissions";
+import { canCreatePurchaseOrders, hasAdminPermission, hasEditPermission } from "@/lib/permissions";
 import {
   usePurchaseOrders,
   usePOSummary,
@@ -138,6 +138,7 @@ export default function PurchaseOrdersPage() {
   const { selectedSite } = useSite();
   const isMobile = useIsMobile();
   const canEdit = hasEditPermission(userProfile?.role);
+  const canCreatePO = canCreatePurchaseOrders(userProfile?.role);
   const isAdmin = hasAdminPermission(userProfile?.role);
 
   // Track if we've already processed URL params
@@ -763,7 +764,7 @@ export default function PurchaseOrdersPage() {
       <PageHeader
         title="Purchase Orders"
         actions={
-          !isMobile && canEdit ? (
+          !isMobile && canCreatePO ? (
             <Button
               variant="contained"
               startIcon={<AddIcon />}
@@ -886,7 +887,7 @@ export default function PurchaseOrdersPage() {
       />
 
       {/* Mobile FAB */}
-      {isMobile && canEdit && (
+      {isMobile && canCreatePO && (
         <Fab
           color="primary"
           sx={{ position: "fixed", bottom: 16, right: 16 }}
