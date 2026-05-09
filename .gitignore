@@ -84,6 +84,10 @@ supabase/.temp/
 /summary-*.png
 /site-selector-*.png
 /edit-dialog-*.png
+/cri-*.png
+/equipment-*.png
+/pumps-*.png
+/vendors-*.png
 
 # Claude scheduled-tasks runtime lock
 .claude/scheduled_tasks.lock
