@@ -9,7 +9,13 @@
 
 BEGIN;
 
--- 1. Drop the auxiliary batch tables. site_engineer_settlements and engineer_reimbursements
+-- 1. Drop dependent views before touching site_engineer_transactions columns.
+--    v_all_expenses references site_engineer_transactions.confirmed_at and .is_settled in
+--    seven CASE expressions (settlement_groups, tea_shop, misc_expense, subcontract_payment
+--    branches). Migration F recreates it with v2-compatible logic.
+DROP VIEW IF EXISTS v_all_expenses CASCADE;
+
+-- 2. Drop the auxiliary batch tables. site_engineer_settlements and engineer_reimbursements
 --    encoded the batch-aware settlement workflow that the new model collapses into a single
 --    spend ledger row.
 DROP TABLE IF EXISTS engineer_wallet_batch_usage CASCADE;

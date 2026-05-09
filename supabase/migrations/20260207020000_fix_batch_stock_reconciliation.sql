@@ -22,6 +22,7 @@ GROUP BY si.id, si.batch_code, si.current_qty, mpe.original_qty;
 DO $$
 DECLARE
   fix_count INTEGER;
+  rec RECORD;
 BEGIN
   SELECT COUNT(*) INTO fix_count
   FROM correct_batch_quantities
