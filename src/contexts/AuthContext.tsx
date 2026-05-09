@@ -31,33 +31,45 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     userProfileRef.current = userProfile;
   }, [userProfile]);
 
-  const fetchUserProfile = useCallback(async (userId: string) => {
-    try {
-      console.log("[AuthContext] Fetching user profile...", { userId });
-      const { data, error } = await supabase
-        .from("users")
-        .select("*")
-        .eq("auth_id", userId)
-        .maybeSingle();
-
-      if (error) {
-        console.error("[AuthContext] Error fetching user profile:", error);
-        setUserProfile(null);
-        return;
+  // Retry once on transient errors (network / auth lock contention) before giving up.
+  // Returning a boolean lets the watchdog effect know whether to schedule another attempt.
+  const fetchUserProfile = useCallback(async (userId: string): Promise<boolean> => {
+    const attempt = async (): Promise<{ ok: boolean; profileFound: boolean }> => {
+      try {
+        const { data, error } = await supabase
+          .from("users")
+          .select("*")
+          .eq("auth_id", userId)
+          .maybeSingle();
+        if (error) return { ok: false, profileFound: false };
+        if (!data) return { ok: true, profileFound: false };
+        setUserProfile(data);
+        return { ok: true, profileFound: true };
+      } catch {
+        return { ok: false, profileFound: false };
       }
+    };
 
-      if (!data) {
-        console.warn("[AuthContext] No profile found for auth user:", userId);
-        setUserProfile(null);
-        return;
-      }
-
-      console.log("[AuthContext] User profile fetched successfully:", data?.name);
-      setUserProfile(data);
-    } catch (error) {
-      console.error("[AuthContext] Error fetching user profile:", error);
-      setUserProfile(null);
+    console.log("[AuthContext] Fetching user profile...", { userId });
+    let result = await attempt();
+    if (!result.ok) {
+      // Single quick retry — covers transient cross-tab auth-lock or 6-conn-limit stalls
+      console.warn("[AuthContext] Profile fetch failed, retrying in 1s...");
+      await new Promise((r) => setTimeout(r, 1000));
+      result = await attempt();
     }
+    if (!result.ok) {
+      console.error("[AuthContext] Profile fetch failed after retry");
+      return false;
+    }
+    if (!result.profileFound) {
+      console.warn("[AuthContext] No profile row for auth user:", userId);
+      // Don't null out an existing profile on a transient empty response; only
+      // null it out when there is genuinely no profile and we previously had none.
+      setUserProfile((prev) => prev ?? null);
+      return false;
+    }
+    return true;
   }, [supabase]);
 
   const refreshUserProfile = useCallback(async () => {
@@ -184,6 +196,53 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       stopSessionManager();
     };
   }, [supabase, fetchUserProfile]);
+
+  // Watchdog: keep retrying profile fetch as long as we have an auth user but
+  // no profile. The 5s+3s safety-timeout recovery is one-shot; if it ran during
+  // a window of cross-tab auth-lock contention or proxy slowness, the second
+  // tab would otherwise sit forever with userProfile=null and SiteProvider
+  // would render "No sites available". Backs off 3s, 6s, 12s, 24s, capped at 30s.
+  // Also retries immediately on tab becoming visible.
+  useEffect(() => {
+    if (!user || userProfile) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let attempt = 0;
+
+    const tryFetch = async () => {
+      if (cancelled || userProfileRef.current) return;
+      const ok = await fetchUserProfile(user.id);
+      if (cancelled || ok) return;
+      attempt++;
+      const delay = Math.min(3000 * Math.pow(2, attempt - 1), 30000);
+      console.log(`[AuthContext] Watchdog retrying profile fetch in ${delay}ms (attempt ${attempt + 1})`);
+      timer = setTimeout(tryFetch, delay);
+    };
+
+    // Small initial delay so the existing 5s safety-timeout recovery wins the
+    // first race when it can; only step in if it didn't.
+    timer = setTimeout(tryFetch, 1500);
+
+    const onVisible = () => {
+      if (typeof document === "undefined") return;
+      if (document.visibilityState === "visible" && !userProfileRef.current) {
+        if (timer) clearTimeout(timer);
+        attempt = 0;
+        tryFetch();
+      }
+    };
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", onVisible);
+    }
+
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", onVisible);
+      }
+    };
+  }, [user?.id, userProfile?.id, fetchUserProfile]);
 
   const signIn = async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({

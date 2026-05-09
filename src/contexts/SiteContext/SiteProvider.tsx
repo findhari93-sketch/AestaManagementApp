@@ -75,7 +75,7 @@ export function SiteProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [isInitialized, setIsInitialized] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const { userProfile, loading: authLoading } = useAuth();
+  const { user, userProfile, loading: authLoading } = useAuth();
   const [supabase] = useState(() => createClient());
 
   // Ref to prevent duplicate fetches
@@ -235,6 +235,7 @@ export function SiteProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     console.log("[SiteContext] Effect triggered:", {
       authLoading,
+      hasUser: !!user,
       hasUserProfile: !!userProfile,
     });
 
@@ -254,16 +255,26 @@ export function SiteProvider({ children }: { children: React.ReactNode }) {
         lastUserIdRef.current = currentUserId;
         fetchSites();
       }
-    } else {
-      console.log("[SiteContext] No user profile, clearing state");
-      hasFetchedRef.current = false;
-      lastUserIdRef.current = null;
-      setSites([]);
-      setSelectedSiteState(null);
-      setLoading(false);
-      setIsInitialized(true);
+      return;
     }
-  }, [authLoading, userProfile?.id, fetchSites]);
+
+    if (user) {
+      // Logged-in auth user but profile fetch hasn't completed yet
+      // (e.g., second tab hit AuthContext's safety-timeout window). The
+      // AuthContext watchdog will keep retrying; don't clear sites and
+      // render "No sites available" in the meantime.
+      console.log("[SiteContext] Auth user present but profile pending, waiting...");
+      return;
+    }
+
+    console.log("[SiteContext] No auth user, clearing state");
+    hasFetchedRef.current = false;
+    lastUserIdRef.current = null;
+    setSites([]);
+    setSelectedSiteState(null);
+    setLoading(false);
+    setIsInitialized(true);
+  }, [authLoading, user, userProfile?.id, fetchSites]);
 
   // Cross-tab sync
   useEffect(() => {
