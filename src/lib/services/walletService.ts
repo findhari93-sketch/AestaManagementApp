@@ -20,6 +20,8 @@ import type {
   SiteBreakdown,
 } from "@/types/wallet.types";
 import type { PayerSource } from "@/types/settlement.types";
+import { recordSpend as recordSpendV2 } from "./engineerWalletV2";
+import type { WalletPaymentMode } from "@/types/engineer-wallet-v2.types";
 
 // ============================================
 // Batch Code Generation
@@ -286,99 +288,39 @@ export async function recordWalletSpending(
   supabase: SupabaseClient,
   config: RecordSpendingConfig
 ): Promise<WalletOperationResult> {
+  // v2 SHIM (2026-05-09): the per-batch ledger model is gone. site_engineer_transactions
+  // no longer has batch_code / remaining_balance / settlement_group_id columns, and
+  // engineer_wallet_batch_usage was dropped. We forward to atomic_record_wallet_spend
+  // (engineerWalletV2.recordSpend), which holds a per-(engineer, site) advisory lock and
+  // accepts any positive amount — a deficit becomes "office owes engineer" and is cleared
+  // by a subsequent deposit on the same site. config.batchAllocations is intentionally
+  // ignored here so existing callers in settlementService keep compiling unchanged.
   try {
-    if (!config.batchAllocations || config.batchAllocations.length === 0) {
-      return { success: false, error: "No batch allocations provided" };
-    }
-
-    // Validate allocations
-    const batches = await getAvailableBatches(supabase, config.engineerId, config.siteId);
-    const validation = validateBatchSelection(
-      batches,
-      config.batchAllocations,
-      config.amount,
-      config.siteId
-    );
-
-    if (!validation.valid) {
-      return { success: false, error: validation.errors.join("; ") };
-    }
-
-    // Create spending transaction
-    const { data: txData, error: txError } = await (supabase
-      .from("site_engineer_transactions") as any)
-      .insert({
-        user_id: config.engineerId,
-        transaction_type: "spent_on_behalf",
-        amount: config.amount,
-        transaction_date: config.transactionDate || dayjs().format("YYYY-MM-DD"),
-        payment_mode: config.paymentMode,
-        site_id: config.siteId,
-        description: config.description,
-        notes: config.notes || null,
-        recipient_type: config.recipientType || null,
-        related_subcontract_id: config.subcontractId || null,
-        proof_url: config.proofUrl || null,
-        recorded_by: config.userName,
-        recorded_by_user_id: config.userId,
-        is_settled: false,
-        // Settlement linking
-        settlement_reference: config.settlementReference || null,
-        settlement_group_id: config.settlementGroupId || null,
-      })
-      .select()
-      .single();
-
-    if (txError) throw txError;
-
-    // Batch insert usage records and update balances in parallel
-    // 1. Prepare all usage records for batch insert
-    const usageRecords = config.batchAllocations.map((allocation) => ({
-      transaction_id: txData.id,
-      batch_transaction_id: allocation.batchId,
-      amount_used: allocation.amount,
-    }));
-
-    // 2. Prepare all balance updates
-    const balanceUpdates = config.batchAllocations
-      .map((allocation) => {
-        const batch = batches.find((b) => b.id === allocation.batchId);
-        if (!batch) return null;
-        return {
-          id: allocation.batchId,
-          remaining_balance: batch.remaining_balance - allocation.amount,
-        };
-      })
-      .filter(Boolean) as { id: string; remaining_balance: number }[];
-
-    // 3. Execute both operations in parallel
-    const [usageResult, balanceResult] = await Promise.all([
-      // Batch insert usage records
-      (supabase.from("engineer_wallet_batch_usage") as any).insert(usageRecords),
-      // Batch update balances using upsert
-      supabase
-        .from("site_engineer_transactions")
-        .upsert(balanceUpdates, { onConflict: "id" }),
-    ]);
-
-    if (usageResult.error) {
-      console.error("Error creating batch usage records:", usageResult.error);
-    }
-
-    if (balanceResult.error) {
-      console.error("Error updating batch balances:", balanceResult.error);
-    }
-
-    return {
-      success: true,
-      transactionId: txData.id,
-    };
-  } catch (err: any) {
+    // PaymentMode includes "cheque" | "other" which the wallet RPC doesn't accept;
+    // map them to bank_transfer (closest equivalent for ledger purposes).
+    const walletPaymentMode: WalletPaymentMode =
+      config.paymentMode === "cash" ||
+      config.paymentMode === "upi" ||
+      config.paymentMode === "bank_transfer"
+        ? config.paymentMode
+        : "bank_transfer";
+    const result = await recordSpendV2(supabase, {
+      engineer_id: config.engineerId,
+      site_id: config.siteId,
+      amount: config.amount,
+      payment_mode: walletPaymentMode,
+      proof_url: config.proofUrl ?? null,
+      transaction_date: config.transactionDate,
+      description: config.description,
+      notes: config.notes ?? null,
+      recorded_by: config.userName,
+      recorded_by_user_id: config.userId,
+    });
+    return { success: true, transactionId: result.id };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Failed to record spending";
     console.error("Error recording wallet spending:", err);
-    return {
-      success: false,
-      error: err.message || "Failed to record spending",
-    };
+    return { success: false, error: message };
   }
 }
 

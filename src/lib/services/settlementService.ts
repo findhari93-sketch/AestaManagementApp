@@ -353,13 +353,9 @@ export async function processSettlement(
 
     // 2. If via engineer wallet, record spending transaction (deducts from wallet batches)
     if (config.paymentChannel === "engineer_wallet" && config.engineerId) {
-      // Validate batch allocations are provided
-      if (!config.batchAllocations || config.batchAllocations.length === 0) {
-        throw new Error("Batch allocation required for engineer wallet settlement. Please select which wallet batches to use.");
-      }
-
-      // Use walletService.recordWalletSpending for proper batch tracking
-      // Map payment mode for compatibility (net_banking -> bank_transfer)
+      // v2 SHIM (2026-05-09): batchAllocations is no longer required — wallet v2 has no
+      // batches, just a per-(engineer, site) running balance. recordWalletSpending forwards
+      // to atomic_record_wallet_spend internally.
       const walletPaymentMode = config.paymentMode === "net_banking" ? "bank_transfer" : config.paymentMode;
       const spendingResult = await recordWalletSpending(supabase, {
         engineerId: config.engineerId,
@@ -607,12 +603,9 @@ export async function processWeeklySettlement(
     settlementGroupId = groupData.id;
     settlementReference = groupData.settlement_reference;
 
-    // 3. If via engineer wallet, record spending transaction (deducts from wallet batches)
+    // 3. If via engineer wallet, record spending transaction
     if (config.paymentChannel === "engineer_wallet" && config.engineerId) {
-      if (!config.batchAllocations || config.batchAllocations.length === 0) {
-        throw new Error("Batch allocation required for engineer wallet settlement. Please select which wallet batches to use.");
-      }
-
+      // v2 SHIM (2026-05-09): batchAllocations no longer required — see recordWalletSpending.
       const walletPaymentMode = config.paymentMode === "net_banking" ? "bank_transfer" : config.paymentMode;
       const spendingResult = await recordWalletSpending(supabase, {
         engineerId: config.engineerId,
