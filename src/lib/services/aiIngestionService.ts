@@ -13,6 +13,7 @@ import { QueryClient } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase/client";
 import { queryKeys } from "@/lib/cache/keys";
 import { splitCategoryHint } from "@/lib/ai-ingestion/schemas";
+import { withTimeout, TIMEOUTS } from "@/lib/utils/timeout";
 import type { AiPurchaseOutput } from "@/lib/ai-ingestion/schemas";
 import type {
   CommitState,
@@ -126,9 +127,18 @@ export async function commitPurchase(args: CommitArgs): Promise<PurchaseCommitRe
 
   const payload = buildPurchasePayload(args);
 
-  const { data, error } = await (supabase as any).rpc("ingest_purchase_atomic", {
-    p_payload: payload,
-  });
+  // The RPC fans out across ~5 tables in one transaction. Bound it with a
+  // generous-but-finite timeout so a stalled Cloudflare-proxy upgrade
+  // doesn't leave the dialog spinning indefinitely. On timeout the throw
+  // bubbles to useAIIngestion.commit's catch which dispatches COMMIT_FAILED
+  // and routes the dialog to the "error" step with a "Try again" CTA.
+  const { data, error } = await withTimeout(
+    Promise.resolve(
+      (supabase as any).rpc("ingest_purchase_atomic", { p_payload: payload }),
+    ),
+    TIMEOUTS.DATABASE_OPERATION,
+    `Save timed out after ${TIMEOUTS.DATABASE_OPERATION / 1000}s. The bill upload succeeded; safe to retry the save.`,
+  );
 
   if (error) {
     throw new Error(error.message ?? "ingest_purchase_atomic failed");
