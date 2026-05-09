@@ -144,6 +144,10 @@ export function CivilStyleTradeTable({
           hasEntry: dayUnits > 0 || dayAmount > 0,
         });
       }
+      // Match Civil's DESC ordering within a week — latest date first so
+      // today sits at the top of the current week and supervisors don't have
+      // to scroll past Sunday-through-Friday to reach today's row.
+      days.reverse();
       groups.push({
         weekStart: ws,
         weekEnd: we,
