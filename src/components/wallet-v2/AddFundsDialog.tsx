@@ -312,6 +312,7 @@ export default function AddFundsDialog({
               customName={payerName}
               onChange={setPayerSource}
               onCustomNameChange={setPayerName}
+              siteId={siteId || undefined}
               compact
             />
           )}

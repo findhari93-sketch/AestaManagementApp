@@ -13,15 +13,11 @@ export type WalletTransactionType = "deposit" | "spend" | "return";
 export type WalletPaymentMode = "cash" | "upi" | "bank_transfer";
 export type WalletPaymentChannel = "direct" | "engineer_wallet";
 
-/** Canonical payer source keys mirrored from the payer_sources registry + legacy compat. */
-export type WalletPayerSourceKey =
-  | "own_money"
-  | "amma_money"
-  | "client_money"
-  | "trust_account"
-  | "other_site_money"
-  | "custom"
-  | "mothers_money"; // legacy back-compat
+/** Payer source key as stored on the wallet ledger.
+ *  Validated against the per-site payer_sources registry at the app layer —
+ *  not at the type or DB-CHECK layer — so site-specific custom keys (e.g.
+ *  "site_cash" on Srinivasan) flow through without a code change. */
+export type WalletPayerSourceKey = string;
 
 /** One row of site_engineer_transactions in the v2 model. */
 export interface WalletLedgerEntry {
