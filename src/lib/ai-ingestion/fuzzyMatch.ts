@@ -197,3 +197,84 @@ export function rankClientSide<T extends { id: string; name: string }>(
     .slice(0, limit);
   return ranked;
 }
+
+// ============================================================================
+// Client-side matchers that take a pre-fetched catalog and return MatchResult
+// in the same shape as the trigram RPCs. Used by resolvePreview to avoid the
+// N+1 RPC fan-out (which queues behind browser concurrent-connection limits
+// and can stall on auth-token-refresh contention).
+// ============================================================================
+
+interface MaterialCatalogRow {
+  id: string;
+  name: string;
+  local_name: string | null;
+  category_id: string | null;
+  unit: string;
+}
+
+interface VendorCatalogRow {
+  id: string;
+  name: string;
+  city: string | null;
+  phone: string | null;
+  gst_number: string | null;
+}
+
+export function matchMaterialClientSide(
+  query: string,
+  catalog: readonly MaterialCatalogRow[],
+  options: { categoryId?: string | null; limit?: number } = {},
+): MatchResult<MaterialMatchCandidate> {
+  const trimmed = query.trim();
+  if (!trimmed) return { status: "new" };
+  const limit = options.limit ?? 5;
+  const filtered = options.categoryId
+    ? catalog.filter((m) => m.category_id === options.categoryId)
+    : catalog;
+
+  // Match against name OR local_name, take the better score.
+  const scored = filtered
+    .map<MaterialMatchCandidate>((m) => {
+      const nameScore = clientSimilarity(trimmed, m.name);
+      const localScore = m.local_name ? clientSimilarity(trimmed, m.local_name) : 0;
+      return {
+        id: m.id,
+        name: m.name,
+        local_name: m.local_name,
+        category_id: m.category_id,
+        unit: m.unit,
+        score: Math.max(nameScore, localScore),
+      };
+    })
+    .filter((c) => c.score >= 0.3)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
+
+  return bucketCandidates(scored);
+}
+
+export function matchVendorClientSide(
+  query: string,
+  catalog: readonly VendorCatalogRow[],
+  options: { limit?: number } = {},
+): MatchResult<VendorMatchCandidate> {
+  const trimmed = query.trim();
+  if (!trimmed) return { status: "new" };
+  const limit = options.limit ?? 5;
+
+  const scored = catalog
+    .map<VendorMatchCandidate>((v) => ({
+      id: v.id,
+      name: v.name,
+      city: v.city,
+      phone: v.phone,
+      gst_number: v.gst_number,
+      score: clientSimilarity(trimmed, v.name),
+    }))
+    .filter((c) => c.score >= 0.3)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
+
+  return bucketCandidates(scored);
+}
