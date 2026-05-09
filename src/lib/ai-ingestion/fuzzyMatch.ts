@@ -13,6 +13,19 @@
  */
 
 import { createClient } from "@/lib/supabase/client";
+import { withTimeout } from "@/lib/utils/timeout";
+
+/**
+ * Per-call timeout for the trigram match RPCs. The Cloudflare Worker proxy
+ * occasionally stalls on REST calls (see memory: production_nav_hang_fix_2026_05_05);
+ * without a timeout the parse step's Promise.all hangs forever and the
+ * "Parsing…" button stays disabled until the user closes the dialog.
+ *
+ * 15s is generous enough to absorb a slow proxy + a 5-row trigram search,
+ * but tight enough that a true hang surfaces as a user-actionable error
+ * within the same step rather than an indefinite spinner.
+ */
+const MATCH_TIMEOUT_MS = 15_000;
 
 export const MATCH_THRESHOLD_AUTO = 0.7;
 export const MATCH_THRESHOLD_AMBIGUOUS = 0.5;
@@ -63,12 +76,18 @@ export async function matchMaterial(
   if (!trimmed) return { status: "new" };
 
   const supabase = createClient();
-  const { data, error } = await (supabase as any).rpc("match_material_by_name", {
-    p_query: trimmed,
-    p_category_id: options.categoryId ?? null,
-    p_threshold: 0.3,
-    p_limit: options.limit ?? 5,
-  });
+  const { data, error } = await withTimeout(
+    Promise.resolve(
+      (supabase as any).rpc("match_material_by_name", {
+        p_query: trimmed,
+        p_category_id: options.categoryId ?? null,
+        p_threshold: 0.3,
+        p_limit: options.limit ?? 5,
+      }),
+    ),
+    MATCH_TIMEOUT_MS,
+    `match_material_by_name timed out after ${MATCH_TIMEOUT_MS / 1000}s`,
+  );
 
   if (error) {
     // RPC missing (e.g. migration not yet applied locally) → caller falls back.
@@ -90,11 +109,17 @@ export async function matchVendor(
   if (!trimmed) return { status: "new" };
 
   const supabase = createClient();
-  const { data, error } = await (supabase as any).rpc("match_vendor_by_name", {
-    p_query: trimmed,
-    p_threshold: 0.3,
-    p_limit: options.limit ?? 5,
-  });
+  const { data, error } = await withTimeout(
+    Promise.resolve(
+      (supabase as any).rpc("match_vendor_by_name", {
+        p_query: trimmed,
+        p_threshold: 0.3,
+        p_limit: options.limit ?? 5,
+      }),
+    ),
+    MATCH_TIMEOUT_MS,
+    `match_vendor_by_name timed out after ${MATCH_TIMEOUT_MS / 1000}s`,
+  );
 
   if (error) {
     throw new FuzzyMatchRpcError(error.message ?? "match_vendor_by_name failed");
