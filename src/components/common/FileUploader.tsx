@@ -48,6 +48,12 @@ const UPLOAD_CONSTANTS = {
   MIN_ATTEMPT_TIMEOUT: 30000,
   TIMEOUT_PER_100KB: 5000,
 
+  // No-progress watchdog: if onloadstart/onprogress doesn't fire within this
+  // window after xhr.send(), the request is likely queued behind a dead socket
+  // in the browser's per-host connection pool. Abort fast so the retry loop
+  // can re-send on a fresh socket — beats waiting the full per-attempt timeout.
+  NO_PROGRESS_WATCHDOG: 5000,
+
   // Retry configuration
   MAX_RETRIES: 2, // Total 3 attempts (1 initial + 2 retries)
   INITIAL_RETRY_DELAY: 1000, // 1s base delay
@@ -523,8 +529,32 @@ export default function FileUploader({
         // Set up timeout
         xhr.timeout = timeoutMs;
 
+        // No-progress watchdog state. Set when the connection produces ANY
+        // signal of life (onloadstart or onprogress). If still false when the
+        // watchdog timer fires, we abort so the retry loop can re-issue on a
+        // fresh socket.
+        let progressed = false;
+        let watchdogTriggered = false;
+        let watchdogTimer: ReturnType<typeof setTimeout> | null = null;
+        const clearWatchdog = () => {
+          if (watchdogTimer) {
+            clearTimeout(watchdogTimer);
+            watchdogTimer = null;
+          }
+        };
+
+        // onloadstart fires once when the request starts loading. For tiny
+        // files this may be the only "we have a connection" signal we get
+        // before onload (no intermediate progress event).
+        xhr.upload.onloadstart = () => {
+          progressed = true;
+          clearWatchdog();
+        };
+
         // Real progress tracking
         xhr.upload.onprogress = (event) => {
+          progressed = true;
+          clearWatchdog();
           if (event.lengthComputable) {
             const percent = Math.round((event.loaded / event.total) * 100);
             onProgress(percent);
@@ -532,6 +562,7 @@ export default function FileUploader({
         };
 
         xhr.onload = () => {
+          clearWatchdog();
           xhrRef.current = null;
           if (xhr.status >= 200 && xhr.status < 300) {
             try {
@@ -561,18 +592,33 @@ export default function FileUploader({
         };
 
         xhr.onerror = () => {
+          clearWatchdog();
           xhrRef.current = null;
           reject(new Error("Network error during upload"));
         };
 
         xhr.ontimeout = () => {
+          clearWatchdog();
           xhrRef.current = null;
           reject(new Error(`Upload timed out after ${Math.round(timeoutMs / 1000)}s`));
         };
 
         xhr.onabort = () => {
+          clearWatchdog();
           xhrRef.current = null;
-          reject(new Error("Upload cancelled"));
+          // Distinguish watchdog-triggered abort (retryable, transient stall)
+          // from user/global-timeout abort (terminal, propagates as cancel).
+          // The retry loop's break-on-cancel check uses "cancelled"/"aborted"
+          // keywords; "stalled" is not in that set so it stays retryable.
+          if (watchdogTriggered) {
+            reject(
+              new Error(
+                `Upload stalled — no progress within ${UPLOAD_CONSTANTS.NO_PROGRESS_WATCHDOG / 1000}s`
+              )
+            );
+          } else {
+            reject(new Error("Upload cancelled"));
+          }
         };
 
         xhr.open("POST", uploadUrl);
@@ -582,6 +628,23 @@ export default function FileUploader({
         // Let browser set Content-Type with boundary for FormData, or set it for raw file
         xhr.setRequestHeader("Content-Type", fileToUpload.type || "application/octet-stream");
         xhr.send(fileToUpload);
+
+        // Arm the watchdog after send. If the request is queued behind a dead
+        // socket in the browser's per-host pool, neither onloadstart nor
+        // onprogress will fire — we abort and let the retry loop try again.
+        watchdogTimer = setTimeout(() => {
+          if (!progressed) {
+            console.warn(
+              `[FileUploader] No upload progress within ${UPLOAD_CONSTANTS.NO_PROGRESS_WATCHDOG}ms — aborting (likely poisoned connection pool)`
+            );
+            watchdogTriggered = true;
+            try {
+              xhr.abort();
+            } catch {
+              // ignore — onabort will handle the rejection
+            }
+          }
+        }, UPLOAD_CONSTANTS.NO_PROGRESS_WATCHDOG);
       });
     },
     [supabase, bucketName]

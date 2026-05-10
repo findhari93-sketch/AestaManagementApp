@@ -107,6 +107,7 @@ const REALTIME_CHANNELS: RealtimeChannelConfig[] = [
 
 let supabaseClient: ReturnType<typeof createClient> | null = null;
 let currentSiteId: string | null = null;
+let storedQueryClient: QueryClient | null = null;
 let tabMessageUnsubscribe: (() => void) | null = null;
 let retryTimeouts: NodeJS.Timeout[] = [];
 
@@ -307,6 +308,7 @@ export function startRealtimeListeners(
 
   supabaseClient = createClient();
   currentSiteId = siteId;
+  storedQueryClient = queryClient;
 
   // Create channels for all configured tables
   for (const config of REALTIME_CHANNELS) {
@@ -363,9 +365,36 @@ export function stopRealtimeListeners() {
     channelStates.clear();
     supabaseClient = null;
     currentSiteId = null;
+    storedQueryClient = null;
   } catch (error) {
     console.error("[Realtime] Failed to stop listeners:", error);
   }
+}
+
+/**
+ * Force WebSocket disconnect + re-subscribe.
+ *
+ * Called by SessionManager.healConnectionPool when a post-idle canary fetch
+ * detects a poisoned per-host connection pool. Calling realtime.disconnect()
+ * closes the half-open WS that has been blocking REST traffic; the subsequent
+ * stop+start re-creates fresh channels.
+ *
+ * No-op if no active subscription (follower tabs, no site selected).
+ */
+export function forceRealtimeReconnect(): void {
+  if (!supabaseClient || !currentSiteId || !storedQueryClient) {
+    return;
+  }
+  const qc = storedQueryClient;
+  const siteId = currentSiteId;
+  console.log("[Realtime] Force reconnect — disconnecting WS to evict dead socket");
+  try {
+    supabaseClient.realtime.disconnect();
+  } catch (err) {
+    console.warn("[Realtime] disconnect threw:", err);
+  }
+  stopRealtimeListeners();
+  startRealtimeListeners(qc, siteId);
 }
 
 /**

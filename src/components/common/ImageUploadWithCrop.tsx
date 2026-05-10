@@ -19,7 +19,7 @@ import {
   Image as ImageIcon,
 } from "@mui/icons-material";
 import { SupabaseClient } from "@supabase/supabase-js";
-import { ensureFreshSession } from "@/lib/auth/sessionManager";
+import { hardenedUpload } from "@/lib/storage/uploadHelpers";
 import ImageCropper from "@/components/profile/ImageCropper";
 
 interface ImageUploadWithCropProps {
@@ -105,19 +105,8 @@ export default function ImageUploadWithCrop({
     setUploading(true);
     setError(null);
 
-    // Timeout for upload (30 seconds)
-    const uploadTimeout = 30000;
-    let timeoutId: NodeJS.Timeout | null = null;
-
-    // ... existing imports
-
-    // Inside handleCropComplete:
-
     try {
-      // Ensure fresh session before starting upload
-      await ensureFreshSession();
-
-      // Compress the cropped image if needed (with 8s timeout)
+      // Compress the cropped image if needed (with 8s safety timeout)
       let finalBlob = croppedBlob;
       if (croppedBlob.size > maxSizeKB * 1024) {
         const compressionPromise = compressBlob(croppedBlob, maxSizeKB);
@@ -130,60 +119,31 @@ export default function ImageUploadWithCrop({
         finalBlob = await Promise.race([compressionPromise, compressionTimeout]);
       }
 
-      // Generate filename
       const timestamp = Date.now();
       const fileName = `${fileNamePrefix}_${timestamp}.jpg`;
       const filePath = `${folderPath}/${fileName}`;
 
       console.log(`[ImageUpload] Uploading to ${bucketName}/${filePath}, size: ${finalBlob.size} bytes`);
 
-      // Create upload promise with timeout
-      const uploadPromise = supabase.storage
-        .from(bucketName)
-        .upload(filePath, finalBlob, {
-          cacheControl: "3600",
-          upsert: true,
-          contentType: "image/jpeg",
-        });
-
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        timeoutId = setTimeout(() => {
-          reject(new Error("Upload timed out. Please try again."));
-        }, uploadTimeout);
+      const { publicUrl } = await hardenedUpload({
+        supabase,
+        bucketName,
+        filePath,
+        file: finalBlob,
+        contentType: "image/jpeg",
       });
 
-      // Race between upload and timeout
-      const { data, error: uploadError } = await Promise.race([
-        uploadPromise,
-        timeoutPromise,
-      ]) as Awaited<typeof uploadPromise>;
-
-      if (timeoutId) clearTimeout(timeoutId);
-
-      if (uploadError) {
-        console.error("[ImageUpload] Upload error:", uploadError);
-        throw new Error(uploadError.message || "Upload failed");
-      }
-
-      if (!data?.path) {
-        throw new Error("Upload completed but no file path returned");
-      }
-
-      console.log("[ImageUpload] Upload successful:", data.path);
-
-      // Get public URL
-      const { data: { publicUrl } } = supabase.storage
-        .from(bucketName)
-        .getPublicUrl(data.path);
-
       console.log("[ImageUpload] Public URL:", publicUrl);
-
       onChange(publicUrl);
       setSelectedImage(null);
     } catch (err: any) {
-      if (timeoutId) clearTimeout(timeoutId);
       console.error("[ImageUpload] Error:", err);
-      setError(err.message || "Failed to upload image");
+      const message = err?.message || "Failed to upload image";
+      setError(
+        message.includes("timed out") || message.includes("stalled")
+          ? "Upload timed out. Please check your connection and try again."
+          : message
+      );
     } finally {
       setUploading(false);
     }

@@ -40,6 +40,7 @@ import {
 import CategoryAutocomplete from "@/components/common/CategoryAutocomplete";
 import { compressImage } from "@/components/attendance/work-updates/imageUtils";
 import { createClient } from "@/lib/supabase/client";
+import { hardenedUpload } from "@/lib/storage/uploadHelpers";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useFormDraft } from "@/hooks/useFormDraft";
 import {
@@ -181,26 +182,24 @@ export default function VendorDialog({
       // Compress image for QR codes (max 200KB, 400px)
       const compressedFile = await compressImage(file, 200, 400, 400, 0.8);
 
-      // Generate unique file name
-      const fileExt = "jpg";
-      const fileName = `vendors/${vendor?.id || "new"}/${Date.now()}.${fileExt}`;
+      const fileName = `vendors/${vendor?.id || "new"}/${Date.now()}.jpg`;
 
-      // Upload to Supabase Storage
-      const { error: uploadError } = await supabase.storage
-        .from("vendor-qr")
-        .upload(fileName, compressedFile, {
-          cacheControl: "3600",
-          upsert: true,
-        });
-
-      if (uploadError) throw uploadError;
-
-      // Get public URL
-      const { data: urlData } = supabase.storage.from("vendor-qr").getPublicUrl(fileName);
-      handleChange("qr_code_url", urlData.publicUrl);
+      const { publicUrl } = await hardenedUpload({
+        supabase,
+        bucketName: "vendor-qr",
+        filePath: fileName,
+        file: compressedFile,
+        contentType: "image/jpeg",
+      });
+      handleChange("qr_code_url", publicUrl);
     } catch (err: unknown) {
       console.error("Error uploading QR code:", err);
-      setError("Failed to upload QR code image");
+      const message = err instanceof Error ? err.message : "";
+      setError(
+        message.includes("timed out") || message.includes("stalled")
+          ? "Upload timed out. Please check your connection and try again."
+          : "Failed to upload QR code image"
+      );
     } finally {
       setUploadingQr(false);
       if (fileInputRef.current) {
@@ -230,26 +229,24 @@ export default function VendorDialog({
       // Compress image for shop photos (max 500KB, 1200px)
       const compressedFile = await compressImage(file, 500, 1200, 1200, 0.8);
 
-      // Generate unique file name
-      const fileExt = "jpg";
-      const fileName = `vendors/${vendor?.id || "new"}/${Date.now()}_shop.${fileExt}`;
+      const fileName = `vendors/${vendor?.id || "new"}/${Date.now()}_shop.jpg`;
 
-      // Upload to Supabase Storage
-      const { error: uploadError } = await supabase.storage
-        .from("vendor-photos")
-        .upload(fileName, compressedFile, {
-          cacheControl: "3600",
-          upsert: true,
-        });
-
-      if (uploadError) throw uploadError;
-
-      // Get public URL
-      const { data: urlData } = supabase.storage.from("vendor-photos").getPublicUrl(fileName);
-      handleChange("shop_photo_url", urlData.publicUrl);
+      const { publicUrl } = await hardenedUpload({
+        supabase,
+        bucketName: "vendor-photos",
+        filePath: fileName,
+        file: compressedFile,
+        contentType: "image/jpeg",
+      });
+      handleChange("shop_photo_url", publicUrl);
     } catch (err: unknown) {
       console.error("Error uploading shop photo:", err);
-      setError("Failed to upload shop photo");
+      const message = err instanceof Error ? err.message : "";
+      setError(
+        message.includes("timed out") || message.includes("stalled")
+          ? "Upload timed out. Please check your connection and try again."
+          : "Failed to upload shop photo"
+      );
     } finally {
       setUploadingShopPhoto(false);
       if (shopPhotoInputRef.current) {

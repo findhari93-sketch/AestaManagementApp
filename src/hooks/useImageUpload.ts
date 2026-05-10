@@ -3,6 +3,7 @@
 import { useState, useCallback } from "react";
 import imageCompression from "browser-image-compression";
 import { SupabaseClient } from "@supabase/supabase-js";
+import { hardenedUpload } from "@/lib/storage/uploadHelpers";
 
 export interface UploadedImage {
   url: string;
@@ -87,51 +88,44 @@ export function useImageUpload({
 
       setProgress(50);
 
-      const uploadPromise = supabase.storage
-        .from(bucketName)
-        .upload(filePath, file, {
-          cacheControl: "3600",
-          upsert: true,
+      try {
+        const { publicUrl } = await hardenedUpload({
+          supabase,
+          bucketName,
+          filePath,
+          file,
+          onProgress: (percent) => {
+            // Map XHR progress (0-100) to our UI range (50-95)
+            setProgress(50 + Math.round(percent * 0.45));
+          },
         });
-
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("Upload timed out. Please try again.")), 30000)
-      );
-
-      const { data, error: uploadError } = await Promise.race([
-        uploadPromise,
-        timeoutPromise,
-      ]) as Awaited<typeof uploadPromise>;
-
-      if (uploadError) {
-        // Provide user-friendly error messages
-        if (uploadError.message.includes("Bucket not found") || uploadError.message.includes("bucket")) {
+        setProgress(100);
+        return publicUrl;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        // Provide user-friendly error messages for known failure modes
+        if (message.includes("Bucket not found") || message.includes("bucket")) {
           throw new Error(
             `Storage bucket "${bucketName}" not found. Please create it in your Supabase Dashboard > Storage.`
           );
         }
-        if (uploadError.message.includes("not allowed") || uploadError.message.includes("policy")) {
+        if (message.includes("not allowed") || message.includes("policy")) {
           throw new Error(
             "Upload permission denied. Please check your storage bucket policies in Supabase."
           );
         }
-        if (uploadError.message.includes("too large") || uploadError.message.includes("size")) {
+        if (message.includes("too large") || message.includes("size")) {
           throw new Error(
             "Image is too large. Please try a smaller image (max 5MB recommended)."
           );
         }
-        throw new Error(uploadError.message);
+        if (message.includes("timed out") || message.includes("stalled")) {
+          throw new Error(
+            "Upload timed out. Please check your connection and try again."
+          );
+        }
+        throw err;
       }
-
-      setProgress(80);
-
-      const {
-        data: { publicUrl },
-      } = supabase.storage.from(bucketName).getPublicUrl(data.path);
-
-      setProgress(100);
-
-      return publicUrl;
     },
     [supabase, bucketName, folderPath]
   );

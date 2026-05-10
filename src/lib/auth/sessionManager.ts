@@ -31,6 +31,17 @@ const VISIBILITY_REFRESH_THRESHOLD = 5 * 60 * 1000; // 5 minutes - re-auth on ta
 // detection (which surfaces as a 400 invalid_grant from /auth/v1/token).
 let _refreshInFlight: Promise<boolean> | null = null;
 
+// Module-level dedupe for the full idle-wake recovery (refresh + pool heal).
+// Both `handleVisibilityChange` (tab return) and `handleActivity` (same-tab idle
+// end) can race here when the user backgrounds the tab and clicks immediately
+// on return — let only one run finish.
+let _recoverInFlight: Promise<void> | null = null;
+
+// Canary endpoint: a tiny GET against the proxy used to detect a poisoned
+// per-host connection pool. labor_categories is in the Worker's CACHEABLE_TABLES
+// so it's edge-cached and never round-trips to Supabase under normal conditions.
+const CANARY_TIMEOUT_MS = 3000;
+
 type SessionManagerState = {
   isInitialized: boolean;
   lastActivity: number;
@@ -408,33 +419,137 @@ class SessionManager {
   };
 
   private async recoverFromIdleWake(): Promise<void> {
-    const qc = this.state.queryClient;
-
-    // Drop zombie fetches before they complete with the stale token and pollute
-    // the cache or trigger 401-handling races against our refresh.
-    if (qc) {
-      try {
-        await qc.cancelQueries();
-      } catch (err) {
-        console.warn("[SessionManager] cancelQueries threw:", err);
-      }
+    if (_recoverInFlight) {
+      return _recoverInFlight;
     }
+    _recoverInFlight = (async () => {
+      try {
+        const qc = this.state.queryClient;
 
-    const ok = await this.refreshSessionDeduped();
+        // Drop zombie fetches before they complete with the stale token and
+        // pollute the cache or trigger 401-handling races against our refresh.
+        if (qc) {
+          try {
+            await qc.cancelQueries();
+          } catch (err) {
+            console.warn("[SessionManager] cancelQueries threw:", err);
+          }
+        }
 
-    if (ok) {
-      this.state.lastSessionCheckTime = Date.now();
-      this.state.needsRefreshOnNextMutation = false;
-      this.dispatchSessionRestoredEvent();
+        const ok = await this.refreshSessionDeduped();
+
+        if (ok) {
+          this.state.lastSessionCheckTime = Date.now();
+          this.state.needsRefreshOnNextMutation = false;
+
+          // Heal browser per-host connection pool. Canary first; only force a
+          // realtime reconnect if the pool is actually poisoned. This is the
+          // root-cause fix for "Upload timed out" after idle.
+          await this.healConnectionPool();
+
+          this.dispatchSessionRestoredEvent();
+          return;
+        }
+
+        // Refresh failed. If it's an unrecoverable refresh-token state (rotated
+        // / reused / expired), the only path back is a fresh login. Anything
+        // else — transient network — will recover on the next user action.
+        console.error("[SessionManager] Idle-wake refresh failed — redirecting to login");
+        if (typeof window !== "undefined") {
+          window.location.href = "/login?session_expired=true";
+        }
+      } finally {
+        _recoverInFlight = null;
+      }
+    })();
+    return _recoverInFlight;
+  }
+
+  /**
+   * Detect and heal a poisoned browser per-host connection pool.
+   *
+   * When the tab has been idle, the Supabase realtime WebSocket can die
+   * silently (browser timer throttling, ISP/Cloudflare killing idle TCP).
+   * The browser keeps the half-open socket in its per-host pool until
+   * something tries to use it — at which point an XHR upload to the same
+   * host queues behind the dead socket and never gets a progress event.
+   *
+   * Strategy: run a tiny canary GET bound by 3s. If it succeeds, the pool
+   * is fine — leave realtime alone. If it fails, force-disconnect the WS
+   * (which evicts its socket from the pool) and re-subscribe channels.
+   */
+  private async healConnectionPool(): Promise<void> {
+    const canaryOk = await this.runPoolCanary();
+    if (canaryOk) {
+      console.log("[SessionManager] Pool canary OK — no heal needed");
       return;
     }
 
-    // Refresh failed. If it's an unrecoverable refresh-token state (rotated /
-    // reused / expired), the only path back is a fresh login. Anything else —
-    // transient network — will recover on the next user action.
-    console.error("[SessionManager] Idle-wake refresh failed — redirecting to login");
-    if (typeof window !== "undefined") {
-      window.location.href = "/login?session_expired=true";
+    console.warn(
+      "[SessionManager] Pool canary failed — forcing realtime reconnect to evict dead socket"
+    );
+    try {
+      const { forceRealtimeReconnect } = await import("@/lib/supabase/realtime");
+      forceRealtimeReconnect();
+    } catch (err) {
+      console.error("[SessionManager] forceRealtimeReconnect failed:", err);
+      return;
+    }
+
+    // Verify the heal worked. If still failing, surface a UI-level event so
+    // the app can show a brief "Reconnecting…" banner instead of leaving the
+    // user to puzzle out why the next action fails.
+    const recoveredOk = await this.runPoolCanary();
+    if (recoveredOk) {
+      console.log("[SessionManager] Pool healed after realtime reconnect");
+    } else if (typeof window !== "undefined") {
+      console.error("[SessionManager] Pool still degraded after heal");
+      window.dispatchEvent(new CustomEvent("connection-degraded"));
+    }
+  }
+
+  /**
+   * Tiny GET against the Worker proxy to detect a poisoned connection pool.
+   * Hits a Worker-cached table so it's cheap and doesn't load Supabase.
+   * Returns true on 2xx within CANARY_TIMEOUT_MS, false on timeout / network
+   * failure / non-2xx.
+   */
+  private async runPoolCanary(): Promise<boolean> {
+    if (typeof window === "undefined") return true;
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const apikey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    if (!url || !apikey) return true;
+
+    const startedAt = Date.now();
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), CANARY_TIMEOUT_MS);
+    try {
+      const res = await fetch(
+        `${url}/rest/v1/labor_categories?select=id&limit=1`,
+        {
+          method: "GET",
+          headers: { apikey, Accept: "application/json" },
+          signal: ctrl.signal,
+          cache: "no-store",
+        }
+      );
+      const elapsed = Date.now() - startedAt;
+      if (!res.ok) {
+        console.warn(`[SessionManager] Canary HTTP ${res.status} in ${elapsed}ms`);
+        return false;
+      }
+      console.log(`[SessionManager] Canary OK in ${elapsed}ms`);
+      return true;
+    } catch (err) {
+      const elapsed = Date.now() - startedAt;
+      const isAbort = err instanceof Error && err.name === "AbortError";
+      console.warn(
+        `[SessionManager] Canary ${isAbort ? "timed out" : "failed"} after ${elapsed}ms`,
+        isAbort ? "" : err
+      );
+      return false;
+    } finally {
+      clearTimeout(timer);
     }
   }
 
@@ -471,11 +586,15 @@ class SessionManager {
     this.state.activityTimer = setTimeout(() => {
       this.state.lastActivity = Date.now();
 
-      // Instead of refreshing immediately (which causes race conditions with ensureFreshSession),
-      // just set a flag. The next ensureFreshSession call will handle the refresh.
       if (wasIdle) {
-        console.log("[SessionManager] Activity detected after idle - flagging for refresh on next mutation");
+        console.log("[SessionManager] Activity detected after idle — running idle-wake recovery");
         this.state.needsRefreshOnNextMutation = true;
+        // Same-tab idle-end recovery. visibilitychange wouldn't fire here
+        // because the tab was never hidden, so without this the FIRST upload
+        // after a long same-tab idle is the one that gets poisoned-pool'd.
+        // recoverFromIdleWake is deduped, so racing with the visibility path
+        // is safe.
+        void this.recoverFromIdleWake();
       }
     }, ACTIVITY_DEBOUNCE);
   };

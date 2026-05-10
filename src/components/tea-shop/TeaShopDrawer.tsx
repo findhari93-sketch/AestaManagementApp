@@ -22,6 +22,7 @@ import {
   Delete as DeleteIcon,
 } from "@mui/icons-material";
 import { createClient } from "@/lib/supabase/client";
+import { hardenedUpload } from "@/lib/storage/uploadHelpers";
 import { useAuth } from "@/contexts/AuthContext";
 import type { Database } from "@/types/database.types";
 
@@ -114,29 +115,26 @@ export default function TeaShopDrawer({
     setError(null);
 
     try {
-      // Generate unique file name
       const fileExt = file.name.split(".").pop();
       const fileName = `${siteId}/${Date.now()}.${fileExt}`;
 
-      // Upload to Supabase Storage
-      const { data, error: uploadError } = await supabase.storage
-        .from("tea-shop-qr")
-        .upload(fileName, file, {
-          cacheControl: "3600",
-          upsert: true,
-        });
-
-      if (uploadError) throw uploadError;
-
-      // Get public URL
-      const { data: urlData } = supabase.storage.from("tea-shop-qr").getPublicUrl(fileName);
-      setQrCodeUrl(urlData.publicUrl);
+      const { publicUrl } = await hardenedUpload({
+        supabase,
+        bucketName: "tea-shop-qr",
+        filePath: fileName,
+        file,
+      });
+      setQrCodeUrl(publicUrl);
     } catch (err: any) {
       console.error("Error uploading QR code:", err);
-      setError("Failed to upload QR code image");
+      const message = err?.message || "";
+      setError(
+        message.includes("timed out") || message.includes("stalled")
+          ? "Upload timed out. Please check your connection and try again."
+          : "Failed to upload QR code image"
+      );
     } finally {
       setUploadingQr(false);
-      // Reset file input
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
       }

@@ -24,6 +24,7 @@ import {
 import imageCompression from "browser-image-compression";
 import { getWorkUpdatePhotoPath } from "./imageUtils";
 import { SupabaseClient } from "@supabase/supabase-js";
+import { hardenedUpload } from "@/lib/storage/uploadHelpers";
 
 // Helper to detect if running on mobile
 const isMobileDevice = () => {
@@ -56,8 +57,7 @@ const withTimeout = <T,>(promise: Promise<T>, timeoutMs: number, errorMsg: strin
 };
 
 // Upload timeout constants
-const UPLOAD_TIMEOUT_MS = 30000; // 30 seconds per upload attempt
-const MAX_OPERATION_MS = 120000; // 2 minutes max for entire operation
+const MAX_OPERATION_MS = 120000; // 2 minutes max for entire operation (compression + upload)
 
 // Helper to convert storage errors to user-friendly messages
 const getUploadErrorMessage = (error: unknown): string => {
@@ -67,8 +67,8 @@ const getUploadErrorMessage = (error: unknown): string => {
 
   const message = error.message.toLowerCase();
 
-  // Check for timeout
-  if (message.includes("timed out")) {
+  // Check for timeout / stalled (poisoned-pool watchdog from hardenedUpload)
+  if (message.includes("timed out") || message.includes("stalled")) {
     return "Upload timed out. Please check your internet connection and try again.";
   }
 
@@ -288,59 +288,6 @@ export default function PhotoCaptureButton({
     setTimeout(() => setError(null), 3000);
   }, []);
 
-  // Upload with retry logic
-  const uploadWithRetry = async (
-    filePath: string,
-    file: File,
-    maxRetries: number = 2
-  ): Promise<{ error: Error | null; data: unknown }> => {
-    let lastError: Error | null = null;
-
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      console.log(`[PhotoCapture] Upload attempt ${attempt}/${maxRetries}`);
-
-      try {
-        // Wrap upload with timeout to prevent indefinite hangs
-        const { error: uploadError, data: uploadData } = await withTimeout(
-          supabase.storage
-            .from("work-updates")
-            .upload(filePath, file, {
-              cacheControl: "3600",
-              upsert: true,
-            }),
-          UPLOAD_TIMEOUT_MS,
-          `Upload timed out after ${UPLOAD_TIMEOUT_MS / 1000}s. Please check your connection.`
-        );
-
-        if (!uploadError) {
-          return { error: null, data: uploadData };
-        }
-
-        lastError = new Error(uploadError.message || "Upload failed");
-        // Preserve status code if available for better error messages
-        if ("status" in uploadError) {
-          (lastError as unknown as Record<string, unknown>).status = (uploadError as unknown as Record<string, unknown>).status;
-        }
-        console.warn(`[PhotoCapture] Attempt ${attempt} failed:`, uploadError.message);
-
-        // Wait before retry (exponential backoff)
-        if (attempt < maxRetries) {
-          await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
-        }
-      } catch (err) {
-        lastError = err instanceof Error ? err : new Error(String(err));
-        console.warn(`[PhotoCapture] Attempt ${attempt} exception:`, lastError.message);
-
-        // Don't retry on timeout - fail fast
-        if (lastError.message.includes("timed out")) {
-          break;
-        }
-      }
-    }
-
-    return { error: lastError, data: null };
-  };
-
   const handleCapture = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -464,30 +411,31 @@ export default function PhotoCaptureButton({
         throw new Error("Upload cancelled");
       }
 
-      // Upload to Supabase
+      // Upload to Supabase via hardened pipeline (ensureFreshSession +
+      // no-progress watchdog + retry — see src/lib/storage/uploadHelpers.ts)
       setUploadProgress(55);
       setUploadStatus("uploading");
       const filePath = getWorkUpdatePhotoPath(siteId, date, period, photoIndex);
       console.log("[PhotoCapture] Uploading to path:", filePath);
 
-      const { error: uploadError } = await uploadWithRetry(filePath, compressedFile, 2);
+      const { publicUrl } = await hardenedUpload({
+        supabase,
+        bucketName: "work-updates",
+        filePath,
+        file: compressedFile,
+        signal: abortControllerRef.current?.signal,
+        onProgress: (percent) => {
+          // Map XHR progress (0-100) to UI range (55-90)
+          if (isMountedRef.current) {
+            setUploadProgress(55 + Math.round(percent * 0.35));
+          }
+        },
+      });
 
-      // Check if cancelled
+      // Check if cancelled (hardenedUpload also honors signal, this is belt-and-suspenders)
       if (abortControllerRef.current?.signal.aborted) {
         throw new Error("Upload cancelled");
       }
-
-      if (uploadError) {
-        console.error("[PhotoCapture] Upload error:", uploadError.message);
-        throw uploadError;
-      }
-
-      setUploadProgress(90);
-
-      // Get public URL
-      const {
-        data: { publicUrl },
-      } = supabase.storage.from("work-updates").getPublicUrl(filePath);
 
       console.log("[PhotoCapture] Success! Public URL:", publicUrl);
       setUploadProgress(100);
