@@ -19,6 +19,7 @@ import {
   commitPurchase,
   type PurchaseCommitResult,
 } from "@/lib/services/aiIngestionService";
+import { withTimeout, TIMEOUTS } from "@/lib/utils/timeout";
 import { createClient } from "@/lib/supabase/client";
 import type {
   ModeConfig,
@@ -35,7 +36,7 @@ export const AI_CATALOG_QUERY_KEYS = {
   vendors: ["vendors", "ai-catalog"] as const,
   materials: ["materials", "ai-catalog"] as const,
 };
-const CATALOG_STALE_TIME_MS = 5 * 60 * 1000;
+const CATALOG_STALE_TIME_MS = 30 * 60 * 1000;
 
 export async function fetchVendorsForMatch() {
   const supabase = createClient();
@@ -77,18 +78,22 @@ export function createPurchaseMode(
       // at dialog-open time) has already completed, or joins the in-flight
       // request if it's still running. Uses JOIN-free selects so Supabase
       // executes a fast index scan and the Cloudflare Worker can edge-cache.
-      const [allVendors, allMaterials] = await Promise.all([
-        queryClient.fetchQuery({
-          queryKey: AI_CATALOG_QUERY_KEYS.vendors,
-          queryFn: fetchVendorsForMatch,
-          staleTime: CATALOG_STALE_TIME_MS,
-        }),
-        queryClient.fetchQuery({
-          queryKey: AI_CATALOG_QUERY_KEYS.materials,
-          queryFn: fetchMaterialsForMatch,
-          staleTime: CATALOG_STALE_TIME_MS,
-        }),
-      ]);
+      const [allVendors, allMaterials] = await withTimeout(
+        Promise.all([
+          queryClient.fetchQuery({
+            queryKey: AI_CATALOG_QUERY_KEYS.vendors,
+            queryFn: fetchVendorsForMatch,
+            staleTime: CATALOG_STALE_TIME_MS,
+          }),
+          queryClient.fetchQuery({
+            queryKey: AI_CATALOG_QUERY_KEYS.materials,
+            queryFn: fetchMaterialsForMatch,
+            staleTime: CATALOG_STALE_TIME_MS,
+          }),
+        ]),
+        TIMEOUTS.QUERY,
+        "Catalog fetch timed out. Please close and reopen the dialog to retry.",
+      );
 
       const supabase = createClient();
 
