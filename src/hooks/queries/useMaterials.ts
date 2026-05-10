@@ -218,54 +218,58 @@ export function useDeleteMaterialCategory() {
 // ============================================
 
 /**
+ * Standalone fetch — usable outside React hooks (e.g. queryClient.prefetchQuery / fetchQuery).
+ * Returns the full material list with category + brands, keyed by queryKeys.materials.list().
+ */
+export async function fetchMaterialCatalog(): Promise<MaterialWithDetails[]> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("materials")
+    .select(
+      `
+      *,
+      category:material_categories(id, name, code),
+      brands:material_brands(id, brand_name, variant_name, is_preferred, quality_rating, image_url, is_active)
+    `
+    )
+    .eq("is_active", true)
+    .order("name");
+  if (error) throw error;
+
+  const materials = data as unknown as MaterialWithDetails[];
+  const parentIds = [...new Set(materials.filter(m => m.parent_id).map(m => m.parent_id!))];
+
+  if (parentIds.length > 0) {
+    const { data: parents } = await supabase
+      .from("materials")
+      .select("id, name, code")
+      .in("id", parentIds);
+
+    const parentMap = new Map(parents?.map(p => [p.id, p]) || []);
+    for (const m of materials) {
+      if (m.parent_id) {
+        m.parent_material = parentMap.get(m.parent_id) || null;
+      }
+    }
+  }
+
+  return materials;
+}
+
+/**
  * Fetch all materials with optional category filter
  * Includes parent material info for variants
  */
 export function useMaterials(categoryId?: string | null) {
-  const supabase = createClient();
-
   return useQuery({
     queryKey: categoryId
       ? [...queryKeys.materials.list(), categoryId]
       : queryKeys.materials.list(),
     queryFn: wrapQueryFn(async () => {
-      let query = supabase
-        .from("materials")
-        .select(
-          `
-          *,
-          category:material_categories(id, name, code),
-          brands:material_brands(id, brand_name, variant_name, is_preferred, quality_rating, image_url, is_active)
-        `
-        )
-        .eq("is_active", true)
-        .order("name");
-
+      const materials = await fetchMaterialCatalog();
       if (categoryId) {
-        query = query.eq("category_id", categoryId);
+        return materials.filter(m => m.category_id === categoryId);
       }
-
-      const { data, error } = await query;
-      if (error) throw error;
-
-      // Fetch parent material names for variants
-      const materials = data as unknown as MaterialWithDetails[];
-      const parentIds = [...new Set(materials.filter(m => m.parent_id).map(m => m.parent_id!))];
-
-      if (parentIds.length > 0) {
-        const { data: parents } = await supabase
-          .from("materials")
-          .select("id, name, code")
-          .in("id", parentIds);
-
-        const parentMap = new Map(parents?.map(p => [p.id, p]) || []);
-        for (const m of materials) {
-          if (m.parent_id) {
-            m.parent_material = parentMap.get(m.parent_id) || null;
-          }
-        }
-      }
-
       return materials;
     }, { operationName: "useMaterials" }),
   });

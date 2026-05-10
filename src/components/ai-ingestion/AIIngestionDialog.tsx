@@ -29,6 +29,9 @@ import type { IngestionMode, IngestionStep } from "@/lib/ai-ingestion/types";
 import { useAIIngestion } from "@/hooks/useAIIngestion";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { buildModeRegistry } from "@/lib/ai-ingestion/modes";
+import { fetchVendorCatalog } from "@/hooks/queries/useVendors";
+import { fetchMaterialCatalog } from "@/hooks/queries/useMaterials";
+import { queryKeys } from "@/lib/cache/keys";
 
 import ModeSelector from "./ModeSelector";
 import ContextPicker from "./ContextPicker";
@@ -92,6 +95,22 @@ export default function AIIngestionDialog({
       ingest.setContext({ siteId: lockedSite.id });
     }
   }, [open, lockedSite, ingest]);
+
+  // Prefetch vendor + material catalogs as soon as the dialog opens so they
+  // are ready in the React Query cache by the time the user reaches Parse & preview.
+  useEffect(() => {
+    if (!open) return;
+    queryClient.prefetchQuery({
+      queryKey: queryKeys.vendors.list(),
+      queryFn: fetchVendorCatalog,
+      staleTime: 5 * 60 * 1000,
+    });
+    queryClient.prefetchQuery({
+      queryKey: queryKeys.materials.list(),
+      queryFn: fetchMaterialCatalog,
+      staleTime: 5 * 60 * 1000,
+    });
+  }, [open, queryClient]);
 
   const close = () => {
     if (ingest.state.step === "committing") return;

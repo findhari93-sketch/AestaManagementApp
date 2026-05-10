@@ -17,48 +17,47 @@ import type {
 // ============================================
 
 /**
+ * Standalone fetch — usable outside React hooks (e.g. queryClient.prefetchQuery / fetchQuery).
+ * Returns the full vendor list with categories, keyed by queryKeys.vendors.list().
+ */
+export async function fetchVendorCatalog(): Promise<VendorWithCategories[]> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("vendors")
+    .select(
+      `
+      *,
+      vendor_material_categories(
+        category_id,
+        is_primary,
+        category:material_categories(id, name, code)
+      )
+    `
+    )
+    .eq("is_active", true)
+    .order("name");
+  if (error) throw error;
+  return (data ?? []).map((v: any) => ({
+    ...v,
+    categories: v.vendor_material_categories?.map((vc: any) => vc.category) || [],
+  })) as VendorWithCategories[];
+}
+
+/**
  * Fetch all vendors with optional category filter
  */
 export function useVendors(categoryId?: string | null) {
-  const supabase = createClient();
-
   return useQuery({
     queryKey: categoryId
       ? [...queryKeys.vendors.list(), categoryId]
       : queryKeys.vendors.list(),
     queryFn: wrapQueryFn(async () => {
-      let query = supabase
-        .from("vendors")
-        .select(
-          `
-          *,
-          vendor_material_categories(
-            category_id,
-            is_primary,
-            category:material_categories(id, name, code)
-          )
-        `
-        )
-        .eq("is_active", true)
-        .order("name");
-
-      const { data, error } = await query;
-      if (error) throw error;
-
-      // Transform to include categories array
-      const vendors = data.map((v: any) => ({
-        ...v,
-        categories:
-          v.vendor_material_categories?.map((vc: any) => vc.category) || [],
-      })) as VendorWithCategories[];
-
-      // Filter by category if specified
+      const vendors = await fetchVendorCatalog();
       if (categoryId) {
         return vendors.filter((v) =>
           v.categories?.some((c) => c?.id === categoryId)
         );
       }
-
       return vendors;
     }, { operationName: "useVendors" }),
   });

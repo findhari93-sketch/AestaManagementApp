@@ -20,7 +20,9 @@ import {
   type PurchaseCommitResult,
 } from "@/lib/services/aiIngestionService";
 import { createClient } from "@/lib/supabase/client";
-import { withTimeout } from "@/lib/utils/timeout";
+import { queryKeys } from "@/lib/cache/keys";
+import { fetchVendorCatalog } from "@/hooks/queries/useVendors";
+import { fetchMaterialCatalog } from "@/hooks/queries/useMaterials";
 import type {
   ModeConfig,
   ResolvedPreview,
@@ -29,7 +31,7 @@ import type {
   VendorSummary,
 } from "@/lib/ai-ingestion/types";
 
-const CATALOG_FETCH_TIMEOUT_MS = 30_000;
+const CATALOG_STALE_TIME_MS = 5 * 60 * 1000;
 
 import { buildPurchasePrompt } from "./purchase.prompt";
 
@@ -45,57 +47,24 @@ export function createPurchaseMode(
     schema: aiPurchaseOutputSchema,
 
     async resolvePreview(parsed): Promise<ResolvedPreview> {
-      // Use React Query cache (already warm from the materials page) to avoid
-      // redundant network round-trips. Fall back to a direct Supabase fetch
-      // only when the cache is empty (e.g. dialog opened on a cold page).
-      const cachedVendors = queryClient.getQueryData<unknown[]>(["vendors", "list"]);
-      const cachedMaterials = queryClient.getQueryData<unknown[]>(["materials", "list"]);
-
-      let allVendors: unknown[];
-      let allMaterials: unknown[];
+      // fetchQuery uses the React Query cache populated by the prefetch that
+      // fires when the dialog opens. If that prefetch is still in-flight,
+      // fetchQuery joins it (deduplication). Only fetches from the network
+      // on a genuine cold cache, which should be rare.
+      const [allVendors, allMaterials] = await Promise.all([
+        queryClient.fetchQuery({
+          queryKey: queryKeys.vendors.list(),
+          queryFn: fetchVendorCatalog,
+          staleTime: CATALOG_STALE_TIME_MS,
+        }),
+        queryClient.fetchQuery({
+          queryKey: queryKeys.materials.list(),
+          queryFn: fetchMaterialCatalog,
+          staleTime: CATALOG_STALE_TIME_MS,
+        }),
+      ]);
 
       const supabase = createClient();
-
-      if (cachedVendors && cachedMaterials) {
-        allVendors = cachedVendors;
-        allMaterials = cachedMaterials;
-      } else {
-        const [vendorsRes, materialsRes] = await Promise.all([
-          cachedVendors
-            ? Promise.resolve({ data: cachedVendors, error: null })
-            : withTimeout(
-                Promise.resolve(
-                  (supabase as any)
-                    .from("vendors")
-                    .select("id, name, city, phone, gst_number")
-                    .eq("is_active", true),
-                ),
-                CATALOG_FETCH_TIMEOUT_MS,
-                `Vendor catalog fetch timed out after ${CATALOG_FETCH_TIMEOUT_MS / 1000}s`,
-              ),
-          cachedMaterials
-            ? Promise.resolve({ data: cachedMaterials, error: null })
-            : withTimeout(
-                Promise.resolve(
-                  (supabase as any)
-                    .from("materials")
-                    .select("id, name, local_name, category_id, unit")
-                    .eq("is_active", true),
-                ),
-                CATALOG_FETCH_TIMEOUT_MS,
-                `Material catalog fetch timed out after ${CATALOG_FETCH_TIMEOUT_MS / 1000}s`,
-              ),
-        ]);
-
-        if (vendorsRes.error) {
-          throw new Error(`Failed to load vendor catalog: ${vendorsRes.error.message}`);
-        }
-        if (materialsRes.error) {
-          throw new Error(`Failed to load material catalog: ${materialsRes.error.message}`);
-        }
-        allVendors = vendorsRes.data ?? [];
-        allMaterials = materialsRes.data ?? [];
-      }
 
       const vendorMatch = matchVendorClientSide(
         parsed.vendor.name,
