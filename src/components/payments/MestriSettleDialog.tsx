@@ -237,6 +237,18 @@ export function MestriSettleDialog({
     // The mestri's laborer_id lives on subcontracts but useSiteSubcontracts
     // flattens to laborer_name only — fetch the laborer_id via a raw query.
     try {
+      // Defensive date checks — empty strings reach Postgres as the literal
+      // "" and explode with "invalid input syntax for type date". Guard here
+      // so the user gets a clear message instead of a silent hang.
+      if (!paymentDate) {
+        throw new Error("Payment date is required.");
+      }
+      if (!isDateOnly && !weekStart) {
+        throw new Error(
+          "Week boundary is missing — close and reopen the dialog from a week's Settle button."
+        );
+      }
+
       const { data: subRow, error: subErr } = await supabase
         .from("subcontracts")
         .select("laborer_id")
@@ -250,31 +262,50 @@ export function MestriSettleDialog({
         );
       }
 
+      // 30-second hard timeout so the dialog can never hang forever on a
+      // dropped request or a poisoned proxy connection. Without this, the
+      // button would stay stuck on "Recording…" indefinitely with no error.
+      const SETTLE_TIMEOUT_MS = 30000;
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(
+          () =>
+            reject(
+              new Error(
+                "Settlement is taking too long — check your connection and try again."
+              )
+            ),
+          SETTLE_TIMEOUT_MS
+        )
+      );
+
       // In date-only mode there is no week to bind to — pass the actual
       // payment date itself. The waterfall RPC is the only consumer that
       // matters and it ignores `payment_for_date` (it allocates based on
       // settlement_groups.settlement_date oldest-first).
-      const result = await processContractPayment(supabase, {
-        siteId,
-        laborerId,
-        laborerName: selectedSubcontract.laborer_name ?? "Mestri",
-        amount: amountNum,
-        paymentType,
-        actualPaymentDate: paymentDate,
-        paymentForDate: isDateOnly ? paymentDate : (weekStart as string),
-        paymentMode,
-        paymentChannel,
-        payerSource,
-        customPayerName:
-          payerSource === "custom" || payerSource === "other_site_money"
-            ? customPayerName
-            : undefined,
-        subcontractId: selectedSubcontract.id,
-        proofUrl: proofFile?.url || undefined,
-        notes: notes || undefined,
-        userId: userProfile.id,
-        userName: userProfile.name ?? userProfile.email ?? "Unknown",
-      });
+      const result = await Promise.race([
+        processContractPayment(supabase, {
+          siteId,
+          laborerId,
+          laborerName: selectedSubcontract.laborer_name ?? "Mestri",
+          amount: amountNum,
+          paymentType,
+          actualPaymentDate: paymentDate,
+          paymentForDate: isDateOnly ? paymentDate : (weekStart as string),
+          paymentMode,
+          paymentChannel,
+          payerSource,
+          customPayerName:
+            payerSource === "custom" || payerSource === "other_site_money"
+              ? customPayerName
+              : undefined,
+          subcontractId: selectedSubcontract.id,
+          proofUrl: proofFile?.url || undefined,
+          notes: notes || undefined,
+          userId: userProfile.id,
+          userName: userProfile.name ?? userProfile.email ?? "Unknown",
+        }),
+        timeoutPromise,
+      ]);
 
       if (!result.success) {
         throw new Error(result.error ?? "Settlement failed");
@@ -518,6 +549,14 @@ export function MestriSettleDialog({
             waterfall (oldest week first). Advances are tracked separately and
             don&apos;t reduce the salary owed.
           </Typography>
+
+          {/* Inline error so users actually see why the settle failed instead
+              of the button silently snapping back from "Recording…" to "Settle". */}
+          {error && (
+            <Alert severity="error" onClose={() => setError(null)}>
+              {error}
+            </Alert>
+          )}
         </Stack>
       </DialogContent>
       <DialogActions sx={{ px: 3, py: 1.5 }}>
