@@ -243,7 +243,10 @@
       "PowerShell(Get-NetTCPConnection -LocalPort 3000 -ErrorAction SilentlyContinue | Select-Object -First 1 OwningProcess, State | Format-List ; Get-Process -Id \\(Get-NetTCPConnection -LocalPort 3000 -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty OwningProcess\\) -ErrorAction SilentlyContinue | Select-Object Id, ProcessName, StartTime, WS)",
       "PowerShell(Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue | Select OwningProcess; $p = \\(Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue | Select -ExpandProperty OwningProcess -First 1\\); if \\($p\\) { Get-Process -Id $p | Select Id, ProcessName, StartTime } else { 'no listener on 3000' })",
       "PowerShell(Get-Process -Id 27936 | Select Id, ProcessName, StartTime, @{n='WS_MB';e={[math]::Round\\($_.WS/1MB,1\\)}})",
-      "PowerShell(Get-Process -Id 27936 -ErrorAction SilentlyContinue)"
+      "PowerShell(Get-Process -Id 27936 -ErrorAction SilentlyContinue)",
+      "Bash(Get-Content \"C:\\\\Users\\\\Haribabu\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-Haribabu-Documents-AppsCopilot-AestaManagementApp\\\\7c489243-1fd6-432a-9077-f97b0f8848a0\\\\tasks\\\\buschnekl.output\" -Wait)",
+      "Bash(Select-String -Pattern \"error|warning|compiled|failed|success|✓|✗|done|Error|Warning|Compiled|Failed|Success|Done\" --line-buffered)",
+      "Bash(Get-Content \"C:\\\\Users\\\\Haribabu\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-Haribabu-Documents-AppsCopilot-AestaManagementApp\\\\7c489243-1fd6-432a-9077-f97b0f8848a0\\\\tasks\\\\buschnekl.output\")"
     ],
     "deny": [],
     "ask": [],
