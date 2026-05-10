@@ -208,7 +208,7 @@ export function useCreateMaterialRequest() {
             section_id: data.section_id || null, // Convert undefined to null for UUID
             requested_by: data.requested_by!,
             request_number: requestNumber,
-            request_date: new Date().toISOString().split("T")[0],
+            request_date: data.request_date || new Date().toISOString().split("T")[0],
             required_by_date: data.required_by_date || null,
             priority: data.priority,
             status: "pending",

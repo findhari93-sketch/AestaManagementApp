@@ -1297,6 +1297,7 @@ export interface MaterialRequestFormData {
   site_id: string;
   section_id?: string;
   requested_by?: string;
+  request_date?: string;
   required_by_date?: string;
   priority: RequestPriority;
   notes?: string;
