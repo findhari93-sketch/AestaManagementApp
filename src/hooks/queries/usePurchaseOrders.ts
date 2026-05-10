@@ -185,10 +185,11 @@ export function useCreatePurchaseOrder() {
       });
 
       // Round final totals to whole numbers
-      // When price includes GST: total = subtotal (GST already inside)
+      // When price includes GST: total = subtotal (GST already inside) + transport
+      const transport = data.transport_cost || 0;
       const totalAmount = priceIncGst
-        ? Math.round(subtotal)
-        : Math.round(subtotal + taxAmount);
+        ? Math.round(subtotal + transport)
+        : Math.round(subtotal + taxAmount + transport);
       subtotal = Math.round(subtotal);
       taxAmount = Math.round(taxAmount);
 
@@ -370,7 +371,7 @@ export function useCreatePurchaseOrder() {
         vendor_bill_url: variables.vendor_bill_url || null,
         subtotal: Math.round(subtotal),
         tax_amount: Math.round(taxAmount),
-        total_amount: Math.round(subtotal + taxAmount),
+        total_amount: Math.round(subtotal + taxAmount + (variables.transport_cost || 0)),
         // Missing PurchaseOrder fields
         discount_amount: null,
         other_charges: null,
@@ -478,6 +479,19 @@ export function useUpdatePurchaseOrder() {
       // Ensure fresh session before mutation
       await ensureFreshSession();
 
+      // If transport cost is being changed, recompute total_amount from current items
+      let newTotalAmount: number | undefined = undefined;
+      if (data.transport_cost !== undefined) {
+        const { data: poItems } = await supabase
+          .from("purchase_order_items")
+          .select("total_amount")
+          .eq("po_id", id);
+        const itemsSum = (poItems || []).reduce(
+          (s: number, i: any) => s + Number(i.total_amount || 0), 0
+        );
+        newTotalAmount = Math.round(itemsSum + (data.transport_cost || 0));
+      }
+
       const { data: result, error } = await supabase
         .from("purchase_orders")
         .update({
@@ -492,6 +506,7 @@ export function useUpdatePurchaseOrder() {
           vendor_bill_url: data.vendor_bill_url ?? undefined,
           internal_notes: data.internal_notes || null,
           updated_at: new Date().toISOString(),
+          ...(newTotalAmount !== undefined && { total_amount: newTotalAmount }),
         })
         .eq("id", id)
         .select()
