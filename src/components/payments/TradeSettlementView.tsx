@@ -8,16 +8,21 @@ import {
   Typography,
   Chip,
   Button,
-  Table,
-  TableHead,
-  TableBody,
-  TableRow,
-  TableCell,
-  TableContainer,
   CircularProgress,
   Alert,
+  ToggleButton,
+  ToggleButtonGroup,
+  IconButton,
+  Tooltip,
+  alpha,
+  useTheme,
 } from "@mui/material";
-import { TaskAlt as SettleIcon } from "@mui/icons-material";
+import {
+  TaskAlt as SettleIcon,
+  CalendarViewWeek as WaterfallIcon,
+  Receipt as BySettlementIcon,
+  Delete as DeleteIcon,
+} from "@mui/icons-material";
 import dayjs from "dayjs";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase/client";
@@ -26,6 +31,7 @@ import { useContractHeadcount } from "@/hooks/queries/useContractHeadcount";
 import { useContractMidEntries } from "@/hooks/queries/useContractMidEntries";
 import { WeeklyHeadcountSettleDialog } from "@/components/trades/WeeklyHeadcountSettleDialog";
 import { MestriSettleDialog } from "@/components/payments/MestriSettleDialog";
+import DeleteContractSettlementDialog from "@/components/payments/DeleteContractSettlementDialog";
 import type { LaborTrackingMode, TradeContract } from "@/types/trade.types";
 import type { TradeColor } from "@/theme/tradeColors";
 
@@ -45,24 +51,65 @@ interface WeekRow {
   daysWithEntries: number;
 }
 
+// Matches the internal SettlementRecord shape in DeleteContractSettlementDialog
+interface SettlementRecord {
+  id: string;
+  settlementReference: string;
+  settlementDate: string;
+  totalAmount: number;
+  paymentMode: string | null;
+  paymentChannel: string;
+  paymentType: string | null;
+  payerSource: string | null;
+  payerName: string | null;
+  subcontractId: string | null;
+  subcontractTitle: string | null;
+  proofUrl: string | null;
+  proofUrls: string[];
+  notes: string | null;
+  createdBy: string | null;
+  createdAt: string;
+  laborerCount: number;
+  weekAllocations: { weekStart: string; weekEnd: string; amount: number }[];
+}
+
+interface HeadcountSettlement {
+  id: string;
+  amount: number;
+  period_from_date: string | null;
+  period_to_date: string | null;
+  payment_mode: string | null;
+  notes: string | null;
+  created_at: string;
+}
+
 function formatINR(n: number): string {
   return new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 }).format(n);
 }
 
+function PayerBadge({ source, name }: { source?: string | null; name?: string | null }) {
+  const label =
+    source === "client" ? "Client"
+    : source === "own" ? "Own"
+    : source === "site_cash" ? "Site Cash"
+    : source === "company" ? "Company"
+    : name || source || "Unknown";
+  return (
+    <Chip size="small" label={label} variant="outlined"
+      sx={{ fontSize: "0.65rem", height: 18 }} />
+  );
+}
+
 /**
  * Week-grouped settlement waterfall for a single trade contract.
- * Used in /site/payments when a trade chip is selected.
  *
- *   earned  = sum of day labor value for the week
- *             (mid: subcontract_mid_entries.day_total_amount;
- *              headcount: per-role units × daily_rate)
- *   paid    = sum of subcontract_payments.amount where
- *             period_from_date == weekStart
- *   balance = max(0, earned − paid)
+ * Two views via toggle:
+ *   - Weekly waterfall: trailing 8 weeks, earned vs paid, Settle button
+ *   - By settlement: flat list of recorded settlements with delete action
  *
- * Settle button opens MestriSettleDialog (mid mode — Civil's full pipeline)
- * or WeeklyHeadcountSettleDialog (headcount mode) depending on the
- * contract's labor_tracking_mode.
+ * Mid mode settlements route through Civil's processContractPayment pipeline
+ * (settlement_groups + labor_payments). Headcount mode writes directly to
+ * subcontract_payments. Both tables are read for weeklyPaid totals.
  */
 export function TradeSettlementView({
   contract,
@@ -70,7 +117,13 @@ export function TradeSettlementView({
 }: TradeSettlementViewProps) {
   const supabase = createClient();
   const queryClient = useQueryClient();
+  const theme = useTheme();
   const mode: LaborTrackingMode = contract.laborTrackingMode;
+
+  const [viewMode, setViewMode] = useState<"waterfall" | "by-settlement">("waterfall");
+  const [settleWeekStart, setSettleWeekStart] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<SettlementRecord | null>(null);
+  const [headcountDeletingId, setHeadcountDeletingId] = useState<string | null>(null);
 
   const { data: headcount, isLoading: hcLoading } = useContractHeadcount(
     mode === "headcount" ? contract.id : undefined
@@ -80,13 +133,10 @@ export function TradeSettlementView({
   );
 
   // Per-week paid amounts. Reads BOTH tables because:
-  //   • labor_payments  — where Civil's pipeline (processContractPayment via
-  //     MestriSettleDialog) writes mid/headcount settlements, with
-  //     payment_for_date == weekStart and subcontract_id linked.
-  //   • subcontract_payments — where headcount's WeeklyHeadcountSettleDialog
-  //     and direct payments still write, keyed by period_from_date.
-  // Aggregating both into one map keyed by weekStart avoids double-counting
-  // (a single settlement only writes to one of the two tables in our flows).
+  //   • labor_payments  — where processContractPayment (MestriSettleDialog/mid)
+  //     writes, keyed by payment_for_date == weekStart.
+  //   • subcontract_payments — where WeeklyHeadcountSettleDialog writes,
+  //     keyed by period_from_date.
   const { data: weeklyPaid } = useQuery({
     queryKey: ["contract-weekly-paid", contract.id],
     enabled: !!contract.id,
@@ -110,17 +160,11 @@ export function TradeSettlementView({
       if (laborRes.error) throw laborRes.error;
       if (subRes.error) throw subRes.error;
       const map = new Map<string, number>();
-      for (const r of (laborRes.data ?? []) as Array<{
-        amount: number | string;
-        payment_for_date: string;
-      }>) {
+      for (const r of (laborRes.data ?? []) as Array<{ amount: number | string; payment_for_date: string }>) {
         const key = r.payment_for_date;
         map.set(key, (map.get(key) ?? 0) + Number(r.amount ?? 0));
       }
-      for (const r of (subRes.data ?? []) as Array<{
-        amount: number | string;
-        period_from_date: string;
-      }>) {
+      for (const r of (subRes.data ?? []) as Array<{ amount: number | string; period_from_date: string }>) {
         const key = r.period_from_date;
         map.set(key, (map.get(key) ?? 0) + Number(r.amount ?? 0));
       }
@@ -128,7 +172,77 @@ export function TradeSettlementView({
     },
   });
 
-  const [settleWeekStart, setSettleWeekStart] = useState<string | null>(null);
+  // "By settlement" view data
+  const {
+    data: settlementItems,
+    isLoading: settlementLoading,
+  } = useQuery({
+    queryKey: ["trade-settlement-history", contract.id, mode],
+    enabled: !!contract.id && viewMode === "by-settlement",
+    staleTime: 30 * 1000,
+    queryFn: async (): Promise<SettlementRecord[] | HeadcountSettlement[]> => {
+      const sb = supabase as any;
+      if (mode === "mid") {
+        // Get settlement_group_ids via labor_payments for this subcontract
+        const lpRes = await sb
+          .from("labor_payments")
+          .select("settlement_group_id")
+          .eq("subcontract_id", contract.id)
+          .eq("is_under_contract", true)
+          .not("settlement_group_id", "is", null);
+        if (lpRes.error) throw lpRes.error;
+        const sgIds = [
+          ...new Set(
+            (lpRes.data ?? []).map((r: any) => r.settlement_group_id as string)
+          ),
+        ];
+        if (sgIds.length === 0) return [];
+        const sgRes = await sb
+          .from("settlement_groups")
+          .select(
+            "id, settlement_reference, settlement_date, total_amount, payment_mode, payment_channel, payment_type, payer_source, payer_name, proof_url, proof_urls, notes, created_by_name, created_at, week_allocations, subcontract_id"
+          )
+          .in("id", sgIds)
+          .eq("is_cancelled", false)
+          .order("settlement_date", { ascending: false });
+        if (sgRes.error) throw sgRes.error;
+        return (sgRes.data ?? []).map(
+          (r: any): SettlementRecord => ({
+            id: r.id,
+            settlementReference: r.settlement_reference,
+            settlementDate: r.settlement_date,
+            totalAmount: Number(r.total_amount ?? 0),
+            paymentMode: r.payment_mode,
+            paymentChannel: r.payment_channel ?? "direct",
+            paymentType: r.payment_type,
+            payerSource: r.payer_source,
+            payerName: r.payer_name,
+            subcontractId: r.subcontract_id,
+            subcontractTitle: contract.title,
+            proofUrl: r.proof_url,
+            proofUrls: r.proof_urls ?? [],
+            notes: r.notes,
+            createdBy: r.created_by_name,
+            createdAt: r.created_at,
+            laborerCount: 0,
+            weekAllocations: r.week_allocations ?? [],
+          })
+        );
+      } else {
+        // Headcount: subcontract_payments
+        const res = await sb
+          .from("subcontract_payments")
+          .select(
+            "id, amount, period_from_date, period_to_date, payment_mode, notes, created_at"
+          )
+          .eq("contract_id", contract.id)
+          .eq("is_deleted", false)
+          .order("created_at", { ascending: false });
+        if (res.error) throw res.error;
+        return res.data ?? [];
+      }
+    },
+  });
 
   const isLoading =
     (mode === "headcount" && hcLoading) || (mode === "mid" && midLoading);
@@ -138,7 +252,6 @@ export function TradeSettlementView({
     const today = dayjs();
     const groups: WeekRow[] = [];
     const paidByWeek = weeklyPaid ?? new Map<string, number>();
-    // Trailing 8 weeks so engineer can settle older unpaid weeks too
     for (let weekOffset = 0; weekOffset < 8; weekOffset++) {
       const anchor = today.subtract(weekOffset, "week");
       const wsDay = weekStartOf(anchor);
@@ -194,6 +307,19 @@ export function TradeSettlementView({
   const totalPaid = weeks.reduce((s, w) => s + w.paid, 0);
   const totalBalance = weeks.reduce((s, w) => s + w.balance, 0);
 
+  const invalidateAll = () => {
+    queryClient.invalidateQueries({
+      queryKey: ["contract-weekly-paid", contract.id],
+    });
+    queryClient.invalidateQueries({
+      queryKey: ["trade-attendance-summary", contract.id],
+    });
+    queryClient.invalidateQueries({ queryKey: ["trade-reconciliations"] });
+    queryClient.invalidateQueries({
+      queryKey: ["trade-settlement-history", contract.id, mode],
+    });
+  };
+
   if (mode === "mesthri_only") {
     return (
       <Alert severity="info" sx={{ m: 2 }}>
@@ -211,6 +337,8 @@ export function TradeSettlementView({
       </Alert>
     );
   }
+
+  const isMidMode = mode === "mid";
 
   return (
     <Box>
@@ -244,201 +372,408 @@ export function TradeSettlementView({
         </Stack>
       </Paper>
 
-      {/* Per-week waterfall */}
-      {isLoading ? (
-        <Box sx={{ display: "flex", justifyContent: "center", py: 4 }}>
-          <CircularProgress size={24} />
-        </Box>
-      ) : (
-        <Paper sx={{ overflow: "hidden" }}>
-          <TableContainer>
-            <Table size="small">
-              <TableHead>
-                <TableRow sx={{ bgcolor: tradeColor.dark }}>
-                  <TableCell sx={{ color: tradeColor.contrastText, fontWeight: 600 }}>
-                    Week
-                  </TableCell>
-                  <TableCell
-                    sx={{ color: tradeColor.contrastText, fontWeight: 600 }}
-                    align="center"
+      {/* View toggle */}
+      <Box sx={{ mb: 1.5, display: "flex", alignItems: "center", gap: 1.5 }}>
+        <ToggleButtonGroup
+          size="small"
+          value={viewMode}
+          exclusive
+          onChange={(_, v) => {
+            if (v) setViewMode(v);
+          }}
+        >
+          <ToggleButton value="waterfall" sx={{ gap: 0.5, textTransform: "none", fontSize: "0.78rem" }}>
+            <WaterfallIcon sx={{ fontSize: 15 }} />
+            Weekly waterfall
+          </ToggleButton>
+          <ToggleButton value="by-settlement" sx={{ gap: 0.5, textTransform: "none", fontSize: "0.78rem" }}>
+            <BySettlementIcon sx={{ fontSize: 15 }} />
+            By settlement
+          </ToggleButton>
+        </ToggleButtonGroup>
+        {viewMode === "by-settlement" && settlementItems && (
+          <Typography variant="caption" color="text.secondary">
+            {settlementItems.length}{" "}
+            {settlementItems.length === 1 ? "settlement" : "settlements"}
+          </Typography>
+        )}
+      </Box>
+
+      {/* ─── Weekly waterfall — card-style rows, no Table hover issues ─── */}
+      {viewMode === "waterfall" && (
+        isLoading ? (
+          <Box sx={{ display: "flex", justifyContent: "center", py: 4 }}>
+            <CircularProgress size={24} />
+          </Box>
+        ) : (
+          <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+            {/* Header */}
+            <Box
+              sx={{
+                display: "grid",
+                gridTemplateColumns: "1fr 52px 90px 90px 90px 108px",
+                gap: 1,
+                px: 1.75,
+                py: 0.85,
+                bgcolor: tradeColor.dark,
+                borderRadius: 1,
+              }}
+            >
+              {["Week", "Days", "Earned", "Paid", "Balance", ""].map((h) => (
+                <Typography
+                  key={h}
+                  variant="caption"
+                  sx={{
+                    color: tradeColor.contrastText,
+                    fontWeight: 700,
+                    fontSize: "0.67rem",
+                    textTransform: "uppercase",
+                    letterSpacing: 0.4,
+                  }}
+                >
+                  {h}
+                </Typography>
+              ))}
+            </Box>
+
+            {weeks.map((week) => {
+              const fullySettled = week.earned > 0 && week.balance === 0;
+              const empty = week.earned === 0 && week.paid === 0;
+              return (
+                <Box
+                  key={week.weekStart}
+                  sx={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 52px 90px 90px 90px 108px",
+                    gap: 1,
+                    px: 1.75,
+                    py: 1.25,
+                    bgcolor: week.isCurrentWeek
+                      ? alpha(theme.palette.info.main, 0.06)
+                      : "background.paper",
+                    border: 1,
+                    borderColor: week.isCurrentWeek
+                      ? alpha(theme.palette.info.main, 0.35)
+                      : "divider",
+                    borderRadius: 1.5,
+                    opacity: empty ? 0.55 : 1,
+                    alignItems: "center",
+                  }}
+                >
+                  <Box>
+                    <Typography variant="body2" fontWeight={600}>
+                      {week.weekLabel}
+                    </Typography>
+                    {week.isCurrentWeek && (
+                      <Chip
+                        label="this week"
+                        size="small"
+                        color="info"
+                        sx={{ height: 16, fontSize: "0.58rem", mt: 0.25 }}
+                      />
+                    )}
+                  </Box>
+
+                  <Typography
+                    variant="body2"
+                    color={
+                      week.daysWithEntries > 0 ? "text.primary" : "text.disabled"
+                    }
+                    sx={{ fontVariantNumeric: "tabular-nums" }}
                   >
-                    Days
-                  </TableCell>
-                  <TableCell
-                    sx={{ color: tradeColor.contrastText, fontWeight: 600 }}
-                    align="right"
+                    {week.daysWithEntries || "—"}
+                  </Typography>
+
+                  <Typography
+                    variant="body2"
+                    fontWeight={600}
+                    color={week.earned > 0 ? "text.primary" : "text.disabled"}
+                    sx={{ fontVariantNumeric: "tabular-nums" }}
                   >
-                    Earned
-                  </TableCell>
-                  <TableCell
-                    sx={{ color: tradeColor.contrastText, fontWeight: 600 }}
-                    align="right"
+                    {week.earned > 0 ? `₹${formatINR(week.earned)}` : "—"}
+                  </Typography>
+
+                  <Typography
+                    variant="body2"
+                    color={week.paid > 0 ? "success.main" : "text.disabled"}
+                    sx={{ fontVariantNumeric: "tabular-nums" }}
                   >
-                    Paid
-                  </TableCell>
-                  <TableCell
-                    sx={{ color: tradeColor.contrastText, fontWeight: 600 }}
-                    align="right"
+                    {week.paid > 0 ? `₹${formatINR(week.paid)}` : "—"}
+                  </Typography>
+
+                  <Typography
+                    variant="body2"
+                    fontWeight={week.balance > 0 ? 700 : 400}
+                    color={
+                      week.balance > 0
+                        ? "warning.dark"
+                        : fullySettled
+                        ? "success.main"
+                        : "text.disabled"
+                    }
+                    sx={{ fontVariantNumeric: "tabular-nums" }}
                   >
-                    Balance
-                  </TableCell>
-                  <TableCell
-                    sx={{ color: tradeColor.contrastText, fontWeight: 600 }}
-                    align="center"
-                  >
-                    Action
-                  </TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {weeks.map((week) => {
-                  const fullySettled = week.earned > 0 && week.balance === 0;
-                  const empty = week.earned === 0 && week.paid === 0;
-                  return (
-                    <TableRow
-                      key={week.weekStart}
-                      sx={{
-                        opacity: empty ? 0.55 : 1,
-                        bgcolor: week.isCurrentWeek ? "info.50" : "inherit",
-                      }}
-                    >
-                      <TableCell>
-                        <Typography variant="body2" fontWeight={600}>
-                          {week.weekLabel}
-                        </Typography>
-                        {week.isCurrentWeek && (
-                          <Chip
-                            label="this week"
-                            size="small"
-                            color="info"
-                            sx={{ height: 18, fontSize: "0.6rem", mt: 0.25 }}
-                          />
-                        )}
-                      </TableCell>
-                      <TableCell align="center">
-                        <Typography
-                          variant="body2"
-                          color={week.daysWithEntries > 0 ? "text.primary" : "text.disabled"}
-                        >
-                          {week.daysWithEntries || "—"}
-                        </Typography>
-                      </TableCell>
-                      <TableCell align="right">
-                        <Typography
-                          variant="body2"
-                          fontWeight={600}
-                          color={week.earned > 0 ? "text.primary" : "text.disabled"}
-                        >
-                          {week.earned > 0 ? `₹${formatINR(week.earned)}` : "—"}
-                        </Typography>
-                      </TableCell>
-                      <TableCell align="right">
-                        <Typography
-                          variant="body2"
-                          color={week.paid > 0 ? "success.main" : "text.disabled"}
-                        >
-                          {week.paid > 0 ? `₹${formatINR(week.paid)}` : "—"}
-                        </Typography>
-                      </TableCell>
-                      <TableCell align="right">
-                        <Typography
-                          variant="body2"
-                          fontWeight={600}
-                          color={
-                            week.balance > 0
-                              ? "warning.dark"
-                              : fullySettled
-                              ? "success.main"
-                              : "text.disabled"
-                          }
-                        >
-                          {week.balance > 0
-                            ? `₹${formatINR(week.balance)}`
-                            : fullySettled
-                            ? "settled"
-                            : "—"}
-                        </Typography>
-                      </TableCell>
-                      <TableCell align="center">
-                        {week.balance > 0 && !week.isCurrentWeek && (
-                          <Button
-                            size="small"
-                            variant="contained"
-                            startIcon={<SettleIcon />}
-                            onClick={() => setSettleWeekStart(week.weekStart)}
-                            sx={{
-                              bgcolor: tradeColor.main,
-                              "&:hover": { bgcolor: tradeColor.dark },
-                              color: tradeColor.contrastText,
-                            }}
-                          >
-                            Settle
-                          </Button>
-                        )}
-                        {week.balance > 0 && week.isCurrentWeek && (
-                          <Typography variant="caption" color="text.secondary">
-                            wait until week ends
-                          </Typography>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        </Paper>
+                    {week.balance > 0
+                      ? `₹${formatINR(week.balance)}`
+                      : fullySettled
+                      ? "✓ Settled"
+                      : "—"}
+                  </Typography>
+
+                  <Box>
+                    {week.balance > 0 && !week.isCurrentWeek && (
+                      <Button
+                        size="small"
+                        variant="contained"
+                        startIcon={<SettleIcon />}
+                        onClick={() => setSettleWeekStart(week.weekStart)}
+                        sx={{
+                          bgcolor: tradeColor.main,
+                          "&:hover": { bgcolor: tradeColor.dark },
+                          color: tradeColor.contrastText,
+                          fontSize: "0.7rem",
+                          px: 1.25,
+                          minWidth: 0,
+                        }}
+                      >
+                        Settle
+                      </Button>
+                    )}
+                    {week.balance > 0 && week.isCurrentWeek && (
+                      <Typography variant="caption" color="text.secondary">
+                        in progress
+                      </Typography>
+                    )}
+                  </Box>
+                </Box>
+              );
+            })}
+          </Box>
+        )
       )}
 
-      {/* Settle dialog — mode-aware.
-          - Headcount: existing WeeklyHeadcountSettleDialog (writes
-            subcontract_payments directly).
-          - Mid: MestriSettleDialog — Civil's full pipeline. Writes
-            settlement_groups + labor_payments + subcontract_payments and
-            shows up in /site/expenses as "Contract Salary" (same as Civil).
-            We pre-fill the suggested amount from the week's earned − paid. */}
+      {/* ─── By Settlement view ─── */}
+      {viewMode === "by-settlement" && (
+        settlementLoading ? (
+          <Box sx={{ display: "flex", justifyContent: "center", py: 4 }}>
+            <CircularProgress size={24} />
+          </Box>
+        ) : !settlementItems || settlementItems.length === 0 ? (
+          <Box sx={{ py: 5, textAlign: "center" }}>
+            <Typography variant="body2" color="text.secondary">
+              No settlements recorded yet.
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              Switch to Weekly waterfall and tap Settle to record one.
+            </Typography>
+          </Box>
+        ) : isMidMode ? (
+          <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+            {(settlementItems as SettlementRecord[]).map((s) => (
+              <Box
+                key={s.id}
+                sx={{
+                  px: 2,
+                  py: 1.5,
+                  bgcolor: "background.paper",
+                  border: 1,
+                  borderColor: "divider",
+                  borderRadius: 1.5,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 2,
+                  flexWrap: "wrap",
+                }}
+              >
+                <Box sx={{ flex: 1, minWidth: 0 }}>
+                  <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap" useFlexGap>
+                    <Typography
+                      variant="caption"
+                      sx={{
+                        fontFamily: "monospace",
+                        fontWeight: 700,
+                        bgcolor: alpha(tradeColor.main, 0.08),
+                        color: tradeColor.main,
+                        border: `1px solid ${alpha(tradeColor.main, 0.25)}`,
+                        borderRadius: 0.5,
+                        px: 0.75,
+                        py: 0.1,
+                      }}
+                    >
+                      {s.settlementReference}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {dayjs(s.settlementDate).format("DD MMM YYYY")}
+                    </Typography>
+                    {s.payerSource && (
+                      <PayerBadge source={s.payerSource} name={s.payerName} />
+                    )}
+                  </Stack>
+                  {s.weekAllocations && s.weekAllocations.length > 0 && (
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      sx={{ mt: 0.25, display: "block" }}
+                    >
+                      Week:{" "}
+                      {dayjs(s.weekAllocations[0].weekStart).format("D MMM")} –{" "}
+                      {dayjs(s.weekAllocations[0].weekEnd).format("D MMM YYYY")}
+                    </Typography>
+                  )}
+                  {s.notes && (
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      sx={{ mt: 0.25, display: "block", fontStyle: "italic" }}
+                    >
+                      {s.notes}
+                    </Typography>
+                  )}
+                </Box>
+                <Typography
+                  variant="body1"
+                  fontWeight={700}
+                  sx={{
+                    fontVariantNumeric: "tabular-nums",
+                    color: tradeColor.main,
+                  }}
+                >
+                  ₹{formatINR(s.totalAmount)}
+                </Typography>
+                <Tooltip title="Delete this settlement (cannot be undone)">
+                  <IconButton
+                    size="small"
+                    color="error"
+                    onClick={() => setDeleteTarget(s)}
+                  >
+                    <DeleteIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              </Box>
+            ))}
+          </Box>
+        ) : (
+          // Headcount mode — subcontract_payments list
+          <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+            {(settlementItems as HeadcountSettlement[]).map((s) => (
+              <Box
+                key={s.id}
+                sx={{
+                  px: 2,
+                  py: 1.5,
+                  bgcolor: "background.paper",
+                  border: 1,
+                  borderColor: "divider",
+                  borderRadius: 1.5,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 2,
+                  flexWrap: "wrap",
+                }}
+              >
+                <Box sx={{ flex: 1, minWidth: 0 }}>
+                  <Typography variant="caption" color="text.secondary">
+                    {dayjs(s.created_at).format("DD MMM YYYY")}
+                    {s.period_from_date &&
+                      ` · Week: ${dayjs(s.period_from_date).format("D MMM")}`}
+                    {s.period_to_date &&
+                      ` – ${dayjs(s.period_to_date).format("D MMM YYYY")}`}
+                  </Typography>
+                  {s.notes && (
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      sx={{ mt: 0.25, display: "block", fontStyle: "italic" }}
+                    >
+                      {s.notes}
+                    </Typography>
+                  )}
+                </Box>
+                <Typography
+                  variant="body1"
+                  fontWeight={700}
+                  sx={{
+                    fontVariantNumeric: "tabular-nums",
+                    color: tradeColor.main,
+                  }}
+                >
+                  ₹{formatINR(Number(s.amount))}
+                </Typography>
+                <Tooltip title="Delete this settlement">
+                  <span>
+                    <IconButton
+                      size="small"
+                      color="error"
+                      disabled={headcountDeletingId === s.id}
+                      onClick={async () => {
+                        setHeadcountDeletingId(s.id);
+                        try {
+                          await (supabase as any)
+                            .from("subcontract_payments")
+                            .update({ is_deleted: true })
+                            .eq("id", s.id);
+                          invalidateAll();
+                        } finally {
+                          setHeadcountDeletingId(null);
+                        }
+                      }}
+                    >
+                      {headcountDeletingId === s.id ? (
+                        <CircularProgress size={14} color="inherit" />
+                      ) : (
+                        <DeleteIcon fontSize="small" />
+                      )}
+                    </IconButton>
+                  </span>
+                </Tooltip>
+              </Box>
+            ))}
+          </Box>
+        )
+      )}
+
+      {/* ─── Settle dialog — mode-aware ─── */}
       {settleWeekStart !== null && mode === "headcount" && (
         <WeeklyHeadcountSettleDialog
           open={true}
           onClose={() => setSettleWeekStart(null)}
-          onSaved={() => {
-            /* invalidation handled inside */
-          }}
+          onSaved={() => {}}
           siteId={contract.siteId}
           contractId={contract.id}
           contractTitle={contract.title}
         />
       )}
-      {settleWeekStart !== null && mode === "mid" && (() => {
-        const week = weeks.find((w) => w.weekStart === settleWeekStart);
-        return (
-          <MestriSettleDialog
-            open={true}
-            onClose={() => {
-              setSettleWeekStart(null);
-              // MestriSettleDialog only invalidates Civil-flavored caches
-              // (salary-waterfall, payments-ledger, etc). Refresh our
-              // mid-mode-specific queries here so the table reflects the
-              // newly recorded settlement immediately.
-              queryClient.invalidateQueries({
-                queryKey: ["contract-weekly-paid", contract.id],
-              });
-              queryClient.invalidateQueries({
-                queryKey: ["trade-attendance-summary", contract.id],
-              });
-              queryClient.invalidateQueries({
-                queryKey: ["trade-reconciliations"],
-              });
-            }}
-            siteId={contract.siteId}
-            mode="fill-week"
-            weekStart={settleWeekStart}
-            weekEnd={week?.weekEnd}
-            suggestedAmount={week?.balance ?? 0}
-            initialSubcontractId={contract.id}
-          />
-        );
-      })()}
+      {settleWeekStart !== null &&
+        mode === "mid" &&
+        (() => {
+          const week = weeks.find((w) => w.weekStart === settleWeekStart);
+          return (
+            <MestriSettleDialog
+              open={true}
+              onClose={() => {
+                setSettleWeekStart(null);
+                invalidateAll();
+              }}
+              siteId={contract.siteId}
+              mode="fill-week"
+              weekStart={settleWeekStart}
+              weekEnd={week?.weekEnd}
+              suggestedAmount={week?.balance ?? 0}
+              initialSubcontractId={contract.id}
+            />
+          );
+        })()}
+
+      {/* ─── Delete dialog for mid-mode settlements ─── */}
+      <DeleteContractSettlementDialog
+        open={deleteTarget !== null}
+        onClose={() => setDeleteTarget(null)}
+        settlement={deleteTarget}
+        onSuccess={() => {
+          setDeleteTarget(null);
+          invalidateAll();
+        }}
+      />
     </Box>
   );
 }
