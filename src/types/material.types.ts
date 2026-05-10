@@ -776,6 +776,7 @@ export interface MaterialRequest {
   priority: RequestPriority;
   status: MaterialRequestStatus;
   notes: string | null;
+  purchase_type: 'own_site' | 'group_stock';
   approved_by: string | null;
   approved_at: string | null;
   rejection_reason: string | null;
@@ -1301,6 +1302,7 @@ export interface MaterialRequestFormData {
   required_by_date?: string;
   priority: RequestPriority;
   notes?: string;
+  purchase_type?: 'own_site' | 'group_stock';
   items: MaterialRequestItemFormData[];
 }
 

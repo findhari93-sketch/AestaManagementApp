@@ -213,6 +213,7 @@ export function useCreateMaterialRequest() {
             priority: data.priority,
             status: "pending",
             notes: data.notes || null,
+            purchase_type: data.purchase_type ?? 'own_site',
           })
           .select()
           .single(),

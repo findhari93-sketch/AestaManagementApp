@@ -26,6 +26,8 @@ import {
   Select,
   MenuItem,
   Tooltip,
+  ToggleButton,
+  ToggleButtonGroup,
 } from "@mui/material";
 import {
   Close as CloseIcon,
@@ -48,6 +50,7 @@ import {
 } from "@/hooks/queries/useMaterialRequests";
 import { useQuery } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase/client";
+import { useSiteGroupMembership } from "@/hooks/queries/useSiteGroups";
 import type {
   MaterialRequestWithDetails,
   MaterialRequestItemFormData,
@@ -89,6 +92,7 @@ export default function MaterialRequestDialog({
 
   const { data: materials = [] } = useMaterials();
   const { data: stockItems = [] } = useSiteStock(siteId);
+  const { data: groupMembership } = useSiteGroupMembership(siteId);
 
   // Fetch building sections for this site
   const supabase = createClient();
@@ -128,6 +132,7 @@ export default function MaterialRequestDialog({
   const [sectionId, setSectionId] = useState("");
   const [requiredByDate, setRequiredByDate] = useState("");
   const [priority, setPriority] = useState<RequestPriority>("normal");
+  const [purchaseType, setPurchaseType] = useState<'own_site' | 'group_stock'>('own_site');
   const [notes, setNotes] = useState("");
   const [items, setItems] = useState<RequestItemRow[]>([]);
 
@@ -153,6 +158,7 @@ export default function MaterialRequestDialog({
       setSectionId(request.section_id || "");
       setRequiredByDate(request.required_by_date || "");
       setPriority(request.priority);
+      setPurchaseType(request.purchase_type ?? 'own_site');
       setNotes(request.notes || "");
 
       // Map existing items
@@ -172,6 +178,7 @@ export default function MaterialRequestDialog({
       setSectionId("");
       setRequiredByDate("");
       setPriority("normal");
+      setPurchaseType('own_site');
       setNotes("");
       setItems([]);
     }
@@ -290,6 +297,7 @@ export default function MaterialRequestDialog({
           requested_by: userProfile.id,
           required_by_date: requiredByDate || undefined,
           priority,
+          purchase_type: purchaseType,
           notes: notes || undefined,
           items: items.map((item) => ({
             material_id: item.material_id,
@@ -422,6 +430,26 @@ export default function MaterialRequestDialog({
               </Select>
             </FormControl>
           </Grid>
+
+          {/* Purchase type — only shown when site is in a group */}
+          {groupMembership?.isInGroup && (
+            <Grid size={12}>
+              <Box>
+                <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.5 }}>
+                  Purchase for
+                </Typography>
+                <ToggleButtonGroup
+                  value={purchaseType}
+                  exclusive
+                  onChange={(_, val) => { if (val) setPurchaseType(val); }}
+                  size="small"
+                >
+                  <ToggleButton value="own_site">This site only</ToggleButton>
+                  <ToggleButton value="group_stock">Group stock</ToggleButton>
+                </ToggleButtonGroup>
+              </Box>
+            </Grid>
+          )}
 
           {/* Add Item Section */}
           <Grid size={12}>

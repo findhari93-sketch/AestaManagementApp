@@ -15,6 +15,8 @@ import {
   Stack,
   SwipeableDrawer,
   TextField,
+  ToggleButton,
+  ToggleButtonGroup,
   Toolbar,
   Typography,
   useMediaQuery,
@@ -37,6 +39,7 @@ import { useToast } from "@/contexts/ToastContext";
 import { useMaterials } from "@/hooks/queries/useMaterials";
 import { useSiteStock } from "@/hooks/queries/useStockInventory";
 import { useCreateMaterialRequest } from "@/hooks/queries/useMaterialRequests";
+import { useSiteGroupMembership } from "@/hooks/queries/useSiteGroups";
 import type { MaterialWithDetails } from "@/types/material.types";
 
 interface CartItem {
@@ -85,9 +88,12 @@ export default function QuickRequestPage() {
   const { data: stockItems = [] } = useSiteStock(selectedSite?.id);
   const createRequest = useCreateMaterialRequest();
 
+  const { data: groupMembership } = useSiteGroupMembership(selectedSite?.id);
+
   const [search, setSearch] = useState("");
   const [cart, setCart] = useState<CartItem[]>([]);
   const [requestDate, setRequestDate] = useState<string>(todayIso());
+  const [purchaseType, setPurchaseType] = useState<'own_site' | 'group_stock'>('own_site');
   const [pickerMaterial, setPickerMaterial] = useState<MaterialWithDetails | null>(null);
   const [pickerQty, setPickerQty] = useState(1);
   const isSubmittingRef = useRef(false);
@@ -172,6 +178,7 @@ export default function QuickRequestPage() {
         site_id: selectedSite.id,
         requested_by: userProfile.id,
         request_date: requestDate,
+        purchase_type: purchaseType,
         priority: "normal",
         items: cart.map((c) => ({
           material_id: c.material_id,
@@ -214,6 +221,24 @@ export default function QuickRequestPage() {
       }
     />
   );
+
+  const purchaseTypeToggle = groupMembership?.isInGroup ? (
+    <Box>
+      <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.5 }}>
+        Purchase for
+      </Typography>
+      <ToggleButtonGroup
+        value={purchaseType}
+        exclusive
+        onChange={(_, val) => { if (val) setPurchaseType(val); }}
+        size="small"
+        fullWidth
+      >
+        <ToggleButton value="own_site">This site only</ToggleButton>
+        <ToggleButton value="group_stock">Group stock</ToggleButton>
+      </ToggleButtonGroup>
+    </Box>
+  ) : null;
 
   const cartList = (
     <Stack spacing={1}>
@@ -291,15 +316,6 @@ export default function QuickRequestPage() {
           <Typography variant="h6" sx={{ flex: 1 }}>
             Request Material
           </Typography>
-          {isDesktop && isBackdated && (
-            <Chip
-              size="small"
-              icon={<CalendarIcon />}
-              label={formatDateLabel(requestDate)}
-              color="warning"
-              variant="outlined"
-            />
-          )}
         </Toolbar>
       </AppBar>
 
@@ -320,7 +336,10 @@ export default function QuickRequestPage() {
         >
           <Box>
             {!isDesktop && (
-              <Box sx={{ mb: 2 }}>{dateInput}</Box>
+              <Stack spacing={1.5} sx={{ mb: 2 }}>
+                {dateInput}
+                {purchaseTypeToggle}
+              </Stack>
             )}
 
             <TextField
@@ -442,7 +461,10 @@ export default function QuickRequestPage() {
                 <Typography variant="overline" color="text.secondary">
                   Request details
                 </Typography>
-                <Box sx={{ mt: 1 }}>{dateInput}</Box>
+                <Stack spacing={1.5} sx={{ mt: 1 }}>
+                  {dateInput}
+                  {purchaseTypeToggle}
+                </Stack>
               </Box>
 
               <Box>
