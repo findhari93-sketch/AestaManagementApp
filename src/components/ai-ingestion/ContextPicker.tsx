@@ -5,7 +5,17 @@
 
 "use client";
 
-import { Alert, Box, MenuItem, Stack, TextField, Typography } from "@mui/material";
+import {
+  Alert,
+  Box,
+  Collapse,
+  FormControlLabel,
+  MenuItem,
+  Stack,
+  Switch,
+  TextField,
+  Typography,
+} from "@mui/material";
 
 import FileUploader, { UploadedFile } from "@/components/common/FileUploader";
 import { createClient } from "@/lib/supabase/client";
@@ -40,6 +50,13 @@ export default function ContextPicker({
   const supabase = createClient();
   const showSitePicker = mode === "purchase"; // quotation/warranty don't tie to a site
 
+  // For purchase mode without a locked site, the user explicitly opts in to
+  // recording a site expense. Default OFF = catalog-only ingest. The toggle is
+  // bypassed when site is locked (site-flow caller — already site-scoped) or
+  // when mode isn't purchase.
+  const recordAsSiteExpense = ctx.recordAsSiteExpense ?? !!lockedSite;
+  const isCompanyPurchaseFlow = mode === "purchase" && !lockedSite;
+
   const onUploaded = (file: UploadedFile) => {
     onChange({ billUrls: [file.url] });
   };
@@ -52,39 +69,76 @@ export default function ContextPicker({
 
   return (
     <Stack spacing={2.5}>
-      {showSitePicker ? (
-        lockedSite ? (
-          <TextField
-            label="Site"
-            value={lockedSite.name}
-            disabled
-            size="small"
-            fullWidth
+      {showSitePicker && lockedSite ? (
+        <TextField
+          label="Site"
+          value={lockedSite.name}
+          disabled
+          size="small"
+          fullWidth
+          helperText="Site is fixed by the page you opened this from."
+        />
+      ) : null}
+
+      {isCompanyPurchaseFlow ? (
+        <Box>
+          <FormControlLabel
+            control={
+              <Switch
+                checked={recordAsSiteExpense}
+                onChange={(e) =>
+                  onChange({
+                    recordAsSiteExpense: e.target.checked,
+                    siteId: e.target.checked ? ctx.siteId : null,
+                  })
+                }
+                size="small"
+              />
+            }
+            label={
+              <Box component="span">
+                <Typography variant="body2" component="span">
+                  Also record as site expense
+                </Typography>
+                <Typography
+                  variant="caption"
+                  component="span"
+                  color="text.secondary"
+                  sx={{ ml: 1 }}
+                >
+                  {recordAsSiteExpense
+                    ? "Bill will land on the chosen site's expenses."
+                    : "Catalog-only — updates materials, vendors, and price history."}
+                </Typography>
+              </Box>
+            }
           />
-        ) : (
-          <TextField
-            select
-            label="Site"
-            value={ctx.siteId ?? ""}
-            onChange={(e) => onChange({ siteId: e.target.value })}
-            size="small"
-            fullWidth
-            required
-            helperText="Which site is this purchase for?"
-          >
-            {sites.length === 0 ? (
-              <MenuItem disabled value="">
-                No sites available
-              </MenuItem>
-            ) : (
-              sites.map((s) => (
-                <MenuItem key={s.id} value={s.id}>
-                  {s.name}
+          <Collapse in={recordAsSiteExpense} unmountOnExit>
+            <TextField
+              select
+              label="Site"
+              value={ctx.siteId ?? ""}
+              onChange={(e) => onChange({ siteId: e.target.value })}
+              size="small"
+              fullWidth
+              required
+              helperText="Which site is this purchase for?"
+              sx={{ mt: 1.5 }}
+            >
+              {sites.length === 0 ? (
+                <MenuItem disabled value="">
+                  No sites available
                 </MenuItem>
-              ))
-            )}
-          </TextField>
-        )
+              ) : (
+                sites.map((s) => (
+                  <MenuItem key={s.id} value={s.id}>
+                    {s.name}
+                  </MenuItem>
+                ))
+              )}
+            </TextField>
+          </Collapse>
+        </Box>
       ) : null}
 
       <TextField

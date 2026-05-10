@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import dynamic from "next/dynamic";
 import {
   Box,
   Typography,
@@ -31,6 +32,8 @@ import {
   DialogActions,
   Button,
   Divider,
+  Snackbar,
+  Stack,
 } from "@mui/material";
 import {
   Receipt as ExpenseIcon,
@@ -43,6 +46,10 @@ import {
   Edit as EditIcon,
   Delete as DeleteIcon,
   MoreVert as MoreIcon,
+  AutoAwesome as AIIcon,
+  Description as POIcon,
+  EditNote as ManualIcon,
+  Hub as GroupConvIcon,
 } from "@mui/icons-material";
 import PageHeader from "@/components/layout/PageHeader";
 import MaterialWorkflowBar from "@/components/materials/MaterialWorkflowBar";
@@ -56,6 +63,23 @@ import {
   type SiteMaterialExpense,
 } from "@/hooks/queries/useMaterialPurchases";
 import { useRouter } from "next/navigation";
+
+const AIIngestionDialog = dynamic(
+  () => import("@/components/ai-ingestion/AIIngestionDialog"),
+  { ssr: false },
+);
+
+// Visual config for the Origin column. Each entry maps a `source` enum value
+// to the chip rendered in the table + filter row.
+const originConfig: Record<
+  SiteMaterialExpense["origin"],
+  { icon: React.ReactNode; label: string; color: "default" | "info" | "secondary" | "success" }
+> = {
+  ai_ingest: { icon: <AIIcon sx={{ fontSize: 14 }} />, label: "AI", color: "secondary" },
+  purchase_order: { icon: <POIcon sx={{ fontSize: 14 }} />, label: "PO", color: "info" },
+  manual: { icon: <ManualIcon sx={{ fontSize: 14 }} />, label: "Manual", color: "default" },
+  group_conversion: { icon: <GroupConvIcon sx={{ fontSize: 14 }} />, label: "Group", color: "success" },
+};
 
 // Type config for display
 const typeConfig: Record<
@@ -83,6 +107,12 @@ export default function MaterialExpensesPage() {
   const { selectedSite } = useSite();
   const router = useRouter();
   const [typeFilter, setTypeFilter] = useState<"all" | SiteMaterialExpense["type"]>("all");
+  const [originFilter, setOriginFilter] = useState<"all" | SiteMaterialExpense["origin"]>("all");
+  const [aiDialogOpen, setAiDialogOpen] = useState(false);
+  const [snackbar, setSnackbar] = useState<{ open: boolean; message: string }>({
+    open: false,
+    message: "",
+  });
 
   // Menu and dialog state
   const [menuAnchorEl, setMenuAnchorEl] = useState<null | HTMLElement>(null);
@@ -102,11 +132,21 @@ export default function MaterialExpensesPage() {
   const allExpenses = expensesData?.expenses || [];
   const totalAmount = expensesData?.total || 0;
 
-  // Filter expenses by type
+  // Filter expenses by both type and origin
   const filteredExpenses = useMemo(() => {
-    if (typeFilter === "all") return allExpenses;
-    return allExpenses.filter((e) => e.type === typeFilter);
-  }, [allExpenses, typeFilter]);
+    return allExpenses.filter((e) => {
+      if (typeFilter !== "all" && e.type !== typeFilter) return false;
+      if (originFilter !== "all" && e.origin !== originFilter) return false;
+      return true;
+    });
+  }, [allExpenses, typeFilter, originFilter]);
+
+  // Per-origin counts for filter chip badges
+  const originCounts = useMemo(() => {
+    const counts = { ai_ingest: 0, purchase_order: 0, manual: 0, group_conversion: 0 };
+    for (const e of allExpenses) counts[e.origin]++;
+    return counts;
+  }, [allExpenses]);
 
   // Calculate summaries by type
   const summaries = useMemo(() => {
@@ -224,6 +264,18 @@ export default function MaterialExpensesPage() {
             ? `Actual material costs for ${selectedSite.name}`
             : "Actual material costs attributed to this site"
         }
+        actions={
+          selectedSite?.id ? (
+            <Button
+              variant="contained"
+              size="small"
+              startIcon={<AIIcon />}
+              onClick={() => setAiDialogOpen(true)}
+            >
+              Quick Bill (AI)
+            </Button>
+          ) : null
+        }
       />
 
       <MaterialWorkflowBar currentStep="expenses" />
@@ -330,28 +382,60 @@ export default function MaterialExpensesPage() {
 
       {/* Filters */}
       <Paper sx={{ mb: 2 }}>
-        <Box sx={{ p: 2, display: "flex", alignItems: "center", gap: 2 }}>
-          <Typography variant="subtitle2" color="text.secondary">
-            Filter:
-          </Typography>
-          <ToggleButtonGroup
-            value={typeFilter}
-            exclusive
-            onChange={(_, value) => value && setTypeFilter(value)}
-            size="small"
-          >
-            <ToggleButton value="all">All ({summaries.total.count})</ToggleButton>
-            <ToggleButton value="own_site">
-              <OwnSiteIcon sx={{ mr: 0.5, fontSize: 18 }} /> Own Site ({summaries.own_site.count})
-            </ToggleButton>
-            <ToggleButton value="allocated" sx={{ color: "info.main" }}>
-              <GroupIcon sx={{ mr: 0.5, fontSize: 18 }} /> From Group ({summaries.allocated.count})
-            </ToggleButton>
-            <ToggleButton value="self_use" sx={{ color: "secondary.main" }}>
-              <SelfUseIcon sx={{ mr: 0.5, fontSize: 18 }} /> Self Use ({summaries.self_use.count})
-            </ToggleButton>
-          </ToggleButtonGroup>
-        </Box>
+        <Stack
+          spacing={1.5}
+          sx={{ p: 2 }}
+          divider={<Divider flexItem />}
+        >
+          <Box sx={{ display: "flex", alignItems: "center", gap: 2, flexWrap: "wrap" }}>
+            <Typography variant="subtitle2" color="text.secondary">
+              Type:
+            </Typography>
+            <ToggleButtonGroup
+              value={typeFilter}
+              exclusive
+              onChange={(_, value) => value && setTypeFilter(value)}
+              size="small"
+            >
+              <ToggleButton value="all">All ({summaries.total.count})</ToggleButton>
+              <ToggleButton value="own_site">
+                <OwnSiteIcon sx={{ mr: 0.5, fontSize: 18 }} /> Own Site ({summaries.own_site.count})
+              </ToggleButton>
+              <ToggleButton value="allocated" sx={{ color: "info.main" }}>
+                <GroupIcon sx={{ mr: 0.5, fontSize: 18 }} /> From Group ({summaries.allocated.count})
+              </ToggleButton>
+              <ToggleButton value="self_use" sx={{ color: "secondary.main" }}>
+                <SelfUseIcon sx={{ mr: 0.5, fontSize: 18 }} /> Self Use ({summaries.self_use.count})
+              </ToggleButton>
+            </ToggleButtonGroup>
+          </Box>
+
+          <Box sx={{ display: "flex", alignItems: "center", gap: 2, flexWrap: "wrap" }}>
+            <Typography variant="subtitle2" color="text.secondary">
+              Origin:
+            </Typography>
+            <ToggleButtonGroup
+              value={originFilter}
+              exclusive
+              onChange={(_, value) => value && setOriginFilter(value)}
+              size="small"
+            >
+              <ToggleButton value="all">All</ToggleButton>
+              <ToggleButton value="ai_ingest" sx={{ color: "secondary.main" }}>
+                <AIIcon sx={{ mr: 0.5, fontSize: 16 }} /> AI ({originCounts.ai_ingest})
+              </ToggleButton>
+              <ToggleButton value="purchase_order" sx={{ color: "info.main" }}>
+                <POIcon sx={{ mr: 0.5, fontSize: 16 }} /> PO ({originCounts.purchase_order})
+              </ToggleButton>
+              <ToggleButton value="manual">
+                <ManualIcon sx={{ mr: 0.5, fontSize: 16 }} /> Manual ({originCounts.manual})
+              </ToggleButton>
+              <ToggleButton value="group_conversion" sx={{ color: "success.main" }}>
+                <GroupConvIcon sx={{ mr: 0.5, fontSize: 16 }} /> Group ({originCounts.group_conversion})
+              </ToggleButton>
+            </ToggleButtonGroup>
+          </Box>
+        </Stack>
 
         {/* Expenses Table */}
         <TableContainer>
@@ -361,6 +445,7 @@ export default function MaterialExpensesPage() {
                 <TableCell>Date</TableCell>
                 <TableCell>Ref Code</TableCell>
                 <TableCell>Type</TableCell>
+                <TableCell>Origin</TableCell>
                 <TableCell>Material</TableCell>
                 <TableCell>Qty</TableCell>
                 <TableCell align="right">Amount</TableCell>
@@ -372,6 +457,7 @@ export default function MaterialExpensesPage() {
               {isLoading ? (
                 [...Array(5)].map((_, i) => (
                   <TableRow key={i}>
+                    <TableCell><Skeleton /></TableCell>
                     <TableCell><Skeleton /></TableCell>
                     <TableCell><Skeleton /></TableCell>
                     <TableCell><Skeleton /></TableCell>
@@ -407,6 +493,27 @@ export default function MaterialExpensesPage() {
                           variant="outlined"
                           sx={{ fontSize: "0.75rem" }}
                         />
+                      </TableCell>
+                      <TableCell>
+                        {(() => {
+                          const oc = originConfig[expense.origin];
+                          return (
+                            <Tooltip
+                              title={originTooltip(expense)}
+                              arrow
+                              placement="top"
+                            >
+                              <Chip
+                                icon={oc.icon as React.ReactElement}
+                                label={oc.label}
+                                size="small"
+                                color={oc.color}
+                                variant={expense.origin === "manual" ? "outlined" : "filled"}
+                                sx={{ fontSize: "0.7rem", height: 22 }}
+                              />
+                            </Tooltip>
+                          );
+                        })()}
                       </TableCell>
                       <TableCell>
                         <Typography variant="body2" fontWeight={500}>
@@ -472,7 +579,7 @@ export default function MaterialExpensesPage() {
                 })
               ) : (
                 <TableRow>
-                  <TableCell colSpan={8} align="center" sx={{ py: 4 }}>
+                  <TableCell colSpan={9} align="center" sx={{ py: 4 }}>
                     <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 1 }}>
                       <ExpenseIcon sx={{ fontSize: 48, color: "text.disabled" }} />
                       <Typography color="text.secondary">
@@ -821,6 +928,48 @@ export default function MaterialExpensesPage() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* AI Bill Ingestion Dialog — site is locked to the current site. */}
+      {selectedSite ? (
+        <AIIngestionDialog
+          open={aiDialogOpen}
+          onClose={() => setAiDialogOpen(false)}
+          initialMode="purchase"
+          lockedSite={{ id: selectedSite.id, name: selectedSite.name }}
+          sites={[]}
+          onSaved={(result) => {
+            const ref = (result as { ref_code?: string | null } | null)?.ref_code;
+            setSnackbar({
+              open: true,
+              message: ref ? `Saved as ${ref}` : "Bill saved",
+            });
+          }}
+        />
+      ) : null}
+
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={4000}
+        onClose={() => setSnackbar((s) => ({ ...s, open: false }))}
+        message={snackbar.message}
+      />
     </Box>
   );
+}
+
+/**
+ * Tooltip text for the Origin chip — explains what the source value means in
+ * a single short line.
+ */
+function originTooltip(expense: SiteMaterialExpense): string {
+  switch (expense.origin) {
+    case "ai_ingest":
+      return `Ingested from bill on ${formatDate(expense.purchase_date)}`;
+    case "purchase_order":
+      return `Linked to PO ${expense.source_ref}`;
+    case "manual":
+      return "Manually entered";
+    case "group_conversion":
+      return `From group purchase ${expense.batch_ref_code ?? expense.source_ref}`;
+  }
 }

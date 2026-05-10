@@ -34,6 +34,40 @@ export interface IngestionContext {
   billUrls: string[]; // already-uploaded URLs (multi-page warranty support)
   /** Warranty mode only — the purchase row to attach warranty to. */
   purchaseId?: string | null;
+  /**
+   * Purchase mode + company-flow only. Toggle exposed in ContextPicker:
+   * "Also record as site expense?". Default true on /site/* callers (site is
+   * locked); default false on /company/* (catalog-only ingest unless user
+   * opts in). When false, siteId stays null and the RPC skips creating a
+   * material_purchase_expenses row.
+   */
+  recordAsSiteExpense?: boolean;
+}
+
+/**
+ * Per-row pricing intelligence shown on the Preview step. Computed by the
+ * mode's resolvePreview against the price_history table.
+ */
+export interface RowPriceContext {
+  lastFromSameVendor: { price: number; date: string; daysAgo: number } | null;
+  lastFromAnyVendor: {
+    price: number;
+    vendorId: string;
+    vendorName: string;
+    date: string;
+  } | null;
+  /** (current - lastFromSameVendor.price) / lastFromSameVendor.price * 100 */
+  deltaPctVsSameVendor: number | null;
+}
+
+/**
+ * Vendor-level summary shown below the preview table.
+ */
+export interface VendorSummary {
+  vendorId: string;
+  vendorName: string;
+  last30Days: { billCount: number; totalAmount: number; avgAmount: number };
+  thisBill: { totalAmount: number };
 }
 
 /**
@@ -66,6 +100,12 @@ export interface ResolvedPreviewRow {
   /** Free-text edit of the material name (for NEW rows). */
   overrideMaterialName: string | null;
   warnings: string[];
+  /**
+   * Pricing intelligence — populated only when the row matched a known
+   * material (or override id is set) and we could look up price_history.
+   * `null` for new materials with no history yet.
+   */
+  priceContext: RowPriceContext | null;
 }
 
 export interface ResolvedPreview {
@@ -74,6 +114,11 @@ export interface ResolvedPreview {
   /** Override vendor chosen by user. */
   overrideVendorId: string | null;
   rows: ResolvedPreviewRow[];
+  /**
+   * Vendor-level summary card shown below the row list. `null` for unmatched
+   * vendors or vendors with no recent bills in the visible site set.
+   */
+  vendorSummary: VendorSummary | null;
 }
 
 export type CommitPhase =

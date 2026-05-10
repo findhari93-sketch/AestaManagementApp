@@ -25,6 +25,8 @@ import type {
   ModeConfig,
   ResolvedPreview,
   ResolvedPreviewRow,
+  RowPriceContext,
+  VendorSummary,
 } from "@/lib/ai-ingestion/types";
 
 /**
@@ -89,9 +91,73 @@ export function createPurchaseMode(
       const allMaterials = materialsRes.data ?? [];
 
       const vendorMatch = matchVendorClientSide(parsed.vendor.name, allVendors);
+      const matchedVendorId =
+        vendorMatch.status === "matched" ? vendorMatch.entity.id : null;
 
-      const rows: ResolvedPreviewRow[] = parsed.items.map((item, index) => {
+      // First pass: build rows + collect matched material ids (for price-context lookup)
+      const matchedMaterialIds: string[] = [];
+      const baseRows = parsed.items.map((item, index) => {
         const match = matchMaterialClientSide(item.name, allMaterials);
+        if (match.status === "matched") matchedMaterialIds.push(match.entity.id);
+        return { item, index, match };
+      });
+
+      // Price intelligence (best-effort — failures degrade to null priceContext rather than blocking the preview)
+      const [priceCtxRes, vendorSummaryRes] = await Promise.all([
+        matchedMaterialIds.length > 0
+          ? (supabase as any).rpc("get_purchase_price_context", {
+              p_material_ids: matchedMaterialIds,
+              p_vendor_id: matchedVendorId,
+            })
+          : Promise.resolve({ data: [], error: null }),
+        matchedVendorId
+          ? (supabase as any).rpc("get_vendor_recent_summary", {
+              p_vendor_id: matchedVendorId,
+              p_days: 30,
+            })
+          : Promise.resolve({ data: null, error: null }),
+      ]);
+
+      const priceCtxByMaterialId = new Map<string, RowPriceContext>();
+      if (!priceCtxRes.error && Array.isArray(priceCtxRes.data)) {
+        const today = new Date();
+        for (const row of priceCtxRes.data as Array<{
+          material_id: string;
+          last_same_vendor_price: number | null;
+          last_same_vendor_date: string | null;
+          last_any_vendor_price: number | null;
+          last_any_vendor_id: string | null;
+          last_any_vendor_name: string | null;
+          last_any_vendor_date: string | null;
+        }>) {
+          const lastSame =
+            row.last_same_vendor_price != null && row.last_same_vendor_date
+              ? {
+                  price: Number(row.last_same_vendor_price),
+                  date: row.last_same_vendor_date,
+                  daysAgo: daysBetween(row.last_same_vendor_date, today),
+                }
+              : null;
+          const lastAny =
+            row.last_any_vendor_price != null && row.last_any_vendor_date
+              ? {
+                  price: Number(row.last_any_vendor_price),
+                  vendorId: row.last_any_vendor_id ?? "",
+                  vendorName: row.last_any_vendor_name ?? "Unknown vendor",
+                  date: row.last_any_vendor_date,
+                }
+              : null;
+          priceCtxByMaterialId.set(row.material_id, {
+            lastFromSameVendor: lastSame,
+            lastFromAnyVendor: lastAny,
+            deltaPctVsSameVendor: null, // filled per-row using current bill price
+          });
+        }
+      } else if (priceCtxRes.error) {
+        console.warn("[ai-ingest] price context lookup failed:", priceCtxRes.error);
+      }
+
+      const rows: ResolvedPreviewRow[] = baseRows.map(({ item, index, match }) => {
         const warnings: string[] = [];
 
         // Sanity warning: catalog unit vs bill unit mismatch
@@ -103,6 +169,21 @@ export function createPurchaseMode(
           typeof item.unit_price === "number" && typeof item.quantity === "number"
             ? item.quantity * item.unit_price
             : null;
+
+        // Compute per-row price context with delta vs same vendor
+        let priceContext: RowPriceContext | null = null;
+        if (match.status === "matched") {
+          const ctx = priceCtxByMaterialId.get(match.entity.id);
+          if (ctx) {
+            const deltaPct =
+              ctx.lastFromSameVendor && typeof item.unit_price === "number"
+                ? ((item.unit_price - ctx.lastFromSameVendor.price) /
+                    ctx.lastFromSameVendor.price) *
+                  100
+                : null;
+            priceContext = { ...ctx, deltaPctVsSameVendor: deltaPct };
+          }
+        }
 
         return {
           index,
@@ -126,8 +207,38 @@ export function createPurchaseMode(
           overrideMaterialId: null,
           overrideMaterialName: null,
           warnings,
+          priceContext,
         };
       });
+
+      // Build vendor summary (best-effort)
+      let vendorSummary: VendorSummary | null = null;
+      if (
+        vendorMatch.status === "matched" &&
+        !vendorSummaryRes.error &&
+        Array.isArray(vendorSummaryRes.data) &&
+        vendorSummaryRes.data.length > 0
+      ) {
+        const s = vendorSummaryRes.data[0] as {
+          bill_count: number;
+          total_amount: number;
+          avg_amount: number;
+        };
+        if (Number(s.bill_count) > 0) {
+          vendorSummary = {
+            vendorId: vendorMatch.entity.id,
+            vendorName: vendorMatch.entity.name,
+            last30Days: {
+              billCount: Number(s.bill_count),
+              totalAmount: Number(s.total_amount),
+              avgAmount: Number(s.avg_amount),
+            },
+            thisBill: { totalAmount: Number(parsed.total_amount) },
+          };
+        }
+      } else if (vendorSummaryRes.error) {
+        console.warn("[ai-ingest] vendor summary lookup failed:", vendorSummaryRes.error);
+      }
 
       return {
         vendorRawName: parsed.vendor.name,
@@ -144,6 +255,7 @@ export function createPurchaseMode(
               : { kind: "new", suggestedName: parsed.vendor.name },
         overrideVendorId: null,
         rows,
+        vendorSummary,
       };
     },
 
@@ -171,4 +283,10 @@ export function createPurchaseMode(
 
 function formatNumber(n: number): string {
   return n.toLocaleString("en-IN", { maximumFractionDigits: 2 });
+}
+
+function daysBetween(isoDate: string, today: Date): number {
+  const past = new Date(isoDate);
+  const ms = today.getTime() - past.getTime();
+  return Math.max(0, Math.round(ms / (1000 * 60 * 60 * 24)));
 }

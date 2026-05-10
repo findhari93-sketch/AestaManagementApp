@@ -1226,6 +1226,12 @@ export interface SiteMaterialExpense {
   purchase_expense_id: string | null;
   batch_ref_code: string | null;
   settlement_reference: string | null;
+  /**
+   * Origin of the row in `material_purchase_expenses.source` — used by the
+   * Origin column on /site/material-expenses to distinguish AI-ingested bills
+   * from PO-driven, manual, and group-converted rows.
+   */
+  origin: "manual" | "ai_ingest" | "purchase_order" | "group_conversion";
 }
 
 /**
@@ -1260,6 +1266,7 @@ export function useSiteLevelMaterialExpenses(siteId: string | undefined) {
             total_amount,
             amount_paid,
             is_paid,
+            source,
             settlement_reference,
             vendor_name,
             bill_url,
@@ -1301,6 +1308,7 @@ export function useSiteLevelMaterialExpenses(siteId: string | undefined) {
               purchase_expense_id: purchase.id,
               batch_ref_code: null,
               settlement_reference: purchase.settlement_reference,
+              origin: (purchase.source ?? "manual") as SiteMaterialExpense["origin"],
             });
           }
         }
@@ -1314,6 +1322,7 @@ export function useSiteLevelMaterialExpenses(siteId: string | undefined) {
             purchase_date,
             total_amount,
             amount_paid,
+            source,
             original_batch_code,
             settlement_reference,
             vendor_name,
@@ -1355,6 +1364,7 @@ export function useSiteLevelMaterialExpenses(siteId: string | undefined) {
               purchase_expense_id: expense.id,
               batch_ref_code: expense.original_batch_code,
               settlement_reference: expense.settlement_reference,
+              origin: (expense.source ?? "group_conversion") as SiteMaterialExpense["origin"],
             });
           }
         }
@@ -1369,6 +1379,7 @@ export function useSiteLevelMaterialExpenses(siteId: string | undefined) {
             purchase_date,
             total_amount,
             amount_paid,
+            source,
             original_batch_code,
             settlement_reference,
             vendor_name,
@@ -1409,6 +1420,7 @@ export function useSiteLevelMaterialExpenses(siteId: string | undefined) {
               purchase_expense_id: expense.id,
               batch_ref_code: expense.original_batch_code,
               settlement_reference: expense.settlement_reference,
+              origin: (expense.source ?? "group_conversion") as SiteMaterialExpense["origin"],
             });
           }
         }

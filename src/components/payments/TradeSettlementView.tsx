@@ -19,7 +19,7 @@ import {
 } from "@mui/material";
 import { TaskAlt as SettleIcon } from "@mui/icons-material";
 import dayjs from "dayjs";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase/client";
 import { weekStartOf, weekEndOf } from "@/lib/utils/weekUtils";
 import { useContractHeadcount } from "@/hooks/queries/useContractHeadcount";
@@ -69,6 +69,7 @@ export function TradeSettlementView({
   tradeColor,
 }: TradeSettlementViewProps) {
   const supabase = createClient();
+  const queryClient = useQueryClient();
   const mode: LaborTrackingMode = contract.laborTrackingMode;
 
   const { data: headcount, isLoading: hcLoading } = useContractHeadcount(
@@ -78,22 +79,45 @@ export function TradeSettlementView({
     mode === "mid" ? contract.id : undefined
   );
 
-  // Per-week paid amounts (from subcontract_payments grouped by period_from_date)
+  // Per-week paid amounts. Reads BOTH tables because:
+  //   • labor_payments  — where Civil's pipeline (processContractPayment via
+  //     MestriSettleDialog) writes mid/headcount settlements, with
+  //     payment_for_date == weekStart and subcontract_id linked.
+  //   • subcontract_payments — where headcount's WeeklyHeadcountSettleDialog
+  //     and direct payments still write, keyed by period_from_date.
+  // Aggregating both into one map keyed by weekStart avoids double-counting
+  // (a single settlement only writes to one of the two tables in our flows).
   const { data: weeklyPaid } = useQuery({
     queryKey: ["contract-weekly-paid", contract.id],
     enabled: !!contract.id,
     staleTime: 30 * 1000,
     queryFn: async (): Promise<Map<string, number>> => {
       const sb = supabase as any;
-      const { data, error } = await sb
-        .from("subcontract_payments")
-        .select("amount, period_from_date")
-        .eq("contract_id", contract.id)
-        .eq("is_deleted", false)
-        .not("period_from_date", "is", null);
-      if (error) throw error;
+      const [laborRes, subRes] = await Promise.all([
+        sb
+          .from("labor_payments")
+          .select("amount, payment_for_date")
+          .eq("subcontract_id", contract.id)
+          .eq("is_under_contract", true)
+          .not("payment_for_date", "is", null),
+        sb
+          .from("subcontract_payments")
+          .select("amount, period_from_date")
+          .eq("contract_id", contract.id)
+          .eq("is_deleted", false)
+          .not("period_from_date", "is", null),
+      ]);
+      if (laborRes.error) throw laborRes.error;
+      if (subRes.error) throw subRes.error;
       const map = new Map<string, number>();
-      for (const r of (data ?? []) as Array<{
+      for (const r of (laborRes.data ?? []) as Array<{
+        amount: number | string;
+        payment_for_date: string;
+      }>) {
+        const key = r.payment_for_date;
+        map.set(key, (map.get(key) ?? 0) + Number(r.amount ?? 0));
+      }
+      for (const r of (subRes.data ?? []) as Array<{
         amount: number | string;
         period_from_date: string;
       }>) {
@@ -390,7 +414,22 @@ export function TradeSettlementView({
         return (
           <MestriSettleDialog
             open={true}
-            onClose={() => setSettleWeekStart(null)}
+            onClose={() => {
+              setSettleWeekStart(null);
+              // MestriSettleDialog only invalidates Civil-flavored caches
+              // (salary-waterfall, payments-ledger, etc). Refresh our
+              // mid-mode-specific queries here so the table reflects the
+              // newly recorded settlement immediately.
+              queryClient.invalidateQueries({
+                queryKey: ["contract-weekly-paid", contract.id],
+              });
+              queryClient.invalidateQueries({
+                queryKey: ["trade-attendance-summary", contract.id],
+              });
+              queryClient.invalidateQueries({
+                queryKey: ["trade-reconciliations"],
+              });
+            }}
             siteId={contract.siteId}
             mode="fill-week"
             weekStart={settleWeekStart}

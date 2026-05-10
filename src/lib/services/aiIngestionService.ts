@@ -23,11 +23,16 @@ import type {
 } from "@/lib/ai-ingestion/types";
 
 export interface PurchaseCommitResult {
-  purchase_id: string;
-  ref_code: string;
+  /** Null when catalog-only ingest (recordAsSiteExpense=false). */
+  purchase_id: string | null;
+  /** Null when catalog-only ingest. */
+  ref_code: string | null;
   vendor_id: string;
+  /** Empty array for catalog-only ingest. */
   item_ids: string[];
   items_count: number;
+  /** True when a material_purchase_expenses row was created. */
+  expense_created: boolean;
 }
 
 interface CommitArgs {
@@ -96,6 +101,7 @@ function buildPurchasePayload(args: {
     bill_url: ctx.billUrls[0] ?? null,
     payment_mode: null,
     purchase_type: "own_site",
+    source: "ai_ingest",
     notes: null,
     vendor,
     items,
@@ -119,8 +125,12 @@ export async function commitPurchase(args: CommitArgs): Promise<PurchaseCommitRe
   const { ctx, queryClient, onPhaseChange } = args;
   const supabase = createClient();
 
-  if (!ctx.siteId) {
-    throw new Error("Site is required for a purchase commit.");
+  // The toggle defaults to OFF on the company flow → catalog-only ingest with
+  // siteId null. The toggle is bypassed on the site flow → siteId is locked.
+  // Throw only when the user explicitly enabled the toggle (recordAsSiteExpense
+  // === true) but never picked a site — defense in depth behind the UI gate.
+  if (!ctx.siteId && ctx.recordAsSiteExpense === true) {
+    throw new Error("Site is required when 'Also record as site expense' is enabled.");
   }
 
   onPhaseChange({ phase: "rpc", message: "Saving to database…" });

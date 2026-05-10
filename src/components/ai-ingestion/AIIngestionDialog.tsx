@@ -264,7 +264,15 @@ export default function AIIngestionDialog({
           <Button
             variant="contained"
             onClick={() => ingest.goTo("prompt")}
-            disabled={!ingest.state.ctx.siteId && config.mode === "purchase"}
+            disabled={
+              // Block only when the user has explicitly opted in to recording
+              // a site expense but hasn't picked a site yet. The default
+              // (undefined) treats company-flow as catalog-only / allow continue,
+              // matching ContextPicker's "default toggle off" UX.
+              config.mode === "purchase" &&
+              ingest.state.ctx.recordAsSiteExpense === true &&
+              !ingest.state.ctx.siteId
+            }
           >
             Next: Copy prompt
           </Button>

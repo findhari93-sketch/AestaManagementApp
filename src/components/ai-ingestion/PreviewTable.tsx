@@ -22,12 +22,21 @@ import {
   Paper,
   Alert,
 } from "@mui/material";
-import { Edit as EditIcon, Warning as WarningIcon } from "@mui/icons-material";
+import {
+  Edit as EditIcon,
+  Warning as WarningIcon,
+  TrendingDown as DownIcon,
+  TrendingUp as UpIcon,
+  TrendingFlat as FlatIcon,
+  Lightbulb as TipIcon,
+} from "@mui/icons-material";
 
 import type {
   ResolvedPreview,
   ResolvedPreviewRow,
   RowMatchOutcome,
+  RowPriceContext,
+  VendorSummary,
 } from "@/lib/ai-ingestion/types";
 import type { MaterialMatchCandidate } from "@/lib/ai-ingestion/fuzzyMatch";
 import ResolveRowEditor from "./ResolveRowEditor";
@@ -160,7 +169,44 @@ export default function PreviewTable({ preview, summary, onPatch }: PreviewTable
                     </Typography>
                   </TableCell>
                   <TableCell align="right">
-                    <Typography variant="body2">₹{formatNumber(row.unitPrice)}</Typography>
+                    <Stack spacing={0.25} alignItems="flex-end">
+                      <Stack direction="row" spacing={0.5} alignItems="center">
+                        <Typography variant="body2">₹{formatNumber(row.unitPrice)}</Typography>
+                        <PriceDeltaBadge ctx={row.priceContext} />
+                      </Stack>
+                      {row.priceContext?.lastFromSameVendor ? (
+                        <Typography variant="caption" color="text.secondary">
+                          was ₹{formatNumber(row.priceContext.lastFromSameVendor.price)} ·{" "}
+                          {row.priceContext.lastFromSameVendor.daysAgo}d ago
+                        </Typography>
+                      ) : null}
+                      {row.priceContext?.lastFromAnyVendor &&
+                      row.priceContext.lastFromAnyVendor.price < row.unitPrice &&
+                      // Only surface "cheaper elsewhere" when the cheaper one is from a different vendor
+                      (!row.priceContext.lastFromSameVendor ||
+                        row.priceContext.lastFromAnyVendor.price <
+                          row.priceContext.lastFromSameVendor.price) ? (
+                        <Tooltip
+                          title={`Cheapest recently: ₹${formatNumber(
+                            row.priceContext.lastFromAnyVendor.price,
+                          )} from ${row.priceContext.lastFromAnyVendor.vendorName} on ${formatDate(
+                            row.priceContext.lastFromAnyVendor.date,
+                          )}`}
+                        >
+                          <Stack direction="row" spacing={0.25} alignItems="center">
+                            <TipIcon sx={{ fontSize: 12, color: "warning.main" }} />
+                            <Typography variant="caption" color="warning.main">
+                              cheaper elsewhere
+                            </Typography>
+                          </Stack>
+                        </Tooltip>
+                      ) : null}
+                      {!row.priceContext && status === "new" ? (
+                        <Typography variant="caption" color="text.disabled" sx={{ fontStyle: "italic" }}>
+                          new — no price history
+                        </Typography>
+                      ) : null}
+                    </Stack>
                   </TableCell>
                   <TableCell align="right">
                     <Typography variant="body2">
@@ -187,6 +233,8 @@ export default function PreviewTable({ preview, summary, onPatch }: PreviewTable
         </Table>
       </TableContainer>
 
+      {preview.vendorSummary ? <VendorSummaryCard summary={preview.vendorSummary} /> : null}
+
       <ResolveRowEditor
         anchorEl={editAnchor}
         row={editingRow}
@@ -195,6 +243,74 @@ export default function PreviewTable({ preview, summary, onPatch }: PreviewTable
       />
     </Stack>
   );
+}
+
+function PriceDeltaBadge({ ctx }: { ctx: RowPriceContext | null }) {
+  if (!ctx?.deltaPctVsSameVendor && ctx?.deltaPctVsSameVendor !== 0) return null;
+  const pct = ctx.deltaPctVsSameVendor;
+  // Bucketing: ≤ -2 green, ±5 gray, +5..10 amber, > 10 red
+  let color: "success" | "default" | "warning" | "error";
+  let Icon = FlatIcon;
+  if (pct <= -2) {
+    color = "success";
+    Icon = DownIcon;
+  } else if (pct <= 5 && pct >= -2) {
+    color = "default";
+    Icon = FlatIcon;
+  } else if (pct <= 10) {
+    color = "warning";
+    Icon = UpIcon;
+  } else {
+    color = "error";
+    Icon = UpIcon;
+  }
+  const sign = pct > 0 ? "+" : "";
+  return (
+    <Tooltip title={`${sign}${pct.toFixed(1)}% vs last buy from same vendor`}>
+      <Chip
+        size="small"
+        icon={<Icon sx={{ fontSize: 14 }} />}
+        label={`${sign}${pct.toFixed(0)}%`}
+        color={color}
+        variant={color === "default" ? "outlined" : "filled"}
+        sx={{ height: 20, "& .MuiChip-label": { px: 0.5, fontSize: 11 } }}
+      />
+    </Tooltip>
+  );
+}
+
+function VendorSummaryCard({ summary }: { summary: VendorSummary }) {
+  const avg = summary.last30Days.avgAmount;
+  const ratio = avg > 0 ? summary.thisBill.totalAmount / avg : 0;
+  const note =
+    avg === 0
+      ? "First bill from this vendor in 30 days"
+      : ratio < 0.7
+        ? "below average"
+        : ratio > 1.5
+          ? "above average"
+          : "within average";
+  return (
+    <Paper variant="outlined" sx={{ p: 2 }}>
+      <Stack spacing={0.5}>
+        <Typography variant="subtitle2">{summary.vendorName}</Typography>
+        <Typography variant="caption" color="text.secondary">
+          Last 30 days · {summary.last30Days.billCount} bill
+          {summary.last30Days.billCount === 1 ? "" : "s"} · ₹
+          {formatNumber(summary.last30Days.totalAmount)} total · avg ₹
+          {formatNumber(avg)}
+        </Typography>
+        <Typography variant="caption" color="text.secondary">
+          This bill: ₹{formatNumber(summary.thisBill.totalAmount)} ({note})
+        </Typography>
+      </Stack>
+    </Paper>
+  );
+}
+
+function formatDate(iso: string): string {
+  const d = new Date(iso);
+  return d.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
 }
 
 function effectiveStatus(row: ResolvedPreviewRow): "matched" | "ambiguous" | "new" {
