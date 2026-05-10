@@ -1,10 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import {
   Box,
   Button,
-  IconButton,
   Tooltip,
   Typography,
   alpha,
@@ -12,8 +10,6 @@ import {
 } from "@mui/material";
 import {
   Description as ContractIcon,
-  ExpandMore,
-  ExpandLess,
   ChevronRight,
   InfoOutlined,
 } from "@mui/icons-material";
@@ -41,8 +37,6 @@ interface Props {
   /** Triggers the lazy load + opens the drawer. */
   onOpenSubcontracts: () => void;
   subcontractsLoading?: boolean;
-  /** Persisted collapse key in localStorage. */
-  storageKey?: string;
 }
 
 export default function ExpensesSummaryBand({
@@ -56,28 +50,8 @@ export default function ExpensesSummaryBand({
   subcontracts,
   onOpenSubcontracts,
   subcontractsLoading,
-  storageKey = "expenses_summary_band_collapsed",
 }: Props) {
   const theme = useTheme();
-  const [collapsed, setCollapsed] = useState<boolean>(false);
-
-  useEffect(() => {
-    try {
-      const v = localStorage.getItem(storageKey);
-      if (v === "1") setCollapsed(true);
-    } catch {
-      // localStorage may be unavailable (incognito, server) — fail open
-    }
-  }, [storageKey]);
-
-  const setCollapsedAndPersist = (next: boolean) => {
-    setCollapsed(next);
-    try {
-      localStorage.setItem(storageKey, next ? "1" : "0");
-    } catch {
-      // ignore
-    }
-  };
 
   const grouped: GroupedBreakdown = groupExpenseBreakdown(breakdown);
 
@@ -126,7 +100,7 @@ export default function ExpensesSummaryBand({
           gap: { xs: 1.5, md: 2.5 },
           px: { xs: 2, md: 2.5 },
           pt: 1.5,
-          pb: collapsed ? 1.5 : 1.25,
+          pb: 1.25,
           flexWrap: { xs: "wrap", md: "nowrap" },
         }}
       >
@@ -378,41 +352,34 @@ export default function ExpensesSummaryBand({
               </Button>
             </Tooltip>
           )}
-          <Tooltip title={collapsed ? "Show breakdown" : "Hide breakdown"}>
-            <IconButton size="small" onClick={() => setCollapsedAndPersist(!collapsed)}>
-              {collapsed ? <ExpandMore /> : <ExpandLess />}
-            </IconButton>
-          </Tooltip>
         </Box>
       </Box>
 
-      {!collapsed ? (
-        <Box
-          sx={{
-            display: "flex",
-            flexDirection: { xs: "column", md: "row" },
-            gap: { xs: 2, md: 3 },
-            px: { xs: 2, md: 2.5 },
-            pb: 2,
-            alignItems: "flex-start",
-          }}
-        >
-          <LaborGroupCard
-            grouped={grouped}
-            group={group}
-            activeTypes={activeTypes}
-            onSelectGroup={() => onSelectGroup(group === "labor" ? "all" : "labor")}
-            onSelectTypes={onSelectTypes}
-          />
-          <BuildingGroupCard
-            grouped={grouped}
-            group={group}
-            activeTypes={activeTypes}
-            onSelectGroup={() => onSelectGroup(group === "building" ? "all" : "building")}
-            onSelectTypes={onSelectTypes}
-          />
-        </Box>
-      ) : null}
+      <Box
+        sx={{
+          display: "flex",
+          flexDirection: { xs: "column", md: "row" },
+          gap: { xs: 2, md: 3 },
+          px: { xs: 2, md: 2.5 },
+          pb: 2,
+          alignItems: "flex-start",
+        }}
+      >
+        <LaborGroupCard
+          grouped={grouped}
+          group={group}
+          activeTypes={activeTypes}
+          onSelectGroup={() => onSelectGroup(group === "labor" ? "all" : "labor")}
+          onSelectTypes={onSelectTypes}
+        />
+        <BuildingGroupCard
+          grouped={grouped}
+          group={group}
+          activeTypes={activeTypes}
+          onSelectGroup={() => onSelectGroup(group === "building" ? "all" : "building")}
+          onSelectTypes={onSelectTypes}
+        />
+      </Box>
     </Box>
   );
 }
