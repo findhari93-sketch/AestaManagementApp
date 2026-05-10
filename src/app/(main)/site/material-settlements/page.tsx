@@ -21,6 +21,7 @@ import {
   Skeleton,
   Alert,
   Grid,
+  Snackbar,
   ToggleButton,
   ToggleButtonGroup,
 } from "@mui/material";
@@ -41,6 +42,7 @@ import {
   SwapHoriz as InterSiteIcon,
   KeyboardArrowDown as ArrowDownIcon,
   KeyboardArrowUp as ArrowUpIcon,
+  AutoAwesome as AIIcon,
 } from "@mui/icons-material";
 import PageHeader from "@/components/layout/PageHeader";
 import MaterialWorkflowBar from "@/components/materials/MaterialWorkflowBar";
@@ -58,6 +60,12 @@ import BillVerificationDialog from "@/components/materials/BillVerificationDialo
 import { useVerifyBill } from "@/hooks/queries/useBillVerification";
 import EditMaterialPurchaseDialog from "@/components/materials/EditMaterialPurchaseDialog";
 import { useRouter } from "next/navigation";
+import dynamic from "next/dynamic";
+
+const AIIngestionDialog = dynamic(
+  () => import("@/components/ai-ingestion/AIIngestionDialog"),
+  { ssr: false },
+);
 
 export default function MaterialSettlementsPage() {
   const { selectedSite } = useSite();
@@ -86,6 +94,10 @@ export default function MaterialSettlementsPage() {
   // Edit dialog state
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [editingPurchase, setEditingPurchase] = useState<MaterialPurchaseExpenseWithDetails | null>(null);
+
+  // AI Ingestion dialog state
+  const [aiDialogOpen, setAiDialogOpen] = useState(false);
+  const [snackbar, setSnackbar] = useState<{ open: boolean; message: string }>({ open: false, message: "" });
 
   // Bill verification dialog state (for direct verification from the chip)
   const [verificationDialogOpen, setVerificationDialogOpen] = useState(false);
@@ -269,6 +281,15 @@ export default function MaterialSettlementsPage() {
         >
           New Purchase
         </Button>
+        {selectedSite && canEdit && (
+          <Button
+            variant="outlined"
+            startIcon={<AIIcon />}
+            onClick={() => setAiDialogOpen(true)}
+          >
+            Quick Bill (AI)
+          </Button>
+        )}
       </Box>
 
       {/* Summary Cards */}
@@ -927,6 +948,28 @@ export default function MaterialSettlementsPage() {
         purchaseOrder={settlementPO}
         onClose={handleSettlementClose}
         onSuccess={handleSettlementClose}
+      />
+
+      {/* AI Ingestion Dialog */}
+      {selectedSite && (
+        <AIIngestionDialog
+          open={aiDialogOpen}
+          onClose={() => setAiDialogOpen(false)}
+          initialMode="purchase"
+          lockedSite={{ id: selectedSite.id, name: selectedSite.name }}
+          sites={[]}
+          onSaved={(result) => {
+            const ref = (result as { ref_code?: string | null } | null)?.ref_code;
+            setSnackbar({ open: true, message: ref ? `Saved as ${ref}` : "Bill saved" });
+          }}
+        />
+      )}
+
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={4000}
+        onClose={() => setSnackbar((s) => ({ ...s, open: false }))}
+        message={snackbar.message}
       />
 
       {/* Direct Bill Verification Dialog - triggered by clicking Unverified chip */}
