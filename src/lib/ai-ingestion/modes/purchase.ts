@@ -29,13 +29,7 @@ import type {
   VendorSummary,
 } from "@/lib/ai-ingestion/types";
 
-/**
- * Catalog fetch timeout. Each list is a single GET to a `CACHEABLE_TABLES`
- * row in the Cloudflare Worker (60s edge cache), so this is generous.
- * If the catalog fetch itself stalls, the user sees a clear error rather
- * than a stuck spinner.
- */
-const CATALOG_FETCH_TIMEOUT_MS = 15_000;
+const CATALOG_FETCH_TIMEOUT_MS = 30_000;
 
 import { buildPurchasePrompt } from "./purchase.prompt";
 
@@ -51,53 +45,72 @@ export function createPurchaseMode(
     schema: aiPurchaseOutputSchema,
 
     async resolvePreview(parsed): Promise<ResolvedPreview> {
-      // Pre-fetch the full catalog once instead of issuing N+1 trigram RPCs.
-      // The Worker edge-caches `materials` and `vendors` GETs for 60s
-      // (CACHEABLE_TABLES in cloudflare-proxy/src/index.ts), so this is two
-      // fast trips at most. Avoids browser concurrent-connection queueing
-      // and auth-refresh contention that stalled the parse step in earlier
-      // attempts (see e5eb5df).
+      // Use React Query cache (already warm from the materials page) to avoid
+      // redundant network round-trips. Fall back to a direct Supabase fetch
+      // only when the cache is empty (e.g. dialog opened on a cold page).
+      const cachedVendors = queryClient.getQueryData<unknown[]>(["vendors", "list"]);
+      const cachedMaterials = queryClient.getQueryData<unknown[]>(["materials", "list"]);
+
+      let allVendors: unknown[];
+      let allMaterials: unknown[];
+
       const supabase = createClient();
-      const [vendorsRes, materialsRes] = await Promise.all([
-        withTimeout(
-          Promise.resolve(
-            (supabase as any)
-              .from("vendors")
-              .select("id, name, city, phone, gst_number")
-              .eq("is_active", true),
-          ),
-          CATALOG_FETCH_TIMEOUT_MS,
-          `Vendor catalog fetch timed out after ${CATALOG_FETCH_TIMEOUT_MS / 1000}s`,
-        ),
-        withTimeout(
-          Promise.resolve(
-            (supabase as any)
-              .from("materials")
-              .select("id, name, local_name, category_id, unit")
-              .eq("is_active", true),
-          ),
-          CATALOG_FETCH_TIMEOUT_MS,
-          `Material catalog fetch timed out after ${CATALOG_FETCH_TIMEOUT_MS / 1000}s`,
-        ),
-      ]);
 
-      if (vendorsRes.error) {
-        throw new Error(`Failed to load vendor catalog: ${vendorsRes.error.message}`);
-      }
-      if (materialsRes.error) {
-        throw new Error(`Failed to load material catalog: ${materialsRes.error.message}`);
-      }
-      const allVendors = vendorsRes.data ?? [];
-      const allMaterials = materialsRes.data ?? [];
+      if (cachedVendors && cachedMaterials) {
+        allVendors = cachedVendors;
+        allMaterials = cachedMaterials;
+      } else {
+        const [vendorsRes, materialsRes] = await Promise.all([
+          cachedVendors
+            ? Promise.resolve({ data: cachedVendors, error: null })
+            : withTimeout(
+                Promise.resolve(
+                  (supabase as any)
+                    .from("vendors")
+                    .select("id, name, city, phone, gst_number")
+                    .eq("is_active", true),
+                ),
+                CATALOG_FETCH_TIMEOUT_MS,
+                `Vendor catalog fetch timed out after ${CATALOG_FETCH_TIMEOUT_MS / 1000}s`,
+              ),
+          cachedMaterials
+            ? Promise.resolve({ data: cachedMaterials, error: null })
+            : withTimeout(
+                Promise.resolve(
+                  (supabase as any)
+                    .from("materials")
+                    .select("id, name, local_name, category_id, unit")
+                    .eq("is_active", true),
+                ),
+                CATALOG_FETCH_TIMEOUT_MS,
+                `Material catalog fetch timed out after ${CATALOG_FETCH_TIMEOUT_MS / 1000}s`,
+              ),
+        ]);
 
-      const vendorMatch = matchVendorClientSide(parsed.vendor.name, allVendors);
+        if (vendorsRes.error) {
+          throw new Error(`Failed to load vendor catalog: ${vendorsRes.error.message}`);
+        }
+        if (materialsRes.error) {
+          throw new Error(`Failed to load material catalog: ${materialsRes.error.message}`);
+        }
+        allVendors = vendorsRes.data ?? [];
+        allMaterials = materialsRes.data ?? [];
+      }
+
+      const vendorMatch = matchVendorClientSide(
+        parsed.vendor.name,
+        allVendors as Parameters<typeof matchVendorClientSide>[1],
+      );
       const matchedVendorId =
         vendorMatch.status === "matched" ? vendorMatch.entity.id : null;
 
       // First pass: build rows + collect matched material ids (for price-context lookup)
       const matchedMaterialIds: string[] = [];
       const baseRows = parsed.items.map((item, index) => {
-        const match = matchMaterialClientSide(item.name, allMaterials);
+        const match = matchMaterialClientSide(
+          item.name,
+          allMaterials as Parameters<typeof matchMaterialClientSide>[1],
+        );
         if (match.status === "matched") matchedMaterialIds.push(match.entity.id);
         return { item, index, match };
       });
