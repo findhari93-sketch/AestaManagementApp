@@ -358,7 +358,10 @@ export default function SiteSubcontractsPage() {
         rate_per_unit: form.rate_per_unit || null,
         total_units: form.total_units || null,
         weekly_advance_rate: form.weekly_advance_rate || null,
-        start_date: form.start_date,
+        // Coerce empty strings to null so Postgres doesn't reject the date
+        // column with "invalid input syntax for type date" — the form binds
+        // these as "" when the underlying field is null (line 284).
+        start_date: form.start_date || null,
         expected_end_date: form.expected_end_date || null,
         status: form.status,
       };
@@ -1296,6 +1299,13 @@ export default function SiteSubcontractsPage() {
               </Select>
             </FormControl>
           </Box>
+          {/* Inline error inside the dialog so users don't miss the save failure
+              when the dialog backdrop covers the page-level Alert. */}
+          {error && (
+            <Alert severity="error" sx={{ mt: 2 }} onClose={() => setError("")}>
+              {error}
+            </Alert>
+          )}
         </DialogContent>
         <DialogActions>
           <Button onClick={handleCloseDialog}>Cancel</Button>
