@@ -16,9 +16,12 @@ import {
   LinearProgress,
 } from "@mui/material";
 import {
+  CameraAlt,
   CheckCircle,
   Close,
   CloudUpload,
+  ContentPaste,
+  FolderOpen,
   InsertDriveFile,
   PictureAsPdf,
   Image as ImageIcon,
@@ -28,6 +31,7 @@ import {
 import { SupabaseClient } from "@supabase/supabase-js";
 import { ensureFreshSession } from "@/lib/supabase/client";
 import { withTimeout } from "@/lib/utils/timeout";
+import { useIsMobile } from "@/hooks/useIsMobile";
 
 // Upload status type for better UX feedback
 type UploadStatus =
@@ -388,7 +392,9 @@ export default function FileUploader({
   maxImageHeight = 1280,
 }: FileUploaderProps) {
   const theme = useTheme();
+  const isMobile = useIsMobile();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
   const dropZoneRef = useRef<HTMLDivElement>(null);
 
   const [isDragging, setIsDragging] = useState(false);
@@ -396,6 +402,7 @@ export default function FileUploader({
   const [uploadSuccess, setUploadSuccess] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [clipboardError, setClipboardError] = useState<string | null>(null);
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   // Store last uploaded file to display until parent updates value prop
   const [lastUploadedFile, setLastUploadedFile] = useState<UploadedFile | null>(null);
@@ -743,8 +750,19 @@ export default function FileUploader({
       // Create abort controller for this upload
       abortControllerRef.current = new AbortController();
 
+      // Local phase tracker — closure variable so the visibilitychange handler
+      // always sees the latest phase without needing a ref.
+      let currentPhase: UploadStatus = 'idle';
+      const setPhase = (s: UploadStatus) => { currentPhase = s; setUploadStatus(s); };
+
+      // Whether the abort was triggered by the app being backgrounded (vs user cancel).
+      let backgroundedAbort = false;
+
       // Cleanup helper
+      let removeVisibilityListener: (() => void) | null = null;
       const cleanup = () => {
+        removeVisibilityListener?.();
+        removeVisibilityListener = null;
         if (globalTimeoutRef.current) {
           clearTimeout(globalTimeoutRef.current);
           globalTimeoutRef.current = null;
@@ -776,7 +794,7 @@ export default function FileUploader({
         const effectiveMime = getEffectiveMimeType(file);
 
         if (compressImages && effectiveMime.startsWith("image/")) {
-          setUploadStatus("compressing");
+          setPhase("compressing");
           setUploadProgress(5);
 
           try {
@@ -810,9 +828,28 @@ export default function FileUploader({
         // Use a distinct "preparing" status so the UI doesn't keep saying
         // "Compressing image..." while the auth refresh is running.
         if (isMountedRef.current) {
-          setUploadStatus("preparing");
+          setPhase("preparing");
           setUploadProgress(50);
         }
+
+        // Visibilitychange guard: if the user backgrounds the app during the
+        // auth-token refresh, the browser throttles setTimeout so withTimeout
+        // never fires and the upload hangs at 50% forever. Abort immediately
+        // when the user returns to the app and we're still in "preparing".
+        const onVisibilityChange = () => {
+          if (
+            document.visibilityState === 'visible' &&
+            currentPhase === 'preparing' &&
+            isMountedRef.current
+          ) {
+            backgroundedAbort = true;
+            abortControllerRef.current?.abort();
+          }
+        };
+        document.addEventListener('visibilitychange', onVisibilityChange);
+        removeVisibilityListener = () =>
+          document.removeEventListener('visibilitychange', onVisibilityChange);
+
         try {
           await ensureFreshSession();
         } catch (sessionError) {
@@ -835,7 +872,7 @@ export default function FileUploader({
         }
 
         // === PHASE 3: Upload with real XHR progress ===
-        setUploadStatus("uploading");
+        setPhase("uploading");
         setUploadProgress(55);
 
         const ext = file.name.split(".").pop() || "file";
@@ -872,7 +909,7 @@ export default function FileUploader({
         cleanup();
         setUploadProgress(100);
         setUploadSuccess(true);
-        setUploadStatus("success");
+        setPhase("success");
 
         // Get public URL
         const {
@@ -905,7 +942,7 @@ export default function FileUploader({
       } catch (err: unknown) {
         cleanup();
         setUploadProgress(0);
-        setUploadStatus("error");
+        setPhase("error");
         setRetryCount(0);
 
         const error = err instanceof Error ? err : new Error(String(err));
@@ -916,7 +953,9 @@ export default function FileUploader({
           errorMsg.includes("cancelled") ||
           errorMsg.includes("aborted")
         ) {
-          errorMsg = "Upload cancelled";
+          errorMsg = backgroundedAbort
+            ? "Upload was interrupted when the app was backgrounded. Please try again."
+            : "Upload cancelled";
         } else if (errorMsg.includes("Network error")) {
           errorMsg = "Network error during upload. Please check your internet connection and try again.";
         }
@@ -1009,6 +1048,42 @@ export default function FileUploader({
     e.target.value = "";
   };
 
+  // Clipboard paste via button (works on both desktop and mobile)
+  const handleClipboardButtonClick = useCallback(async () => {
+    if (uploading || disabled) return;
+    try {
+      const items = await navigator.clipboard.read();
+      const imageItem = items.find((item) =>
+        item.types.some((t) => t.startsWith("image/"))
+      );
+      if (!imageItem) {
+        setClipboardError("No image found in clipboard");
+        setTimeout(() => { if (isMountedRef.current) setClipboardError(null); }, 3000);
+        return;
+      }
+      const type = imageItem.types.find((t) => t.startsWith("image/"))!;
+      const blob = await imageItem.getType(type);
+      const ext = type.split("/")[1] ?? "png";
+      const file = new File([blob], `clipboard.${ext}`, { type });
+      await handleFileSelect(file);
+    } catch {
+      setClipboardError("Could not read clipboard. Try Ctrl+V / Cmd+V in the drop zone.");
+      setTimeout(() => { if (isMountedRef.current) setClipboardError(null); }, 3000);
+    }
+  }, [uploading, disabled, handleFileSelect]);
+
+  // Ctrl+V / Cmd+V paste directly on the drop zone (desktop convenience)
+  const handlePasteOnDropZone = useCallback(
+    (e: React.ClipboardEvent) => {
+      if (uploading || disabled) return;
+      const file = Array.from(e.clipboardData?.files ?? []).find((f) =>
+        f.type.startsWith("image/")
+      );
+      if (file) handleFileSelect(file);
+    },
+    [uploading, disabled, handleFileSelect]
+  );
+
   const handleRemove = () => {
     setPendingFile(null);
     setLastUploadedFile(null);
@@ -1068,6 +1143,17 @@ export default function FileUploader({
         disabled={disabled}
       />
 
+      {/* Camera capture — only used on mobile via the "Take photo" button */}
+      <input
+        ref={cameraInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        style={{ display: "none" }}
+        onChange={handleInputChange}
+        disabled={disabled}
+      />
+
       <Paper
         ref={dropZoneRef}
         elevation={0}
@@ -1075,8 +1161,9 @@ export default function FileUploader({
         onDragLeave={handleDragLeave}
         onDragOver={handleDragOver}
         onDrop={handleDrop}
+        onPaste={handlePasteOnDropZone}
         onClick={() =>
-          !disabled && !uploading && !hasFile && fileInputRef.current?.click()
+          !isMobile && !disabled && !uploading && !hasFile && fileInputRef.current?.click()
         }
         sx={{
           p: compact ? 2 : 3,
@@ -1308,8 +1395,45 @@ export default function FileUploader({
               </Tooltip>
             </Stack>
           </Box>
+        ) : isMobile ? (
+          // Mobile Empty State — three tap-friendly action buttons
+          <Stack spacing={1.5} sx={{ py: 1 }}>
+            <Button
+              fullWidth
+              variant="outlined"
+              startIcon={<CameraAlt />}
+              onClick={(e) => { e.stopPropagation(); cameraInputRef.current?.click(); }}
+              disabled={disabled}
+              sx={{ justifyContent: "flex-start", pl: 2 }}
+            >
+              Take photo
+            </Button>
+            <Button
+              fullWidth
+              variant="outlined"
+              startIcon={<ContentPaste />}
+              onClick={(e) => { e.stopPropagation(); handleClipboardButtonClick(); }}
+              disabled={disabled}
+              sx={{ justifyContent: "flex-start", pl: 2 }}
+            >
+              Paste from clipboard
+            </Button>
+            <Button
+              fullWidth
+              variant="outlined"
+              startIcon={<FolderOpen />}
+              onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
+              disabled={disabled}
+              sx={{ justifyContent: "flex-start", pl: 2 }}
+            >
+              Browse files
+            </Button>
+            <Typography variant="caption" color="text.secondary" sx={{ textAlign: "center" }}>
+              {helperText || `${acceptLabel} • Max ${maxSizeMB}MB`}
+            </Typography>
+          </Stack>
         ) : (
-          // Empty State
+          // Desktop Empty State — drag-and-drop zone
           <Box sx={{ textAlign: "center" }}>
             <CloudUpload
               sx={{
@@ -1352,6 +1476,26 @@ export default function FileUploader({
           </Box>
         )}
       </Paper>
+
+      {/* Desktop: clipboard paste button below drop zone (only when idle, no file) */}
+      {!isMobile && !uploading && !hasFile && (
+        <Button
+          size="small"
+          variant="text"
+          startIcon={<ContentPaste fontSize="small" />}
+          onClick={handleClipboardButtonClick}
+          disabled={disabled}
+          sx={{ mt: 1, color: "text.secondary", textTransform: "none" }}
+        >
+          Paste from clipboard (Ctrl+V)
+        </Button>
+      )}
+
+      {clipboardError && (
+        <Typography variant="caption" color="error" sx={{ display: "block", mt: 0.5 }}>
+          {clipboardError}
+        </Typography>
+      )}
 
       {error && (
         <Alert severity="error" sx={{ mt: 1 }} onClose={() => setError(null)}>

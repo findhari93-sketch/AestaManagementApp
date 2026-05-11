@@ -246,7 +246,11 @@
       "PowerShell(Get-Process -Id 27936 -ErrorAction SilentlyContinue)",
       "Bash(Get-Content \"C:\\\\Users\\\\Haribabu\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-Haribabu-Documents-AppsCopilot-AestaManagementApp\\\\7c489243-1fd6-432a-9077-f97b0f8848a0\\\\tasks\\\\buschnekl.output\" -Wait)",
       "Bash(Select-String -Pattern \"error|warning|compiled|failed|success|✓|✗|done|Error|Warning|Compiled|Failed|Success|Done\" --line-buffered)",
-      "Bash(Get-Content \"C:\\\\Users\\\\Haribabu\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-Haribabu-Documents-AppsCopilot-AestaManagementApp\\\\7c489243-1fd6-432a-9077-f97b0f8848a0\\\\tasks\\\\buschnekl.output\")"
+      "Bash(Get-Content \"C:\\\\Users\\\\Haribabu\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-Haribabu-Documents-AppsCopilot-AestaManagementApp\\\\7c489243-1fd6-432a-9077-f97b0f8848a0\\\\tasks\\\\buschnekl.output\")",
+      "Bash(Start-Sleep -Seconds 8)",
+      "Bash(Invoke-WebRequest -Uri \"http://localhost:3000\" -TimeoutSec 5 -UseBasicParsing)",
+      "PowerShell(Start-Sleep -Seconds 6; try { \\(Invoke-WebRequest -Uri \"http://localhost:3000\" -TimeoutSec 4 -UseBasicParsing\\).StatusCode } catch { \"not ready\" })",
+      "PowerShell(Get-Process -Name \"node\" -ErrorAction SilentlyContinue)"
     ],
     "deny": [],
     "ask": [],

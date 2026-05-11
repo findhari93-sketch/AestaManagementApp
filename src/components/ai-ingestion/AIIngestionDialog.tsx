@@ -7,22 +7,28 @@
 
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Box,
   Button,
+  Chip,
   Dialog,
   DialogActions,
   DialogContent,
   DialogTitle,
   IconButton,
+  Stack,
   Step,
   StepLabel,
   Stepper,
   Typography,
 } from "@mui/material";
-import { Close as CloseIcon, Refresh as RefreshIcon } from "@mui/icons-material";
+import {
+  CheckCircle as CheckCircleIcon,
+  Close as CloseIcon,
+  Refresh as RefreshIcon,
+} from "@mui/icons-material";
 import { useQueryClient } from "@tanstack/react-query";
 
 import type { IngestionMode, IngestionStep } from "@/lib/ai-ingestion/types";
@@ -58,6 +64,53 @@ export interface AIIngestionDialogProps {
   sites?: SiteOption[];
   /** Called after a successful commit, with the mode-specific result. */
   onSaved?: (result: unknown) => void;
+}
+
+function PillStepper({
+  steps,
+  activeIndex,
+  sx,
+}: {
+  steps: Array<{ key: string; label: string }>;
+  activeIndex: number;
+  sx?: object;
+}) {
+  return (
+    <Stack direction="row" alignItems="center" justifyContent="center" sx={sx}>
+      {steps.map((s, i) => {
+        const done = i < activeIndex;
+        const active = i === activeIndex;
+        return (
+          <Fragment key={s.key}>
+            {i > 0 && (
+              <Box sx={{ width: 14, height: 1, bgcolor: "divider", mx: 0.5, flexShrink: 0 }} />
+            )}
+            {active ? (
+              <Chip
+                size="small"
+                label={`${i + 1} · ${s.label}`}
+                color="primary"
+                sx={{ fontWeight: 600 }}
+              />
+            ) : done ? (
+              <CheckCircleIcon sx={{ fontSize: 18, color: "success.main", flexShrink: 0 }} />
+            ) : (
+              <Box
+                sx={{
+                  width: 18,
+                  height: 18,
+                  borderRadius: "50%",
+                  border: "2px solid",
+                  borderColor: "divider",
+                  flexShrink: 0,
+                }}
+              />
+            )}
+          </Fragment>
+        );
+      })}
+    </Stack>
+  );
 }
 
 const VISIBLE_STEPS: Array<{ key: IngestionStep; label: string }> = [
@@ -184,18 +237,17 @@ export default function AIIngestionDialog({
 
       <DialogContent dividers sx={{ minHeight: 480 }}>
         {!isOverlay ? (
-          <Stepper
-            activeStep={activeStepIdx}
-            alternativeLabel={!isMobile}
-            orientation={isMobile ? "vertical" : "horizontal"}
-            sx={{ mb: 3 }}
-          >
-            {visibleSteps.map((s) => (
-              <Step key={s.key}>
-                <StepLabel>{s.label}</StepLabel>
-              </Step>
-            ))}
-          </Stepper>
+          isMobile ? (
+            <PillStepper steps={visibleSteps} activeIndex={activeStepIdx} sx={{ mb: 2 }} />
+          ) : (
+            <Stepper activeStep={activeStepIdx} alternativeLabel sx={{ mb: 3 }}>
+              {visibleSteps.map((s) => (
+                <Step key={s.key}>
+                  <StepLabel>{s.label}</StepLabel>
+                </Step>
+              ))}
+            </Stepper>
+          )
         ) : null}
 
         {ingest.state.step === "mode" ? (
@@ -278,7 +330,20 @@ export default function AIIngestionDialog({
         ) : null}
       </DialogContent>
 
-      <DialogActions sx={{ p: 2, gap: 1 }}>
+      <DialogActions
+        sx={{
+          p: 2,
+          gap: 1,
+          ...(isMobile && {
+            position: "sticky",
+            bottom: 0,
+            bgcolor: "background.paper",
+            borderTop: 1,
+            borderColor: "divider",
+            zIndex: 1,
+          }),
+        }}
+      >
         <Button onClick={close} disabled={ingest.state.step === "committing"}>
           Close
         </Button>

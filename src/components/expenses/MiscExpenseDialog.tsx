@@ -194,31 +194,22 @@ export default function MiscExpenseDialog({
         .select("id, name")
         .in("role", ["site_engineer", "admin", "office"]);
 
-      // Calculate wallet balances for engineers
-      const engineersWithBalance: SiteEngineerOption[] = [];
-      for (const eng of data || []) {
-        const { data: transactions } = await (supabase as any)
-          .from("site_engineer_transactions")
-          .select("amount, transaction_type")
-          .eq("user_id", eng.id)
-          .eq("site_id", selectedSite.id);
+      // Get wallet balances from v2 view
+      const allIds = (data || []).map((e: any) => e.id);
+      const { data: balanceRows } = await (supabase as any)
+        .from("v_engineer_wallet_balance")
+        .select("user_id, balance")
+        .in("user_id", allIds)
+        .eq("site_id", selectedSite.id);
+      const balanceMap = Object.fromEntries(
+        (balanceRows ?? []).map((r: any) => [r.user_id, r.balance as number])
+      );
 
-        const balance = (transactions || []).reduce((sum: number, t: any) => {
-          if (t.transaction_type === "credit" || t.transaction_type === "received_from_company") {
-            return sum + (t.amount || 0);
-          }
-          if (t.transaction_type === "debit" || t.transaction_type === "spent_on_behalf") {
-            return sum - (t.amount || 0);
-          }
-          return sum;
-        }, 0);
-
-        engineersWithBalance.push({
-          id: eng.id,
-          name: eng.name,
-          wallet_balance: balance,
-        });
-      }
+      const engineersWithBalance: SiteEngineerOption[] = (data || []).map((eng: any) => ({
+        id: eng.id,
+        name: eng.name,
+        wallet_balance: balanceMap[eng.id] ?? 0,
+      }));
 
       setEngineers(engineersWithBalance);
     } catch (err) {

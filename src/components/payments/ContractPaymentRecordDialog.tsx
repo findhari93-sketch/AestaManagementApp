@@ -48,6 +48,7 @@ import { ensureFreshSession } from "@/lib/auth/sessionManager";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSite } from "@/contexts/SiteContext";
 import { processWaterfallContractPayment } from "@/lib/services/settlementService";
+import { getLatestDepositPayerSource } from "@/lib/services/engineerWalletV2";
 import { withTimeout, TIMEOUTS } from "@/lib/utils/timeout";
 import FileUploader, { UploadedFile } from "@/components/common/FileUploader";
 import SubcontractLinkSelector from "./SubcontractLinkSelector";
@@ -140,6 +141,9 @@ export default function ContractPaymentRecordDialog({
   const [actualPaymentDate, setActualPaymentDate] = useState<dayjs.Dayjs>(dayjs());
   const [moneySource, setMoneySource] = useState<PayerSource>("own_money");
   const [moneySourceName, setMoneySourceName] = useState<string>("");
+  const [depositPayerSource, setDepositPayerSource] = useState<string | null>(null);
+
+  const isSiteEngineer = userProfile?.role === "site_engineer";
   const [subcontractId, setSubcontractId] = useState<string | null>(null);
   const [proofUrl, setProofUrl] = useState<string | null>(null);
   const [notes, setNotes] = useState<string>("");
@@ -234,22 +238,17 @@ export default function ContractPaymentRecordDialog({
           avatar_url: u.avatar_url,
         }));
 
-        // Get wallet balances
+        // Get wallet balances from v2 view
+        const { data: balanceRows } = await (supabase as any)
+          .from("v_engineer_wallet_balance")
+          .select("user_id, balance")
+          .in("user_id", engineerList.map((e) => e.id))
+          .eq("site_id", selectedSite.id);
+        const balanceMap = Object.fromEntries(
+          (balanceRows ?? []).map((r: any) => [r.user_id, r.balance as number])
+        );
         for (const eng of engineerList) {
-          const { data: txns } = await supabase
-            .from("site_engineer_transactions")
-            .select("amount, transaction_type")
-            .eq("engineer_id", eng.id)
-            .eq("site_id", selectedSite.id);
-
-          if (txns) {
-            eng.wallet_balance = txns.reduce((sum, t) => {
-              if (t.transaction_type === "credit") return sum + t.amount;
-              if (t.transaction_type === "debit" || t.transaction_type === "spent_on_behalf")
-                return sum - t.amount;
-              return sum;
-            }, 0);
-          }
+          eng.wallet_balance = balanceMap[eng.id] ?? 0;
         }
 
         setEngineers(engineerList);
@@ -262,6 +261,25 @@ export default function ContractPaymentRecordDialog({
 
     fetchEngineers();
   }, [selectedSite?.id, open, supabase]);
+
+  // Auto-select wallet channel for site engineers
+  useEffect(() => {
+    if (isSiteEngineer) setPaymentChannel("engineer_wallet");
+  }, [isSiteEngineer]);
+
+  // Fetch deposit payer source when engineer selected in wallet mode
+  useEffect(() => {
+    const fetchDepositSource = async () => {
+      if (paymentChannel !== "engineer_wallet" || !selectedEngineerId || !selectedSite?.id) {
+        setDepositPayerSource(null);
+        return;
+      }
+      const { payer_source } = await getLatestDepositPayerSource(supabase, selectedEngineerId, selectedSite.id);
+      setDepositPayerSource(payer_source);
+      if (payer_source) setMoneySource(payer_source as PayerSource);
+    };
+    fetchDepositSource();
+  }, [selectedEngineerId, paymentChannel, selectedSite?.id]);
 
   const handleSubmit = async () => {
     if (!selectedSite || !userProfile || amount <= 0) {
@@ -604,36 +622,38 @@ export default function ContractPaymentRecordDialog({
           </RadioGroup>
         </Box>
 
-        {/* Payment Channel */}
-        <Box sx={{ mb: 3 }}>
-          <Typography variant="subtitle2" gutterBottom>
-            Payment Channel
-          </Typography>
-          <ToggleButtonGroup
-            exclusive
-            value={paymentChannel}
-            onChange={(_, v) => v && setPaymentChannel(v)}
-            fullWidth
-            size="small"
-          >
-            <ToggleButton value="direct">
-              <PaymentIcon sx={{ mr: 1 }} fontSize="small" />
-              Direct Payment
-            </ToggleButton>
-            <ToggleButton value="engineer_wallet">
-              <WalletIcon sx={{ mr: 1 }} fontSize="small" />
-              Via Site Engineer
-            </ToggleButton>
-          </ToggleButtonGroup>
-        </Box>
+        {/* Payment Channel — hidden for site engineers (always wallet) */}
+        {!isSiteEngineer && (
+          <Box sx={{ mb: 3 }}>
+            <Typography variant="subtitle2" gutterBottom>
+              Payment Channel
+            </Typography>
+            <ToggleButtonGroup
+              exclusive
+              value={paymentChannel}
+              onChange={(_, v) => v && setPaymentChannel(v)}
+              fullWidth
+              size="small"
+            >
+              <ToggleButton value="direct">
+                <PaymentIcon sx={{ mr: 1 }} fontSize="small" />
+                Direct Payment
+              </ToggleButton>
+              <ToggleButton value="engineer_wallet">
+                <WalletIcon sx={{ mr: 1 }} fontSize="small" />
+                Via Site Engineer
+              </ToggleButton>
+            </ToggleButtonGroup>
+          </Box>
+        )}
 
-        {/* Money Source */}
+        {/* Money Source — locked to deposit source when settling via wallet */}
         <PayerSourceSelector
           value={moneySource}
           customName={moneySourceName}
           onChange={setMoneySource}
           onCustomNameChange={setMoneySourceName}
-          disabled={processing}
+          disabled={processing || paymentChannel === "engineer_wallet"}
         />
 
         {/* Engineer Selection */}

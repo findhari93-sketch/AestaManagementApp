@@ -421,6 +421,27 @@ export async function recordSpend(
 // Cancel
 // ------------------------------------------------------------------
 
+export async function getLatestDepositPayerSource(
+  supabase: SupabaseClient,
+  engineerId: string,
+  siteId: string
+): Promise<{ payer_source: string | null; transaction_date: string | null }> {
+  const { data } = await supabase
+    .from("site_engineer_transactions")
+    .select("payer_source, transaction_date")
+    .eq("user_id", engineerId)
+    .eq("site_id", siteId)
+    .eq("transaction_type", "deposit")
+    .is("cancelled_at", null)
+    .order("transaction_date", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return {
+    payer_source: data?.payer_source ?? null,
+    transaction_date: data?.transaction_date ?? null,
+  };
+}
+
 export async function cancelTransaction(
   supabase: SupabaseClient,
   args: {
