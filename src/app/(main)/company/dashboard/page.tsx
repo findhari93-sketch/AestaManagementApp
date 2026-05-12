@@ -43,6 +43,7 @@ import PageHeader from "@/components/layout/PageHeader";
 import dayjs from "dayjs";
 import { useCompanyStats, useSiteSummaries } from "@/hooks/queries/useCompanyData";
 import { useQueryClient } from "@tanstack/react-query";
+import DailyPeekSection from "@/components/dashboard/DailyPeekSection";
 
 export default function CompanyDashboardPage() {
   const { userProfile } = useAuth();
@@ -179,6 +180,9 @@ export default function CompanyDashboardPage() {
           </Grid>
         ))}
       </Grid>
+
+      {/* Daily Site Peek — multi-site daily attendance overview */}
+      <DailyPeekSection />
 
       {/* Monthly Summary Card */}
       <Paper

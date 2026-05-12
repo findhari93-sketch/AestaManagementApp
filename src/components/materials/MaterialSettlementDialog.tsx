@@ -41,6 +41,7 @@ import { useRecordAdvancePayment } from "@/hooks/queries/usePurchaseOrders";
 import { useVerifyBill } from "@/hooks/queries/useBillVerification";
 import { useSiteGroupMembership } from "@/hooks/queries/useSiteGroups";
 import { useAuth } from "@/contexts/AuthContext";
+import { useSite } from "@/contexts/SiteContext";
 import type { MaterialPurchaseExpenseWithDetails, MaterialPaymentMode, PurchaseOrderWithDetails } from "@/types/material.types";
 import type { PayerSource } from "@/types/settlement.types";
 import { formatCurrency, formatDate } from "@/lib/formatters";
@@ -69,6 +70,7 @@ export default function MaterialSettlementDialog({
 }: MaterialSettlementDialogProps) {
   const supabase = createClient();
   const { user } = useAuth();
+  const { selectedSite } = useSite();
   const settleMutation = useSettleMaterialPurchase();
   const advancePaymentMutation = useRecordAdvancePayment();
   const verifyBillMutation = useVerifyBill();
@@ -315,6 +317,15 @@ export default function MaterialSettlementDialog({
           <Alert severity="warning" sx={{ mb: 2 }}>
             Recording <strong>advance payment</strong> for this purchase order.
             Materials have not been delivered yet.
+          </Alert>
+        )}
+
+        {/* Cross-site banner: consumer site settling on behalf of another payer site */}
+        {isGroupStockParent && purchase && selectedSite && purchase.site_id !== selectedSite.id && (
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            You are recording this payment on behalf of{" "}
+            <strong>{purchase.paying_site?.name || "another site"}</strong>. Use the
+            <strong> Paying site</strong> selector below if your site is actually paying instead.
           </Alert>
         )}
 

@@ -174,6 +174,7 @@ export default function CompanySitesPage() {
     location_lat: "",
     location_lng: "",
     location_google_maps_url: "",
+    engineer_phone: "",
   });
 
   // Helper to check if current project is personal
@@ -366,6 +367,7 @@ export default function CompanySitesPage() {
           location_lat: site.location_lat?.toString() || "",
           location_lng: site.location_lng?.toString() || "",
           location_google_maps_url: site.location_google_maps_url || "",
+          engineer_phone: (site as { engineer_phone?: string | null }).engineer_phone || "",
         });
         // Set uploaded file info if document exists
         if (site.contract_document_url) {
@@ -442,6 +444,7 @@ export default function CompanySitesPage() {
           location_lat: "",
           location_lng: "",
           location_google_maps_url: "",
+          engineer_phone: "",
         });
       }
       setDialogOpen(true);
@@ -764,7 +767,8 @@ export default function CompanySitesPage() {
         location_lat: form.location_lat ? parseFloat(form.location_lat) : null,
         location_lng: form.location_lng ? parseFloat(form.location_lng) : null,
         location_google_maps_url: form.location_google_maps_url || null,
-      };
+        engineer_phone: form.engineer_phone || null,
+      } as Database["public"]["Tables"]["sites"]["Update"] & { engineer_phone: string | null };
 
       const insertPayload: Database["public"]["Tables"]["sites"]["Insert"] = {
         // Guarded above: when editingSite is null, selectedCompany must exist.
@@ -791,7 +795,8 @@ export default function CompanySitesPage() {
         location_lat: form.location_lat ? parseFloat(form.location_lat) : null,
         location_lng: form.location_lng ? parseFloat(form.location_lng) : null,
         location_google_maps_url: form.location_google_maps_url || null,
-      };
+        engineer_phone: form.engineer_phone || null,
+      } as Database["public"]["Tables"]["sites"]["Insert"] & { engineer_phone: string | null };
 
       if (editingSite) {
         const { error } = await mutationClient
@@ -1694,6 +1699,18 @@ export default function CompanySitesPage() {
                     onChange={(e) =>
                       setForm({ ...form, client_contact: e.target.value })
                     }
+                  />
+                </Grid>
+                <Grid size={{ xs: 12, sm: 6 }}>
+                  <TextField
+                    fullWidth
+                    label="Engineer WhatsApp"
+                    placeholder="+91XXXXXXXXXX"
+                    value={form.engineer_phone}
+                    onChange={(e) =>
+                      setForm({ ...form, engineer_phone: e.target.value })
+                    }
+                    helperText="Used by Daily Peek to nudge when attendance isn't recorded"
                   />
                 </Grid>
                 <Grid size={{ xs: 12 }}>

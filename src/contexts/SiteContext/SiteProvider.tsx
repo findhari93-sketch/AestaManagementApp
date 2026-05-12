@@ -27,10 +27,12 @@ const SITES_CACHE_KEY = "cachedSites";
 // Retry config for fetchSites
 const MAX_FETCH_RETRIES = 3;
 
-// Helper functions to safely access localStorage
+// Helper functions to safely access storage
 function getStoredSiteId(): string | null {
   if (typeof window === "undefined") return null;
   try {
+    const sessionVal = sessionStorage.getItem(SELECTED_SITE_KEY);
+    if (sessionVal !== null) return sessionVal;
     return localStorage.getItem(SELECTED_SITE_KEY);
   } catch {
     return null;
@@ -51,8 +53,10 @@ function storeSiteId(siteId: string | null): void {
   if (typeof window === "undefined") return;
   try {
     if (siteId) {
+      sessionStorage.setItem(SELECTED_SITE_KEY, siteId);
       localStorage.setItem(SELECTED_SITE_KEY, siteId);
     } else {
+      sessionStorage.removeItem(SELECTED_SITE_KEY);
       localStorage.removeItem(SELECTED_SITE_KEY);
     }
   } catch {
@@ -275,43 +279,6 @@ export function SiteProvider({ children }: { children: React.ReactNode }) {
     setLoading(false);
     setIsInitialized(true);
   }, [authLoading, user, userProfile?.id, fetchSites]);
-
-  // Cross-tab sync
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    const handleStorageChange = (e: StorageEvent) => {
-      if (e.key !== SELECTED_SITE_KEY) return;
-
-      const newSiteId = e.newValue;
-      console.log(
-        "[SiteContext] Storage event - site changed in another tab:",
-        newSiteId
-      );
-
-      if (!newSiteId) {
-        setSelectedSiteState(null);
-        return;
-      }
-
-      if (selectedSite?.id === newSiteId) return;
-
-      const newSite = sites.find((s) => s.id === newSiteId);
-      if (newSite) {
-        console.log("[SiteContext] Syncing site from another tab:", newSite.name);
-        setSelectedSiteState(newSite);
-        setSelectedSiteCookie(newSite.id);
-      } else {
-        console.log(
-          "[SiteContext] Site from another tab not in local list, refreshing..."
-        );
-        fetchSites();
-      }
-    };
-
-    window.addEventListener("storage", handleStorageChange);
-    return () => window.removeEventListener("storage", handleStorageChange);
-  }, [selectedSite?.id, sites, fetchSites]);
 
   // Re-fetch sites when token is refreshed and previous fetch had failed
   useEffect(() => {

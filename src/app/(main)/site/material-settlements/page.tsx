@@ -1,60 +1,43 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   Box,
   Typography,
   Card,
   CardContent,
   Button,
-  Chip,
-  Collapse,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  Paper,
-  IconButton,
-  Tooltip,
   Skeleton,
   Alert,
-  Grid,
   Snackbar,
-  ToggleButton,
-  ToggleButtonGroup,
+  Stack,
+  Divider,
+  Collapse,
+  IconButton,
+  Tooltip,
+  useTheme,
+  useMediaQuery,
 } from "@mui/material";
 import {
-  Payment as PaymentIcon,
-  CheckCircle as SettledIcon,
-  Pending as PendingIcon,
-  Visibility as ViewIcon,
-  Delete as DeleteIcon,
-  Inventory as InventoryIcon,
   Add as AddIcon,
-  Receipt as BillIcon,
-  Groups as GroupIcon,
-  Store as OwnSiteIcon,
-  Warning as WarningIcon,
-  Remove as NoBillIcon,
-  Edit as EditIcon,
-  SwapHoriz as InterSiteIcon,
-  KeyboardArrowDown as ArrowDownIcon,
-  KeyboardArrowUp as ArrowUpIcon,
   AutoAwesome as AIIcon,
+  Pending as PendingIcon,
+  CheckCircle as SettledIcon,
+  Inventory as InventoryIcon,
+  Schedule as ClockIcon,
+  ExpandMore as ExpandMoreIcon,
+  ExpandLess as ExpandLessIcon,
 } from "@mui/icons-material";
 import PageHeader from "@/components/layout/PageHeader";
 import MaterialWorkflowBar from "@/components/materials/MaterialWorkflowBar";
 import Breadcrumbs from "@/components/layout/Breadcrumbs";
 import { useSite } from "@/contexts/SiteContext";
 import { useAuth } from "@/contexts/AuthContext";
-import { formatCurrency, formatDate } from "@/lib/formatters";
+import { formatCurrency } from "@/lib/formatters";
 import { hasEditPermission } from "@/lib/permissions";
 import { useSiteMaterialExpenses, useDeleteMaterialPurchase } from "@/hooks/queries/useMaterialPurchases";
 import type { MaterialPurchaseExpenseWithDetails, PurchaseOrderWithDetails } from "@/types/material.types";
 import ConfirmDialog from "@/components/common/ConfirmDialog";
-import { BillPreviewButton } from "@/components/common/BillViewerDialog";
 import MaterialSettlementDialog from "@/components/materials/MaterialSettlementDialog";
 import BillVerificationDialog from "@/components/materials/BillVerificationDialog";
 import { useVerifyBill } from "@/hooks/queries/useBillVerification";
@@ -62,167 +45,201 @@ import EditMaterialPurchaseDialog from "@/components/materials/EditMaterialPurch
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 
+import {
+  getItemAmount,
+  getSettlementType,
+  isExpenseSettled,
+  isItemSettled,
+  type SettlementItem,
+} from "@/components/materials/settlements/settlementClassifiers";
+import SettlementsFilterBar, {
+  applySearchAndDate,
+  type SettlementsFilter,
+  type SettlementsView,
+} from "@/components/materials/settlements/SettlementsFilterBar";
+import PendingVendorCard, {
+  groupPendingByVendor,
+} from "@/components/materials/settlements/PendingVendorCard";
+import SettlementsTableView from "@/components/materials/settlements/SettlementsTableView";
+import SettlementInspectDrawer from "@/components/materials/settlements/SettlementInspectDrawer";
+
 const AIIngestionDialog = dynamic(
   () => import("@/components/ai-ingestion/AIIngestionDialog"),
   { ssr: false },
 );
 
+const VIEW_STORAGE_KEY = "aesta.matsettle.view";
+
 export default function MaterialSettlementsPage() {
   const { selectedSite } = useSite();
   const router = useRouter();
-  const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "settled">("all");
-  const [typeFilter, setTypeFilter] = useState<"all" | "vendor" | "intersite" | "advance">("vendor");
-  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
 
-  const toggleRow = (id: string) => {
-    setExpandedRows(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
-  };
+  // Filter state
+  const [filter, setFilter] = useState<SettlementsFilter>({
+    search: "",
+    dateFrom: "",
+    dateTo: "",
+    typeFilter: "vendor",
+    statusFilter: "all",
+  });
+  const [view, setView] = useState<SettlementsView>("cards");
+  const [settledOpen, setSettledOpen] = useState(false);
 
-  // Delete confirmation state
+  // Restore view preference
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const saved = window.localStorage.getItem(VIEW_STORAGE_KEY);
+    if (saved === "cards" || saved === "table") setView(saved);
+  }, []);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(VIEW_STORAGE_KEY, view);
+  }, [view]);
+
+  // Dialog state
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [selectedPurchase, setSelectedPurchase] = useState<MaterialPurchaseExpenseWithDetails | null>(null);
 
-  // Settlement dialog state
   const [settlementDialogOpen, setSettlementDialogOpen] = useState(false);
   const [settlementPurchase, setSettlementPurchase] = useState<MaterialPurchaseExpenseWithDetails | null>(null);
   const [settlementPO, setSettlementPO] = useState<PurchaseOrderWithDetails | null>(null);
 
-  // Edit dialog state
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [editingPurchase, setEditingPurchase] = useState<MaterialPurchaseExpenseWithDetails | null>(null);
 
-  // AI Ingestion dialog state
   const [aiDialogOpen, setAiDialogOpen] = useState(false);
   const [snackbar, setSnackbar] = useState<{ open: boolean; message: string }>({ open: false, message: "" });
 
-  // Bill verification dialog state (for direct verification from the chip)
   const [verificationDialogOpen, setVerificationDialogOpen] = useState(false);
   const [verifyingPO, setVerifyingPO] = useState<PurchaseOrderWithDetails | null>(null);
   const [verifyingBillUrl, setVerifyingBillUrl] = useState<string | null>(null);
+
+  // Inspect drawer state
+  const [inspectItem, setInspectItem] = useState<SettlementItem | null>(null);
+  const [inspectOpen, setInspectOpen] = useState(false);
 
   // Hooks
   const { data: materialExpensesData, isLoading } = useSiteMaterialExpenses(selectedSite?.id);
   const deleteMutation = useDeleteMaterialPurchase();
   const verifyBillMutation = useVerifyBill();
 
-  // Auth and permissions
   const { userProfile, user } = useAuth();
   const canEdit = hasEditPermission(userProfile?.role);
 
-  // Extract data - memoized to prevent dependency issues
-  const allPurchases = useMemo(() => materialExpensesData?.expenses || [], [materialExpensesData?.expenses]);
-  const allAdvancePOs = useMemo(() => materialExpensesData?.advancePOs || [], [materialExpensesData?.advancePOs]);
-  const totalAmount = materialExpensesData?.total || 0;
+  // Build unified list
+  const allPurchases = useMemo(
+    () => materialExpensesData?.expenses || [],
+    [materialExpensesData?.expenses],
+  );
+  const allAdvancePOs = useMemo(
+    () => materialExpensesData?.advancePOs || [],
+    [materialExpensesData?.advancePOs],
+  );
 
-  // Create a unified list with type indicators for filtering and display
-  type SettlementItem = (MaterialPurchaseExpenseWithDetails & { itemType: 'expense' }) | (PurchaseOrderWithDetails & { itemType: 'po' });
-
-  const allItems = useMemo(() => {
-    const expenses: SettlementItem[] = allPurchases.map(p => ({ ...p, itemType: 'expense' as const }));
-    const pos: SettlementItem[] = allAdvancePOs.map(po => ({ ...po, itemType: 'po' as const }));
+  const allItems: SettlementItem[] = useMemo(() => {
+    const expenses: SettlementItem[] = allPurchases.map((p) => ({ ...p, itemType: "expense" as const }));
+    const pos: SettlementItem[] = allAdvancePOs.map((po) => ({ ...po, itemType: "po" as const }));
     return [...expenses, ...pos];
   }, [allPurchases, allAdvancePOs]);
 
-  // Determine if a purchase expense is settled
-  const isExpenseSettled = (p: MaterialPurchaseExpenseWithDetails) => {
-    if (p.purchase_type === "group_stock") return !!p.is_paid;
-    if (p.original_batch_code && p.settlement_reference && p.settlement_reference !== "SELF-USE") return true;
-    return !!p.settlement_reference;
-  };
-
-  // Classify settlement item type
-  // Self-use records (settlement_reference === "SELF-USE") are grouped under "intersite"
-  // since they're part of the group stock settlement flow, NOT vendor payments
-  const getSettlementType = (item: SettlementItem): "own_site" | "group_po" | "intersite" | "advance" => {
-    if (item.itemType === 'po') return 'advance';
-    const purchase = item as MaterialPurchaseExpenseWithDetails;
-    // Self-use from group stock → group settlement related, not a vendor payment
-    if (purchase.original_batch_code && purchase.settlement_reference === "SELF-USE") return 'intersite';
-    // Inter-site allocated expenses (debtor side)
-    if (purchase.original_batch_code && purchase.settlement_reference && purchase.settlement_reference !== "SELF-USE") return 'intersite';
-    if (purchase.purchase_type === "group_stock") return 'group_po';
-    return 'own_site';
-  };
-
-  // Helper function to get the correct amount for an expense (includes transport cost)
-  const getExpenseAmount = (expense: MaterialPurchaseExpenseWithDetails) => {
-    if (expense.purchase_order?.total_amount) {
-      const itemsTotal = Number(expense.purchase_order.total_amount);
-      const transportCost = Number(expense.purchase_order.transport_cost || 0);
-      return itemsTotal + transportCost;
-    }
-    return Number(expense.total_amount || 0);
-  };
-
-  // Step 1: Apply type filter
+  // Apply type filter
   const typeFilteredItems = useMemo(() => {
-    if (typeFilter === "all") return allItems;
-    if (typeFilter === "vendor") {
-      return allItems.filter(item => {
+    if (filter.typeFilter === "all") return allItems;
+    if (filter.typeFilter === "vendor") {
+      return allItems.filter((item) => {
         const t = getSettlementType(item);
         return t === "own_site" || t === "group_po";
       });
     }
-    if (typeFilter === "intersite") return allItems.filter(item => getSettlementType(item) === "intersite");
-    if (typeFilter === "advance") return allItems.filter(item => getSettlementType(item) === "advance");
+    if (filter.typeFilter === "intersite") {
+      return allItems.filter((item) => getSettlementType(item) === "intersite");
+    }
+    if (filter.typeFilter === "advance") {
+      return allItems.filter((item) => getSettlementType(item) === "advance");
+    }
     return allItems;
-  }, [allItems, typeFilter]);
+  }, [allItems, filter.typeFilter]);
 
-  // Step 2: Apply status filter on top of type filter
-  const filteredItems = useMemo(() => {
-    if (statusFilter === "all") return typeFilteredItems;
-    if (statusFilter === "pending") {
-      return typeFilteredItems.filter((item) => {
-        if (item.itemType === 'expense') return !isExpenseSettled(item as MaterialPurchaseExpenseWithDetails);
-        return !item.advance_paid;
-      });
-    }
-    if (statusFilter === "settled") {
-      return typeFilteredItems.filter((item) => {
-        if (item.itemType === 'expense') return isExpenseSettled(item as MaterialPurchaseExpenseWithDetails);
-        return !!item.advance_paid;
-      });
-    }
-    return typeFilteredItems;
-  }, [typeFilteredItems, statusFilter]);
+  // Apply search + date filter
+  const searchedItems = useMemo(
+    () => applySearchAndDate(typeFilteredItems, filter),
+    [typeFilteredItems, filter],
+  );
 
-  // Calculate summaries from type-filtered items (so counts reflect active type)
+  // Status-split
+  const pendingItems = useMemo(
+    () => searchedItems.filter((item) => !isItemSettled(item)),
+    [searchedItems],
+  );
+  const settledItems = useMemo(
+    () => searchedItems.filter((item) => isItemSettled(item)),
+    [searchedItems],
+  );
+
+  // Items to feed each view, respecting statusFilter
+  const visibleForView = useMemo(() => {
+    if (filter.statusFilter === "pending") return pendingItems;
+    if (filter.statusFilter === "settled") return settledItems;
+    return searchedItems;
+  }, [filter.statusFilter, pendingItems, settledItems, searchedItems]);
+
+  // KPI counts (from type-filtered items, independent of search/date)
   const summaries = useMemo(() => {
-    const expenses = typeFilteredItems.filter(i => i.itemType === 'expense') as MaterialPurchaseExpenseWithDetails[];
-    const pos = typeFilteredItems.filter(i => i.itemType === 'po') as PurchaseOrderWithDetails[];
-
-    const pendingExpenses = expenses.filter(p => !isExpenseSettled(p));
-    const settledExpenses = expenses.filter(p => isExpenseSettled(p));
-    const pendingPOs = pos.filter(po => !po.advance_paid);
-    const settledPOs = pos.filter(po => !!po.advance_paid);
-
-    const getPOAmount = (po: any) => Number(po.total_amount || 0) + Number(po.transport_cost || 0);
-    const allExpensesTotal = expenses.reduce((sum, p) => sum + getExpenseAmount(p), 0);
-    const allPOsTotal = pos.reduce((sum, po) => sum + getPOAmount(po), 0);
-
+    const pending = typeFilteredItems.filter((i) => !isItemSettled(i));
+    const settled = typeFilteredItems.filter((i) => isItemSettled(i));
+    const pendingTotal = pending.reduce((s, i) => s + getItemAmount(i), 0);
+    const settledTotal = settled.reduce((s, i) => s + getItemAmount(i), 0);
+    const oldestDays = pending.reduce((max, i) => {
+      const d = (() => {
+        const dt = i.itemType === "po" ? i.order_date : (i as MaterialPurchaseExpenseWithDetails).purchase_date;
+        if (!dt) return 0;
+        return Math.max(0, Math.floor((Date.now() - Date.parse(dt)) / (1000 * 60 * 60 * 24)));
+      })();
+      return Math.max(max, d);
+    }, 0);
     return {
-      total: {
-        count: typeFilteredItems.length,
-        amount: allExpensesTotal + allPOsTotal,
-      },
-      pending: {
-        count: pendingExpenses.length + pendingPOs.length,
-        amount: pendingExpenses.reduce((sum, p) => sum + getExpenseAmount(p), 0) +
-                pendingPOs.reduce((sum, po) => sum + getPOAmount(po), 0),
-      },
-      settled: {
-        count: settledExpenses.length + settledPOs.length,
-        amount: settledExpenses.reduce((sum, p) => sum + getExpenseAmount(p), 0) +
-                settledPOs.reduce((sum, po) => sum + getPOAmount(po), 0),
-      },
+      pendingCount: pending.length,
+      pendingTotal,
+      settledCount: settled.length,
+      settledTotal,
+      totalCount: typeFilteredItems.length,
+      oldestDays,
     };
   }, [typeFilteredItems]);
 
-  // Handle delete
+  // Pending grouped by vendor for cards view
+  const pendingGroups = useMemo(() => groupPendingByVendor(pendingItems), [pendingItems]);
+
+  // Handlers
+  const handleSettle = (item: SettlementItem) => {
+    if (item.itemType === "expense") {
+      setSettlementPurchase(item);
+      setSettlementPO(null);
+    } else {
+      setSettlementPO(item);
+      setSettlementPurchase(null);
+    }
+    setSettlementDialogOpen(true);
+  };
+
+  const handleSettlementClose = () => {
+    setSettlementDialogOpen(false);
+    setSettlementPurchase(null);
+    setSettlementPO(null);
+  };
+
+  const handleInspect = (item: SettlementItem) => {
+    setInspectItem(item);
+    setInspectOpen(true);
+  };
+
+  const handleEdit = (purchase: MaterialPurchaseExpenseWithDetails) => {
+    setEditingPurchase(purchase);
+    setEditDialogOpen(true);
+  };
+
   const handleDeleteClick = (purchase: MaterialPurchaseExpenseWithDetails) => {
     setSelectedPurchase(purchase);
     setDeleteConfirmOpen(true);
@@ -239,23 +256,9 @@ export default function MaterialSettlementsPage() {
     }
   };
 
-  // Handle settle - for both expenses and POs
-  const handleSettle = (item: SettlementItem) => {
-    if (item.itemType === 'expense') {
-      setSettlementPurchase(item);
-      setSettlementPO(null);
-    } else {
-      setSettlementPO(item);
-      setSettlementPurchase(null);
-    }
-    setSettlementDialogOpen(true);
-  };
-
-  const handleSettlementClose = () => {
-    setSettlementDialogOpen(false);
-    setSettlementPurchase(null);
-    setSettlementPO(null);
-  };
+  // Inspect-from-settled list: when statusFilter=all, show pending cards + collapsible settled section
+  const showPendingSection = filter.statusFilter !== "settled";
+  const showSettledSection = filter.statusFilter !== "pending";
 
   return (
     <Box>
@@ -272,649 +275,245 @@ export default function MaterialSettlementsPage() {
 
       <MaterialWorkflowBar currentStep="settlements" />
 
-      {/* Action Buttons */}
-      <Box sx={{ display: "flex", gap: 2, mb: 3 }}>
-        <Button
-          variant="contained"
-          startIcon={<AddIcon />}
-          onClick={() => router.push("/site/purchase-orders")}
+      {/* KPI Strip + Actions */}
+      <Box sx={{ mb: 2 }}>
+        <Stack
+          direction={{ xs: "column", md: "row" }}
+          spacing={2}
+          alignItems={{ xs: "stretch", md: "center" }}
         >
-          New Purchase
-        </Button>
-        {selectedSite && canEdit && (
-          <Button
-            variant="outlined"
-            startIcon={<AIIcon />}
-            onClick={() => setAiDialogOpen(true)}
-          >
-            Quick Bill (AI)
-          </Button>
-        )}
-      </Box>
-
-      {/* Summary Cards */}
-      <Grid container spacing={2} sx={{ mb: 3 }}>
-        <Grid size={{ xs: 12, sm: 6, md: 4 }}>
-          <Card>
-            <CardContent>
-              <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
-                <InventoryIcon color="primary" />
-                <Typography variant="subtitle2" color="text.secondary">
-                  Total Purchases
+          <Card variant="outlined" sx={{ flex: 1, borderColor: summaries.pendingCount > 0 ? "warning.light" : "divider" }}>
+            <CardContent sx={{ py: 1.5, "&:last-child": { pb: 1.5 } }}>
+              <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.5 }}>
+                <PendingIcon color="warning" sx={{ fontSize: 18 }} />
+                <Typography variant="caption" color="text.secondary" fontWeight={600}>
+                  PENDING
                 </Typography>
               </Box>
               {isLoading ? (
-                <Skeleton variant="text" width={100} height={40} />
+                <Skeleton variant="text" width={120} height={32} />
               ) : (
-                <>
-                  <Typography variant="h4" fontWeight={600} color="primary.main">
-                    {formatCurrency(summaries.total.amount)}
+                <Stack direction="row" spacing={2} alignItems="baseline" flexWrap="wrap">
+                  <Typography variant="h5" fontWeight={700} color="warning.main">
+                    {formatCurrency(summaries.pendingTotal)}
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
-                    {summaries.total.count} purchases
+                    {summaries.pendingCount} bills
                   </Typography>
-                </>
-              )}
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid size={{ xs: 12, sm: 6, md: 4 }}>
-          <Card>
-            <CardContent>
-              <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
-                <PendingIcon color="warning" />
-                <Typography variant="subtitle2" color="text.secondary">
-                  Pending Settlement
-                </Typography>
-              </Box>
-              {isLoading ? (
-                <Skeleton variant="text" width={100} height={40} />
-              ) : (
-                <>
-                  <Typography variant="h4" fontWeight={600} color="warning.main">
-                    {formatCurrency(summaries.pending.amount)}
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    {summaries.pending.count} purchases awaiting settlement
-                  </Typography>
-                </>
-              )}
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid size={{ xs: 12, sm: 6, md: 4 }}>
-          <Card>
-            <CardContent>
-              <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
-                <SettledIcon color="success" />
-                <Typography variant="subtitle2" color="text.secondary">
-                  Settled
-                </Typography>
-              </Box>
-              {isLoading ? (
-                <Skeleton variant="text" width={100} height={40} />
-              ) : (
-                <>
-                  <Typography variant="h4" fontWeight={600} color="success.main">
-                    {formatCurrency(summaries.settled.amount)}
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    {summaries.settled.count} purchases settled
-                  </Typography>
-                </>
-              )}
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
-
-      {/* Filters */}
-      <Paper sx={{ mb: 2 }}>
-        {/* Type Filter */}
-        <Box sx={{ p: 2, pb: 0, display: "flex", alignItems: "center", gap: 2 }}>
-          <Typography variant="subtitle2" color="text.secondary">
-            Type:
-          </Typography>
-          <ToggleButtonGroup
-            value={typeFilter}
-            exclusive
-            onChange={(_, value) => value && setTypeFilter(value)}
-            size="small"
-          >
-            <ToggleButton value="all">All Types</ToggleButton>
-            <ToggleButton value="vendor">
-              <OwnSiteIcon sx={{ mr: 0.5, fontSize: 18 }} /> Vendor Payments
-            </ToggleButton>
-            <ToggleButton value="intersite" sx={{ color: "info.main" }}>
-              <InterSiteIcon sx={{ mr: 0.5, fontSize: 18 }} /> Inter-Site
-            </ToggleButton>
-            <ToggleButton value="advance" sx={{ color: "warning.main" }}>
-              <PaymentIcon sx={{ mr: 0.5, fontSize: 18 }} /> Advance PO
-            </ToggleButton>
-          </ToggleButtonGroup>
-        </Box>
-
-        {/* Status Filter */}
-        <Box sx={{ p: 2, display: "flex", alignItems: "center", gap: 2 }}>
-          <Typography variant="subtitle2" color="text.secondary">
-            Status:
-          </Typography>
-          <ToggleButtonGroup
-            value={statusFilter}
-            exclusive
-            onChange={(_, value) => value && setStatusFilter(value)}
-            size="small"
-          >
-            <ToggleButton value="all">All ({summaries.total.count})</ToggleButton>
-            <ToggleButton value="pending" sx={{ color: "warning.main" }}>
-              <PendingIcon sx={{ mr: 0.5, fontSize: 18 }} /> Pending ({summaries.pending.count})
-            </ToggleButton>
-            <ToggleButton value="settled" sx={{ color: "success.main" }}>
-              <SettledIcon sx={{ mr: 0.5, fontSize: 18 }} /> Settled ({summaries.settled.count})
-            </ToggleButton>
-          </ToggleButtonGroup>
-        </Box>
-
-        {/* Purchases Table */}
-        <TableContainer>
-          <Table>
-            <TableHead>
-              <TableRow>
-                <TableCell sx={{ width: 48 }} />
-                <TableCell>Ref Code</TableCell>
-                <TableCell>Type</TableCell>
-                <TableCell>PO Number</TableCell>
-                <TableCell>Date</TableCell>
-                <TableCell>Materials</TableCell>
-                <TableCell>Vendor</TableCell>
-                <TableCell align="right">Amount</TableCell>
-                <TableCell>Bill</TableCell>
-                <TableCell>Status</TableCell>
-                <TableCell>Actions</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {isLoading ? (
-                [...Array(5)].map((_, i) => (
-                  <TableRow key={i}>
-                    <TableCell><Skeleton variant="circular" width={24} height={24} /></TableCell>
-                    <TableCell><Skeleton /></TableCell>
-                    <TableCell><Skeleton /></TableCell>
-                    <TableCell><Skeleton /></TableCell>
-                    <TableCell><Skeleton /></TableCell>
-                    <TableCell><Skeleton /></TableCell>
-                    <TableCell><Skeleton /></TableCell>
-                    <TableCell><Skeleton /></TableCell>
-                    <TableCell><Skeleton /></TableCell>
-                    <TableCell><Skeleton /></TableCell>
-                    <TableCell><Skeleton /></TableCell>
-                  </TableRow>
-                ))
-              ) : filteredItems.length > 0 ? (
-                filteredItems.map((item) => {
-                  // Determine item type and extract common fields
-                  const isPO = item.itemType === 'po';
-                  const purchase = isPO ? null : (item as MaterialPurchaseExpenseWithDetails);
-                  const po = isPO ? (item as PurchaseOrderWithDetails) : null;
-
-                  // Check if this is a group stock parent purchase (paying site's batch)
-                  const isGroupStockParent = purchase ? purchase.purchase_type === "group_stock" : false;
-                  // Check if this is an allocated expense from inter-site settlement (debtor side)
-                  const isInterSiteAllocated = purchase ? (!!purchase.original_batch_code && !!purchase.settlement_reference && purchase.settlement_reference !== "SELF-USE") : false;
-
-                  // Extract common display fields
-                  const refCode = purchase?.ref_code || po?.po_number || '';
-                  const dateField = purchase?.purchase_date || po?.order_date || '';
-                  const vendorName = item.vendor?.name || (purchase?.vendor_name) || '-';
-                  // For expenses with linked PO, use the PO's total_amount + transport_cost (which is up-to-date with pricing changes)
-                  // For advance POs or expenses without linked PO, use item.total_amount
-                  const amount = purchase?.purchase_order?.total_amount
-                    ? Number(purchase.purchase_order.total_amount) + Number(purchase.purchase_order.transport_cost || 0)
-                    : Number(item.total_amount || 0);
-                  const materialsText = item.items && item.items.length > 0
-                    ? item.items.map((i: any) => i.material?.name || "Unknown").join(", ")
-                    : "Material purchase";
-
-                  const isExpanded = expandedRows.has(item.id);
-                  const hasItems = item.items && item.items.length > 0;
-
-                  return (
-                  <React.Fragment key={item.id}>
-                  <TableRow hover sx={{ '& > *': { borderBottom: isExpanded ? 'none !important' : undefined } }}>
-                    <TableCell sx={{ width: 48 }}>
-                      <IconButton
-                        size="small"
-                        onClick={() => toggleRow(item.id)}
-                        disabled={!hasItems}
+                  {summaries.oldestDays > 0 && (
+                    <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                      <ClockIcon sx={{ fontSize: 14, color: summaries.oldestDays >= 14 ? "error.main" : "text.secondary" }} />
+                      <Typography
+                        variant="caption"
+                        color={summaries.oldestDays >= 14 ? "error.main" : "text.secondary"}
+                        fontWeight={summaries.oldestDays >= 14 ? 700 : 400}
                       >
-                        {isExpanded ? <ArrowUpIcon /> : <ArrowDownIcon />}
-                      </IconButton>
-                    </TableCell>
-                    <TableCell>
-                      <Typography variant="body2" fontWeight={500} sx={{ fontFamily: "monospace" }}>
-                        {refCode}
-                      </Typography>
-                    </TableCell>
-                    <TableCell>
-                      {isPO ? (
-                        <Tooltip title="Advance payment PO - payment before delivery">
-                          <Chip
-                            icon={<PaymentIcon sx={{ fontSize: 16 }} />}
-                            label="Advance PO"
-                            size="small"
-                            color="warning"
-                            variant="outlined"
-                            sx={{ fontSize: "0.75rem" }}
-                          />
-                        </Tooltip>
-                      ) : isInterSiteAllocated ? (
-                        <Tooltip title="Debtor expense from inter-site settlement - paid to creditor site">
-                          <Chip
-                            icon={<InterSiteIcon sx={{ fontSize: 16 }} />}
-                            label="Inter-Site"
-                            size="small"
-                            color="info"
-                            variant="outlined"
-                            sx={{ fontSize: "0.75rem" }}
-                          />
-                        </Tooltip>
-                      ) : isGroupStockParent ? (
-                        <Tooltip title={
-                          purchase && purchase.site_id !== selectedSite?.id
-                            ? `Group stock PO from ${purchase.paying_site?.name || "another site"}`
-                            : "Group stock purchase - you paid the vendor"
-                        }>
-                          <Chip
-                            icon={<GroupIcon sx={{ fontSize: 16 }} />}
-                            label={
-                              purchase && purchase.site_id !== selectedSite?.id
-                                ? `Group PO · ${purchase.paying_site?.name || "Other"}`
-                                : "Group PO"
-                            }
-                            size="small"
-                            color="secondary"
-                            variant="outlined"
-                            sx={{ fontSize: "0.75rem" }}
-                          />
-                        </Tooltip>
-                      ) : (
-                        <Chip
-                          icon={<OwnSiteIcon sx={{ fontSize: 16 }} />}
-                          label="Own Site"
-                          size="small"
-                          color="default"
-                          variant="outlined"
-                          sx={{ fontSize: "0.75rem" }}
-                        />
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      {po ? (
-                        <Typography variant="body2" color="warning.main" sx={{ fontFamily: "monospace" }}>
-                          {po.po_number} (Advance)
-                        </Typography>
-                      ) : purchase?.purchase_order?.po_number ? (
-                        <Typography variant="body2" fontWeight={500} sx={{ fontFamily: "monospace" }}>
-                          {purchase.purchase_order.po_number}
-                        </Typography>
-                      ) : (
-                        <Typography variant="body2" color="text.secondary">
-                          -
-                        </Typography>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <Typography variant="body2">
-                        {formatDate(dateField)}
-                      </Typography>
-                    </TableCell>
-                    <TableCell>
-                      <Typography variant="body2">
-                        {materialsText}
-                      </Typography>
-                      {item.items && item.items.length > 0 && (
-                        <Typography variant="caption" color="text.secondary">
-                          {item.items.length} item(s)
-                        </Typography>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <Typography variant="body2">
-                        {vendorName}
-                      </Typography>
-                    </TableCell>
-                    <TableCell align="right">
-                      {/* Show both original and paid amounts when bargained */}
-                      {purchase?.amount_paid && purchase.amount_paid !== purchase.total_amount ? (
-                        <>
-                          <Typography
-                            variant="body2"
-                            sx={{ textDecoration: 'line-through', color: 'text.disabled' }}
-                          >
-                            {formatCurrency(amount)}
-                          </Typography>
-                          <Typography variant="body2" fontWeight={600} color="success.main">
-                            {formatCurrency(purchase.amount_paid)}
-                          </Typography>
-                          <Typography variant="caption" color="success.main" display="block">
-                            ({formatCurrency(amount - purchase.amount_paid)} saved)
-                          </Typography>
-                        </>
-                      ) : (
-                        <Typography variant="body2" fontWeight={600}>
-                          {formatCurrency(amount)}
-                        </Typography>
-                      )}
-                      {isPO && (
-                        <Typography variant="caption" color="warning.main" display="block">
-                          Advance payment
-                        </Typography>
-                      )}
-                    </TableCell>
-                    {/* Bill Status Cell */}
-                    <TableCell>
-                      {(() => {
-                        // Get the effective PO (either direct PO or through purchase)
-                        const effectivePO = po || purchase?.purchase_order;
-                        const billUrl = effectivePO?.vendor_bill_url || purchase?.bill_url;
-                        const isVerified = effectivePO?.bill_verified;
-
-                        if (!billUrl) {
-                          return (
-                            <Chip
-                              icon={<NoBillIcon sx={{ fontSize: 14 }} />}
-                              label="No Bill"
-                              size="small"
-                              color="default"
-                              variant="outlined"
-                              sx={{ fontSize: "0.7rem" }}
-                            />
-                          );
-                        }
-
-                        return (
-                          <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-                            <Chip
-                              icon={isVerified ? <SettledIcon sx={{ fontSize: 14 }} /> : <WarningIcon sx={{ fontSize: 14 }} />}
-                              label={isVerified ? "Verified" : "Unverified"}
-                              size="small"
-                              color={isVerified ? "success" : "warning"}
-                              variant="outlined"
-                              sx={{
-                                fontSize: "0.7rem",
-                                cursor: !isVerified ? "pointer" : "default",
-                              }}
-                              onClick={!isVerified && effectivePO ? (e) => {
-                                e.stopPropagation();
-                                setVerifyingPO(effectivePO as PurchaseOrderWithDetails);
-                                setVerifyingBillUrl(billUrl || null);
-                                setVerificationDialogOpen(true);
-                              } : undefined}
-                            />
-                            <BillPreviewButton
-                              billUrl={billUrl}
-                              label=""
-                              size="small"
-                              variant="text"
-                              showIcon
-                            />
-                          </Box>
-                        );
-                      })()}
-                    </TableCell>
-                    <TableCell>
-                      {isPO ? (
-                        // PO advance payment status
-                        po!.advance_paid ? (
-                          <Chip
-                            icon={<SettledIcon />}
-                            label="Advance Paid"
-                            size="small"
-                            color="success"
-                            variant="outlined"
-                          />
-                        ) : (
-                          <Chip
-                            icon={<PendingIcon />}
-                            label="Payment Pending"
-                            size="small"
-                            color="warning"
-                            variant="outlined"
-                          />
-                        )
-                      ) : isInterSiteAllocated ? (
-                        // Inter-site allocated: always settled (created on payment)
-                        <Chip
-                          icon={<SettledIcon />}
-                          label="Paid to Creditor"
-                          size="small"
-                          color="success"
-                          variant="outlined"
-                        />
-                      ) : isGroupStockParent ? (
-                        // Group stock parent: show vendor payment status
-                        purchase!.is_paid ? (
-                          <Chip
-                            icon={<SettledIcon />}
-                            label="Vendor Paid"
-                            size="small"
-                            color="success"
-                            variant="outlined"
-                          />
-                        ) : (
-                          <Chip
-                            icon={<PendingIcon />}
-                            label="Vendor Unpaid"
-                            size="small"
-                            color="warning"
-                            variant="outlined"
-                          />
-                        )
-                      ) : purchase!.settlement_reference ? (
-                        <Chip
-                          icon={<SettledIcon />}
-                          label="Settled"
-                          size="small"
-                          color="success"
-                          variant="outlined"
-                        />
-                      ) : (
-                        <Chip
-                          icon={<PendingIcon />}
-                          label="Pending"
-                          size="small"
-                          color="warning"
-                          variant="outlined"
-                        />
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <Box sx={{ display: "flex", gap: 0.5, alignItems: "center" }}>
-                        {/* Pay Advance button for POs with advance payment timing */}
-                        {isPO && !po!.advance_paid && canEdit && (
-                          <Tooltip title="Record advance payment">
-                            <Button
-                              size="small"
-                              variant="outlined"
-                              color="warning"
-                              onClick={() => handleSettle(item)}
-                              startIcon={<PaymentIcon />}
-                            >
-                              Pay Advance
-                            </Button>
-                          </Tooltip>
-                        )}
-                        {/* Pay Vendor button for group stock parent purchases */}
-                        {isGroupStockParent && !purchase!.is_paid && canEdit && (
-                          <Tooltip title="Record vendor payment">
-                            <Button
-                              size="small"
-                              variant="outlined"
-                              color="secondary"
-                              onClick={() => handleSettle(item)}
-                              startIcon={<PaymentIcon />}
-                            >
-                              Pay Vendor
-                            </Button>
-                          </Tooltip>
-                        )}
-                        {/* Settle button for own site purchases (not inter-site allocated) */}
-                        {!isPO && !isGroupStockParent && !isInterSiteAllocated && !purchase!.settlement_reference && canEdit && (
-                          <Tooltip title="Settle">
-                            <Button
-                              size="small"
-                              variant="outlined"
-                              color="success"
-                              onClick={() => handleSettle(item)}
-                              startIcon={<PaymentIcon />}
-                            >
-                              Settle
-                            </Button>
-                          </Tooltip>
-                        )}
-                        {/* Edit button for all purchase rows */}
-                        {canEdit && purchase && (
-                          <Tooltip title="Edit">
-                            <IconButton
-                              size="small"
-                              color="primary"
-                              onClick={() => {
-                                setEditingPurchase(purchase);
-                                setEditDialogOpen(true);
-                              }}
-                            >
-                              <EditIcon fontSize="small" />
-                            </IconButton>
-                          </Tooltip>
-                        )}
-                        {/* Delete button for all purchase rows */}
-                        {canEdit && purchase && (
-                          <Tooltip title="Delete">
-                            <IconButton
-                              size="small"
-                              color="error"
-                              onClick={() => handleDeleteClick(purchase)}
-                            >
-                              <DeleteIcon fontSize="small" />
-                            </IconButton>
-                          </Tooltip>
-                        )}
-                      </Box>
-                    </TableCell>
-                  </TableRow>
-                  {/* Collapsible Detail Row */}
-                  <TableRow>
-                    <TableCell style={{ paddingBottom: 0, paddingTop: 0 }} colSpan={11}>
-                      <Collapse in={isExpanded} timeout="auto" unmountOnExit>
-                        <Box sx={{ py: 2, px: 2, bgcolor: 'grey.50' }}>
-                          <Typography variant="subtitle2" fontWeight={600} sx={{ mb: 1 }}>
-                            Material Details
-                          </Typography>
-                          {isInterSiteAllocated && purchase?.original_batch_code && (
-                            <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block' }}>
-                              Source Batch: {purchase.original_batch_code}
-                            </Typography>
-                          )}
-                          <Table size="small">
-                            <TableHead>
-                              <TableRow>
-                                <TableCell>Material</TableCell>
-                                <TableCell>Brand</TableCell>
-                                <TableCell align="right">Quantity</TableCell>
-                                <TableCell align="right">Unit Price</TableCell>
-                                <TableCell align="right">Total</TableCell>
-                              </TableRow>
-                            </TableHead>
-                            <TableBody>
-                              {item.items?.map((lineItem: any, idx: number) => (
-                                <TableRow key={lineItem.id || idx}>
-                                  <TableCell>
-                                    <Typography variant="body2">
-                                      {lineItem.material?.name || 'Unknown'}
-                                    </Typography>
-                                  </TableCell>
-                                  <TableCell>
-                                    <Typography variant="body2" color="text.secondary">
-                                      {lineItem.brand?.brand_name || '-'}
-                                    </Typography>
-                                  </TableCell>
-                                  <TableCell align="right">
-                                    <Typography variant="body2">
-                                      {lineItem.quantity} {lineItem.material?.unit || ''}
-                                    </Typography>
-                                  </TableCell>
-                                  <TableCell align="right">
-                                    <Typography variant="body2">
-                                      {formatCurrency(lineItem.unit_price || 0)}
-                                    </Typography>
-                                  </TableCell>
-                                  <TableCell align="right">
-                                    <Typography variant="body2" fontWeight={500}>
-                                      {formatCurrency(lineItem.total_price || 0)}
-                                    </Typography>
-                                  </TableCell>
-                                </TableRow>
-                              ))}
-                            </TableBody>
-                          </Table>
-                        </Box>
-                      </Collapse>
-                    </TableCell>
-                  </TableRow>
-                  </React.Fragment>
-                  );
-                })
-              ) : (
-                <TableRow>
-                  <TableCell colSpan={11} align="center" sx={{ py: 4 }}>
-                    <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 1 }}>
-                      <InventoryIcon sx={{ fontSize: 48, color: "text.disabled" }} />
-                      <Typography color="text.secondary">
-                        No material purchases found
-                      </Typography>
-                      <Typography variant="caption" color="text.disabled">
-                        Create a purchase from the Purchase Orders page
+                        oldest {summaries.oldestDays}d
                       </Typography>
                     </Box>
-                  </TableCell>
-                </TableRow>
+                  )}
+                </Stack>
               )}
-            </TableBody>
-          </Table>
-        </TableContainer>
-      </Paper>
+            </CardContent>
+          </Card>
+          <Card variant="outlined" sx={{ flex: 1 }}>
+            <CardContent sx={{ py: 1.5, "&:last-child": { pb: 1.5 } }}>
+              <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.5 }}>
+                <SettledIcon color="success" sx={{ fontSize: 18 }} />
+                <Typography variant="caption" color="text.secondary" fontWeight={600}>
+                  SETTLED
+                </Typography>
+              </Box>
+              {isLoading ? (
+                <Skeleton variant="text" width={120} height={32} />
+              ) : (
+                <Stack direction="row" spacing={2} alignItems="baseline" flexWrap="wrap">
+                  <Typography variant="h5" fontWeight={700} color="success.main">
+                    {formatCurrency(summaries.settledTotal)}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    {summaries.settledCount} bills
+                  </Typography>
+                </Stack>
+              )}
+            </CardContent>
+          </Card>
+          <Card variant="outlined" sx={{ flex: 1 }}>
+            <CardContent sx={{ py: 1.5, "&:last-child": { pb: 1.5 } }}>
+              <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.5 }}>
+                <InventoryIcon color="primary" sx={{ fontSize: 18 }} />
+                <Typography variant="caption" color="text.secondary" fontWeight={600}>
+                  TOTAL
+                </Typography>
+              </Box>
+              {isLoading ? (
+                <Skeleton variant="text" width={120} height={32} />
+              ) : (
+                <Stack direction="row" spacing={2} alignItems="baseline" flexWrap="wrap">
+                  <Typography variant="h5" fontWeight={700}>
+                    {formatCurrency(summaries.pendingTotal + summaries.settledTotal)}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    {summaries.totalCount} bills
+                  </Typography>
+                </Stack>
+              )}
+            </CardContent>
+          </Card>
+        </Stack>
 
-      {/* Info Box */}
-      <Alert severity="info">
+        <Stack direction="row" spacing={1} sx={{ mt: 2 }}>
+          <Button
+            variant="contained"
+            startIcon={<AddIcon />}
+            onClick={() => router.push("/site/purchase-orders")}
+            size={isMobile ? "small" : "medium"}
+          >
+            New Purchase
+          </Button>
+          {selectedSite && canEdit && (
+            <Button
+              variant="outlined"
+              startIcon={<AIIcon />}
+              onClick={() => setAiDialogOpen(true)}
+              size={isMobile ? "small" : "medium"}
+            >
+              Quick Bill (AI)
+            </Button>
+          )}
+        </Stack>
+      </Box>
+
+      {/* Filter Bar */}
+      <SettlementsFilterBar
+        filter={filter}
+        onFilterChange={setFilter}
+        view={view}
+        onViewChange={setView}
+        totalCount={summaries.totalCount}
+        pendingCount={summaries.pendingCount}
+        settledCount={summaries.settledCount}
+      />
+
+      {/* Body */}
+      {view === "cards" ? (
+        <Box>
+          {isLoading ? (
+            <Stack spacing={2}>
+              {[...Array(3)].map((_, i) => (
+                <Skeleton key={i} variant="rectangular" height={140} sx={{ borderRadius: 1 }} />
+              ))}
+            </Stack>
+          ) : (
+            <>
+              {showPendingSection && (
+                <Box sx={{ mb: 3 }}>
+                  {pendingGroups.length === 0 ? (
+                    <EmptyState
+                      icon={<SettledIcon sx={{ fontSize: 40, color: "success.light" }} />}
+                      title="All caught up"
+                      subtitle="No pending vendor bills for this site."
+                    />
+                  ) : (
+                    <Stack spacing={2}>
+                      {pendingGroups.map((g) => (
+                        <PendingVendorCard
+                          key={g.key}
+                          group={g}
+                          currentSiteId={selectedSite?.id}
+                          canEdit={canEdit}
+                          onSettle={handleSettle}
+                          onInspect={handleInspect}
+                        />
+                      ))}
+                    </Stack>
+                  )}
+                </Box>
+              )}
+
+              {showSettledSection && settledItems.length > 0 && (
+                <Box>
+                  <Box
+                    sx={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      mb: 1,
+                      cursor: "pointer",
+                    }}
+                    onClick={() => setSettledOpen(!settledOpen)}
+                  >
+                    <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                      <SettledIcon color="success" sx={{ fontSize: 18 }} />
+                      <Typography variant="subtitle2" fontWeight={700}>
+                        Recently settled
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        ({settledItems.length} bills · {formatCurrency(summaries.settledTotal)})
+                      </Typography>
+                    </Box>
+                    <IconButton size="small">
+                      {settledOpen ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+                    </IconButton>
+                  </Box>
+                  <Collapse in={settledOpen}>
+                    <SettlementsTableView
+                      items={settledItems}
+                      isLoading={false}
+                      currentSiteId={selectedSite?.id}
+                      canEdit={canEdit}
+                      onSettle={handleSettle}
+                      onInspect={handleInspect}
+                      onEdit={handleEdit}
+                      onDelete={handleDeleteClick}
+                    />
+                  </Collapse>
+                </Box>
+              )}
+            </>
+          )}
+        </Box>
+      ) : (
+        <SettlementsTableView
+          items={visibleForView}
+          isLoading={isLoading}
+          currentSiteId={selectedSite?.id}
+          canEdit={canEdit}
+          onSettle={handleSettle}
+          onInspect={handleInspect}
+          onEdit={handleEdit}
+          onDelete={handleDeleteClick}
+        />
+      )}
+
+      {/* How it works */}
+      <Alert severity="info" sx={{ mt: 3 }}>
         <Typography variant="subtitle2" fontWeight={600}>
           How Material Settlements Work
         </Typography>
         <Typography variant="body2" sx={{ mt: 0.5 }}>
-          Material purchases need to be settled before they appear in Site Expenses:
+          Material purchases need to be settled before they appear in Site Expenses. Group POs are
+          visible to every member site — any site can record the vendor payment, and the actual
+          payer site can be picked at the moment of settlement.
         </Typography>
-        <Box component="ul" sx={{ mt: 0.5, pl: 2, mb: 0 }}>
-          <li>
-            <Typography variant="body2">
-              <strong>Own Site:</strong> Direct purchases for this site - settle to record payment
-            </Typography>
-          </li>
-          <li>
-            <Typography variant="body2">
-              <strong>Group PO:</strong> Group stock purchase where this site paid the vendor - mark as &quot;Vendor Paid&quot; after payment
-            </Typography>
-          </li>
-          <li>
-            <Typography variant="body2">
-              <strong>Inter-Site:</strong> Amount paid to creditor site via inter-site settlement - automatically created when settlement is paid
-            </Typography>
-          </li>
-          <li>
-            <Typography variant="body2">
-              <strong>Settled:</strong> Payment recorded - appears in All Site Expenses
-            </Typography>
-          </li>
-        </Box>
       </Alert>
+
+      {/* Inspect drawer */}
+      <SettlementInspectDrawer
+        item={inspectItem}
+        open={inspectOpen}
+        onClose={() => setInspectOpen(false)}
+        currentSiteId={selectedSite?.id}
+        canEdit={canEdit}
+        onSettle={(item) => {
+          setInspectOpen(false);
+          handleSettle(item);
+        }}
+        onEdit={(purchase) => {
+          setInspectOpen(false);
+          handleEdit(purchase);
+        }}
+      />
 
       {/* Delete Confirmation Dialog */}
       <ConfirmDialog
@@ -972,7 +571,7 @@ export default function MaterialSettlementsPage() {
         message={snackbar.message}
       />
 
-      {/* Direct Bill Verification Dialog - triggered by clicking Unverified chip */}
+      {/* Direct Bill Verification Dialog */}
       <BillVerificationDialog
         open={verificationDialogOpen}
         onClose={() => {
@@ -1000,5 +599,31 @@ export default function MaterialSettlementsPage() {
         }}
       />
     </Box>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+
+function EmptyState({
+  icon,
+  title,
+  subtitle,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  subtitle: string;
+}) {
+  return (
+    <Card variant="outlined" sx={{ borderStyle: "dashed" }}>
+      <CardContent sx={{ py: 4, textAlign: "center" }}>
+        <Box sx={{ display: "flex", justifyContent: "center", mb: 1 }}>{icon}</Box>
+        <Typography variant="subtitle1" fontWeight={600}>
+          {title}
+        </Typography>
+        <Typography variant="body2" color="text.secondary">
+          {subtitle}
+        </Typography>
+      </CardContent>
+    </Card>
   );
 }
