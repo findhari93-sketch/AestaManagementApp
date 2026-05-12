@@ -65,7 +65,7 @@ describe("RecordPriceDialog", () => {
       )
     );
     expect(screen.getByText(/record price/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/price/i)).toBeInTheDocument();
+    expect(screen.getByRole("spinbutton", { name: /price/i })).toBeInTheDocument();
     expect(screen.getByLabelText(/date/i)).toBeInTheDocument();
   });
 

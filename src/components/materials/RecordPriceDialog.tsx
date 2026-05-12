@@ -80,6 +80,7 @@ export function RecordPriceDialog({
 
   function handleSubmit() {
     if (!canSubmit) return;
+    recordPrice.reset();  // clear stale error before retrying
 
     const materialId = variantId || material.id;
 
@@ -106,15 +107,10 @@ export function RecordPriceDialog({
   return (
     <Dialog
       open={open}
-      onClose={handleClose}
+      onClose={() => handleClose()}
       maxWidth="xs"
       fullWidth
-      aria-labelledby="rp-dialog-heading"
     >
-      {/* Hidden accessible label that does not match /price/i so getByLabelText queries hit form fields only */}
-      <span id="rp-dialog-heading" style={{ display: "none" }}>
-        Enter market rate
-      </span>
       <DialogTitle component="div" sx={{ pb: 1 }}>
         <Typography sx={{ fontSize: 15, fontWeight: 700 }}>
           Record Price
