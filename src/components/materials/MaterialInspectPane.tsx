@@ -46,7 +46,6 @@ import { VendorBillChips } from "@/components/materials/inspect/VendorBillChips"
 import type {
   MaterialUnit,
   MaterialWithDetails,
-  MaterialBrand,
   MaterialVendorSummary,
   VendorBillPolicy,
   BrandWithVariantLinks,
@@ -116,7 +115,7 @@ export function MaterialInspectPane({
   const { data: priceHistory = [], isLoading: historyLoading } = useMaterialPriceHistory(
     activeTab === "price-history" ? materialId ?? undefined : undefined
   );
-  const { data: brandLinks = [] } = useBrandVariantLinks(
+  const { data: brandLinks = [], isLoading: brandLinksLoading } = useBrandVariantLinks(
     activeTab === "brands" ? materialId ?? undefined : undefined
   );
 
@@ -135,11 +134,8 @@ export function MaterialInspectPane({
     return () => document.removeEventListener("keydown", onKey);
   }, [isOpen, onClose]);
 
-  const visibleBrands: MaterialBrand[] = (material?.brands || []).filter(
-    (b) => b.is_active
-  );
   const variantCount = variants.length;
-  const brandCount = visibleBrands.length;
+  const brandCount = brandLinks.length;
 
   return (
     <Drawer
@@ -325,7 +321,7 @@ export function MaterialInspectPane({
               onVendorClick={onVendorClick}
             />
           ) : activeTab === "brands" ? (
-            <BrandsTab brandLinks={brandLinks} variants={variants} />
+            <BrandsTab isLoading={brandLinksLoading} brandLinks={brandLinks} variants={variants} />
           ) : activeTab === "variants" ? (
             <VariantsTab isLoading={variantsLoading} variants={variants} canEdit={canEdit} />
           ) : activeTab === "price-history" ? (
@@ -836,12 +832,24 @@ function VendorSummaryRow({
 
 // Exported for testing
 export function BrandsTabContent({
+  isLoading = false,
   brandLinks,
   variants,
 }: {
+  isLoading?: boolean;
   brandLinks: BrandWithVariantLinks[];
   variants: Material[];
 }) {
+  if (isLoading) {
+    return (
+      <Box sx={{ p: 1.5 }}>
+        {[0, 1, 2].map((i) => (
+          <Skeleton key={i} variant="rounded" height={72} sx={{ mb: 1 }} />
+        ))}
+      </Box>
+    );
+  }
+
   if (brandLinks.length === 0) {
     return (
       <Box sx={{ p: 3, textAlign: "center" }}>
@@ -933,13 +941,15 @@ export function BrandsTabContent({
 
 // Internal wrapper — kept so the tab switch logic is unchanged
 function BrandsTab({
+  isLoading,
   brandLinks,
   variants,
 }: {
+  isLoading: boolean;
   brandLinks: BrandWithVariantLinks[];
   variants: Material[];
 }) {
-  return <BrandsTabContent brandLinks={brandLinks} variants={variants} />;
+  return <BrandsTabContent isLoading={isLoading} brandLinks={brandLinks} variants={variants} />;
 }
 
 // =====================================================

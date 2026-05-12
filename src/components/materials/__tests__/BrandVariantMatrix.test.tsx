@@ -77,32 +77,37 @@ const mockBrandLinks: BrandWithVariantLinks[] = [
 
 describe("BrandsTabContent", () => {
   it("renders one card per brand", () => {
-    render(<BrandsTabContent brandLinks={mockBrandLinks} variants={mockVariants} />);
+    render(<BrandsTabContent isLoading={false} brandLinks={mockBrandLinks} variants={mockVariants} />);
     expect(screen.getAllByText("Ultratech")).toHaveLength(1);
     expect(screen.getAllByText("ACC")).toHaveLength(1);
   });
 
   it("shows a filled chip for linked variant (is_active=true)", () => {
-    render(<BrandsTabContent brandLinks={mockBrandLinks} variants={mockVariants} />);
+    render(<BrandsTabContent isLoading={false} brandLinks={mockBrandLinks} variants={mockVariants} />);
     const chip = screen.getByTestId("variant-chip-b1-v1");
     expect(chip).toHaveClass("MuiChip-filled");
   });
 
   it("shows an outlined chip for unlinked variant (is_active=false)", () => {
-    render(<BrandsTabContent brandLinks={mockBrandLinks} variants={mockVariants} />);
+    render(<BrandsTabContent isLoading={false} brandLinks={mockBrandLinks} variants={mockVariants} />);
     const chip = screen.getByTestId("variant-chip-b1-v2");
     expect(chip).toHaveClass("MuiChip-outlined");
   });
 
   it("shows all variant chips even when brand has no links", () => {
-    render(<BrandsTabContent brandLinks={mockBrandLinks} variants={mockVariants} />);
+    render(<BrandsTabContent isLoading={false} brandLinks={mockBrandLinks} variants={mockVariants} />);
     // ACC has no links — variants should still render as outlined (unlinked/unknown)
     expect(screen.getByTestId("variant-chip-b2-v1")).toBeInTheDocument();
     expect(screen.getByTestId("variant-chip-b2-v2")).toBeInTheDocument();
   });
 
   it("shows empty state when no brands", () => {
-    render(<BrandsTabContent brandLinks={[]} variants={[]} />);
+    render(<BrandsTabContent isLoading={false} brandLinks={[]} variants={[]} />);
     expect(screen.getByText(/no brands/i)).toBeInTheDocument();
+  });
+
+  it("shows skeleton rows while loading", () => {
+    const { container } = render(<BrandsTabContent isLoading={true} brandLinks={[]} variants={[]} />);
+    expect(container.querySelectorAll(".MuiSkeleton-root").length).toBeGreaterThanOrEqual(1);
   });
 });
