@@ -1092,8 +1092,7 @@ export function useBrandVariantLinks(materialId: string | undefined) {
         )
         .eq("material_id", materialId)
         .eq("is_active", true)
-        .order("brand_name")
-        .order("variant_name", { nullsFirst: true });
+        .order("brand_name");
 
       if (error) throw error;
       return data as unknown as BrandWithVariantLinks[];
@@ -1161,9 +1160,10 @@ export function useUpsertBrandVariantLinkImage() {
 
       const { data, error } = await (supabase as any)
         .from("material_brand_variant_links")
-        .update({ image_url: imageUrl })
-        .eq("brand_id", brandId)
-        .eq("variant_id", variantId)
+        .upsert(
+          { brand_id: brandId, variant_id: variantId, image_url: imageUrl },
+          { onConflict: "brand_id,variant_id" }
+        )
         .select()
         .single();
 

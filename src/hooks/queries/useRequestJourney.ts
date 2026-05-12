@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase/client";
+import { wrapQueryFn } from "@/lib/utils/timeout";
 import type { RequestJourney, JourneyOverallStatus } from "@/types/journey.types";
 import type {
   MaterialRequest,
@@ -38,11 +39,12 @@ function deriveOverallStatus(
   if (deliveries.length === 0) return "ordered";
 
   // Check delivery verification state
-  const anyPending = deliveries.some(
-    (d) => d.verification_status === "pending"
+  // Treat pending, disputed, and rejected as "not yet verified"
+  const anyNotVerified = deliveries.some(
+    (d) => d.verification_status !== "verified"
   );
 
-  if (anyPending) return "delivery_pending";
+  if (anyNotVerified) return "delivery_pending";
 
   // All deliveries verified (none are pending)
   if (!expense?.is_paid) return "delivery_verified";
@@ -76,7 +78,7 @@ export function useRequestJourney(requestId: string | null | undefined): {
   // ── 1. Fetch the request + items ──────────────────────────────────────────
   const requestQuery = useQuery({
     queryKey: ["journey", "request", requestId ?? "none"],
-    queryFn: async () => {
+    queryFn: wrapQueryFn(async () => {
       if (!requestId) return null;
       const { data, error } = await supabase
         .from("material_requests")
@@ -90,7 +92,7 @@ export function useRequestJourney(requestId: string | null | undefined): {
         .single();
       if (error) throw error;
       return data as MaterialRequest & { items: MaterialRequestItem[] };
-    },
+    }),
     enabled: !!requestId,
     staleTime: 60_000,
   });
@@ -101,7 +103,7 @@ export function useRequestJourney(requestId: string | null | undefined): {
   // ── 2. Fetch the PO + items (enabled once we have a PO id) ───────────────
   const poQuery = useQuery({
     queryKey: ["journey", "po", poId ?? "none"],
-    queryFn: async () => {
+    queryFn: wrapQueryFn(async () => {
       if (!poId) return null;
       const { data, error } = await supabase
         .from("purchase_orders")
@@ -115,7 +117,7 @@ export function useRequestJourney(requestId: string | null | undefined): {
         .single();
       if (error) throw error;
       return data as PurchaseOrder & { items: PurchaseOrderItem[] };
-    },
+    }),
     enabled: !!poId,
     staleTime: 60_000,
   });
@@ -127,7 +129,7 @@ export function useRequestJourney(requestId: string | null | undefined): {
   // ── 3a. Fetch deliveries (enabled once we have PO.id) ────────────────────
   const deliveriesQuery = useQuery({
     queryKey: ["journey", "deliveries", po?.id ?? "none"],
-    queryFn: async () => {
+    queryFn: wrapQueryFn(async () => {
       if (!po?.id) return [] as (Delivery & { items: DeliveryItem[] })[];
       const { data, error } = await supabase
         .from("deliveries")
@@ -140,7 +142,7 @@ export function useRequestJourney(requestId: string | null | undefined): {
         .eq("po_id", po.id);
       if (error) throw error;
       return (data ?? []) as (Delivery & { items: DeliveryItem[] })[];
-    },
+    }),
     enabled: !!po?.id,
     staleTime: 60_000,
   });
@@ -148,7 +150,7 @@ export function useRequestJourney(requestId: string | null | undefined): {
   // ── 3b. Fetch expense (enabled once we have PO.id) ───────────────────────
   const expenseQuery = useQuery({
     queryKey: ["journey", "expense", po?.id ?? "none"],
-    queryFn: async () => {
+    queryFn: wrapQueryFn(async () => {
       if (!po?.id) return null;
       const { data, error } = await supabase
         .from("material_purchase_expenses")
@@ -157,7 +159,7 @@ export function useRequestJourney(requestId: string | null | undefined): {
         .maybeSingle();
       if (error) throw error;
       return (data ?? null) as MaterialPurchaseExpense | null;
-    },
+    }),
     enabled: !!po?.id,
     staleTime: 60_000,
   });
@@ -169,7 +171,7 @@ export function useRequestJourney(requestId: string | null | undefined): {
   // ── 4. Fetch batch usage records (enabled when we have a batch ref code) ─
   const batchUsageQuery = useQuery({
     queryKey: ["journey", "batch-usage", batchRefCode ?? "none"],
-    queryFn: async () => {
+    queryFn: wrapQueryFn(async () => {
       if (!batchRefCode) return [] as BatchUsageRecord[];
       const { data, error } = await supabase
         .from("batch_usage_records")
@@ -177,7 +179,7 @@ export function useRequestJourney(requestId: string | null | undefined): {
         .eq("batch_ref_code", batchRefCode);
       if (error) throw error;
       return (data ?? []) as BatchUsageRecord[];
-    },
+    }),
     enabled: !!batchRefCode,
     staleTime: 60_000,
   });
@@ -192,7 +194,7 @@ export function useRequestJourney(requestId: string | null | undefined): {
   // ── 6. Fetch the settlement (enabled when batchUsage has at least one record) ─
   const settlementQuery = useQuery({
     queryKey: ["journey", "settlement", settlementId ?? "none"],
-    queryFn: async () => {
+    queryFn: wrapQueryFn(async () => {
       if (!settlementId) return null;
       const { data, error } = await supabase
         .from("inter_site_material_settlements")
@@ -210,7 +212,7 @@ export function useRequestJourney(requestId: string | null | undefined): {
         items: InterSiteSettlementItem[];
         payments: InterSiteSettlementPayment[];
       };
-    },
+    }),
     enabled: batchUsage.length > 0 && !!settlementId,
     staleTime: 60_000,
   });
