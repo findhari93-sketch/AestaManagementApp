@@ -21,3 +21,6 @@ export { default as RentalStoreInventoryTab } from "./RentalStoreInventoryTab";
 
 // Estimate Basket
 export { EstimateBasketProvider, useEstimateBasket } from "./EstimateBasket";
+
+// Catalog
+export { RentalItemCard } from "./RentalItemCard";
