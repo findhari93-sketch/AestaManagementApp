@@ -26,7 +26,9 @@ CREATE POLICY "allow_authenticated_read_mbvl"
 
 CREATE POLICY "allow_authenticated_write_mbvl"
   ON material_brand_variant_links FOR ALL
-  TO authenticated USING (true) WITH CHECK (true);
+  TO authenticated
+  USING (EXISTS (SELECT 1 FROM users WHERE auth_id = auth.uid() AND role = ANY (ARRAY['admin'::"public"."user_role", 'office'::"public"."user_role"])))
+  WITH CHECK (EXISTS (SELECT 1 FROM users WHERE auth_id = auth.uid() AND role = ANY (ARRAY['admin'::"public"."user_role", 'office'::"public"."user_role"])));
 
 -- ── 3. Seed: generic brand rows → all active child variants ───────────────────
 -- For every brand with variant_name IS NULL, link it to every active child
@@ -53,7 +55,7 @@ ON CONFLICT (brand_id, variant_id) DO NOTHING;
 --
 -- Auto-seed where a confident unambiguous match exists:
 INSERT INTO material_brand_variant_links (brand_id, variant_id, is_active, image_url)
-SELECT DISTINCT ON (mb.id)
+SELECT
   mb.id          AS brand_id,
   cv.id          AS variant_id,
   true           AS is_active,
@@ -64,5 +66,4 @@ JOIN materials cv ON cv.parent_id = mb.material_id
 WHERE mb.variant_name IS NOT NULL
   AND mb.is_active = true
   AND cv.is_active = true
-ORDER BY mb.id, cv.created_at
 ON CONFLICT (brand_id, variant_id) DO NOTHING;
