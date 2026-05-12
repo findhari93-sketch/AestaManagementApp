@@ -1,7 +1,15 @@
 import React from "react";
-import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, it, expect, beforeEach } from "vitest";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { SalarySliceHero } from "./SalarySliceHero";
+
+// MobileCollapsibleHero defaults to collapsed; expand it before each assertion
+// by clicking the "Expand summary" toggle button. Labels matching the current
+// statusLabel can appear twice (once in the header bar, once inside the KPI
+// tile grid), so we use getAllByText for those and assert length >= 1.
+function expand() {
+  fireEvent.click(screen.getByRole("button", { name: /expand summary/i }));
+}
 
 describe("SalarySliceHero", () => {
   const baseSummary = {
@@ -16,13 +24,23 @@ describe("SalarySliceHero", () => {
     advanceCount: 5,
   };
 
+  beforeEach(() => {
+    try {
+      window.localStorage.clear();
+    } catch {
+      // ignore
+    }
+  });
+
   it("renders the five KPI labels with Indian-formatted values", () => {
     render(<SalarySliceHero summary={baseSummary} isLoading={false} />);
+    expand();
     expect(screen.getByText("Wages Due")).toBeInTheDocument();
     expect(screen.getByText("Paid (waterfall)")).toBeInTheDocument();
     expect(screen.getByText("Advances")).toBeInTheDocument();
     expect(screen.getByText("Total Paid")).toBeInTheDocument();
-    expect(screen.getByText("Mestri Owed")).toBeInTheDocument();
+    // "Mestri Owed" appears in both the collapsed header status label AND in the KPI tile
+    expect(screen.getAllByText("Mestri Owed").length).toBeGreaterThan(0);
     expect(screen.getByText("₹2,34,400")).toBeInTheDocument();
   });
 
@@ -33,7 +51,8 @@ describe("SalarySliceHero", () => {
         isLoading={false}
       />
     );
-    expect(screen.getByText("Excess Paid")).toBeInTheDocument();
+    expand();
+    expect(screen.getAllByText("Excess Paid").length).toBeGreaterThan(0);
     expect(screen.queryByText("Mestri Owed")).not.toBeInTheDocument();
   });
 
@@ -44,16 +63,21 @@ describe("SalarySliceHero", () => {
         isLoading={false}
       />
     );
-    expect(screen.getByText("Settled")).toBeInTheDocument();
+    expand();
+    expect(screen.getAllByText("Settled").length).toBeGreaterThan(0);
   });
 
   it("renders skeleton placeholders when isLoading", () => {
+    // Loading state bypasses MobileCollapsibleHero entirely and renders the
+    // skeleton grid inline, so no expand() click is needed.
     render(<SalarySliceHero summary={undefined} isLoading={true} />);
     expect(screen.getAllByTestId("kpi-skeleton")).toHaveLength(5);
   });
 
   it("renders progress percentage from paidToWeeks/wagesDue", () => {
     render(<SalarySliceHero summary={baseSummary} isLoading={false} />);
-    expect(screen.getByText("78%")).toBeInTheDocument();
+    expand();
+    // 78% appears in the collapsed header progress bar as well as in the expanded view
+    expect(screen.getAllByText("78%").length).toBeGreaterThan(0);
   });
 });

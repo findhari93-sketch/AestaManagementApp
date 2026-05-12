@@ -1,11 +1,25 @@
 import React from "react";
-import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, it, expect, beforeEach } from "vitest";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { ThemeProvider, createTheme } from "@mui/material";
 import { SiteMoneyOverviewHero } from "./SiteMoneyOverviewHero";
 import type { SiteFinancialSummary } from "@/hooks/queries/useSiteFinancialSummary";
 
 const theme = createTheme();
+
+// MobileCollapsibleHero defaults to collapsed; expand it before each assertion
+// by clicking the "Expand summary" toggle button.
+function expand() {
+  fireEvent.click(screen.getByRole("button", { name: /expand summary/i }));
+}
+
+beforeEach(() => {
+  try {
+    window.localStorage.clear();
+  } catch {
+    // ignore
+  }
+});
 
 function renderHero(overrides: Partial<SiteFinancialSummary> = {}) {
   const summary: SiteFinancialSummary = {
@@ -29,6 +43,7 @@ function renderHero(overrides: Partial<SiteFinancialSummary> = {}) {
 describe("SiteMoneyOverviewHero", () => {
   it("renders all six KPI labels", () => {
     renderHero();
+    expand();
     expect(screen.getByText(/Base Contract/i)).toBeInTheDocument();
     expect(screen.getByText(/^Additional Works$/i)).toBeInTheDocument();
     expect(screen.getByText(/Total Contract/i)).toBeInTheDocument();
@@ -40,6 +55,7 @@ describe("SiteMoneyOverviewHero", () => {
 
   it("renders the formatted INR values", () => {
     renderHero();
+    expand();
     expect(screen.getByText("₹50,00,000")).toBeInTheDocument(); // base = 50L
     expect(screen.getByText("₹6,00,000")).toBeInTheDocument();  // extras = 6L
     expect(screen.getByText("₹56,00,000")).toBeInTheDocument(); // total = 56L
@@ -49,12 +65,15 @@ describe("SiteMoneyOverviewHero", () => {
 
   it("renders the progress percentage", () => {
     renderHero();
-    expect(screen.getByText("68%")).toBeInTheDocument();
+    expand();
+    // 68% appears in both the collapsed header progress bar and the expanded body
+    expect(screen.getAllByText("68%").length).toBeGreaterThan(0);
   });
 
   it("uses error variant on Net In Hand when negative", () => {
     // Sanity: the negative-net path renders without throwing
     renderHero({ netInHand: -100_000 });
+    expand();
     expect(screen.getByText(/-1,00,000/)).toBeInTheDocument();
   });
 });
