@@ -155,6 +155,56 @@ export function useRentalItems(categoryId?: string | null) {
   });
 }
 
+export function useRentalItemsWithVendorStats(categoryId?: string | null) {
+  const supabase = createClient();
+
+  return useQuery({
+    queryKey: [
+      ...rentalQueryKeys.items.list(),
+      "withVendorStats",
+      categoryId ?? "all",
+    ],
+    queryFn: wrapQueryFn(async () => {
+      let query = supabase
+        .from("rental_items")
+        .select(
+          `
+          *,
+          category:rental_item_categories(id, name, code),
+          sizes:rental_item_sizes(id, size_label, display_order, is_active),
+          inventory:rental_store_inventory(id, vendor_id, daily_rate, size_rates)
+        `
+        )
+        .eq("is_active", true)
+        .order("name");
+
+      if (categoryId) {
+        query = query.eq("category_id", categoryId);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+
+      return (data ?? []).map((item: any) => ({
+        ...item,
+        vendor_count: (item.inventory as any[])?.length ?? 0,
+        lowest_rate:
+          (item.inventory as any[])?.length > 0
+            ? Math.min(
+                ...(item.inventory as any[]).map(
+                  (inv: any) => inv.daily_rate ?? Infinity
+                )
+              )
+            : null,
+        sizes: ((item.sizes as any[]) ?? []).filter((s: any) => s.is_active),
+      })) as (RentalItemWithDetails & {
+        vendor_count: number;
+        lowest_rate: number | null;
+      })[];
+    }, { operationName: "useRentalItemsWithVendorStats" }),
+  });
+}
+
 /**
  * Pagination parameters
  */

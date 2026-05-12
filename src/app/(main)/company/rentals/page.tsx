@@ -19,7 +19,7 @@ import ShoppingCartIcon from "@mui/icons-material/ShoppingCart";
 import ViewModuleIcon from "@mui/icons-material/ViewModule";
 import StoreIcon from "@mui/icons-material/Store";
 import AddIcon from "@mui/icons-material/Add";
-import { useRentalItems, useRentalCategories } from "@/hooks/queries/useRentals";
+import { useRentalItemsWithVendorStats, useRentalCategories } from "@/hooks/queries/useRentals";
 import { RentalItemCard } from "@/components/rentals/RentalItemCard";
 import { RentalItemInspectPane } from "@/components/rentals/RentalItemInspectPane";
 import { EstimateBasketDrawer } from "@/components/rentals/EstimateBasketDrawer";
@@ -42,7 +42,7 @@ function CompanyRentalsPageInner() {
 
   const { itemCount } = useEstimateBasket();
   const { data: categories = [] } = useRentalCategories();
-  const { data: items = [], isLoading } = useRentalItems(categoryFilter);
+  const { data: items = [], isLoading } = useRentalItemsWithVendorStats(categoryFilter);
 
   const filteredItems =
     deferredSearch.length >= 2
@@ -186,8 +186,8 @@ function CompanyRentalsPageInner() {
                       <RentalItemCard
                         item={item}
                         sizes={item.sizes ?? []}
-                        vendorCount={0}
-                        lowestRate={null}
+                        vendorCount={(item as any).vendor_count ?? 0}
+                        lowestRate={(item as any).lowest_rate ?? null}
                         isSelected={selectedItem?.id === item.id}
                         onSelect={() =>
                           setSelectedItem(selectedItem?.id === item.id ? null : item)
