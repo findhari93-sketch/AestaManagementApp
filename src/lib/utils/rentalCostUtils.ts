@@ -53,5 +53,5 @@ export function calculateExpectedRemaining(
 
 export function calculateDailyBurnRate(spentToDate: number, daysElapsed: number): number {
   if (daysElapsed === 0) return 0;
-  return Math.round(spentToDate / daysElapsed);
+  return spentToDate / daysElapsed;
 }
