@@ -19,7 +19,7 @@ export const CATEGORY_TABS = [
   { id: "doors_windows", label: "Doors & Windows", icon: "🚪" },
   { id: "hardware", label: "Hardware", icon: "🔧" },
   { id: "tiles", label: "Tiles", icon: "🔲" },
-  { id: "pumps", label: "Pumps", icon: "⚙️" },
+  { id: "pumps", label: "Pumps & Motors", icon: "⚙️" },
 ] as const;
 
 export type CategoryTabId = (typeof CATEGORY_TABS)[number]["id"];
