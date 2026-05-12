@@ -19,7 +19,7 @@ import {
 import { Warning as WarningIcon, ShowChart as ShowChartIcon } from "@mui/icons-material";
 import MiniPriceChart from "./MiniPriceChart";
 import { useVendorMaterialBrands, useVendorMaterialPrice } from "@/hooks/queries/useVendorInventory";
-import { useBrandVariantLinkedBrandNames } from "@/hooks/queries/useMaterials";
+import { useBrandVariantLinkedBrandNames, useBrandVariantLinks } from "@/hooks/queries/useMaterials";
 import type { RequestItemForConversion, MaterialBrand } from "@/types/material.types";
 import { formatCurrency } from "@/lib/formatters";
 
@@ -74,6 +74,11 @@ export default function RequestItemRow({
     item.selected_variant_id ?? undefined
   );
 
+  // Fetch brand-variant links to resolve variant-level images for the brand dropdown
+  const { data: brandLinks = [] } = useBrandVariantLinks(
+    effectiveMaterialId ?? undefined
+  );
+
   // Get unique brand names from vendor inventory
   const uniqueBrandNames = useMemo(() => {
     if (!vendorBrands || vendorBrands.length === 0) return [];
@@ -86,6 +91,21 @@ export default function RequestItemRow({
     if (!linkedBrandNames) return allNames;
     return allNames.filter((name) => linkedBrandNames.includes(name));
   }, [vendorBrands, linkedBrandNames]);
+
+  // Build brand option objects with resolved images for the dropdown
+  // Priority: link.image_url → brand.image_url (material image not available on this view model)
+  const brandOptions = useMemo(() => {
+    return uniqueBrandNames.map((name) => {
+      const vendorBrand = vendorBrands.find((b: any) => b.brand_name === name);
+      const brandEntry = brandLinks.find((b) => b.brand_name === name);
+      const linkEntry = brandEntry?.material_brand_variant_links?.find(
+        (l) => l.variant_id === item.selected_variant_id
+      );
+      const imageUrl =
+        linkEntry?.image_url ?? vendorBrand?.image_url ?? brandEntry?.image_url ?? null;
+      return { name, imageUrl };
+    });
+  }, [uniqueBrandNames, vendorBrands, brandLinks, item.selected_variant_id]);
 
   // Get brand variants for the selected brand name
   const brandVariantsForSelectedBrand = useMemo(() => {
@@ -318,14 +338,34 @@ export default function RequestItemRow({
           {/* Brand name dropdown */}
           <Autocomplete
             size="small"
-            options={uniqueBrandNames}
-            value={item.selected_brand_name || null}
-            onChange={(_, value) => handleBrandNameChange(value)}
+            options={brandOptions}
+            getOptionLabel={(opt) => opt.name}
+            isOptionEqualToValue={(opt, val) => opt.name === val.name}
+            value={
+              item.selected_brand_name
+                ? (brandOptions.find((o) => o.name === item.selected_brand_name) ?? { name: item.selected_brand_name, imageUrl: null })
+                : null
+            }
+            onChange={(_, value) => handleBrandNameChange(value?.name ?? null)}
             disabled={isDisabled || !item.selected || !vendorId}
             loading={isLoadingBrands}
             slotProps={{
               popper: { disablePortal: false }
             }}
+            renderOption={(props, option) => (
+              <Box component="li" {...props} sx={{ display: "flex", gap: 1, alignItems: "center" }}>
+                {option.imageUrl ? (
+                  <Box
+                    component="img"
+                    src={option.imageUrl}
+                    sx={{ width: 24, height: 24, objectFit: "cover", borderRadius: 0.5, flexShrink: 0 }}
+                  />
+                ) : (
+                  <Box sx={{ width: 24, height: 24, bgcolor: "grey.200", borderRadius: 0.5, flexShrink: 0 }} />
+                )}
+                <span>{option.name}</span>
+              </Box>
+            )}
             renderInput={(params) => (
               <TextField
                 {...params}
@@ -334,7 +374,7 @@ export default function RequestItemRow({
                     ? "Select vendor"
                     : isLoadingBrands
                       ? "Loading..."
-                      : uniqueBrandNames.length === 0
+                      : brandOptions.length === 0
                         ? "No brands"
                         : "Select brand"
                 }
