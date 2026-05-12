@@ -33,7 +33,7 @@ import {
   PhotoCamera as PhotoCameraIcon,
 } from "@mui/icons-material";
 import { EntityImageAvatar } from "@/components/common/EntityImageAvatar";
-import { useMaterial, useMaterialVariants, useUpdateMaterial } from "@/hooks/queries/useMaterials";
+import { useMaterial, useMaterialVariants, useUpdateMaterial, useBrandVariantLinks } from "@/hooks/queries/useMaterials";
 import {
   useMaterialVendorSummary,
   useMaterialPriceHistory,
@@ -49,6 +49,8 @@ import type {
   MaterialBrand,
   MaterialVendorSummary,
   VendorBillPolicy,
+  BrandWithVariantLinks,
+  Material,
 } from "@/types/material.types";
 
 const UNIT_LABELS: Record<MaterialUnit, string> = {
@@ -109,10 +111,13 @@ export function MaterialInspectPane({
       activeTab === "vendors" ? materialId ?? undefined : undefined
     );
   const { data: variants = [], isLoading: variantsLoading } = useMaterialVariants(
-    activeTab === "variants" ? materialId ?? undefined : undefined
+    activeTab === "variants" || activeTab === "brands" ? materialId ?? undefined : undefined
   );
   const { data: priceHistory = [], isLoading: historyLoading } = useMaterialPriceHistory(
     activeTab === "price-history" ? materialId ?? undefined : undefined
+  );
+  const { data: brandLinks = [] } = useBrandVariantLinks(
+    activeTab === "brands" ? materialId ?? undefined : undefined
   );
 
   // Reset to Overview when switching materials
@@ -320,7 +325,7 @@ export function MaterialInspectPane({
               onVendorClick={onVendorClick}
             />
           ) : activeTab === "brands" ? (
-            <BrandsTab brands={visibleBrands} />
+            <BrandsTab brandLinks={brandLinks} variants={variants} />
           ) : activeTab === "variants" ? (
             <VariantsTab isLoading={variantsLoading} variants={variants} canEdit={canEdit} />
           ) : activeTab === "price-history" ? (
@@ -828,8 +833,16 @@ function VendorSummaryRow({
 // =====================================================
 // Brands tab
 // =====================================================
-function BrandsTab({ brands }: { brands: MaterialBrand[] }) {
-  if (brands.length === 0) {
+
+// Exported for testing
+export function BrandsTabContent({
+  brandLinks,
+  variants,
+}: {
+  brandLinks: BrandWithVariantLinks[];
+  variants: Material[];
+}) {
+  if (brandLinks.length === 0) {
     return (
       <Box sx={{ p: 3, textAlign: "center" }}>
         <Typography variant="body2" color="text.secondary">
@@ -838,11 +851,12 @@ function BrandsTab({ brands }: { brands: MaterialBrand[] }) {
       </Box>
     );
   }
+
   return (
     <Box sx={{ p: 1.5, display: "flex", flexDirection: "column", gap: 1 }}>
-      {brands.map((b) => (
+      {brandLinks.map((brand) => (
         <Box
-          key={b.id}
+          key={brand.id}
           sx={{
             px: 1.5,
             py: 1,
@@ -851,18 +865,18 @@ function BrandsTab({ brands }: { brands: MaterialBrand[] }) {
             borderRadius: 1.5,
             display: "flex",
             gap: 1.25,
-            alignItems: "center",
+            alignItems: "flex-start",
           }}
         >
           <EntityImageAvatar
-            src={b.image_url}
-            name={b.brand_name}
+            src={brand.image_url}
+            name={brand.brand_name}
             size={36}
-            tint={b.is_preferred ? "primary" : "secondary"}
+            tint={brand.is_preferred ? "primary" : "secondary"}
           />
           <Box sx={{ flex: 1, minWidth: 0 }}>
             <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-              {b.is_preferred ? (
+              {brand.is_preferred ? (
                 <Tooltip title="Preferred brand" placement="top">
                   <StarIcon sx={{ fontSize: 14, color: "warning.main" }} />
                 </Tooltip>
@@ -870,19 +884,44 @@ function BrandsTab({ brands }: { brands: MaterialBrand[] }) {
                 <StarBorderIcon sx={{ fontSize: 14, color: "text.disabled" }} />
               )}
               <Typography sx={{ fontSize: 13, fontWeight: 700 }}>
-                {b.variant_name ? `${b.brand_name} ${b.variant_name}` : b.brand_name}
+                {brand.brand_name}
               </Typography>
             </Box>
-            {b.notes ? (
+
+            {/* Variant chips */}
+            {variants.length > 0 && (
+              <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5, mt: 0.75 }}>
+                {variants.map((variant) => {
+                  const link = brand.material_brand_variant_links.find(
+                    (l) => l.variant_id === variant.id
+                  );
+                  const isLinked = link?.is_active ?? false;
+                  return (
+                    <Chip
+                      key={variant.id}
+                      data-testid={`variant-chip-${brand.id}-${variant.id}`}
+                      label={variant.name}
+                      size="small"
+                      variant={isLinked ? "filled" : "outlined"}
+                      color={isLinked ? "primary" : "default"}
+                      sx={{ height: 20, fontSize: 11, fontWeight: 600 }}
+                    />
+                  );
+                })}
+              </Box>
+            )}
+
+            {brand.notes ? (
               <Typography sx={{ fontSize: 11, color: "text.secondary", mt: 0.25 }}>
-                {b.notes}
+                {brand.notes}
               </Typography>
             ) : null}
           </Box>
-          {b.quality_rating != null ? (
+
+          {brand.quality_rating != null ? (
             <Chip
               size="small"
-              label={`${b.quality_rating}/5`}
+              label={`${brand.quality_rating}/5`}
               sx={{ height: 22, fontSize: 11, fontWeight: 600 }}
             />
           ) : null}
@@ -890,6 +929,17 @@ function BrandsTab({ brands }: { brands: MaterialBrand[] }) {
       ))}
     </Box>
   );
+}
+
+// Internal wrapper — kept so the tab switch logic is unchanged
+function BrandsTab({
+  brandLinks,
+  variants,
+}: {
+  brandLinks: BrandWithVariantLinks[];
+  variants: Material[];
+}) {
+  return <BrandsTabContent brandLinks={brandLinks} variants={variants} />;
 }
 
 // =====================================================
