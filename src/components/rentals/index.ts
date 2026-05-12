@@ -25,3 +25,4 @@ export { EstimateBasketProvider, useEstimateBasket } from "./EstimateBasket";
 // Catalog
 export { RentalItemCard } from "./RentalItemCard";
 export { RentalItemInspectPane } from "./RentalItemInspectPane";
+export { EstimateBasketDrawer } from "./EstimateBasketDrawer";
