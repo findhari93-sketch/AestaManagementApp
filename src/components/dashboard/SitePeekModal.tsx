@@ -292,23 +292,26 @@ export default function SitePeekModal({ open, site, date, onClose }: SitePeekMod
                   Workforce ({site.dailyCount + site.contractCount})
                 </Typography>
                 <Stack direction="row" spacing={0.75} sx={{ mt: 0.75, flexWrap: "wrap", gap: 0.75 }}>
-                  {site.dailyCount > 0 && (
-                    <Chip size="small" label={`${site.dailyCount} daily laborers`} />
-                  )}
-                  {site.contractCount > 0 && (
-                    <Chip
-                      size="small"
-                      label={`${site.contractCount} contract crew`}
-                      color="secondary"
-                      variant="outlined"
-                    />
-                  )}
-                  {site.dailyCount === 0 && site.contractCount === 0 && (
-                    <Typography variant="body2" color="text.secondary">
-                      No workforce details for this date.
-                    </Typography>
-                  )}
+                  <Chip
+                    size="small"
+                    label={`${site.dailyCount} daily ${site.dailyCount === 1 ? "laborer" : "laborers"}`}
+                  />
+                  <Chip
+                    size="small"
+                    label={
+                      site.contractCrews > 0
+                        ? `${site.contractCount} contract ${site.contractCount === 1 ? "laborer" : "laborers"} · ${site.contractCrews} ${site.contractCrews === 1 ? "crew" : "crews"}`
+                        : `${site.contractCount} contract ${site.contractCount === 1 ? "laborer" : "laborers"}`
+                    }
+                    color="secondary"
+                    variant="outlined"
+                  />
                 </Stack>
+                {site.dailyCount === 0 && site.contractCount === 0 && (
+                  <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>
+                    No attendance entries recorded yet for this date.
+                  </Typography>
+                )}
               </Box>
 
               {/* Money */}
@@ -326,9 +329,16 @@ export default function SitePeekModal({ open, site, date, onClose }: SitePeekMod
                     </Typography>
                   </Stack>
                   <Stack direction="row" justifyContent="space-between">
-                    <Typography variant="body2" color="text.secondary">
-                      Contract
-                    </Typography>
+                    <Box>
+                      <Typography variant="body2" color="text.secondary">
+                        Contract
+                      </Typography>
+                      {site.contractCount > 0 && site.contractTotal === 0 && (
+                        <Typography variant="caption" color="text.disabled" sx={{ display: "block", lineHeight: 1.2 }}>
+                          Paid weekly — no today entry
+                        </Typography>
+                      )}
+                    </Box>
                     <Typography variant="body2" fontWeight={600}>
                       ₹{site.contractTotal.toLocaleString()}
                     </Typography>

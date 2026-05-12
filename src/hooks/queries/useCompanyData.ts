@@ -47,11 +47,14 @@ async function fetchCompanyStats(): Promise<CompanyStats> {
     // Teams count
     supabase.from("teams").select("id", { count: "exact", head: true }),
 
-    // Pending payments
+    // Pending payments — only past weeks. Current/in-progress weeks are
+    // excluded so a freshly-calculated current-week period doesn't show as
+    // "pending" while attendance for that week is still being recorded.
     supabase
       .from("salary_periods")
       .select("balance_due")
-      .in("status", ["calculated", "partial"]),
+      .in("status", ["calculated", "partial"])
+      .lt("week_ending", today),
 
     // Monthly expenses
     supabase

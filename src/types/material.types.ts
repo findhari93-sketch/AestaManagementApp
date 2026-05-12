@@ -130,6 +130,36 @@ export interface Vendor {
   qr_code_url: string | null;
   shop_photo_url: string | null;
   serving_locations: string[] | null;
+  bill_policy: VendorBillPolicy;
+}
+
+export type VendorBillPolicy = "always_bills" | "bills_unless_cash" | "no_bills";
+
+/**
+ * One row per vendor that has at least one quote or one purchase against a
+ * material (or any of its active variant children). Backed by the RPC
+ * public.get_material_vendor_summary(uuid).
+ */
+export interface MaterialVendorSummary {
+  vendor_id: string;
+  vendor_name: string;
+  shop_name: string | null;
+  vendor_type: string;
+  bill_policy: VendorBillPolicy;
+  accepts_cash: boolean;
+  accepts_upi: boolean;
+  accepts_credit: boolean;
+  gst_number: string | null;
+  quote_count: number;
+  brand_chips: string[];
+  distinct_brands_count: number;
+  min_price: number | null;
+  latest_quote_updated: string | null;
+  last_purchase_date: string | null;
+  last_purchase_amount: number | null;
+  total_purchased_value: number | null;
+  total_purchased_qty: number | null;
+  purchase_count: number;
 }
 
 // ============================================

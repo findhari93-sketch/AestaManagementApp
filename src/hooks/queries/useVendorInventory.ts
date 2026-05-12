@@ -11,6 +11,8 @@ import type {
   PriceHistory,
   PriceHistoryWithDetails,
   PriceEntryFormData,
+  MaterialVendorSummary,
+  VendorBillPolicy,
 } from "@/types/material.types";
 
 // ============================================
@@ -135,6 +137,65 @@ export function useMaterialVendors(materialId: string | undefined) {
       })) as VendorInventoryWithDetails[];
     },
     enabled: !!materialId,
+  });
+}
+
+/**
+ * Per-vendor summary for a material's inspect-pane Vendors tab. Deduplicates
+ * the row-per-quote shape of useMaterialVendors() down to one row per vendor,
+ * with quote/purchase aggregates and the brand chips that vendor supplies.
+ * Backed by the get_material_vendor_summary RPC.
+ */
+export function useMaterialVendorSummary(materialId: string | undefined) {
+  const supabase = createClient();
+
+  return useQuery({
+    queryKey: materialId
+      ? ["material-vendor-summary", materialId]
+      : ["material-vendor-summary"],
+    queryFn: async () => {
+      if (!materialId) return [] as MaterialVendorSummary[];
+
+      const { data, error } = await (supabase as any).rpc(
+        "get_material_vendor_summary",
+        { p_material_id: materialId }
+      );
+
+      if (error) throw error;
+      return (data || []) as MaterialVendorSummary[];
+    },
+    enabled: !!materialId,
+  });
+}
+
+/**
+ * Inline-edit the bill_policy column on a vendor. Used by the new Vendors tab
+ * to flag mandy dealers without leaving the inspect pane.
+ */
+export function useUpdateVendorBillPolicy() {
+  const queryClient = useQueryClient();
+  const supabase = createClient();
+
+  return useMutation({
+    mutationFn: async ({
+      vendorId,
+      billPolicy,
+    }: {
+      vendorId: string;
+      billPolicy: VendorBillPolicy;
+    }) => {
+      await ensureFreshSession();
+      const { error } = await supabase
+        .from("vendors")
+        .update({ bill_policy: billPolicy, updated_at: new Date().toISOString() })
+        .eq("id", vendorId);
+      if (error) throw error;
+      return { vendorId, billPolicy };
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["material-vendor-summary"] });
+      queryClient.invalidateQueries({ queryKey: ["vendors"] });
+    },
   });
 }
 

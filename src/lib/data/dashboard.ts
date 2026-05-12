@@ -103,11 +103,12 @@ export async function getDashboardData(siteId: string): Promise<DashboardData> {
       .select("id", { count: "exact", head: true })
       .eq("status", "active"),
 
-    // Pending salaries summary
+    // Pending salaries summary — only weeks that have fully ended
     supabase
       .from("salary_periods")
       .select("balance_due, status")
-      .in("status", ["calculated", "partial"]),
+      .in("status", ["calculated", "partial"])
+      .lt("week_ending", today),
 
     // Recent attendance (last 5)
     supabase
@@ -117,11 +118,13 @@ export async function getDashboardData(siteId: string): Promise<DashboardData> {
       .order("date", { ascending: false })
       .limit(5),
 
-    // Pending salaries list (last 5)
+    // Pending salaries list (last 5) — exclude current/future weeks; only
+    // surface salary periods whose week has fully ended.
     supabase
       .from("v_salary_periods_detailed")
       .select("laborer_name, week_ending, balance_due, status")
       .in("status", ["calculated", "partial"])
+      .lt("week_ending", today)
       .order("week_ending", { ascending: false })
       .limit(5),
 

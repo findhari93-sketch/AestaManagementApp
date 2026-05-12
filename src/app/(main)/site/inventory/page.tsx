@@ -683,27 +683,40 @@ export default function InventoryPage() {
       {
         accessorKey: "material_name",
         header: "Material",
-        size: 220,
+        size: 280,
         Cell: ({ row }) => (
-          <Box>
-            <Typography variant="body2" fontWeight={500}>
-              {row.original.material_name}
-            </Typography>
-            {row.original.material_code && (
-              <Typography variant="caption" color="text.secondary">
-                {row.original.material_code}
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1, minWidth: 0 }}>
+            <EntityImageAvatar
+              src={row.original.image_url}
+              name={row.original.material_name}
+              size={32}
+              radius={6}
+              fallbackIcon={<InventoryIcon />}
+              tint="primary"
+            />
+            <Box sx={{ minWidth: 0, flex: 1 }}>
+              <Typography variant="body2" fontWeight={500} noWrap>
+                {row.original.material_name}
               </Typography>
-            )}
-            {row.original.brand_names.length > 0 &&
-              row.original.brand_names.map((bn) => (
-                <Chip
-                  key={bn}
-                  label={bn}
-                  size="small"
-                  variant="outlined"
-                  sx={{ ml: 0.5 }}
-                />
-              ))}
+              {row.original.material_code && (
+                <Typography variant="caption" color="text.secondary" noWrap component="div">
+                  {row.original.material_code}
+                </Typography>
+              )}
+              {row.original.brand_names.length > 0 && (
+                <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5, mt: 0.25 }}>
+                  {row.original.brand_names.map((bn) => (
+                    <Chip
+                      key={bn}
+                      label={bn}
+                      size="small"
+                      variant="outlined"
+                      sx={{ height: 18, fontSize: 10 }}
+                    />
+                  ))}
+                </Box>
+              )}
+            </Box>
           </Box>
         ),
       },

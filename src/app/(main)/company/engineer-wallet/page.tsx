@@ -38,7 +38,8 @@ import {
 import WalletBalanceCard from "@/components/wallet-v2/WalletBalanceCard";
 import WalletLedgerList from "@/components/wallet-v2/WalletLedgerList";
 import AddFundsDialog from "@/components/wallet-v2/AddFundsDialog";
-import type { WalletLedgerFilters } from "@/types/engineer-wallet-v2.types";
+import EditDepositDialog from "@/components/wallet-v2/EditDepositDialog";
+import type { WalletLedgerEntry, WalletLedgerFilters } from "@/types/engineer-wallet-v2.types";
 
 const fmt = (n: number) =>
   new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 }).format(Math.round(n));
@@ -63,6 +64,10 @@ export default function CompanyEngineerWalletPage() {
     siteId: "",
   });
   const [tab, setTab] = useState<LedgerTab>("all");
+  const [editingDeposit, setEditingDeposit] = useState<WalletLedgerEntry | null>(null);
+
+  // Office/admin/coadmin can edit deposits. site_engineer never can.
+  const canEditDeposits = userProfile?.role !== "site_engineer";
 
   const engineersQuery = useWalletEnabledEngineers(companyId);
   const engineers = engineersQuery.data ?? [];
@@ -177,6 +182,7 @@ export default function CompanyEngineerWalletPage() {
               onBack={isMobile ? () => setSelectedEngineerId(null) : undefined}
               onAdd={(siteId) => setAddState({ open: true, siteId })}
               onReturn={(siteId) => setReturnState({ open: true, siteId })}
+              onEditDeposit={canEditDeposits ? (row) => setEditingDeposit(row) : undefined}
             />
           </Grid>
         )}
@@ -207,6 +213,16 @@ export default function CompanyEngineerWalletPage() {
             recordedByUserId={userProfile.id}
             lockedSiteId={returnState.siteId || undefined}
           />
+          <EditDepositDialog
+            open={editingDeposit !== null}
+            onClose={() => setEditingDeposit(null)}
+            deposit={editingDeposit}
+            engineerName={
+              engineers.find((e) => e.user_id === selectedEngineerId)?.name ?? "Engineer"
+            }
+            editorName={userProfile.name ?? "Office"}
+            editorUserId={userProfile.id}
+          />
         </>
       )}
     </Container>
@@ -222,6 +238,7 @@ function EngineerDetailPanel({
   onBack,
   onAdd,
   onReturn,
+  onEditDeposit,
 }: {
   engineerId: string;
   engineerName: string;
@@ -231,6 +248,8 @@ function EngineerDetailPanel({
   onBack?: () => void;
   onAdd: (siteId: string) => void;
   onReturn: (siteId: string) => void;
+  /** Defined only when the current user is allowed to edit deposits. */
+  onEditDeposit?: (row: WalletLedgerEntry) => void;
 }) {
   const filters: Omit<WalletLedgerFilters, "cursor"> = {
     type: tab === "all" ? "all" : tab,
@@ -320,6 +339,13 @@ function EngineerDetailPanel({
           hasNextPage={!!ledger.hasNextPage}
           isFetchingNextPage={ledger.isFetchingNextPage}
           onLoadMore={() => ledger.fetchNextPage()}
+          onRowClick={
+            onEditDeposit
+              ? (row) => {
+                  if (row.transaction_type === "deposit") onEditDeposit(row);
+                }
+              : undefined
+          }
         />
       </Box>
     </Box>

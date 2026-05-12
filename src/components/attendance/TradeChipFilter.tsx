@@ -33,6 +33,13 @@ interface TradeChipFilterProps {
    * default and "All" doesn't apply to those workflows).
    */
   allowAllChip?: boolean;
+  /**
+   * When true, hides the "Recording attendance for" header caption and the
+   * helper text underneath the chip row, and tightens vertical margins. Used
+   * on /site/payments where vertical space is at a premium so the table can
+   * surface as much data as possible without scrolling.
+   */
+  compact?: boolean;
 }
 
 const CIVIL_SENTINEL = "__civil__";
@@ -42,6 +49,7 @@ export function TradeChipFilter({
   selected,
   onChange,
   allowAllChip = false,
+  compact = false,
 }: TradeChipFilterProps) {
   const { data: trades, isLoading } = useSiteTrades(siteId);
 
@@ -49,8 +57,8 @@ export function TradeChipFilter({
 
   if (isLoading) {
     return (
-      <Box sx={{ mb: 2 }}>
-        <Skeleton variant="rectangular" height={36} />
+      <Box sx={{ mb: compact ? 0 : 2 }}>
+        <Skeleton variant="rectangular" height={compact ? 28 : 36} />
       </Box>
     );
   }
@@ -99,11 +107,13 @@ export function TradeChipFilter({
       : `${selected.tradeName} attendance — same page, transformed for this trade. Tap Civil to return.`;
 
   return (
-    <Box sx={{ mb: 2 }}>
-      <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.75 }}>
-        Recording attendance for
-      </Typography>
-      <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+    <Box sx={{ mb: compact ? 0 : 2 }}>
+      {!compact && (
+        <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.75 }}>
+          Recording attendance for
+        </Typography>
+      )}
+      <Stack direction="row" spacing={compact ? 0.75 : 1} flexWrap="wrap" useFlexGap>
         {allowAllChip && (
           <Chip
             key="all"
@@ -134,6 +144,7 @@ export function TradeChipFilter({
           return (
             <Chip
               key={trade.category.id}
+              size={compact ? "small" : "medium"}
               label={
                 isCivil ? "Civil" : `${trade.category.name} (${trade.contracts.length})`
               }
@@ -207,9 +218,11 @@ export function TradeChipFilter({
         );
       })()}
 
-      <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>
-        {helperText}
-      </Typography>
+      {!compact && (
+        <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>
+          {helperText}
+        </Typography>
+      )}
     </Box>
   );
 }

@@ -79,14 +79,17 @@ export default function WalletLedgerList({
         {rows.map((row, idx) => {
           const meta = TYPE_META[row.transaction_type];
           const isLast = idx === rows.length - 1;
+          // Only deposits are editable today — keep the click affordance off other rows
+          // so the cursor + hover don't suggest something that won't happen.
+          const isClickable = !!onRowClick && row.transaction_type === "deposit";
           return (
             <React.Fragment key={row.id}>
               <ListItem
-                onClick={onRowClick ? () => onRowClick(row) : undefined}
+                onClick={isClickable ? () => onRowClick!(row) : undefined}
                 sx={{
-                  cursor: onRowClick ? "pointer" : "default",
+                  cursor: isClickable ? "pointer" : "default",
                   py: 1.5,
-                  "&:hover": onRowClick ? { bgcolor: "action.hover" } : undefined,
+                  "&:hover": isClickable ? { bgcolor: "action.hover" } : undefined,
                 }}
                 secondaryAction={
                   <Stack alignItems="flex-end" spacing={0.25}>
@@ -143,6 +146,20 @@ export default function WalletLedgerList({
                           label="Proof"
                           color="default"
                           variant="filled"
+                          sx={{ height: 20, fontSize: "0.65rem" }}
+                        />
+                      )}
+                      {row.edited_at && (
+                        <Chip
+                          size="small"
+                          label="Edited"
+                          color="warning"
+                          variant="outlined"
+                          title={
+                            row.edit_reason
+                              ? `${dayjs(row.edited_at).format("D MMM YYYY")} — ${row.edit_reason}`
+                              : dayjs(row.edited_at).format("D MMM YYYY")
+                          }
                           sx={{ height: 20, fontSize: "0.65rem" }}
                         />
                       )}

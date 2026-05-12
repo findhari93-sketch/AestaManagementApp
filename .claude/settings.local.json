@@ -276,7 +276,8 @@
       "Bash(awk '{print $5}')",
       "Bash(PGPASSWORD=postgres psql -h 127.0.0.1 -p 54322 -U postgres -d postgres -f \"c:/Users/Haribabu/Documents/AppsCopilot/AestaManagementApp/supabase/migrations/20260512150000_add_engineer_phone_and_daily_peek_rpc.sql\")",
       "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\Haribabu\\\\Documents\\\\AppsCopilot\\\\AestaManagementApp\\\\supabase\\\\migrations\" -Name)",
-      "Bash(Sort-Object -Descending)"
+      "Bash(Sort-Object -Descending)",
+      "Bash(wait b3hbwlufw *)"
     ],
     "deny": [],
     "ask": [],

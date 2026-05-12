@@ -41,6 +41,11 @@ export interface WalletLedgerEntry {
   cancelled_by: string | null;
   cancelled_by_user_id: string | null;
   cancellation_reason: string | null;
+  /** Audit trail for admin in-place edits (added 2026-05-12). */
+  edited_at: string | null;
+  edited_by: string | null;
+  edited_by_user_id: string | null;
+  edit_reason: string | null;
 }
 
 /** Live wallet balance + activity counters from v_engineer_wallet_balance.
@@ -100,6 +105,23 @@ export interface RecordDepositInput {
   notes?: string | null;
   recorded_by: string;
   recorded_by_user_id: string;
+}
+
+/** Inputs to updateDeposit. Edits an existing deposit row in place; site_id and
+ *  engineer_id are NOT editable (changing either would orphan downstream spends).
+ *  The service enforces that the resulting pool balance stays >= 0. */
+export interface UpdateDepositInput {
+  id: string;
+  amount: number;
+  payment_mode: WalletPaymentMode;
+  payer_source: WalletPayerSourceKey;
+  payer_name: string | null;
+  proof_url: string | null;
+  transaction_date: string;
+  notes: string | null;
+  edit_reason: string;
+  edited_by: string;
+  edited_by_user_id: string;
 }
 
 /** Inputs to recordReturn. UPI mode requires proof_url. site_id is required —

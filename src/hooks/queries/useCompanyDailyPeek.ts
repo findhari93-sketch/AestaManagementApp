@@ -30,6 +30,7 @@ export interface DailyPeekSite {
   dailyCount: number;
   dailyTotal: number;
   contractCount: number;
+  contractCrews: number;
   contractTotal: number;
 }
 
@@ -113,6 +114,7 @@ export function useCompanyDailyPeek(companyId: string | null | undefined, date: 
             dailyCount: toNumber(r.daily_count),
             dailyTotal: toNumber(r.daily_total),
             contractCount: toNumber(r.contract_count),
+            contractCrews: toNumber(r.contract_crews),
             contractTotal: toNumber(r.contract_total),
           };
         });

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Box,
   Chip,
@@ -8,6 +8,8 @@ import {
   Divider,
   Drawer,
   IconButton,
+  Menu,
+  MenuItem,
   Skeleton,
   Tab,
   Tabs,
@@ -26,21 +28,25 @@ import {
   Storefront as StorefrontIcon,
   Star as StarIcon,
   StarBorder as StarBorderIcon,
+  MoreVert as MoreVertIcon,
 } from "@mui/icons-material";
 import { EntityImageAvatar } from "@/components/common/EntityImageAvatar";
 import { useMaterial, useMaterialVariants } from "@/hooks/queries/useMaterials";
 import {
-  useMaterialVendors,
+  useMaterialVendorSummary,
   useMaterialPriceHistory,
+  useUpdateVendorBillPolicy,
 } from "@/hooks/queries/useVendorInventory";
 import { formatCurrency, formatDate } from "@/lib/formatters";
 import { PriceHistorySparkline } from "@/components/shared/PriceHistorySparkline";
 import { ArrowForward as ArrowForwardIcon } from "@mui/icons-material";
+import { VendorBillChips } from "@/components/materials/inspect/VendorBillChips";
 import type {
   MaterialUnit,
   MaterialWithDetails,
-  VendorInventoryWithDetails,
   MaterialBrand,
+  MaterialVendorSummary,
+  VendorBillPolicy,
 } from "@/types/material.types";
 
 const UNIT_LABELS: Record<MaterialUnit, string> = {
@@ -96,33 +102,10 @@ export function MaterialInspectPane({
   const [activeTab, setActiveTab] = useState<TabKey>("overview");
 
   const { data: material, isLoading } = useMaterial(materialId ?? undefined);
-  const { data: rawVendors = [], isLoading: vendorsLoading } = useMaterialVendors(
-    activeTab === "vendors" ? materialId ?? undefined : undefined
-  );
-
-  // Dedupe by (vendor_id, material_id, brand_id): same vendor + same exact
-  // material variant + same brand should only appear once. Keep the row with
-  // the most recent price update. Including material_id matters when the
-  // current pane is a parent that aggregates quotes from multiple variants —
-  // same vendor + same brand can legitimately have one quote per variant.
-  const vendors = useMemo(() => {
-    const map = new Map<string, (typeof rawVendors)[number]>();
-    for (const row of rawVendors) {
-      const key = `${row.vendor_id}::${row.material_id ?? "no-mat"}::${row.brand_id ?? "no-brand"}`;
-      const existing = map.get(key);
-      if (!existing) {
-        map.set(key, row);
-        continue;
-      }
-      const a = existing.last_price_update || existing.updated_at || "";
-      const b = row.last_price_update || row.updated_at || "";
-      if (b > a) map.set(key, row);
-    }
-    // Re-sort by current_price ascending (matches server order)
-    return Array.from(map.values()).sort(
-      (x, y) => (x.current_price ?? 0) - (y.current_price ?? 0)
+  const { data: vendorSummaries = [], isLoading: vendorsLoading } =
+    useMaterialVendorSummary(
+      activeTab === "vendors" ? materialId ?? undefined : undefined
     );
-  }, [rawVendors]);
   const { data: variants = [], isLoading: variantsLoading } = useMaterialVariants(
     activeTab === "variants" ? materialId ?? undefined : undefined
   );
@@ -327,9 +310,8 @@ export function MaterialInspectPane({
           ) : activeTab === "vendors" ? (
             <VendorsTab
               isLoading={vendorsLoading}
-              vendors={vendors}
+              summaries={vendorSummaries}
               unitLabel={UNIT_LABELS[material.unit] || material.unit}
-              parentMaterialId={material.id}
               onAddVendorQuote={
                 onAddVendorQuote ? () => onAddVendorQuote(material) : undefined
               }
@@ -502,22 +484,23 @@ function OverviewTab({ material }: { material: MaterialWithDetails }) {
 }
 
 // =====================================================
-// Vendors tab
+// Vendors tab — deduped per-vendor summary
+//
+// One row per vendor, regardless of how many (size × brand) quotes they have
+// against the material's variants. Each row shows quote count, brand chips,
+// payment policy, last purchase and total purchased aggregates. Clicking
+// drills into the vendor's own inspect pane via useInspectStack.
 // =====================================================
 function VendorsTab({
   isLoading,
-  vendors,
+  summaries,
   unitLabel,
-  parentMaterialId,
   onAddVendorQuote,
   onVendorClick,
 }: {
   isLoading: boolean;
-  vendors: VendorInventoryWithDetails[];
+  summaries: MaterialVendorSummary[];
   unitLabel: string;
-  /** Id of the material whose InspectPane this tab lives in. Used to label
-   *  quotes that came from variants (rows whose `material_id` differs from this). */
-  parentMaterialId: string;
   onAddVendorQuote?: () => void;
   onVendorClick?: (vendorId: string, vendorName: string) => void;
 }) {
@@ -527,7 +510,7 @@ function VendorsTab({
     return (
       <Box sx={{ p: 1.5 }}>
         {[0, 1, 2].map((i) => (
-          <Skeleton key={i} variant="rounded" height={56} sx={{ mb: 1 }} />
+          <Skeleton key={i} variant="rounded" height={84} sx={{ mb: 1 }} />
         ))}
       </Box>
     );
@@ -569,148 +552,273 @@ function VendorsTab({
         </Box>
       ) : null}
 
-      {vendors.length === 0 ? (
+      {summaries.length === 0 ? (
         <Box sx={{ p: 3, textAlign: "center" }}>
           <Typography variant="body2" color="text.secondary">
-            No vendor quotes yet.
+            No vendor quotes or purchases yet.
           </Typography>
         </Box>
       ) : (
-        vendors.map((v) => {
-          const lastUpdated = v.last_price_update || v.updated_at;
-          const clickable = !!onVendorClick && !!v.vendor?.id;
-          // When the quote is for a variant of the currently-viewed parent,
-          // show the variant name as a small chip so the user knows which spec
-          // the price applies to (25-stage vs 30-stage, 8mm vs 10mm, etc.).
-          const isVariantQuote = !!v.material?.id && v.material.id !== parentMaterialId;
-          const variantLabel = isVariantQuote ? v.material?.name ?? null : null;
-          return (
-            <Box
-              key={v.id}
-              role={clickable ? "button" : undefined}
-              tabIndex={clickable ? 0 : undefined}
-              onClick={() => {
-                if (clickable && v.vendor?.id) {
-                  onVendorClick(v.vendor.id, v.vendor.name);
-                }
-              }}
-              onKeyDown={(e) => {
-                if (
-                  clickable &&
-                  v.vendor?.id &&
-                  (e.key === "Enter" || e.key === " ")
-                ) {
-                  e.preventDefault();
-                  onVendorClick(v.vendor.id, v.vendor.name);
-                }
-              }}
-              sx={{
-                px: 1.5,
-                py: 1,
-                border: 1,
-                borderColor: "divider",
-                borderRadius: 1.5,
-                bgcolor: "background.paper",
-                display: "flex",
-                gap: 1.25,
-                alignItems: "center",
-                cursor: clickable ? "pointer" : "default",
-                transition: "background-color 120ms, border-color 120ms",
-                ...(clickable && {
-                  "&:hover": {
-                    bgcolor: "action.hover",
-                    borderColor: alpha(theme.palette.primary.main, 0.4),
-                  },
-                }),
-              }}
-            >
-              <EntityImageAvatar
-                src={null}
-                name={v.vendor?.name || "Vendor"}
-                size={36}
-                fallbackIcon={<StorefrontIcon />}
-                tint="secondary"
-              />
-              <Box sx={{ flex: 1, minWidth: 0 }}>
-                <Box sx={{ display: "flex", alignItems: "center", gap: 0.5, minWidth: 0 }}>
-                  <Typography
-                    sx={{
-                      fontSize: 13,
-                      fontWeight: 700,
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {v.vendor?.name || "Unknown vendor"}
-                  </Typography>
-                  {variantLabel ? (
-                    <Chip
-                      size="small"
-                      label={variantLabel}
-                      sx={{
-                        height: 18,
-                        fontSize: 10,
-                        fontWeight: 600,
-                        bgcolor: alpha(theme.palette.info.main, 0.12),
-                        color: theme.palette.info.dark,
-                        border: 0,
-                        flexShrink: 0,
-                        maxWidth: 140,
-                        "& .MuiChip-label": { px: 0.75, overflow: "hidden", textOverflow: "ellipsis" },
-                      }}
-                    />
-                  ) : null}
-                </Box>
-                <Typography
-                  sx={{
-                    fontSize: 10.5,
-                    color: "text.secondary",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {[
-                    v.brand?.brand_name,
-                    v.vendor?.shop_name,
-                    lastUpdated ? `Updated ${formatDate(lastUpdated)}` : null,
-                  ]
-                    .filter(Boolean)
-                    .join(" · ")}
-                </Typography>
-              </Box>
-              <Box sx={{ textAlign: "right", flexShrink: 0 }}>
-                <Typography
-                  sx={{
-                    fontSize: 13,
-                    fontWeight: 700,
-                    fontVariantNumeric: "tabular-nums",
-                    color: "success.dark",
-                  }}
-                >
-                  {formatCurrency(v.current_price)}
-                </Typography>
-                <Typography
-                  sx={{
-                    fontSize: 9.5,
-                    color: "text.secondary",
-                    textTransform: "uppercase",
-                    letterSpacing: 0.4,
-                  }}
-                >
-                  per {v.unit || unitLabel}
-                </Typography>
-              </Box>
-              {clickable ? (
-                <ArrowForwardIcon
-                  sx={{ fontSize: 14, color: "text.disabled", flexShrink: 0 }}
-                />
-              ) : null}
-            </Box>
-          );
-        })
+        summaries.map((s) => (
+          <VendorSummaryRow
+            key={s.vendor_id}
+            summary={s}
+            unitLabel={unitLabel}
+            onVendorClick={onVendorClick}
+          />
+        ))
       )}
+    </Box>
+  );
+}
+
+function VendorSummaryRow({
+  summary,
+  unitLabel,
+  onVendorClick,
+}: {
+  summary: MaterialVendorSummary;
+  unitLabel: string;
+  onVendorClick?: (vendorId: string, vendorName: string) => void;
+}) {
+  const theme = useTheme();
+  const updateBillPolicy = useUpdateVendorBillPolicy();
+  const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
+  const clickable = !!onVendorClick;
+  const brandChips = summary.brand_chips || [];
+  const overflowBrands = brandChips.length > 3 ? brandChips.length - 3 : 0;
+  const lastUpdated = summary.latest_quote_updated;
+
+  const openMenu = (e: React.MouseEvent<HTMLButtonElement>) => {
+    e.stopPropagation();
+    setMenuAnchor(e.currentTarget);
+  };
+  const closeMenu = () => setMenuAnchor(null);
+  const setPolicy = (next: VendorBillPolicy) => {
+    closeMenu();
+    if (next === summary.bill_policy) return;
+    updateBillPolicy.mutate({ vendorId: summary.vendor_id, billPolicy: next });
+  };
+
+  return (
+    <Box
+      role={clickable ? "button" : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      onClick={() => clickable && onVendorClick(summary.vendor_id, summary.vendor_name)}
+      onKeyDown={(e) => {
+        if (clickable && (e.key === "Enter" || e.key === " ")) {
+          e.preventDefault();
+          onVendorClick(summary.vendor_id, summary.vendor_name);
+        }
+      }}
+      sx={{
+        px: 1.5,
+        py: 1.25,
+        border: 1,
+        borderColor: "divider",
+        borderRadius: 1.5,
+        bgcolor: "background.paper",
+        display: "flex",
+        flexDirection: "column",
+        gap: 0.75,
+        cursor: clickable ? "pointer" : "default",
+        transition: "background-color 120ms, border-color 120ms",
+        ...(clickable && {
+          "&:hover": {
+            bgcolor: "action.hover",
+            borderColor: alpha(theme.palette.primary.main, 0.4),
+          },
+        }),
+      }}
+    >
+      {/* Top row: avatar, name, price, drill arrow */}
+      <Box sx={{ display: "flex", gap: 1.25, alignItems: "center" }}>
+        <EntityImageAvatar
+          src={null}
+          name={summary.vendor_name}
+          size={36}
+          fallbackIcon={<StorefrontIcon />}
+          tint="secondary"
+        />
+        <Box sx={{ flex: 1, minWidth: 0 }}>
+          <Typography
+            sx={{
+              fontSize: 13,
+              fontWeight: 700,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {summary.vendor_name}
+          </Typography>
+          <Typography
+            sx={{
+              fontSize: 10.5,
+              color: "text.secondary",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {[
+              summary.shop_name,
+              summary.quote_count > 0
+                ? `${summary.quote_count} quote${summary.quote_count === 1 ? "" : "s"}`
+                : null,
+              lastUpdated ? `Updated ${formatDate(lastUpdated)}` : null,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+          </Typography>
+        </Box>
+        <Box sx={{ textAlign: "right", flexShrink: 0 }}>
+          {summary.min_price != null ? (
+            <>
+              <Typography
+                sx={{
+                  fontSize: 13,
+                  fontWeight: 700,
+                  fontVariantNumeric: "tabular-nums",
+                  color: "success.dark",
+                }}
+              >
+                {formatCurrency(summary.min_price)}
+              </Typography>
+              <Typography
+                sx={{
+                  fontSize: 9.5,
+                  color: "text.secondary",
+                  textTransform: "uppercase",
+                  letterSpacing: 0.4,
+                }}
+              >
+                {summary.distinct_brands_count > 1 ? "best · " : ""}per {unitLabel}
+              </Typography>
+            </>
+          ) : (
+            <Typography sx={{ fontSize: 11, color: "text.disabled" }}>No quote</Typography>
+          )}
+        </Box>
+        <IconButton
+          size="small"
+          aria-label="Vendor actions"
+          onClick={openMenu}
+          sx={{ ml: 0.25, mt: -0.5 }}
+        >
+          <MoreVertIcon sx={{ fontSize: 16 }} />
+        </IconButton>
+        {clickable ? (
+          <ArrowForwardIcon
+            sx={{ fontSize: 14, color: "text.disabled", flexShrink: 0 }}
+          />
+        ) : null}
+      </Box>
+
+      {/* Chip row: payment / bill policy */}
+      <VendorBillChips
+        billPolicy={summary.bill_policy}
+        acceptsCash={summary.accepts_cash}
+        acceptsUpi={summary.accepts_upi}
+        acceptsCredit={summary.accepts_credit}
+        gstNumber={summary.gst_number}
+        size="xs"
+      />
+
+      {/* Brand chips */}
+      {brandChips.length > 0 ? (
+        <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.4 }}>
+          {brandChips.slice(0, 3).map((b) => (
+            <Chip
+              key={b}
+              label={b}
+              size="small"
+              sx={{
+                height: 18,
+                fontSize: 10,
+                fontWeight: 600,
+                bgcolor: alpha(theme.palette.info.main, 0.1),
+                color: theme.palette.info.dark,
+                border: 0,
+                "& .MuiChip-label": { px: 0.75 },
+              }}
+            />
+          ))}
+          {overflowBrands > 0 ? (
+            <Tooltip title={brandChips.slice(3).join(", ")} placement="top">
+              <Chip
+                label={`+${overflowBrands}`}
+                size="small"
+                sx={{
+                  height: 18,
+                  fontSize: 10,
+                  fontWeight: 600,
+                  bgcolor: "action.selected",
+                  color: "text.secondary",
+                  border: 0,
+                  "& .MuiChip-label": { px: 0.75 },
+                }}
+              />
+            </Tooltip>
+          ) : null}
+        </Box>
+      ) : null}
+
+      {/* Purchase summary */}
+      {summary.purchase_count > 0 ? (
+        <Box
+          sx={{
+            display: "flex",
+            gap: 1,
+            flexWrap: "wrap",
+            fontSize: 10.5,
+            color: "text.secondary",
+            mt: 0.25,
+          }}
+        >
+          {summary.last_purchase_date ? (
+            <span>
+              Last: <strong>{formatCurrency(summary.last_purchase_amount ?? 0)}</strong> on{" "}
+              {formatDate(summary.last_purchase_date)}
+            </span>
+          ) : null}
+          {summary.total_purchased_value != null ? (
+            <span>
+              · Total <strong>{formatCurrency(summary.total_purchased_value)}</strong>{" "}
+              across {summary.purchase_count} purchase
+              {summary.purchase_count === 1 ? "" : "s"}
+            </span>
+          ) : null}
+        </Box>
+      ) : null}
+
+      <Menu
+        anchorEl={menuAnchor}
+        open={!!menuAnchor}
+        onClose={closeMenu}
+        onClick={(e) => e.stopPropagation()}
+        slotProps={{ paper: { sx: { minWidth: 220 } } }}
+      >
+        <MenuItem disabled sx={{ fontSize: 10.5, opacity: 0.7 }}>
+          BILL POLICY
+        </MenuItem>
+        {(["always_bills", "bills_unless_cash", "no_bills"] as VendorBillPolicy[]).map(
+          (p) => (
+            <MenuItem
+              key={p}
+              selected={summary.bill_policy === p}
+              onClick={() => setPolicy(p)}
+              sx={{ fontSize: 12.5 }}
+            >
+              {p === "always_bills"
+                ? "Always bills"
+                : p === "bills_unless_cash"
+                ? "Skips bill on cash"
+                : "Never issues bills"}
+            </MenuItem>
+          )
+        )}
+      </Menu>
     </Box>
   );
 }

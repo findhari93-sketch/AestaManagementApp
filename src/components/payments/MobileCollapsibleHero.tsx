@@ -7,7 +7,6 @@ import {
   IconButton,
   Typography,
   alpha,
-  useMediaQuery,
   useTheme,
   type Theme,
 } from "@mui/material";
@@ -43,10 +42,12 @@ const variantToTone = (variant: KpiTileVariant, theme: Theme) => {
 };
 
 /**
- * Wraps a per-tab "summary card" section so that on mobile (<600px) it
- * collapses to a single-row bar showing the headline status + progress %,
- * reclaiming ~210px of vertical space for the table below. Desktop renders
- * the children inline inside the standard bordered card.
+ * Wraps a per-tab "summary card" section so that it collapses to a single-row
+ * bar showing the headline status + progress %, reclaiming ~210px of vertical
+ * space for the table below. Applies on every breakpoint — the table is the
+ * primary surface on this page; KPIs are one tap away. Expanded state is
+ * persisted to localStorage per storageKey so users who prefer the KPI tiles
+ * keep them open across navigations.
  */
 export function MobileCollapsibleHero({
   storageKey,
@@ -58,7 +59,6 @@ export function MobileCollapsibleHero({
   children,
 }: MobileCollapsibleHeroProps) {
   const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
   const [expanded, setExpanded] = useState<boolean>(false);
 
   // Hydrate persisted choice on mount only. SSR-safe: state starts collapsed,
@@ -83,24 +83,6 @@ export function MobileCollapsibleHero({
 
   const tone = variantToTone(statusVariant, theme);
 
-  // Desktop / tablet: render the standard bordered card with children inline.
-  if (!isMobile) {
-    return (
-      <Box
-        sx={{
-          p: 2,
-          mb: 1.5,
-          bgcolor: "background.paper",
-          border: `1px solid ${theme.palette.divider}`,
-          borderRadius: 1.5,
-        }}
-      >
-        {children}
-      </Box>
-    );
-  }
-
-  // Mobile: collapsible bar with the same children rendered inside the Collapse.
   return (
     <Box
       sx={{

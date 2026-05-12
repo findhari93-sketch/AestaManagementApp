@@ -188,7 +188,25 @@ export default function PaymentsContent() {
 
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  // Persist active tab across page refresh. SSR-safe: starts on "contract" then
+  // snaps to the stored value on hydration. Stored globally (not per-site) so the
+  // user's last view follows them when they switch sites.
   const [activeTab, setActiveTab] = useState<ActiveTab>("contract");
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const stored = window.localStorage.getItem("payments:activeTab");
+    if (stored === "all" || stored === "contract" || stored === "daily-market") {
+      setActiveTab(stored);
+    }
+  }, []);
+  const handleTabChange = useCallback((next: ActiveTab) => {
+    setActiveTab(next);
+    try {
+      window.localStorage.setItem("payments:activeTab", next);
+    } catch {
+      // localStorage may be unavailable (private mode) — silently ignore
+    }
+  }, []);
   // Trade chip — same pattern as /site/attendance. Civil = existing settlement
   // tabs (Civil's per-laborer waterfall); trade = scoped TradeSettlementView.
   const [tradeChipSelection, setTradeChipSelection] =
@@ -627,12 +645,15 @@ export default function PaymentsContent() {
           />
         )}
         {/* Trade chip filter — same pattern as /site/attendance. Civil keeps
-            the existing 3-tab settlement UI; trade chip swaps to TradeSettlementView. */}
-        <Box sx={{ px: { xs: 1.5, sm: 2 }, pt: 1.5, pb: 1, bgcolor: "background.paper" }}>
+            the existing 3-tab settlement UI; trade chip swaps to TradeSettlementView.
+            Compact mode hides the "Recording attendance for" caption + helper text
+            to reclaim ~50px of vertical space for the table below. */}
+        <Box sx={{ px: { xs: 1, sm: 1.5 }, pt: 0.75, pb: 0.5, bgcolor: "background.paper" }}>
           <TradeChipFilter
             siteId={selectedSite?.id}
             selected={tradeChipSelection}
             onChange={setTradeChipSelection}
+            compact
           />
         </Box>
       </Box>
@@ -653,12 +674,13 @@ export default function PaymentsContent() {
       <Box sx={{ flexShrink: 0, borderBottom: 1, borderColor: "divider", bgcolor: "background.paper" }}>
         <Tabs
           value={activeTab}
-          onChange={(_, v) => setActiveTab(v as ActiveTab)}
+          onChange={(_, v) => handleTabChange(v as ActiveTab)}
           variant="fullWidth"
           sx={{
-            minHeight: 40,
+            minHeight: 34,
             "& .MuiTab-root": {
-              minHeight: 40,
+              minHeight: 34,
+              py: 0.25,
               fontSize: 12.5,
               fontWeight: 600,
               textTransform: "none",

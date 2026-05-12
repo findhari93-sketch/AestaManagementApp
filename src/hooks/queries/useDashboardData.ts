@@ -124,10 +124,12 @@ async function fetchRecentAttendance(
 async function fetchPendingSalaries(siteId: string): Promise<PendingSalary[]> {
   const supabase = createClient();
 
+  const today = dayjs().format("YYYY-MM-DD");
   const { data, error } = await supabase
     .from("v_salary_periods_detailed")
     .select("laborer_name, week_ending, balance_due, status")
     .in("status", ["calculated", "partial"])
+    .lt("week_ending", today)
     .order("week_ending", { ascending: false })
     .limit(5);
 

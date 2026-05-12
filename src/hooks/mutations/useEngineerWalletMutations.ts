@@ -10,8 +10,10 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase/client";
 import {
   cancelTransaction,
+  cancelDeposit,
   recordDeposit,
   recordReturn,
+  updateDeposit,
 } from "@/lib/services/engineerWalletV2";
 import {
   ENGINEER_WALLET_KEYS,
@@ -20,6 +22,7 @@ import {
 import type {
   RecordDepositInput,
   RecordReturnInput,
+  UpdateDepositInput,
 } from "@/types/engineer-wallet-v2.types";
 
 function invalidateForEngineer(qc: ReturnType<typeof useQueryClient>, userId: string) {
@@ -48,6 +51,39 @@ export function useRecordWalletReturn() {
   const supabase = createClient();
   return useMutation({
     mutationFn: (input: RecordReturnInput) => recordReturn(supabase, input),
+    onSuccess: (_data, vars) => invalidateForEngineer(qc, vars.engineer_id),
+  });
+}
+
+export function useUpdateWalletDeposit() {
+  const qc = useQueryClient();
+  const supabase = createClient();
+  return useMutation({
+    mutationFn: (args: UpdateDepositInput & { engineer_id: string }) => {
+      const { engineer_id: _ignored, ...rest } = args;
+      return updateDeposit(supabase, rest);
+    },
+    onSuccess: (_data, vars) => invalidateForEngineer(qc, vars.engineer_id),
+  });
+}
+
+export function useCancelWalletDeposit() {
+  const qc = useQueryClient();
+  const supabase = createClient();
+  return useMutation({
+    mutationFn: (args: {
+      id: string;
+      engineer_id: string;
+      reason: string;
+      cancelled_by: string;
+      cancelled_by_user_id: string;
+    }) =>
+      cancelDeposit(supabase, {
+        id: args.id,
+        reason: args.reason,
+        cancelled_by: args.cancelled_by,
+        cancelled_by_user_id: args.cancelled_by_user_id,
+      }),
     onSuccess: (_data, vars) => invalidateForEngineer(qc, vars.engineer_id),
   });
 }

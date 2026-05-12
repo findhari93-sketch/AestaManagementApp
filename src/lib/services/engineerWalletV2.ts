@@ -27,6 +27,7 @@ import type {
   RecordDepositInput,
   RecordReturnInput,
   RecordSpendInput,
+  UpdateDepositInput,
 } from "@/types/engineer-wallet-v2.types";
 import {
   WalletValidationError,
@@ -440,6 +441,134 @@ export async function getLatestDepositPayerSource(
     payer_source: data?.payer_source ?? null,
     transaction_date: data?.transaction_date ?? null,
   };
+}
+
+// ------------------------------------------------------------------
+// Admin edit of an existing deposit
+// ------------------------------------------------------------------
+
+/** Edit an existing deposit in place. Only deposits (not spends/returns) are
+ *  editable today. site_id and engineer_id are immutable to avoid orphaning
+ *  spends. Throws WalletInsufficientBalanceError if the new amount would push
+ *  the (engineer, site) pool below zero. */
+export async function updateDeposit(
+  supabase: SupabaseClient,
+  input: UpdateDepositInput
+): Promise<void> {
+  if (!input.id) {
+    throw new WalletValidationError("MISSING_ID", "Deposit id is required");
+  }
+  if (!input.amount || input.amount <= 0) {
+    throw new WalletValidationError("INVALID_AMOUNT", "Amount must be positive");
+  }
+  if (!input.payer_source) {
+    throw new WalletValidationError("MISSING_PAYER_SOURCE", "Money source is required");
+  }
+  if (!input.edit_reason || input.edit_reason.trim() === "") {
+    throw new WalletValidationError(
+      "MISSING_EDIT_REASON",
+      "Reason for edit is required"
+    );
+  }
+  validateProofForUpi(input.payment_mode, input.proof_url, "deposit");
+
+  // Re-fetch the current row to enforce invariants and compute the post-edit balance.
+  const { data: row, error: fetchErr } = await supabase
+    .from("site_engineer_transactions")
+    .select("id, user_id, site_id, amount, transaction_type, cancelled_at")
+    .eq("id", input.id)
+    .maybeSingle();
+  if (fetchErr) throw fetchErr;
+  if (!row) {
+    throw new WalletValidationError("NOT_FOUND", "Deposit row not found");
+  }
+  if (row.transaction_type !== "deposit") {
+    throw new WalletValidationError(
+      "NOT_A_DEPOSIT",
+      "Only deposit rows can be edited via this dialog"
+    );
+  }
+  if (row.cancelled_at) {
+    throw new WalletValidationError(
+      "ALREADY_CANCELLED",
+      "Cancelled deposits cannot be edited"
+    );
+  }
+
+  // If lowering the amount, ensure the resulting pool stays non-negative.
+  const oldAmount = Number(row.amount);
+  const delta = input.amount - oldAmount;
+  if (delta < 0) {
+    const balance = await getWalletBalance(
+      supabase,
+      row.user_id as string,
+      row.site_id as string
+    );
+    const newBalance = balance.balance + delta;
+    if (newBalance < 0) {
+      throw new WalletInsufficientBalanceError(balance.balance, -delta);
+    }
+  }
+
+  const { error: updErr } = await supabase
+    .from("site_engineer_transactions")
+    .update({
+      amount: input.amount,
+      payment_mode: input.payment_mode,
+      payer_source: input.payer_source,
+      payer_name: input.payer_name,
+      proof_url: input.proof_url,
+      transaction_date: input.transaction_date,
+      notes: input.notes,
+      edited_at: new Date().toISOString(),
+      edited_by: input.edited_by,
+      edited_by_user_id: input.edited_by_user_id,
+      edit_reason: input.edit_reason.trim(),
+    })
+    .eq("id", input.id)
+    .is("cancelled_at", null);
+
+  if (updErr) throw updErr;
+}
+
+/** Cancel an existing deposit. Guards against negative pool balance — if the
+ *  deposit has already been spent or returned against, cancelling would leave
+ *  the (engineer, site) pool below zero and is rejected. */
+export async function cancelDeposit(
+  supabase: SupabaseClient,
+  args: {
+    id: string;
+    reason: string;
+    cancelled_by: string;
+    cancelled_by_user_id: string;
+  }
+): Promise<void> {
+  const { data: row, error: fetchErr } = await supabase
+    .from("site_engineer_transactions")
+    .select("user_id, site_id, amount, transaction_type, cancelled_at")
+    .eq("id", args.id)
+    .maybeSingle();
+  if (fetchErr) throw fetchErr;
+  if (!row) throw new WalletValidationError("NOT_FOUND", "Deposit row not found");
+  if (row.transaction_type !== "deposit") {
+    throw new WalletValidationError(
+      "NOT_A_DEPOSIT",
+      "Use cancelTransaction for non-deposit rows"
+    );
+  }
+  if (row.cancelled_at) return; // idempotent
+
+  const balance = await getWalletBalance(
+    supabase,
+    row.user_id as string,
+    row.site_id as string
+  );
+  const newBalance = balance.balance - Number(row.amount);
+  if (newBalance < 0) {
+    throw new WalletInsufficientBalanceError(balance.balance, Number(row.amount));
+  }
+
+  await cancelTransaction(supabase, args);
 }
 
 export async function cancelTransaction(
