@@ -75,7 +75,7 @@ export function InventoryCardGrid({ items, lowStockIds, onRecordUsage }: Props) 
   return (
     <Box>
       {/* Category chips */}
-      <Box sx={{ display: "flex", gap: 0.75, flexWrap: "wrap", mb: 2 }}>
+      <Box sx={{ display: "flex", gap: 0.75, flexWrap: "nowrap", overflowX: "auto", mb: 2, pb: 0.5 }}>
         {chipTabs.map((tab) => {
           const count = filterByCategory(items, tab.id as CategoryTabId).length;
           const isActive = activeCategory === tab.id;
