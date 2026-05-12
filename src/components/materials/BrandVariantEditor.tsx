@@ -10,7 +10,6 @@ import {
   Button,
   Collapse,
   Paper,
-  InputAdornment,
   Tooltip,
 } from "@mui/material";
 import {
@@ -21,11 +20,17 @@ import {
   ExpandMore as ExpandMoreIcon,
   ExpandLess as ExpandLessIcon,
   Close as CloseIcon,
-  CameraAlt as CameraAltIcon,
 } from "@mui/icons-material";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { MaterialBrand, BrandWithVariants } from "@/types/material.types";
+import type { MaterialBrand, BrandWithVariants, BrandWithVariantLinks, MaterialBrandVariantLink } from "@/types/material.types";
 import FileUploader from "@/components/common/FileUploader";
+import {
+  useToggleBrandVariantLink,
+  useUpsertBrandVariantLinkImage,
+  useBrandVariantLinks,
+  useMaterialVariants,
+} from "@/hooks/queries/useMaterials";
+import PhotoCameraIcon from "@mui/icons-material/PhotoCamera";
 
 // Category-specific suggested brands
 const CATEGORY_BRAND_SUGGESTIONS: Record<string, string[]> = {
@@ -48,13 +53,15 @@ const CATEGORY_BRAND_SUGGESTIONS: Record<string, string[]> = {
   wire: ["Havells", "Polycab", "Finolex", "KEI", "RR Kabel"],
 };
 
-// Common cement brand variants
-const BRAND_VARIANT_SUGGESTIONS: Record<string, string[]> = {
-  dalmia: ["DSP", "Regular"],
-  ramco: ["Grade", "Hard Worker", "Super Grade"],
-  ultratech: ["Premium", "Weather Plus", "Super"],
-  acc: ["Gold", "Suraksha"],
-};
+function getLinkForVariant(
+  links: BrandWithVariantLinks[],
+  brandId: string,
+  variantId: string
+): MaterialBrandVariantLink | undefined {
+  return links
+    .find((b) => b.id === brandId)
+    ?.material_brand_variant_links.find((l) => l.variant_id === variantId);
+}
 
 interface BrandVariantEditorProps {
   materialId: string;
@@ -79,9 +86,12 @@ export default function BrandVariantEditor({
 }: BrandVariantEditorProps) {
   const [newBrandName, setNewBrandName] = useState("");
   const [expandedBrands, setExpandedBrands] = useState<Set<string>>(new Set());
-  const [addingVariantFor, setAddingVariantFor] = useState<string | null>(null);
-  const [newVariantName, setNewVariantName] = useState("");
   const [isAddingBrand, setIsAddingBrand] = useState(false);
+
+  const { data: brandLinks = [] } = useBrandVariantLinks(materialId);
+  const { data: materialVariants = [] } = useMaterialVariants(materialId);
+  const toggleLink = useToggleBrandVariantLink();
+  const upsertImage = useUpsertBrandVariantLinkImage();
 
   // Get suggested brands based on category
   const suggestedBrands = useMemo(() => {
@@ -98,19 +108,6 @@ export default function BrandVariantEditor({
     }
     return [];
   }, [categoryName, brands]);
-
-  // Get variant suggestions for a brand
-  const getVariantSuggestions = (brandName: string): string[] => {
-    const brandLower = brandName.toLowerCase();
-    const suggestions = BRAND_VARIANT_SUGGESTIONS[brandLower] || [];
-    // Filter out variants already added for this brand
-    const existingVariants = new Set(
-      brands
-        .filter(b => b.brand_name.toLowerCase() === brandLower && b.variant_name)
-        .map(b => b.variant_name!.toLowerCase())
-    );
-    return suggestions.filter(s => !existingVariants.has(s.toLowerCase()));
-  };
 
   // Group brands by brand_name
   const groupedBrands = useMemo((): BrandWithVariants[] => {
@@ -168,17 +165,6 @@ export default function BrandVariantEditor({
       setNewBrandName("");
     } finally {
       setIsAddingBrand(false);
-    }
-  };
-
-  const handleAddVariant = async (brandName: string, variantName: string) => {
-    if (!variantName.trim() || disabled) return;
-    try {
-      await onAddBrand(brandName, variantName.trim());
-      setNewVariantName("");
-      setAddingVariantFor(null);
-    } catch (error) {
-      console.error("Failed to add variant:", error);
     }
   };
 
@@ -242,8 +228,6 @@ export default function BrandVariantEditor({
         <Box sx={{ mb: 2 }}>
           {groupedBrands.map((group) => {
             const isExpanded = expandedBrands.has(group.brand_name);
-            const hasVariants = group.variants.some(v => v.variant_name);
-            const variantSuggestions = getVariantSuggestions(group.brand_name);
 
             return (
               <Paper
@@ -378,102 +362,103 @@ export default function BrandVariantEditor({
                       );
                     })()}
 
-                    {/* Existing Variants */}
-                    <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5, mb: 1 }}>
-                      {group.variants.map((variant) => (
-                        <Chip
-                          key={variant.id}
-                          label={variant.variant_name || "Standard"}
-                          size="small"
-                          variant={variant.variant_name ? "filled" : "outlined"}
-                          color={variant.variant_name ? "default" : "secondary"}
-                          onDelete={() => {
-                            const brand = findBrandByNameAndVariant(group.brand_name, variant.variant_name);
-                            if (brand) handleDeleteBrand(brand);
-                          }}
-                          disabled={disabled}
-                        />
-                      ))}
-                    </Box>
-
-                    {/* Variant Suggestions */}
-                    {variantSuggestions.length > 0 && (
-                      <Box sx={{ mb: 1 }}>
-                        <Typography variant="caption" color="text.secondary">
-                          Add variant:
-                        </Typography>
-                        <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5, mt: 0.5 }}>
-                          {variantSuggestions.map((variant) => (
-                            <Chip
-                              key={variant}
-                              label={`+ ${variant}`}
-                              size="small"
-                              variant="outlined"
-                              color="primary"
-                              onClick={() => handleAddVariant(group.brand_name, variant)}
-                              disabled={disabled}
-                              sx={{ cursor: "pointer" }}
-                            />
-                          ))}
-                        </Box>
-                      </Box>
-                    )}
-
-                    {/* Add Custom Variant */}
-                    {addingVariantFor === group.brand_name ? (
-                      <Box sx={{ display: "flex", gap: 1, alignItems: "center" }}>
-                        <TextField
-                          size="small"
-                          placeholder="Variant name..."
-                          value={newVariantName}
-                          onChange={(e) => setNewVariantName(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") {
-                              e.preventDefault();
-                              handleAddVariant(group.brand_name, newVariantName);
-                            } else if (e.key === "Escape") {
-                              setAddingVariantFor(null);
-                              setNewVariantName("");
-                            }
-                          }}
-                          autoFocus
-                          sx={{ flex: 1 }}
-                          InputProps={{
-                            endAdornment: (
-                              <InputAdornment position="end">
-                                <IconButton
+                    {/* Variant link matrix — only shown when the material has variants */}
+                    {materialVariants.length > 0 && (() => {
+                      const brandLinkEntry = brandLinks.find(
+                        (b) => b.brand_name.toLowerCase() === group.brand_name.toLowerCase()
+                      );
+                      const brandId = brandLinkEntry?.id;
+                      return (
+                        <Box sx={{ mt: 1, pl: 1 }}>
+                          <Typography
+                            variant="caption"
+                            color="text.secondary"
+                            sx={{ display: "block", mb: 0.5 }}
+                          >
+                            Variants
+                          </Typography>
+                          <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
+                            {materialVariants.map((variant) => {
+                              const link = brandId
+                                ? getLinkForVariant(brandLinks, brandId, variant.id)
+                                : undefined;
+                              const isLinked = link?.is_active ?? false;
+                              return (
+                                <Chip
+                                  key={variant.id}
+                                  label={variant.name}
                                   size="small"
+                                  variant={isLinked ? "filled" : "outlined"}
+                                  color={isLinked ? "primary" : "default"}
                                   onClick={() => {
-                                    setAddingVariantFor(null);
-                                    setNewVariantName("");
+                                    if (!brandId) return;
+                                    toggleLink.mutate({
+                                      brandId,
+                                      variantId: variant.id,
+                                      isActive: !isLinked,
+                                      materialId,
+                                    });
                                   }}
-                                >
-                                  <CloseIcon fontSize="small" />
-                                </IconButton>
-                              </InputAdornment>
-                            ),
-                          }}
-                        />
-                        <Button
-                          size="small"
-                          variant="contained"
-                          onClick={() => handleAddVariant(group.brand_name, newVariantName)}
-                          disabled={!newVariantName.trim() || disabled}
-                        >
-                          Add
-                        </Button>
-                      </Box>
-                    ) : (
-                      <Button
-                        size="small"
-                        startIcon={<AddIcon />}
-                        onClick={() => setAddingVariantFor(group.brand_name)}
-                        disabled={disabled}
-                        sx={{ mt: 0.5 }}
-                      >
-                        Add variant
-                      </Button>
-                    )}
+                                  disabled={disabled || toggleLink.isPending || !brandId}
+                                  sx={{ height: 24, fontSize: 11, fontWeight: 600, cursor: "pointer" }}
+                                />
+                              );
+                            })}
+                          </Box>
+
+                          {/* Per-variant image uploads — shown for linked variants only */}
+                          <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5, mt: 0.5 }}>
+                            {materialVariants.map((variant) => {
+                              const link = brandId
+                                ? getLinkForVariant(brandLinks, brandId, variant.id)
+                                : undefined;
+                              if (!link?.is_active) return null;
+                              return (
+                                <Tooltip key={variant.id} title={`Set image for ${variant.name}`}>
+                                  <IconButton
+                                    size="small"
+                                    component="label"
+                                    disabled={disabled}
+                                    sx={{ fontSize: 10, gap: 0.25, borderRadius: 1, px: 0.5 }}
+                                  >
+                                    <PhotoCameraIcon sx={{ fontSize: 14 }} />
+                                    <Typography sx={{ fontSize: 10 }}>{variant.name}</Typography>
+                                    <input
+                                      hidden
+                                      accept="image/*"
+                                      type="file"
+                                      onChange={async (e) => {
+                                        const file = e.target.files?.[0];
+                                        if (!file || !brandId) return;
+                                        // Upload via Supabase storage then call upsertImage
+                                        const fileExt = file.name.split(".").pop();
+                                        const fileName = `brand-variant-${brandId}-${variant.id}-${Date.now()}.${fileExt}`;
+                                        const { data: uploadData, error: uploadError } = await supabase.storage
+                                          .from("work-updates")
+                                          .upload(`product-photos/${fileName}`, file, { upsert: true });
+                                        if (uploadError) {
+                                          console.error("Variant image upload failed:", uploadError);
+                                          return;
+                                        }
+                                        const { data: urlData } = supabase.storage
+                                          .from("work-updates")
+                                          .getPublicUrl(uploadData.path);
+                                        upsertImage.mutate({
+                                          brandId,
+                                          variantId: variant.id,
+                                          imageUrl: urlData.publicUrl,
+                                          materialId,
+                                        });
+                                      }}
+                                    />
+                                  </IconButton>
+                                </Tooltip>
+                              );
+                            })}
+                          </Box>
+                        </Box>
+                      );
+                    })()}
                   </Box>
                 </Collapse>
               </Paper>
