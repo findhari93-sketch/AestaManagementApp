@@ -322,6 +322,8 @@ export interface RentalItemCategoryWithChildren extends RentalItemCategory {
 export interface RentalItemWithDetails extends RentalItem {
   category?: RentalItemCategory | null;
   sizes?: RentalItemSize[];
+  vendor_count?: number;
+  lowest_rate?: number | null;
 }
 
 export interface RentalStoreInventoryWithDetails extends RentalStoreInventory {

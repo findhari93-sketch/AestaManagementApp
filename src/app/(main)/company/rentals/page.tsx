@@ -198,8 +198,8 @@ function CompanyRentalsPageInner() {
                       <RentalItemCard
                         item={item}
                         sizes={item.sizes ?? []}
-                        vendorCount={(item as any).vendor_count ?? 0}
-                        lowestRate={(item as any).lowest_rate ?? null}
+                        vendorCount={item.vendor_count ?? 0}
+                        lowestRate={item.lowest_rate ?? null}
                         isSelected={selectedItem?.id === item.id}
                         onSelect={() =>
                           setSelectedItem(selectedItem?.id === item.id ? null : item)
