@@ -1517,6 +1517,7 @@ export interface PriceEntryFormData {
   source_reference?: string;
   quantity?: number;
   unit?: string;
+  recorded_date?: string; // ISO date "YYYY-MM-DD"; defaults to today if omitted
   notes?: string;
 }
 

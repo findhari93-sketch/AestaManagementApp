@@ -726,7 +726,7 @@ export function useRecordPriceEntry() {
           loading_cost: data.loading_cost || null,
           unloading_cost: data.unloading_cost || null,
           total_landed_cost: totalLandedCost,
-          recorded_date: new Date().toISOString().split("T")[0],
+          recorded_date: data.recorded_date ?? new Date().toISOString().split("T")[0],
           source: data.source,
           source_reference: data.source_reference || null,
           quantity: data.quantity || null,
@@ -739,37 +739,44 @@ export function useRecordPriceEntry() {
 
       if (error) throw error;
 
-      // Also update vendor inventory current price
-      // Note: For null comparisons, we must use .is() not .eq() (Supabase/PostgREST requirement)
-      let inventoryQuery = (supabase as any)
-        .from("vendor_inventory")
-        .select("id")
-        .eq("vendor_id", data.vendor_id)
-        .eq("material_id", data.material_id);
+      // Only update vendor inventory current price for today's entries.
+      // Historical price records should not overwrite the vendor's current price.
+      const today = new Date().toISOString().split("T")[0];
+      const isToday = !data.recorded_date || data.recorded_date === today;
 
-      if (data.brand_id) {
-        inventoryQuery = inventoryQuery.eq("brand_id", data.brand_id);
-      } else {
-        inventoryQuery = inventoryQuery.is("brand_id", null);
-      }
-
-      const { data: existingInventory } = await inventoryQuery.maybeSingle();
-
-      if (existingInventory) {
-        await (supabase as any)
+      if (isToday) {
+        // Also update vendor inventory current price
+        // Note: For null comparisons, we must use .is() not .eq() (Supabase/PostgREST requirement)
+        let inventoryQuery = (supabase as any)
           .from("vendor_inventory")
-          .update({
-            current_price: data.price,
-            price_includes_gst: data.price_includes_gst || false,
-            gst_rate: data.gst_rate || null,
-            transport_cost: data.transport_cost || null,
-            loading_cost: data.loading_cost || null,
-            unloading_cost: data.unloading_cost || null,
-            last_price_update: new Date().toISOString(),
-            price_source: data.source,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", existingInventory.id);
+          .select("id")
+          .eq("vendor_id", data.vendor_id)
+          .eq("material_id", data.material_id);
+
+        if (data.brand_id) {
+          inventoryQuery = inventoryQuery.eq("brand_id", data.brand_id);
+        } else {
+          inventoryQuery = inventoryQuery.is("brand_id", null);
+        }
+
+        const { data: existingInventory } = await inventoryQuery.maybeSingle();
+
+        if (existingInventory) {
+          await (supabase as any)
+            .from("vendor_inventory")
+            .update({
+              current_price: data.price,
+              price_includes_gst: data.price_includes_gst || false,
+              gst_rate: data.gst_rate || null,
+              transport_cost: data.transport_cost || null,
+              loading_cost: data.loading_cost || null,
+              unloading_cost: data.unloading_cost || null,
+              last_price_update: new Date().toISOString(),
+              price_source: data.source,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", existingInventory.id);
+        }
       }
 
       return result;
