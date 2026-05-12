@@ -3,7 +3,6 @@
 import React from "react";
 import {
   Box,
-  CircularProgress,
   Typography,
   Chip,
   alpha,
@@ -83,18 +82,13 @@ function derivePhases(journey: RequestJourney): PhaseBarStep[] {
     base.push({ name: "Settlement", status: deriveSettlementPhaseStatus(journey) });
   }
 
-  base.push({
-    name: "Expense",
-    status: journey.expense?.is_paid ? "done" : journey.expense ? "active" : "pending",
-  });
-
   return base;
 }
 
 // ── Phase card field helpers ──────────────────────────────────────────────────
 
 function fmt(v: string | null | undefined, fallback = "—"): string {
-  return v || fallback;
+  return (v !== null && v !== undefined && v !== "") ? v : fallback;
 }
 
 function fmtDate(d: string | null | undefined): string {
@@ -358,11 +352,15 @@ export function MaterialRequestJourney({
               },
             ]
           : []),
-        {
-          label: "→ Open Expense",
-          href: `/site/material-expenses?po=${po.po_number}`,
-          variant: "secondary" as const,
-        },
+        ...(expense
+          ? [
+              {
+                label: "→ Open Expense",
+                href: `/site/material-expenses?po=${po.po_number}`,
+                variant: "secondary" as const,
+              },
+            ]
+          : []),
       ]
     : [];
   const vendorPaymentStatusLabel = !expense

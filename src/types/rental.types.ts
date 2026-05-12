@@ -14,6 +14,8 @@ export type RentalSourceType = "store" | "contractor";
 export type RentalRateType = "hourly" | "daily";
 
 export type RentalOrderStatus =
+  | "pending"
+  | "approved"
   | "draft"
   | "confirmed"
   | "active"
@@ -34,6 +36,14 @@ export type TransportHandler = "vendor" | "company" | "laborer";
 
 export type RentalPriceSource = "rental" | "quotation" | "manual";
 
+export type RentalSettlementPartyType = "vendor" | "transport" | "loading_unloading";
+
+export const RENTAL_SETTLEMENT_PARTY_LABELS: Record<RentalSettlementPartyType, string> = {
+  vendor: "Equipment Vendor",
+  transport: "Transport",
+  loading_unloading: "Loading / Unloading",
+};
+
 // Labels for display
 export const RENTAL_TYPE_LABELS: Record<RentalType, string> = {
   equipment: "Equipment/Machines",
@@ -43,6 +53,8 @@ export const RENTAL_TYPE_LABELS: Record<RentalType, string> = {
 };
 
 export const RENTAL_ORDER_STATUS_LABELS: Record<RentalOrderStatus, string> = {
+  pending: "Pending",
+  approved: "Approved",
   draft: "Draft",
   confirmed: "Confirmed",
   active: "Active",
@@ -55,6 +67,8 @@ export const RENTAL_ORDER_STATUS_COLORS: Record<
   RentalOrderStatus,
   "default" | "secondary" | "destructive" | "outline"
 > = {
+  pending: "secondary",
+  approved: "outline",
   draft: "secondary",
   confirmed: "outline",
   active: "default",
@@ -173,6 +187,7 @@ export interface RentalOrder {
   rental_order_number: string;
   site_id: string;
   vendor_id: string;
+  parent_order_id: string | null;
   order_date: string;
   start_date: string;
   expected_return_date: string | null;
@@ -273,6 +288,8 @@ export interface RentalAdvance {
 export interface RentalSettlement {
   id: string;
   rental_order_id: string;
+  party_type: RentalSettlementPartyType;
+  party_name: string | null;
   settlement_date: string;
   settlement_reference: string | null;
   total_rental_amount: number;
@@ -351,7 +368,7 @@ export interface RentalOrderWithDetails extends RentalOrder {
   items?: RentalOrderItemWithDetails[];
   advances?: RentalAdvance[];
   returns?: RentalReturn[];
-  settlement?: RentalSettlement | null;
+  settlements?: RentalSettlement[];
   // Calculated fields
   accrued_rental_cost?: number;
   total_advance_paid?: number;
@@ -455,6 +472,8 @@ export interface RentalAdvanceFormData {
 
 export interface RentalSettlementFormData {
   rental_order_id: string;
+  party_type: RentalSettlementPartyType;
+  party_name?: string | null;
   settlement_date: string;
   total_rental_amount: number;
   total_transport_amount: number;

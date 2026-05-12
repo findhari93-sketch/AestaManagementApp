@@ -421,7 +421,7 @@ export default function SiteRentalsPage() {
                     const estimatedTotal = itemsTotal + transportTotal;
 
                     // Check for settlement data
-                    const settlement = rental.settlement;
+                    const settlement = (rental.settlements ?? [])[0];
                     const isSettled = rental.status === "completed" && settlement;
 
                     // Calculate paid and balance based on settlement status

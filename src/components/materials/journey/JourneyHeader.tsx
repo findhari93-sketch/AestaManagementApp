@@ -40,11 +40,11 @@ export function JourneyHeader({ journey, isFullPage }: JourneyHeaderProps) {
 
   const { request, overallStatus } = journey;
 
-  // Derive material name from first request item if available
+  // Derive subtitle from first request item qty if available
   const firstItem = request.items?.[0];
-  const materialLabel = firstItem
-    ? `${firstItem.requested_qty} units`
-    : "—";
+  const qtyLabel = firstItem
+    ? `${firstItem.requested_qty} ${firstItem.unit || "units"}`
+    : null;
 
   return (
     <Box
@@ -123,9 +123,11 @@ export function JourneyHeader({ journey, isFullPage }: JourneyHeaderProps) {
           flexWrap: "wrap",
         }}
       >
-        <Typography variant="body2" color="text.secondary" sx={{ fontSize: "0.78rem" }}>
-          {materialLabel}
-        </Typography>
+        {qtyLabel && (
+          <Typography variant="body2" color="text.secondary" sx={{ fontSize: "0.78rem" }}>
+            {qtyLabel}
+          </Typography>
+        )}
         <Chip
           label={STATUS_LABELS[overallStatus]}
           color={STATUS_COLOR[overallStatus]}

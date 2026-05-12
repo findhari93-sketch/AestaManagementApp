@@ -19,13 +19,7 @@ export function JourneyStatusStrip({ journey }: JourneyStatusStripProps) {
   const { po, expense, isGroupPO } = journey;
 
   const totalValue = po?.total_amount ?? expense?.total_amount ?? null;
-  const vendorName = po
-    ? null // vendor_id is available but not the name in the bare PO; fall back to expense
-    : null;
-  const expenseVendorName = expense?.vendor_name ?? null;
-  const brand = po?.items?.[0]
-    ? null // brand_id is on item but not joined name
-    : null;
+  const vendorDisplay = expense?.vendor_name ?? po?.vendor_id ?? "—";
 
   const amountPaid = expense?.amount_paid ?? null;
   const isPaid = expense?.is_paid ?? false;
@@ -54,19 +48,7 @@ export function JourneyStatusStrip({ journey }: JourneyStatusStripProps) {
           sx={{ fontSize: "0.78rem", fontWeight: 500, color: "text.primary" }}
           noWrap
         >
-          {expenseVendorName ?? "—"}
-        </Typography>
-      ),
-    },
-    {
-      label: "Brand",
-      content: (
-        <Typography
-          variant="body2"
-          sx={{ fontSize: "0.78rem", fontWeight: 500, color: "text.primary" }}
-          noWrap
-        >
-          {brand ?? "—"}
+          {vendorDisplay}
         </Typography>
       ),
     },

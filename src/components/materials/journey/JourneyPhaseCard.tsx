@@ -122,7 +122,7 @@ export function JourneyPhaseCard({
               fontSize: "0.85rem",
             }}
           >
-            <span role="img" aria-hidden>
+            <span aria-hidden="true">
               {icon}
             </span>
           </Box>

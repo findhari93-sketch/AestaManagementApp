@@ -490,7 +490,7 @@ export function useRentalOrders(
         .order("created_at", { ascending: false });
 
       if (filters?.status && filters.status !== "all") {
-        query = query.eq("status", filters.status);
+        query = query.eq("status", filters.status as any);
       }
       if (filters?.vendorId) {
         query = query.eq("vendor_id", filters.vendorId);
@@ -557,8 +557,11 @@ export function useRentalOrders(
           0
         );
 
+        const { settlement, ...rest } = order as any;
         return {
-          ...order,
+          ...rest,
+          settlements: settlement ? [settlement] : [],
+          parent_order_id: (order as any).parent_order_id ?? null,
           accrued_rental_cost: accruedRentalCost,
           total_advance_paid: totalAdvancePaid,
           days_since_start: daysSinceStart,
@@ -773,8 +776,11 @@ export function useRentalOrder(id: string | undefined) {
         0
       );
 
+      const { settlement: settlementSingular, ...restData } = data as any;
       return {
-        ...data,
+        ...restData,
+        settlements: settlementSingular ? [settlementSingular] : [],
+        parent_order_id: (data as any).parent_order_id ?? null,
         accrued_rental_cost: accruedRentalCost,
         total_advance_paid: totalAdvancePaid,
         days_since_start: daysSinceStart,
@@ -902,7 +908,7 @@ export function useUpdateRentalOrderStatus() {
 
       const { data, error } = await supabase
         .from("rental_orders")
-        .update({ status })
+        .update({ status: status as any })
         .eq("id", id)
         .select()
         .single();
@@ -1484,7 +1490,7 @@ export function useRentalSummary(siteId: string) {
 
       for (const order of completedOrders || []) {
         completedCount++;
-        const settlement = order.settlement as any;
+        const settlement = (order as any).settlement as any;
         if (settlement) {
           // Settlement exists - use negotiated or calculated amount
           const finalAmount = settlement.negotiated_final_amount ||
