@@ -18,3 +18,6 @@ export { default as RentalItemSelector } from "./RentalItemSelector";
 
 // Vendor Integration
 export { default as RentalStoreInventoryTab } from "./RentalStoreInventoryTab";
+
+// Estimate Basket
+export { EstimateBasketProvider, useEstimateBasket } from "./EstimateBasket";
