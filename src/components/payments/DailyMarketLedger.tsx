@@ -2,6 +2,7 @@
 
 import React, { useMemo } from "react";
 import { Box, Chip, Skeleton, Typography, useTheme, alpha } from "@mui/material";
+import { AccountBalanceWallet as AccountBalanceWalletIcon } from "@mui/icons-material";
 import dayjs from "dayjs";
 import { weekStartStr, weekEndStr } from "@/lib/utils/weekUtils";
 import type { PaymentsLedgerRow } from "./PaymentsLedger";
@@ -205,7 +206,7 @@ function LedgerRow({ row, pending, onClick, onSettle }: LedgerRowProps) {
         },
       }}
     >
-      <Box sx={{ display: { xs: "none", sm: "block" } }}>
+      <Box sx={{ display: { xs: "none", sm: "flex" }, alignItems: "center", gap: 0.5 }}>
         {row.settlementRef ? (
           <Box
             component="span"
@@ -227,6 +228,15 @@ function LedgerRow({ row, pending, onClick, onSettle }: LedgerRowProps) {
           <Typography sx={{ fontSize: 12, color: "text.disabled" }}>
             —
           </Typography>
+        )}
+        {row.paymentChannel === "engineer_wallet" && (
+          <Chip
+            size="small"
+            icon={<AccountBalanceWalletIcon sx={{ fontSize: 11 }} />}
+            label="via wallet"
+            variant="outlined"
+            sx={{ height: 18, fontSize: 10, color: "text.secondary", ml: 0.5 }}
+          />
         )}
       </Box>
       <Box sx={{ display: { xs: "none", sm: "block" } }}>

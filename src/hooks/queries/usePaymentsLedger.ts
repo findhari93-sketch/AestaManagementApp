@@ -48,6 +48,7 @@ export function usePaymentsLedger(args: UsePaymentsLedgerArgs) {
         is_pending: boolean;
         laborer_id: string | null;
         period: string | null;
+        payment_channel: string | null;
       }>;
       return rows.map<PaymentsLedgerRow>((r) => ({
         id:            r.id,
@@ -63,6 +64,7 @@ export function usePaymentsLedger(args: UsePaymentsLedgerArgs) {
         laborerId:     r.laborer_id ?? undefined,
         siteId:        siteId as string,
         period:        (r.period === "legacy" ? "legacy" : "current"),
+        paymentChannel: r.payment_channel ?? undefined,
       }));
     },
   });

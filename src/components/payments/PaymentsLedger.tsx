@@ -26,6 +26,7 @@ export interface PaymentsLedgerRow {
   /** 'legacy' or 'current' — populated by get_payments_ledger. Non-auditing
    *  sites always get 'current'. Used to bucket rows into legacy/current bands. */
   period: "legacy" | "current";
+  paymentChannel?: string;   // 'direct' | 'engineer_wallet' | undefined (pending rows)
   // Set on synthetic parent rows produced by the same-week + same-subtype
   // grouping below. Children retain their original flat shape.
   subRows?: PaymentsLedgerRow[];
