@@ -55,10 +55,13 @@ import {
   useOverdueRentals,
   useRentalOrders,
   useDeleteRentalOrder,
+  useApproveRentalRequest,
 } from "@/hooks/queries/useRentals";
 import {
   OngoingRentalsList,
   RentalOrderDialog,
+  RentalRequestForm,
+  RentalOrderCard,
 } from "@/components/rentals";
 import { formatCurrency } from "@/lib/formatters";
 import {
@@ -138,6 +141,7 @@ export default function SiteRentalsPage() {
   const searchParams = useSearchParams();
   const { selectedSite } = useSite();
   const [orderDialogOpen, setOrderDialogOpen] = useState(false);
+  const [requestFormOpen, setRequestFormOpen] = useState(false);
   const [statusFilter, setStatusFilter] = useState<RentalOrderStatus | "all">("all");
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [rentalToDelete, setRentalToDelete] = useState<{ id: string; orderNumber: string } | null>(null);
@@ -161,6 +165,9 @@ export default function SiteRentalsPage() {
   const { data: summary, isLoading: loadingSummary } = useRentalSummary(siteId);
   const { data: overdueRentals = [] } = useOverdueRentals(siteId);
   const deleteRentalOrder = useDeleteRentalOrder();
+  const approveRequest = useApproveRentalRequest();
+
+  const { data: pendingOrders = [] } = useRentalOrders(siteId, { status: "pending" } as any);
 
   // Fetch all rentals for the "all" and "history" tabs
   const { data: allRentals = [], isLoading: loadingAllRentals } = useRentalOrders(
@@ -225,13 +232,23 @@ export default function SiteRentalsPage() {
         title="Rental Management"
         subtitle={`Track equipment and scaffolding rentals at ${selectedSite.name}`}
         actions={
-          <Button
-            variant="contained"
-            startIcon={<AddIcon />}
-            onClick={handleCreateOrder}
-          >
-            New Rental
-          </Button>
+          <Box sx={{ display: "flex", gap: 1 }}>
+            <Button
+              variant="outlined"
+              startIcon={<AddIcon />}
+              onClick={() => setRequestFormOpen(true)}
+              size="small"
+            >
+              New Request
+            </Button>
+            <Button
+              variant="contained"
+              startIcon={<AddIcon />}
+              onClick={handleCreateOrder}
+            >
+              New Rental
+            </Button>
+          </Box>
         }
       />
 
@@ -332,12 +349,41 @@ export default function SiteRentalsPage() {
 
       {/* Tab Content */}
       {currentTab === "ongoing" && (
-        <OngoingRentalsList
-          siteId={siteId}
-          onViewOrder={handleViewOrder}
-          onCreateOrder={handleCreateOrder}
-          showOverdueAlert={false}
-        />
+        <>
+          {pendingOrders.length > 0 && (
+            <Box sx={{ mb: 2 }}>
+              <Typography variant="subtitle2" color="warning.main" gutterBottom>
+                {pendingOrders.length} request{pendingOrders.length > 1 ? "s" : ""} awaiting PO
+              </Typography>
+              <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+                {pendingOrders.map((order) => (
+                  <Box key={order.id} sx={{ position: "relative" }}>
+                    <RentalOrderCard order={order} onClick={() => handleViewOrder(order.id)} />
+                    <Button
+                      size="small"
+                      variant="contained"
+                      color="warning"
+                      sx={{ position: "absolute", top: 8, right: 8 }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        approveRequest.mutate(order.id);
+                      }}
+                      disabled={approveRequest.isPending}
+                    >
+                      Approve
+                    </Button>
+                  </Box>
+                ))}
+              </Box>
+            </Box>
+          )}
+          <OngoingRentalsList
+            siteId={siteId}
+            onViewOrder={handleViewOrder}
+            onCreateOrder={handleCreateOrder}
+            showOverdueAlert={false}
+          />
+        </>
       )}
 
       {(currentTab === "all" || currentTab === "history") && (
@@ -353,6 +399,8 @@ export default function SiteRentalsPage() {
                   onChange={(e) => setStatusFilter(e.target.value as RentalOrderStatus | "all")}
                 >
                   <MenuItem value="all">All Status</MenuItem>
+                  <MenuItem value="pending">Pending Request</MenuItem>
+                  <MenuItem value="approved">Approved</MenuItem>
                   <MenuItem value="draft">Draft</MenuItem>
                   <MenuItem value="confirmed">Confirmed</MenuItem>
                   <MenuItem value="active">Active</MenuItem>
@@ -651,6 +699,14 @@ export default function SiteRentalsPage() {
         open={orderDialogOpen}
         onClose={() => setOrderDialogOpen(false)}
         siteId={siteId}
+      />
+
+      {/* New Rental Request Form */}
+      <RentalRequestForm
+        open={requestFormOpen}
+        onClose={() => setRequestFormOpen(false)}
+        siteId={siteId}
+        onSuccess={() => setRequestFormOpen(false)}
       />
 
       {/* Delete Confirmation Dialog */}
