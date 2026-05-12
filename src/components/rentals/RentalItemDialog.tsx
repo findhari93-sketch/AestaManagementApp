@@ -18,6 +18,8 @@ import {
   IconButton,
   Alert,
   InputAdornment,
+  Stack,
+  Chip,
 } from "@mui/material";
 import { Close as CloseIcon } from "@mui/icons-material";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -25,6 +27,8 @@ import {
   useCreateRentalItem,
   useUpdateRentalItem,
   useRentalCategories,
+  useRentalItemSizes,
+  useCreateRentalItemSize,
 } from "@/hooks/queries/useRentals";
 import { createClient } from "@/lib/supabase/client";
 import ImageUploadWithCrop from "@/components/common/ImageUploadWithCrop";
@@ -54,13 +58,13 @@ const UNITS = [
 interface RentalItemDialogProps {
   open: boolean;
   onClose: () => void;
-  item: RentalItemWithDetails | null;
+  item?: RentalItemWithDetails | null;
 }
 
 export default function RentalItemDialog({
   open,
   onClose,
-  item,
+  item = null,
 }: RentalItemDialogProps) {
   const isMobile = useIsMobile();
   const isEdit = !!item;
@@ -70,7 +74,11 @@ export default function RentalItemDialog({
   const updateItem = useUpdateRentalItem();
   const supabase = createClient();
 
+  const { data: existingSizes = [] } = useRentalItemSizes(item?.id);
+  const createSize = useCreateRentalItemSize();
+
   const [error, setError] = useState("");
+  const [newSizeLabel, setNewSizeLabel] = useState("");
   const [formData, setFormData] = useState<RentalItemFormData>({
     name: "",
     code: "",
@@ -124,6 +132,16 @@ export default function RentalItemDialog({
   const handleChange = (field: keyof RentalItemFormData, value: unknown) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
     setError("");
+  };
+
+  const handleAddSize = async () => {
+    if (!item?.id || !newSizeLabel.trim()) return;
+    await createSize.mutateAsync({
+      rental_item_id: item.id,
+      size_label: newSizeLabel.trim(),
+      display_order: existingSizes.length,
+    });
+    setNewSizeLabel("");
   };
 
   const handleSubmit = async () => {
@@ -341,6 +359,37 @@ export default function RentalItemDialog({
             />
           </Grid>
         </Grid>
+
+        {item?.id && (
+          <Box sx={{ mt: 2 }}>
+            <Typography variant="subtitle2" gutterBottom>Size Variants</Typography>
+            {existingSizes.length > 0 && (
+              <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
+                {existingSizes.map((s) => (
+                  <Chip key={s.id} label={s.size_label} size="small" />
+                ))}
+              </Stack>
+            )}
+            <Box sx={{ display: "flex", gap: 1 }}>
+              <TextField
+                size="small"
+                label='Add size (e.g. 6×1½)'
+                value={newSizeLabel}
+                onChange={(e) => setNewSizeLabel(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleAddSize(); } }}
+                sx={{ flex: 1 }}
+              />
+              <Button
+                variant="outlined"
+                size="small"
+                onClick={handleAddSize}
+                disabled={!newSizeLabel.trim() || createSize.isPending}
+              >
+                Add
+              </Button>
+            </Box>
+          </Box>
+        )}
       </DialogContent>
 
       <DialogActions sx={{ px: 3, py: 2 }}>

@@ -23,6 +23,7 @@ import AddIcon from "@mui/icons-material/Add";
 import { useRentalItemsWithVendorStats, useRentalCategories } from "@/hooks/queries/useRentals";
 import { useVendors } from "@/hooks/queries/useVendors";
 import { RentalItemCard } from "@/components/rentals/RentalItemCard";
+import { RentalItemDialog } from "@/components/rentals";
 import { RentalItemInspectPane } from "@/components/rentals/RentalItemInspectPane";
 import { VendorInspectPane } from "@/components/vendors/VendorInspectPane";
 import { EstimateBasketDrawer } from "@/components/rentals/EstimateBasketDrawer";
@@ -293,8 +294,13 @@ function CompanyRentalsPageInner() {
         onConvertToRequest={handleConvertToRequest}
       />
 
-      {/* Add Item dialog — Task 12 wires up RentalItemDialog */}
-      {addItemOpen && null}
+      {/* Add Item dialog */}
+      {addItemOpen && (
+        <RentalItemDialog
+          open={addItemOpen}
+          onClose={() => setAddItemOpen(false)}
+        />
+      )}
     </Box>
   );
 }
