@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from "react";
 import {
   Box,
+  Button,
   Chip,
   CircularProgress,
   Divider,
@@ -31,9 +32,10 @@ import {
   StarBorder as StarBorderIcon,
   MoreVert as MoreVertIcon,
   PhotoCamera as PhotoCameraIcon,
+  AddCircleOutline as AddCircleOutlineIcon,
 } from "@mui/icons-material";
 import { EntityImageAvatar } from "@/components/common/EntityImageAvatar";
-import { useMaterial, useMaterialVariants, useUpdateMaterial, useBrandVariantLinks } from "@/hooks/queries/useMaterials";
+import { useMaterial, useMaterialVariants, useMaterialBrands, useUpdateMaterial, useBrandVariantLinks } from "@/hooks/queries/useMaterials";
 import {
   useMaterialVendorSummary,
   useMaterialPriceHistory,
@@ -43,6 +45,7 @@ import { formatCurrency, formatDate } from "@/lib/formatters";
 import { PriceHistorySparkline } from "@/components/shared/PriceHistorySparkline";
 import { ArrowForward as ArrowForwardIcon } from "@mui/icons-material";
 import { VendorBillChips } from "@/components/materials/inspect/VendorBillChips";
+import { RecordPriceDialog } from "./RecordPriceDialog";
 import type {
   MaterialUnit,
   MaterialWithDetails,
@@ -50,6 +53,7 @@ import type {
   VendorBillPolicy,
   BrandWithVariantLinks,
   Material,
+  PriceHistoryWithDetails,
 } from "@/types/material.types";
 
 const UNIT_LABELS: Record<MaterialUnit, string> = {
@@ -118,6 +122,9 @@ export function MaterialInspectPane({
   const { data: brandLinks = [], isLoading: brandLinksLoading } = useBrandVariantLinks(
     activeTab === "brands" ? materialId ?? undefined : undefined
   );
+  const { data: materialBrands = [] } = useMaterialBrands(material?.id);
+
+  const [recordPriceOpen, setRecordPriceOpen] = useState(false);
 
   // Reset to Overview when switching materials
   useEffect(() => {
@@ -325,13 +332,23 @@ export function MaterialInspectPane({
           ) : activeTab === "variants" ? (
             <VariantsTab isLoading={variantsLoading} variants={variants} canEdit={canEdit} />
           ) : activeTab === "price-history" ? (
-            <PriceHistoryTab
-              isLoading={historyLoading}
-              points={priceHistory.map((p) => ({
-                date: p.recorded_date,
-                price: p.price,
-              }))}
-            />
+            <>
+              <PriceHistoryTab
+                isLoading={historyLoading}
+                entries={priceHistory}
+                variants={variants}
+                onAddPrice={() => setRecordPriceOpen(true)}
+              />
+              {material && (
+                <RecordPriceDialog
+                  open={recordPriceOpen}
+                  onClose={() => setRecordPriceOpen(false)}
+                  material={material}
+                  variants={variants}
+                  brands={materialBrands}
+                />
+              )}
+            </>
           ) : (
             <ActivityTab />
           )}
@@ -1173,11 +1190,24 @@ function ActivityTab() {
 // =====================================================
 function PriceHistoryTab({
   isLoading,
-  points,
+  entries,
+  variants,
+  onAddPrice,
 }: {
   isLoading: boolean;
-  points: { date: string; price: number }[];
+  entries: PriceHistoryWithDetails[];
+  variants: Material[];
+  onAddPrice: () => void;
 }) {
+  const variantNameById = Object.fromEntries(
+    variants.map((v) => [v.id, v.name])
+  );
+
+  const sparklinePoints = entries.map((e) => ({
+    date: e.recorded_date,
+    price: e.price,
+  }));
+
   if (isLoading) {
     return (
       <Box sx={{ p: 1.5 }}>
@@ -1187,32 +1217,21 @@ function PriceHistoryTab({
       </Box>
     );
   }
-  if (points.length === 0) {
-    return (
-      <Box sx={{ p: 3, textAlign: "center" }}>
-        <Typography variant="body2" color="text.secondary">
-          No price history recorded yet.
-        </Typography>
-      </Box>
-    );
-  }
-
-  const sorted = [...points].sort(
-    (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
-  );
 
   return (
-    <Box sx={{ p: 2, display: "flex", flexDirection: "column", gap: 1.5 }}>
+    <Box sx={{ p: 1.5, display: "flex", flexDirection: "column", gap: 1 }}>
+      {/* Header: count + sparkline + add button */}
       <Box
         sx={{
           px: 1.5,
-          py: 1.25,
+          py: 1,
           border: 1,
           borderColor: "divider",
           borderRadius: 1.5,
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
+          gap: 1,
         }}
       >
         <Typography
@@ -1224,48 +1243,116 @@ function PriceHistoryTab({
             letterSpacing: 0.4,
           }}
         >
-          {points.length} entries
+          {entries.length} entries
         </Typography>
-        <PriceHistorySparkline points={points} width={140} height={40} />
+        {entries.length > 0 && (
+          <PriceHistorySparkline points={sparklinePoints} width={100} height={36} />
+        )}
+        <Button
+          size="small"
+          startIcon={<AddCircleOutlineIcon sx={{ fontSize: 14 }} />}
+          onClick={onAddPrice}
+          sx={{ fontSize: 11, py: 0.4, px: 1, minWidth: 0, whiteSpace: "nowrap" }}
+        >
+          Record Price
+        </Button>
       </Box>
-      <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
-        {sorted.slice(0, 30).map((p, i) => (
-          <Box
-            key={i}
-            sx={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              px: 1.25,
-              py: 0.75,
-              border: 1,
-              borderColor: "divider",
-              borderRadius: 1,
-              bgcolor: "background.paper",
-            }}
-          >
-            <Typography
-              sx={{
-                fontSize: 11,
-                color: "text.secondary",
-                textTransform: "uppercase",
-                letterSpacing: 0.3,
-              }}
-            >
-              {formatDate(p.date)}
-            </Typography>
-            <Typography
-              sx={{
-                fontSize: 13,
-                fontWeight: 700,
-                fontVariantNumeric: "tabular-nums",
-              }}
-            >
-              {formatCurrency(p.price)}
-            </Typography>
-          </Box>
-        ))}
-      </Box>
+
+      {entries.length === 0 ? (
+        <Box sx={{ p: 3, textAlign: "center" }}>
+          <Typography variant="body2" color="text.secondary">
+            No price history recorded yet.
+          </Typography>
+        </Box>
+      ) : (
+        <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
+          {[...entries]
+            .sort(
+              (a, b) =>
+                new Date(b.recorded_date).getTime() -
+                new Date(a.recorded_date).getTime()
+            )
+            .slice(0, 30)
+            .map((entry) => {
+              const variantName = variantNameById[entry.material_id];
+              return (
+                <Box
+                  key={entry.id}
+                  sx={{
+                    display: "grid",
+                    gridTemplateColumns: "60px 1fr auto",
+                    alignItems: "center",
+                    gap: 0.75,
+                    px: 1.25,
+                    py: 0.75,
+                    border: 1,
+                    borderColor: "divider",
+                    borderRadius: 1,
+                    bgcolor: "background.paper",
+                  }}
+                >
+                  {/* Date */}
+                  <Typography
+                    sx={{
+                      fontSize: 10,
+                      color: "text.secondary",
+                      textTransform: "uppercase",
+                      letterSpacing: 0.3,
+                    }}
+                  >
+                    {formatDate(entry.recorded_date)}
+                  </Typography>
+
+                  {/* Vendor · Brand · Variant */}
+                  <Box sx={{ minWidth: 0 }}>
+                    <Typography
+                      sx={{
+                        fontSize: 11,
+                        fontWeight: 600,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {entry.vendor?.name ?? "—"}
+                    </Typography>
+                    <Typography
+                      sx={{
+                        fontSize: 10,
+                        color: "text.secondary",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {[entry.brand?.brand_name, variantName]
+                        .filter(Boolean)
+                        .join(" · ") || "No brand / variant"}
+                    </Typography>
+                  </Box>
+
+                  {/* Price */}
+                  <Box sx={{ textAlign: "right" }}>
+                    <Typography
+                      sx={{
+                        fontSize: 13,
+                        fontWeight: 700,
+                        fontVariantNumeric: "tabular-nums",
+                      }}
+                    >
+                      {formatCurrency(entry.price)}
+                    </Typography>
+                    {entry.quantity != null && (
+                      <Typography sx={{ fontSize: 10, color: "text.secondary" }}>
+                        {entry.quantity} {entry.unit ?? ""}
+                      </Typography>
+                    )}
+                  </Box>
+                </Box>
+              );
+            })}
+        </Box>
+      )}
     </Box>
   );
 }
