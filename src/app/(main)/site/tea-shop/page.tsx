@@ -26,6 +26,7 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
+  Avatar,
 } from "@mui/material";
 import {
   Add as AddIcon,
@@ -33,6 +34,7 @@ import {
   Delete,
   Payment as PaymentIcon,
   LocalCafe,
+  LocalCafe as CafeIcon,
   Fastfood,
   Settings,
   Warning as WarningIcon,
@@ -44,6 +46,7 @@ import {
   CheckCircle as CheckCircleIcon,
   Groups as GroupsIcon,
 } from "@mui/icons-material";
+import TeaShopPayBottomSheet from "@/components/tea-shop/TeaShopPayBottomSheet";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { ensureFreshSession } from "@/lib/auth/sessionManager";
@@ -188,6 +191,8 @@ export default function TeaShopPage() {
   const [configDialogOpen, setConfigDialogOpen] = useState(false);
   const [entryDialogOpen, setEntryDialogOpen] = useState(false);
   const [settlementDialogOpen, setSettlementDialogOpen] = useState(false);
+  const [payBottomSheetOpen, setPayBottomSheetOpen] = useState(false);
+  const [settlementInitialAmount, setSettlementInitialAmount] = useState<number | undefined>(undefined);
   const [editingEntry, setEditingEntry] = useState<TeaShopEntry | null>(null);
   const [editingSettlement, setEditingSettlement] = useState<TeaShopSettlement | null>(null);
 
@@ -882,6 +887,17 @@ export default function TeaShopPage() {
         }
         actions={
           <Box sx={{ display: "flex", gap: 0.5, alignItems: "center" }}>
+            {/* Shop avatar */}
+            {(shop || companyTeaShop) && (
+              <Avatar
+                src={(companyTeaShop as any)?.photo_url || (shop as any)?.photo_url || undefined}
+                sx={{ width: 32, height: 32, bgcolor: "primary.light", mr: 0.5 }}
+              >
+                {!(companyTeaShop as any)?.photo_url && !(shop as any)?.photo_url && (
+                  <CafeIcon sx={{ fontSize: 18 }} />
+                )}
+              </Avatar>
+            )}
             {/* Group indicator (no toggle - automatic grouping) */}
             {isInGroup && (
               <Tooltip title={`Grouped with ${siteGroup?.sites?.length || 0} sites`}>
@@ -950,51 +966,74 @@ export default function TeaShopPage() {
           (not affected by date filter)
         </Typography>
       </Box>
-      <Grid container spacing={{ xs: 1, sm: 2 }} sx={{ mb: { xs: 2, sm: 3 } }}>
-        <Grid size={{ xs: 6, sm: 'grow' }}>
-          <Paper sx={{ p: { xs: 1, sm: 2 }, textAlign: "center", bgcolor: stats.pendingBalance > 0 ? "error.50" : "success.50" }}>
-            <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.65rem', sm: '0.75rem' } }}>
-              Pending
+
+      {/* Hero: Pending Balance */}
+      {(() => {
+        const activeUpiId = (companyTeaShop as any)?.upi_id || (shop as any)?.upi_id || null;
+        const shopDisplayName = companyTeaShop?.name || shop?.shop_name || "Tea Shop";
+        const showPayButton = canEdit && stats.pendingBalance > 0 && !!activeUpiId;
+        return (
+          <Paper
+            sx={{
+              p: { xs: 2, sm: 2.5 },
+              mb: { xs: 1.5, sm: 2 },
+              textAlign: "center",
+              bgcolor: stats.pendingBalance > 0 ? "error.50" : "success.50",
+              border: 1,
+              borderColor: stats.pendingBalance > 0 ? "error.200" : "success.200",
+            }}
+          >
+            <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.65rem', sm: '0.75rem' }, letterSpacing: 1, textTransform: 'uppercase' }}>
+              Pending Amount
             </Typography>
             <Typography
-              variant="h6"
-              fontWeight={700}
+              variant="h4"
+              fontWeight={800}
               color={stats.pendingBalance > 0 ? "error.main" : "success.main"}
-              sx={{ fontSize: { xs: '1rem', sm: '1.25rem' } }}
+              sx={{ my: 0.5, fontSize: { xs: '2rem', sm: '2.5rem' } }}
             >
-              ₹{stats.pendingBalance.toLocaleString()}
+              {stats.pendingBalance > 0 ? `₹${stats.pendingBalance.toLocaleString()}` : "All Clear ✓"}
             </Typography>
-          </Paper>
-        </Grid>
-        {/* Extra Paid Card - only show when overpaid */}
-        {stats.overpaidAmount > 0 && (
-          <Grid size={{ xs: 6, sm: 'grow' }}>
-            <Paper sx={{ p: { xs: 1, sm: 2 }, textAlign: "center", bgcolor: "info.50" }}>
-              <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.65rem', sm: '0.75rem' } }}>
-                Extra Paid
-              </Typography>
-              <Typography
-                variant="h6"
-                fontWeight={700}
-                color="info.main"
-                sx={{ fontSize: { xs: '1rem', sm: '1.25rem' } }}
+            {showPayButton && (
+              <Button
+                variant="contained"
+                color="error"
+                size="medium"
+                onClick={() => setPayBottomSheetOpen(true)}
+                sx={{ mt: 0.5, borderRadius: 6, px: 3 }}
               >
-                ₹{stats.overpaidAmount.toLocaleString()}
+                Pay via UPI →
+              </Button>
+            )}
+            {canEdit && stats.pendingBalance > 0 && !activeUpiId && (
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+                Add UPI ID in ⚙ settings to enable quick pay
               </Typography>
-            </Paper>
-          </Grid>
-        )}
+            )}
+          </Paper>
+        );
+      })()}
+
+      {/* Extra Paid Card - only show when overpaid */}
+      {stats.overpaidAmount > 0 && (
+        <Paper sx={{ p: { xs: 1, sm: 2 }, textAlign: "center", bgcolor: "info.50", mb: { xs: 1, sm: 1.5 } }}>
+          <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.65rem', sm: '0.75rem' } }}>
+            Extra Paid (Credit)
+          </Typography>
+          <Typography variant="h6" fontWeight={700} color="info.main" sx={{ fontSize: { xs: '1rem', sm: '1.25rem' } }}>
+            ₹{stats.overpaidAmount.toLocaleString()}
+          </Typography>
+        </Paper>
+      )}
+
+      {/* Secondary stats 2×2 grid */}
+      <Grid container spacing={{ xs: 1, sm: 2 }} sx={{ mb: { xs: 2, sm: 3 } }}>
         <Grid size={{ xs: 6, sm: 'grow' }}>
           <Paper sx={{ p: { xs: 1, sm: 2 }, textAlign: "center" }}>
             <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.65rem', sm: '0.75rem' } }}>
               Total Spent
             </Typography>
-            <Typography
-              variant="h6"
-              fontWeight={700}
-              color="primary.main"
-              sx={{ fontSize: { xs: '1rem', sm: '1.25rem' } }}
-            >
+            <Typography variant="h6" fontWeight={700} color="primary.main" sx={{ fontSize: { xs: '1rem', sm: '1.25rem' } }}>
               ₹{(stats.totalAllTime || 0).toLocaleString()}
             </Typography>
           </Paper>
@@ -1004,68 +1043,41 @@ export default function TeaShopPage() {
             <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.65rem', sm: '0.75rem' } }}>
               Total Paid
             </Typography>
-            <Typography
-              variant="h6"
-              fontWeight={700}
-              color="success.main"
-              sx={{ fontSize: { xs: '1rem', sm: '1.25rem' } }}
-            >
+            <Typography variant="h6" fontWeight={700} color="success.main" sx={{ fontSize: { xs: '1rem', sm: '1.25rem' } }}>
               ₹{(stats.totalPaid || 0).toLocaleString()}
             </Typography>
           </Paper>
         </Grid>
-        <Grid size={{ xs: 4, sm: 'grow' }}>
+        {/* This Week - hidden on mobile */}
+        <Grid size={{ xs: 0, sm: 'grow' }} sx={{ display: { xs: 'none', sm: 'block' } }}>
           <Paper sx={{ p: { xs: 1, sm: 2 }, textAlign: "center" }}>
-            <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.65rem', sm: '0.75rem' } }}>
+            <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.75rem' }}>
               This Week
             </Typography>
-            <Typography
-              variant="h6"
-              fontWeight={700}
-              color="text.primary"
-              sx={{ fontSize: { xs: '0.875rem', sm: '1.25rem' } }}
-            >
+            <Typography variant="h6" fontWeight={700} color="text.primary" sx={{ fontSize: '1.25rem' }}>
               ₹{stats.thisWeekTotal.toLocaleString()}
             </Typography>
           </Paper>
         </Grid>
-        <Grid size={{ xs: 4, sm: 'grow' }}>
+        <Grid size={{ xs: 6, sm: 'grow' }}>
           <Paper sx={{ p: { xs: 1, sm: 2 }, textAlign: "center" }}>
             <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.65rem', sm: '0.75rem' } }}>
               This Month
             </Typography>
-            <Typography
-              variant="h6"
-              fontWeight={700}
-              color="text.primary"
-              sx={{ fontSize: { xs: '0.875rem', sm: '1.25rem' } }}
-            >
+            <Typography variant="h6" fontWeight={700} color="text.primary" sx={{ fontSize: { xs: '1rem', sm: '1.25rem' } }}>
               ₹{stats.thisMonthTotal.toLocaleString()}
             </Typography>
           </Paper>
         </Grid>
-        <Grid size={{ xs: 4, sm: 'grow' }}>
+        <Grid size={{ xs: 6, sm: 'grow' }}>
           <Paper sx={{ p: { xs: 1, sm: 2 }, textAlign: "center" }}>
             <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.65rem', sm: '0.75rem' } }}>
               Last Pay
             </Typography>
-            <Typography
-              variant="body1"
-              fontWeight={600}
-              sx={{ fontSize: { xs: '0.75rem', sm: '1rem' } }}
-            >
+            <Typography variant="body1" fontWeight={600} sx={{ fontSize: { xs: '0.85rem', sm: '1rem' } }}>
               {stats.lastSettlement
-                ? `₹${stats.lastSettlement.amount_paid.toLocaleString()}`
+                ? `₹${stats.lastSettlement.amount_paid.toLocaleString()} · ${dayjs(stats.lastSettlement.payment_date).format("DD MMM")}`
                 : "None"}
-            </Typography>
-            <Typography
-              variant="caption"
-              color="text.secondary"
-              sx={{ display: { xs: 'none', sm: 'block' }, fontSize: '0.65rem' }}
-            >
-              {stats.lastSettlement
-                ? dayjs(stats.lastSettlement.payment_date).format("DD MMM")
-                : "-"}
             </Typography>
           </Paper>
         </Grid>
@@ -1773,6 +1785,7 @@ export default function TeaShopPage() {
               onClose={() => {
                 setSettlementDialogOpen(false);
                 setEditingSettlement(null);
+                setSettlementInitialAmount(undefined);
               }}
               shop={effectiveShop}
               pendingBalance={stats.pendingBalance}
@@ -1781,9 +1794,12 @@ export default function TeaShopPage() {
               isInGroup={isInGroup}
               siteGroupId={siteGroupId}
               filterBySiteId={effectiveFilterBySiteId}
+              initialAmount={settlementInitialAmount}
+              initialPaymentMode={settlementInitialAmount !== undefined ? "upi" : undefined}
               onSuccess={() => {
                 setSettlementDialogOpen(false);
                 setEditingSettlement(null);
+                setSettlementInitialAmount(undefined);
                 fetchData();
               }}
             />
@@ -1820,6 +1836,26 @@ export default function TeaShopPage() {
       >
         <AddIcon />
       </Fab>
+
+      {/* Pay via UPI bottom sheet */}
+      {(() => {
+        const activeUpiId = (companyTeaShop as any)?.upi_id || (shop as any)?.upi_id || "";
+        const shopDisplayName = companyTeaShop?.name || shop?.shop_name || "Tea Shop";
+        return (
+          <TeaShopPayBottomSheet
+            open={payBottomSheetOpen}
+            onClose={() => setPayBottomSheetOpen(false)}
+            shopName={shopDisplayName}
+            upiId={activeUpiId}
+            pendingBalance={stats.pendingBalance}
+            onRecordPayment={(amount) => {
+              setSettlementInitialAmount(amount);
+              setEditingSettlement(null);
+              setSettlementDialogOpen(true);
+            }}
+          />
+        );
+      })()}
     </Box>
   );
 }

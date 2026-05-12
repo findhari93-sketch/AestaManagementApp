@@ -60,10 +60,12 @@ interface TeaShopSettlementDialogProps {
   pendingBalance: number;
   entries: TeaShopEntry[];
   onSuccess?: () => void;
-  settlement?: TeaShopSettlement | null; // For edit mode
-  isInGroup?: boolean; // Whether site is in a group
-  siteGroupId?: string; // Site group ID for combined data
-  filterBySiteId?: string; // Filter entries to specific site in group mode
+  settlement?: TeaShopSettlement | null;
+  isInGroup?: boolean;
+  siteGroupId?: string;
+  filterBySiteId?: string;
+  initialAmount?: number;
+  initialPaymentMode?: PaymentMode;
 }
 
 interface SiteEngineer {
@@ -108,6 +110,8 @@ export default function TeaShopSettlementDialog({
   isInGroup = false,
   siteGroupId,
   filterBySiteId,
+  initialAmount,
+  initialPaymentMode,
 }: TeaShopSettlementDialogProps) {
   const isEditMode = !!settlement;
   const { userProfile } = useAuth();
@@ -184,12 +188,9 @@ export default function TeaShopSettlementDialog({
         setPayerSource((settlement as any).payer_source || "own_money");
         setCustomPayerName((settlement as any).payer_name || "");
       } else {
-        // New settlement - reset form
-        // OR rely on user input if not first open? No, we want to reset on open.
-        // We use pendingBalance for initial value, but don't track it for updates
-        setAmountPaying(Math.round(pendingBalance));
+        setAmountPaying(Math.round(initialAmount ?? pendingBalance));
         setPaymentDate(dayjs().format("YYYY-MM-DD"));
-        setPaymentMode("cash");
+        setPaymentMode(initialPaymentMode ?? "cash");
         setPayerType("company_direct");
         setSelectedEngineerId("");
         setCreateWalletTransaction(true);

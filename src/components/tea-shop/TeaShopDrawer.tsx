@@ -14,12 +14,14 @@ import {
   Switch,
   Paper,
   Divider,
+  Avatar,
 } from "@mui/material";
 import {
   Close as CloseIcon,
   QrCode2 as QrCodeIcon,
   CloudUpload as CloudUploadIcon,
   Delete as DeleteIcon,
+  LocalCafe as CafeIcon,
 } from "@mui/icons-material";
 import { createClient } from "@/lib/supabase/client";
 import { hardenedUpload } from "@/lib/storage/uploadHelpers";
@@ -53,7 +55,9 @@ export default function TeaShopDrawer({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [uploadingQr, setUploadingQr] = useState(false);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const photoInputRef = useRef<HTMLInputElement>(null);
 
   // Form state
   const [shopName, setShopName] = useState("");
@@ -66,6 +70,7 @@ export default function TeaShopDrawer({
   // Payment info state
   const [upiId, setUpiId] = useState("");
   const [qrCodeUrl, setQrCodeUrl] = useState<string | null>(null);
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
 
   useEffect(() => {
     if (open) {
@@ -76,11 +81,10 @@ export default function TeaShopDrawer({
         setAddress(shop.address || "");
         setNotes(shop.notes || "");
         setIsActive(shop.is_active);
-        // Load payment info
         setUpiId((shop as any).upi_id || "");
         setQrCodeUrl((shop as any).qr_code_url || null);
+        setPhotoUrl((shop as any).photo_url || null);
       } else {
-        // Reset for new shop
         setShopName("");
         setOwnerName("");
         setContactPhone("");
@@ -89,23 +93,21 @@ export default function TeaShopDrawer({
         setIsActive(true);
         setUpiId("");
         setQrCodeUrl(null);
+        setPhotoUrl(null);
       }
       setError(null);
     }
   }, [open, shop]);
 
-  // Handle QR code image upload
   const handleQrCodeUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    // Validate file type
     if (!file.type.startsWith("image/")) {
       setError("Please upload an image file");
       return;
     }
 
-    // Validate file size (max 2MB)
     if (file.size > 2 * 1024 * 1024) {
       setError("Image size should be less than 2MB");
       return;
@@ -117,7 +119,6 @@ export default function TeaShopDrawer({
     try {
       const fileExt = file.name.split(".").pop();
       const fileName = `${siteId}/${Date.now()}.${fileExt}`;
-
       const { publicUrl } = await hardenedUpload({
         supabase,
         bucketName: "tea-shop-qr",
@@ -135,15 +136,51 @@ export default function TeaShopDrawer({
       );
     } finally {
       setUploadingQr(false);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
-      }
+      if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
 
-  // Remove QR code
-  const handleRemoveQrCode = () => {
-    setQrCodeUrl(null);
+  const handleRemoveQrCode = () => setQrCodeUrl(null);
+
+  const handlePhotoUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      setError("Please upload an image file");
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      setError("Image size should be less than 5MB");
+      return;
+    }
+
+    setUploadingPhoto(true);
+    setError(null);
+
+    try {
+      const fileExt = file.name.split(".").pop();
+      const fileName = `${siteId}/${Date.now()}.${fileExt}`;
+      const { publicUrl } = await hardenedUpload({
+        supabase,
+        bucketName: "tea-shop-photos",
+        filePath: fileName,
+        file,
+      });
+      setPhotoUrl(publicUrl);
+    } catch (err: any) {
+      console.error("Error uploading photo:", err);
+      const message = err?.message || "";
+      setError(
+        message.includes("timed out") || message.includes("stalled")
+          ? "Upload timed out. Please check your connection and try again."
+          : "Failed to upload shop photo"
+      );
+    } finally {
+      setUploadingPhoto(false);
+      if (photoInputRef.current) photoInputRef.current.value = "";
+    }
   };
 
   const handleSave = async () => {
@@ -156,7 +193,6 @@ export default function TeaShopDrawer({
     setError(null);
 
     try {
-      // Always save as site-specific shop - grouping is automatic based on site's site_group_id
       const shopData: Record<string, any> = {
         shop_name: shopName.trim(),
         owner_name: ownerName.trim() || null,
@@ -166,25 +202,22 @@ export default function TeaShopDrawer({
         is_active: isActive,
         upi_id: upiId.trim() || null,
         qr_code_url: qrCodeUrl || null,
-        is_group_shop: false, // Grouping is now automatic, not explicit
+        photo_url: photoUrl || null,
+        is_group_shop: false,
         site_id: siteId,
         site_group_id: null,
       };
 
       if (shop) {
-        // Update existing shop
         const { error: updateError } = await (supabase
           .from("tea_shop_accounts") as any)
           .update(shopData)
           .eq("id", shop.id);
-
         if (updateError) throw updateError;
       } else {
-        // Create new shop
         const { error: insertError } = await (supabase
           .from("tea_shop_accounts") as any)
           .insert(shopData);
-
         if (insertError) throw insertError;
       }
 
@@ -217,14 +250,12 @@ export default function TeaShopDrawer({
           </IconButton>
         </Box>
 
-        {/* Error Alert */}
         {error && (
           <Alert severity="error" sx={{ mb: 2 }}>
             {error}
           </Alert>
         )}
 
-        {/* Form */}
         <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
           <TextField
             label="Shop Name"
@@ -273,7 +304,6 @@ export default function TeaShopDrawer({
 
           <Divider sx={{ my: 1 }} />
 
-          {/* Payment Information Section */}
           <Typography variant="subtitle2" color="text.secondary" sx={{ mt: 1 }}>
             Payment Information
           </Typography>
@@ -286,6 +316,54 @@ export default function TeaShopDrawer({
             placeholder="e.g., shopname@upi or 9876543210@paytm"
             helperText="Enter the shop's UPI ID for quick payments"
           />
+
+          {/* Shop Photo Upload */}
+          <Box>
+            <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: "block" }}>
+              Shop Photo (shown in page header)
+            </Typography>
+            <input
+              type="file"
+              accept="image/*"
+              ref={photoInputRef}
+              onChange={handlePhotoUpload}
+              style={{ display: "none" }}
+              id="shop-photo-upload"
+            />
+            <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
+              <Avatar
+                src={photoUrl || undefined}
+                sx={{ width: 64, height: 64, bgcolor: "primary.light", cursor: "pointer" }}
+                onClick={() => photoInputRef.current?.click()}
+              >
+                {!photoUrl && <CafeIcon />}
+              </Avatar>
+              <Box>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={uploadingPhoto ? <CircularProgress size={14} /> : <CloudUploadIcon />}
+                  onClick={() => photoInputRef.current?.click()}
+                  disabled={uploadingPhoto}
+                >
+                  {uploadingPhoto ? "Uploading..." : photoUrl ? "Change" : "Upload Photo"}
+                </Button>
+                {photoUrl && (
+                  <Button
+                    size="small"
+                    color="error"
+                    onClick={() => setPhotoUrl(null)}
+                    sx={{ ml: 1 }}
+                  >
+                    Remove
+                  </Button>
+                )}
+                <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.5 }}>
+                  Max 5MB, JPG/PNG
+                </Typography>
+              </Box>
+            </Box>
+          </Box>
 
           {/* QR Code Upload */}
           <Paper
@@ -362,7 +440,6 @@ export default function TeaShopDrawer({
             )}
           </Paper>
 
-          {/* Group info banner - show when site is in a group */}
           {siteGroupId && (
             <Alert severity="info" sx={{ py: 1 }}>
               <Typography variant="caption">
@@ -384,7 +461,6 @@ export default function TeaShopDrawer({
           )}
         </Box>
 
-        {/* Actions */}
         <Box sx={{ mt: 4, display: "flex", gap: 2 }}>
           <Button variant="outlined" onClick={onClose} fullWidth disabled={loading}>
             Cancel
