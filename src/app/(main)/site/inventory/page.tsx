@@ -101,6 +101,7 @@ import UsageDeleteConfirmDialog from "@/components/inventory/UsageDeleteConfirmD
 import UsageEditDialog from "@/components/inventory/UsageEditDialog";
 import { InventoryCardGrid } from "@/components/inventory/InventoryCardGrid";
 import { QuickUsageSheet } from "@/components/inventory/QuickUsageSheet";
+import { EntityImageAvatar } from "@/components/common/EntityImageAvatar";
 import PODetailsDrawer from "@/components/materials/PODetailsDrawer";
 import { usePOByBatchCode } from "@/hooks/queries/useStockInventory";
 
@@ -356,25 +357,35 @@ export default function InventoryPage() {
       {
         accessorKey: "material.name",
         header: "Material",
-        size: 200,
+        size: 260,
         Cell: ({ row }) => (
-          <Box>
-            <Typography variant="body2" fontWeight={500}>
-              {row.original.material?.name}
-            </Typography>
-            {row.original.material?.code && (
-              <Typography variant="caption" color="text.secondary">
-                {row.original.material.code}
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1, minWidth: 0 }}>
+            <EntityImageAvatar
+              src={(row.original.material as { image_url?: string | null } | undefined)?.image_url ?? null}
+              name={row.original.material?.name ?? ""}
+              size={32}
+              radius={6}
+              fallbackIcon={<InventoryIcon />}
+              tint="primary"
+            />
+            <Box sx={{ minWidth: 0, flex: 1 }}>
+              <Typography variant="body2" fontWeight={500} noWrap>
+                {row.original.material?.name}
               </Typography>
-            )}
-            {row.original.brand && (
-              <Chip
-                label={row.original.brand.brand_name}
-                size="small"
-                variant="outlined"
-                sx={{ ml: 1 }}
-              />
-            )}
+              {row.original.material?.code && (
+                <Typography variant="caption" color="text.secondary" noWrap component="div">
+                  {row.original.material.code}
+                </Typography>
+              )}
+              {row.original.brand && (
+                <Chip
+                  label={row.original.brand.brand_name}
+                  size="small"
+                  variant="outlined"
+                  sx={{ mt: 0.25, height: 18, fontSize: 10 }}
+                />
+              )}
+            </Box>
           </Box>
         ),
       },
@@ -639,6 +650,21 @@ export default function InventoryPage() {
             );
           }
           return <Chip label="Site" size="small" variant="outlined" />;
+        },
+      },
+      {
+        id: "settlement_state",
+        header: "Settlement",
+        size: 120,
+        Cell: ({ row }) => {
+          const state = (row.original as ExtendedStock).settlement_state;
+          if (state === "settled") {
+            return <Chip label="✓ Settled" size="small" sx={{ bgcolor: "#e8f5e9", color: "#2e7d32", fontWeight: 600 }} />;
+          }
+          if (state === "pending") {
+            return <Chip label="⏳ Pending" size="small" sx={{ bgcolor: "#fff8e1", color: "#f57f17", fontWeight: 600 }} />;
+          }
+          return <Typography variant="caption" color="text.disabled">—</Typography>;
         },
       },
       {
@@ -1447,7 +1473,7 @@ export default function InventoryPage() {
             />
             {stockTab !== "completed" && (
               <>
-                {/* Cards / Table primary toggle */}
+                {/* Display: Cards / Table */}
                 <ToggleButtonGroup
                   value={cardView ? "cards" : "table"}
                   exclusive
@@ -1466,36 +1492,33 @@ export default function InventoryPage() {
                   </ToggleButton>
                 </ToggleButtonGroup>
 
-                {/* Table sub-toggle (consolidated / batch) — only visible in table mode */}
-                {!cardView && (
-                  <ToggleButtonGroup
-                    value={stockViewMode}
-                    exclusive
-                    onChange={(_, value) => value && setStockViewMode(value)}
-                    size="small"
-                  >
-                    <ToggleButton value="consolidated">
-                      <Tooltip title="By Material (consolidated)">
-                        <ViewListIcon fontSize="small" />
-                      </Tooltip>
-                    </ToggleButton>
-                    <ToggleButton value="batch">
-                      <Tooltip title="By Batch (detailed)">
-                        <ViewModuleIcon fontSize="small" />
-                      </Tooltip>
-                    </ToggleButton>
-                  </ToggleButtonGroup>
-                )}
+                {/* Group by: Material / Batch — always visible (works in both Cards and Table modes) */}
+                <ToggleButtonGroup
+                  value={stockViewMode}
+                  exclusive
+                  onChange={(_, value) => value && setStockViewMode(value)}
+                  size="small"
+                >
+                  <ToggleButton value="consolidated" aria-label="group by material">
+                    Material
+                  </ToggleButton>
+                  <ToggleButton value="batch" aria-label="group by batch">
+                    Batch
+                  </ToggleButton>
+                </ToggleButtonGroup>
               </>
             )}
           </Box>
 
-          {/* Card Grid View (default) */}
+          {/* Card Grid View (Material or Batch mode) */}
           {stockTab !== "completed" && cardView && (
             <InventoryCardGrid
+              mode={stockViewMode === "batch" ? "batch" : "material"}
               items={consolidatedStock}
+              batchItems={filteredStock}
               lowStockIds={lowStockIds}
-              onRecordUsage={(item) => setQuickSheetItem(item)}
+              onRecordMaterialUsage={(item) => setQuickSheetItem(item)}
+              onRecordBatchUsage={(item) => handleRecordUsage(item)}
             />
           )}
 

@@ -13,6 +13,7 @@ const makeItem = (overrides: Partial<ConsolidatedStockItem> = {}): ConsolidatedS
   unit: "Bag",
   category_id: "cat-1",
   category_name: "Civil",
+  image_url: null,
   total_qty: 3.5,
   total_available_qty: 3.5,
   batch_count: 1,
@@ -49,24 +50,34 @@ describe("MaterialStockCard", () => {
     expect(screen.getByText(/MAT-CEM-001/)).toBeInTheDocument();
   });
 
-  it("shows Shared badge when has_shared_batches only", () => {
-    render(<MaterialStockCard item={makeItem({ has_shared_batches: true, has_own_batches: false })} isLowStock={false} onRecordUsage={vi.fn()} />);
-    expect(screen.getByText("Shared")).toBeInTheDocument();
+  it("renders banner image when image_url is set", () => {
+    render(
+      <MaterialStockCard
+        item={makeItem({ image_url: "https://example.com/ppc.jpg" })}
+        isLowStock={false}
+        onRecordUsage={vi.fn()}
+      />
+    );
+    const img = screen.getByAltText("PPC Cement") as HTMLImageElement;
+    expect(img).toBeInTheDocument();
+    expect(img.src).toContain("https://example.com/ppc.jpg");
   });
 
-  it("shows Own badge when has_own_batches only", () => {
-    render(<MaterialStockCard item={makeItem({ has_shared_batches: false, has_own_batches: true })} isLowStock={false} onRecordUsage={vi.fn()} />);
-    expect(screen.getByText("Own")).toBeInTheDocument();
+  it("renders fallback (no <img>) when image_url is null", () => {
+    render(
+      <MaterialStockCard item={makeItem({ image_url: null })} isLowStock={false} onRecordUsage={vi.fn()} />
+    );
+    expect(screen.queryByAltText("PPC Cement")).not.toBeInTheDocument();
   });
 
-  it("shows Mixed badge when both batch types", () => {
-    render(<MaterialStockCard item={makeItem({ has_shared_batches: true, has_own_batches: true })} isLowStock={false} onRecordUsage={vi.fn()} />);
-    expect(screen.getByText("Mixed")).toBeInTheDocument();
-  });
-
-  it("shows Low badge when isLowStock", () => {
+  it("shows Low overlay chip when isLowStock", () => {
     render(<MaterialStockCard item={makeItem()} isLowStock={true} onRecordUsage={vi.fn()} />);
     expect(screen.getByText("Low")).toBeInTheDocument();
+  });
+
+  it("does NOT show Low chip when isLowStock=false", () => {
+    render(<MaterialStockCard item={makeItem()} isLowStock={false} onRecordUsage={vi.fn()} />);
+    expect(screen.queryByText("Low")).not.toBeInTheDocument();
   });
 
   it("calls onRecordUsage with item when Record Usage clicked", () => {

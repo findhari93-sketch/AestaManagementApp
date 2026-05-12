@@ -47,6 +47,8 @@ export interface ConsolidatedStockItem {
   /** Category from material */
   category_id: string | null;
   category_name: string | null;
+  /** Material image URL (from materials.image_url) — null when material has no photo */
+  image_url: string | null;
   /** Total current quantity across all batches */
   total_qty: number;
   /** Total available quantity across all batches */
@@ -213,6 +215,7 @@ export function consolidateStock(
         unit: (item.material?.unit as string) || "piece",
         category_id: item.material?.category_id ?? null,
         category_name: (item.material as any)?.category?.name ?? null,
+        image_url: (item.material as any)?.image_url ?? null,
         total_qty: 0,
         total_available_qty: 0,
         batch_count: 0,

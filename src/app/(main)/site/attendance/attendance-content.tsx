@@ -1293,17 +1293,23 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
     let totalContractAmount = 0;
     let totalMarketAmount = 0;
 
+    // Today is "in progress" — its unpaid rows don't count as pending.
+    const todayDateStr = dayjs().format("YYYY-MM-DD");
+
     dateSummaries.forEach((s) => {
+      const isToday = s.date === todayDateStr;
       totalSalary += s.totalSalary;
       totalTeaShop += s.teaShop?.total || 0;
       totalLaborers += s.totalLaborerCount;
       totalPaidCount += s.paidCount;
-      totalPendingCount += s.pendingCount;
       totalPaidAmount += s.paidAmount;
-      totalPendingAmount += s.pendingAmount;
       totalDailyAmount += s.dailyLaborerAmount;
       totalContractAmount += s.contractLaborerAmount;
       totalMarketAmount += s.marketLaborerAmount;
+      if (!isToday) {
+        totalPendingCount += s.pendingCount;
+        totalPendingAmount += s.pendingAmount;
+      }
     });
 
     const totalExpense = totalSalary + totalTeaShop;
@@ -1432,6 +1438,7 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
     // Helper to calculate weekly summary
     const today = dayjs().startOf("day");
     const currentWeekStart = weekStartStr(today);
+    // todayStr is already declared above (line ~1367) in this same useMemo scope; reuse it here.
 
     const calculateWeeklySummary = (
       weekStart: string,
@@ -1444,24 +1451,33 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
       let totalLaborers = 0;
       const contractLaborerIds: string[] = [];
       let weekEnd = weekStart;
+      const isCurrentWeek = weekStart === currentWeekStart;
 
       entries.forEach((e) => {
         if (e.date > weekEnd) weekEnd = e.date;
         if (e.type === "attendance") {
+          // Today's records are "in progress", never pending.
+          // Contract pending is suppressed for the entire current week
+          // since contract crews are settled weekly after the week ends.
+          const skipToday = e.date === todayStr;
           e.summary.records.forEach((r) => {
             if (!r.is_paid) {
               if (r.laborer_type === "contract") {
-                pendingContractSalary += r.daily_earnings;
+                if (!isCurrentWeek) {
+                  pendingContractSalary += r.daily_earnings;
+                }
                 if (!contractLaborerIds.includes(r.laborer_id)) {
                   contractLaborerIds.push(r.laborer_id);
                 }
               } else {
-                pendingDailySalary += r.daily_earnings;
+                if (!skipToday) {
+                  pendingDailySalary += r.daily_earnings;
+                }
               }
             }
           });
           e.summary.marketLaborers.forEach((m) => {
-            if (!m.isPaid) {
+            if (!m.isPaid && !skipToday) {
               pendingMarketSalary += m.dailyEarnings;
             }
           });
@@ -1469,8 +1485,6 @@ export default function AttendanceContent({ initialData }: AttendanceContentProp
           totalLaborers += e.summary.totalLaborerCount;
         }
       });
-
-      const isCurrentWeek = weekStart === currentWeekStart;
 
       return {
         weekStart,

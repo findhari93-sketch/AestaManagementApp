@@ -95,6 +95,7 @@ export type ExtendedStockInventory = StockInventoryWithDetails & {
   batch_total_amount?: number | null; // Total batch purchase amount incl. GST
   batch_original_qty?: number | null; // Original qty purchased for this material
   is_vendor_paid?: boolean | null; // Whether vendor has been paid for this batch
+  settlement_state?: "settled" | "pending" | "self_use" | null; // Inter-site settlement aggregate; null for own (non-shared) batches
 };
 
 /**
@@ -136,7 +137,7 @@ export function useSiteStock(
           *,
           pricing_mode,
           total_weight,
-          material:materials(id, name, code, unit, category_id, reorder_level, weight_per_unit, length_per_piece, gst_rate),
+          material:materials(id, name, code, unit, category_id, reorder_level, weight_per_unit, length_per_piece, gst_rate, image_url),
           brand:material_brands(id, brand_name),
           location:stock_locations(id, name)
         `
@@ -292,7 +293,7 @@ export function useSiteStock(
             *,
             pricing_mode,
             total_weight,
-            material:materials(id, name, code, unit, category_id, reorder_level, weight_per_unit, length_per_piece, gst_rate),
+            material:materials(id, name, code, unit, category_id, reorder_level, weight_per_unit, length_per_piece, gst_rate, image_url),
             brand:material_brands(id, brand_name),
             location:stock_locations(id, name),
             site:sites(id, name)
@@ -421,7 +422,61 @@ export function useSiteStock(
       }
 
       // Combine own stock and shared group stock
-      return [...ownStock, ...sharedStock];
+      const combined = [...ownStock, ...sharedStock];
+
+      // Aggregate inter-site settlement state per batch_code (one parallel query, not N+1).
+      // For each shared batch in the result set, look at batch_usage_records: if any usage row
+      // has settlement_status === 'pending', the batch is "pending"; if all rows are 'settled'
+      // (or there are no non-self-use rows), the batch is "settled"; if only self-use rows exist,
+      // it's "self_use". Own (non-shared) batches get null — no inter-site settlement concept.
+      const sharedBatchCodes = Array.from(
+        new Set(
+          combined
+            .filter((s) => s.is_shared && s.batch_code)
+            .map((s) => s.batch_code as string)
+        )
+      );
+
+      if (sharedBatchCodes.length > 0) {
+        const { data: usageRows, error: usageErr } = await supabase
+          .from("batch_usage_records")
+          .select("batch_ref_code, settlement_status")
+          .in("batch_ref_code", sharedBatchCodes);
+
+        if (usageErr) {
+          console.warn("[useSiteStock] Failed to fetch batch settlement statuses:", usageErr);
+        } else if (usageRows) {
+          const tally = new Map<string, { pending: number; settled: number; selfUse: number }>();
+          for (const row of usageRows as { batch_ref_code: string; settlement_status: string }[]) {
+            const t = tally.get(row.batch_ref_code) ?? { pending: 0, settled: 0, selfUse: 0 };
+            if (row.settlement_status === "pending") t.pending++;
+            else if (row.settlement_status === "settled") t.settled++;
+            else if (row.settlement_status === "self_use") t.selfUse++;
+            tally.set(row.batch_ref_code, t);
+          }
+
+          for (const item of combined) {
+            if (!item.is_shared || !item.batch_code) {
+              item.settlement_state = null;
+              continue;
+            }
+            const t = tally.get(item.batch_code);
+            if (!t || (t.pending === 0 && t.settled === 0 && t.selfUse === 0)) {
+              item.settlement_state = "settled";
+            } else if (t.pending > 0) {
+              item.settlement_state = "pending";
+            } else if (t.settled > 0) {
+              item.settlement_state = "settled";
+            } else {
+              item.settlement_state = "self_use";
+            }
+          }
+        }
+      } else {
+        for (const item of combined) item.settlement_state = null;
+      }
+
+      return combined;
     }, { operationName: "useSiteStock" }),
     enabled: !!siteId,
     staleTime: 60000,
