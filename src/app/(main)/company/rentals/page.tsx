@@ -45,7 +45,7 @@ function CompanyRentalsPageInner() {
   const [basketOpen, setBasketOpen] = useState(false);
   const [addItemOpen, setAddItemOpen] = useState(false);
 
-  const { itemCount } = useEstimateBasket();
+  const { itemCount, addItem } = useEstimateBasket();
   const { data: categories = [] } = useRentalCategories();
   const { data: items = [], isLoading } = useRentalItemsWithVendorStats(categoryFilter);
   const { data: allVendors = [] } = useVendors();
@@ -205,7 +205,17 @@ function CompanyRentalsPageInner() {
                         onSelect={() =>
                           setSelectedItem(selectedItem?.id === item.id ? null : item)
                         }
-                        onAddToEstimate={() => setSelectedItem(item)}
+                        onAddToEstimate={() => {
+                          const wasEmpty = itemCount === 0;
+                          addItem({
+                            rental_item_id: item.id,
+                            rental_item_name: item.name,
+                            size_label: item.sizes?.[0]?.size_label ?? null,
+                            quantity: 10,
+                            days: 25,
+                          });
+                          if (wasEmpty) setBasketOpen(true);
+                        }}
                       />
                     </Grid>
                   ))}
