@@ -407,8 +407,16 @@ export async function processSettlement(
     }
 
     // 3. Update attendance records with settlement_group_id
+    // wallet-v2: when the engineer spends from their own wallet (userId === engineerId),
+    // the payment is terminal — mark is_paid=true. Pre-v2 admin→engineer transfers
+    // (userId ≠ engineerId) kept is_paid=false because the engineer still had to settle
+    // onward; that two-step flow is gone in wallet-v2.
+    const isWalletDirectSpend =
+      config.paymentChannel === "engineer_wallet" &&
+      !!config.engineerId &&
+      config.userId === config.engineerId;
     const updateData = {
-      is_paid: config.paymentChannel === "direct",
+      is_paid: config.paymentChannel === "direct" || isWalletDirectSpend,
       payment_date: paymentDate,
       payment_mode: config.paymentMode,
       paid_via: config.paymentChannel === "direct" ? "direct" : "engineer_wallet",
@@ -653,8 +661,13 @@ export async function processWeeklySettlement(
     }
 
     // 4. Update attendance records with settlement_group_id
+    // wallet-v2: see processSettlement note above — engineer spending own wallet is terminal.
+    const isWalletDirectSpend =
+      config.paymentChannel === "engineer_wallet" &&
+      !!config.engineerId &&
+      config.userId === config.engineerId;
     const updateData = {
-      is_paid: config.paymentChannel === "direct",
+      is_paid: config.paymentChannel === "direct" || isWalletDirectSpend,
       payment_date: paymentDate,
       payment_mode: config.paymentMode,
       paid_via: config.paymentChannel === "direct" ? "direct" : "engineer_wallet",
