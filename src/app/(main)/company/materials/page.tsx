@@ -29,6 +29,7 @@ import PageHeader from "@/components/layout/PageHeader";
 import { useAuth } from "@/contexts/AuthContext";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { hasEditPermission } from "@/lib/permissions";
+import { CATEGORY_TAB_MAPPING, CATEGORY_TABS } from "@/lib/constants/materialCategories";
 import {
   usePaginatedMaterials,
   useMaterialCategories,
@@ -61,30 +62,6 @@ const AIIngestionDialog = dynamic(
   () => import("@/components/ai-ingestion/AIIngestionDialog"),
   { ssr: false }
 );
-
-const CATEGORY_TAB_MAPPING: Record<string, string[]> = {
-  civil: ["CEM", "STL", "AGG", "BRK"],
-  electrical: ["ELC"],
-  plumbing: ["PLB"],
-  painting: ["PNT", "WPF"],
-  doors_windows: ["WOD", "GLS"],
-  hardware: ["HRD", "MSC"],
-  tiles: ["TIL"],
-  pumps: ["PMP"],
-  all: [],
-};
-
-const CATEGORY_TABS = [
-  { id: "all", label: "All" },
-  { id: "civil", label: "Civil" },
-  { id: "electrical", label: "Electrical" },
-  { id: "plumbing", label: "Plumbing" },
-  { id: "painting", label: "Painting" },
-  { id: "doors_windows", label: "Doors & Windows" },
-  { id: "hardware", label: "Hardware" },
-  { id: "tiles", label: "Tiles" },
-  { id: "pumps", label: "Pumps & Motors" },
-];
 
 const SORT_OPTIONS: { value: MaterialSortOption; label: string }[] = [
   { value: "frequently_used", label: "Frequently used" },
