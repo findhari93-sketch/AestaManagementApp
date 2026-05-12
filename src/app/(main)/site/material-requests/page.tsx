@@ -8,6 +8,7 @@ import {
   Box,
   Button,
   Chip,
+  Drawer,
   IconButton,
   Typography,
   TextField,
@@ -22,6 +23,8 @@ import {
   Badge,
   Avatar,
   AvatarGroup,
+  useMediaQuery,
+  useTheme,
 } from "@mui/material";
 import {
   Add as AddIcon,
@@ -35,6 +38,7 @@ import {
   Link as LinkIcon,
   CheckCircleOutline as FulfilledIcon,
   Inventory2 as MaterialIcon,
+  Close as CloseIcon,
 } from "@mui/icons-material";
 import DataTable, { type MRT_ColumnDef } from "@/components/common/DataTable";
 import PageHeader from "@/components/layout/PageHeader";
@@ -55,6 +59,7 @@ import MaterialRequestDialog from "@/components/materials/MaterialRequestDialog"
 import MaterialRequestDeleteConfirmationDialog from "@/components/materials/MaterialRequestDeleteConfirmationDialog";
 import RequestApprovalDialog from "@/components/materials/RequestApprovalDialog";
 import RequestDetailsDrawer from "@/components/materials/RequestDetailsDrawer";
+import { MaterialRequestJourney } from "@/components/materials/journey";
 const UnifiedPurchaseOrderDialog = dynamic(
   () => import("@/components/materials/UnifiedPurchaseOrderDialog"),
   { ssr: false }
@@ -112,12 +117,15 @@ export default function MaterialRequestsPage() {
   const [requestToDelete, setRequestToDelete] = useState<MaterialRequestWithDetails | null>(null);
   const [currentTab, setCurrentTab] = useState<TabValue>("all");
   const [searchTerm, setSearchTerm] = useState("");
+  const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
 
   const searchParams = useSearchParams();
   const router = useRouter();
   const { userProfile, user } = useAuth();
   const { selectedSite } = useSite();
   const isMobile = useIsMobile();
+  const theme = useTheme();
+  const isSmallScreen = useMediaQuery(theme.breakpoints.down("sm"));
   const canEdit = hasEditPermission(userProfile?.role);
   const isAdmin = hasAdminPermission(userProfile?.role);
 
@@ -838,6 +846,16 @@ export default function MaterialRequestsPage() {
         renderRowActions={renderRowActions}
         mobileHiddenColumns={mobileHiddenColumns}
         initialState={tableInitialState}
+        muiTableBodyRowProps={({ row }) => ({
+          onClick: () => setSelectedRequestId(row.original.id),
+          sx: {
+            cursor: "pointer",
+            backgroundColor:
+              selectedRequestId === row.original.id
+                ? `${theme.palette.action.selected} !important`
+                : undefined,
+          },
+        })}
       />
 
       {/* Mobile FAB */}
@@ -897,6 +915,58 @@ export default function MaterialRequestsPage() {
         requestNumber={requestToDelete?.request_number}
         siteId={selectedSite.id}
       />
+
+      {/* Journey Drawer */}
+      <Drawer
+        anchor="right"
+        open={selectedRequestId !== null}
+        onClose={() => setSelectedRequestId(null)}
+        variant={isSmallScreen ? "temporary" : "persistent"}
+        PaperProps={{
+          sx: {
+            width: isSmallScreen ? "100%" : 520,
+            border: 0,
+            borderLeft: `1px solid ${theme.palette.divider}`,
+            boxShadow: isSmallScreen ? undefined : 8,
+          },
+        }}
+        sx={{
+          ...(isSmallScreen
+            ? {}
+            : { "& .MuiBackdrop-root": { display: "none" } }),
+        }}
+      >
+        {/* Header */}
+        <Box
+          sx={{
+            px: 2,
+            py: 1.5,
+            borderBottom: `1px solid ${theme.palette.divider}`,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+          }}
+        >
+          <Typography variant="subtitle2" fontWeight={700}>
+            Request Journey
+          </Typography>
+          <IconButton
+            size="small"
+            aria-label="Close journey pane"
+            onClick={() => setSelectedRequestId(null)}
+          >
+            <CloseIcon fontSize="small" />
+          </IconButton>
+        </Box>
+
+        {/* Journey content */}
+        <Box sx={{ flex: 1, overflow: "auto" }}>
+          <MaterialRequestJourney
+            requestId={selectedRequestId}
+            isFullPage={false}
+          />
+        </Box>
+      </Drawer>
     </Box>
   );
 }
