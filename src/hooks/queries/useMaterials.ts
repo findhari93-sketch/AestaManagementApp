@@ -1095,7 +1095,7 @@ export function useBrandVariantLinks(materialId: string | undefined) {
         .order("brand_name");
 
       if (error) throw error;
-      return data as BrandWithVariantLinks[];
+      return data as unknown as BrandWithVariantLinks[];
     },
     enabled: !!materialId,
   });
@@ -1119,11 +1119,12 @@ export function useToggleBrandVariantLink() {
     }) => {
       await ensureFreshSession();
 
-      const { data, error } = await supabase
+      const { data, error } = await (supabase as any)
         .from("material_brand_variant_links")
-        .update({ is_active: isActive })
-        .eq("brand_id", brandId)
-        .eq("variant_id", variantId)
+        .upsert(
+          { brand_id: brandId, variant_id: variantId, is_active: isActive },
+          { onConflict: "brand_id,variant_id" }
+        )
         .select()
         .single();
 
@@ -1157,7 +1158,7 @@ export function useUpsertBrandVariantLinkImage() {
     }) => {
       await ensureFreshSession();
 
-      const { data, error } = await supabase
+      const { data, error } = await (supabase as any)
         .from("material_brand_variant_links")
         .update({ image_url: imageUrl })
         .eq("brand_id", brandId)
@@ -1190,7 +1191,7 @@ export function useBrandVariantLinkedBrandNames(variantId: string | undefined) {
     queryFn: async () => {
       if (!variantId) return null;
 
-      const { data, error } = await supabase
+      const { data, error } = await (supabase as any)
         .from("material_brand_variant_links")
         .select("material_brands!brand_id(brand_name)")
         .eq("variant_id", variantId)
@@ -1257,7 +1258,7 @@ export function useCreateMaterialBrand() {
           .eq("is_active", true);
 
         if (variants && variants.length > 0) {
-          await supabase
+          await (supabase as any)
             .from("material_brand_variant_links")
             .upsert(
               variants.map((v) => ({
@@ -1290,7 +1291,7 @@ export function useCreateMaterialBrand() {
         .eq("is_active", true);
 
       if (variants && variants.length > 0) {
-        await supabase
+        await (supabase as any)
           .from("material_brand_variant_links")
           .insert(
             variants.map((v) => ({
@@ -1491,7 +1492,7 @@ export function useCreateMaterialWithVariants() {
                 is_active: true,
               }))
             );
-            await supabase
+            await (supabase as any)
               .from("material_brand_variant_links")
               .insert(links)
               .throwOnError();
@@ -1580,7 +1581,7 @@ export function useAddVariantToMaterial() {
         .eq("is_active", true);
 
       if (brands && brands.length > 0) {
-        await supabase
+        await (supabase as any)
           .from("material_brand_variant_links")
           .insert(
             brands.map((b) => ({

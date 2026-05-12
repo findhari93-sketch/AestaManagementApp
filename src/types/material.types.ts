@@ -517,7 +517,7 @@ export interface BrandWithVariantLinks extends MaterialBrand {
 
 // Helper type for grouped brand display with variants
 export interface BrandWithVariants {
-  id: string;
+  id?: string;
   brand_name: string;
   is_preferred: boolean;
   variants: Array<{

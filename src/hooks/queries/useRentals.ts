@@ -1676,7 +1676,7 @@ export function useRentalItemSizes(itemId: string | undefined) {
       : ["rentals", "sizes", "disabled"],
     enabled: !!itemId,
     queryFn: wrapQueryFn(async () => {
-      const { data, error } = await supabase
+      const { data, error } = await (supabase as any)
         .from("rental_item_sizes")
         .select("*")
         .eq("rental_item_id", itemId!)
@@ -1701,7 +1701,7 @@ export function useRentalInventoryForItem(itemId: string | undefined) {
         .from("rental_store_inventory")
         .select(`
           *,
-          vendor:vendors(id, name, shop_name, phone, location),
+          vendor:vendors(id, name, shop_name, phone),
           rental_item:rental_items(id, name, code, unit)
         `)
         .eq("rental_item_id", itemId!)
@@ -1720,9 +1720,9 @@ export function useCreateRentalItemSize() {
     mutationFn: async (data: RentalItemSizeFormData) => {
       await ensureFreshSession();
 
-      const { data: result, error } = await supabase
+      const { data: result, error } = await (supabase as any)
         .from("rental_item_sizes")
-        .insert(data as never)
+        .insert(data)
         .select()
         .single();
       if (error) throw error;
