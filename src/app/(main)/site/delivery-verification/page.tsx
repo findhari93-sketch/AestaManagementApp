@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState, useCallback } from "react";
+import { useMemo, useState, useCallback, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   Box,
   Card,
@@ -142,8 +143,11 @@ export default function DeliveryVerificationPage() {
   const [deliveryDialogOpen, setDeliveryDialogOpen] = useState(false);
   const [selectedPO, setSelectedPO] = useState<POAwaitingDelivery | null>(null);
   const [activeTab, setActiveTab] = useState<"awaiting" | "disputed" | "all">("awaiting");
+  const [highlightedGrn, setHighlightedGrn] = useState<string | null>(null);
 
   const { selectedSite } = useSite();
+  const searchParams = useSearchParams();
+  const grnParam = searchParams.get("grn");
 
   // Fetch POs awaiting delivery
   const { data: posAwaitingDelivery = [], isLoading: posLoading } =
@@ -162,6 +166,20 @@ export default function DeliveryVerificationPage() {
     setDeliveryDialogOpen(false);
     setSelectedPO(null);
   }, []);
+
+  // Deep-link: switch to "Recent Deliveries" tab and highlight the GRN row when ?grn=GRN-xxx is present
+  useEffect(() => {
+    if (!grnParam) return;
+    if (allLoading || allDeliveries.length === 0) return;
+    const match = allDeliveries.find(
+      (d: DeliveryData) =>
+        d.grn_number?.toLowerCase() === grnParam.toLowerCase()
+    );
+    if (match) {
+      setActiveTab("all");
+      setHighlightedGrn(match.grn_number);
+    }
+  }, [grnParam, allLoading, allDeliveries]);
 
   // Filter deliveries by status
   const recentDeliveries = useMemo(() => {
@@ -495,9 +513,15 @@ export default function DeliveryVerificationPage() {
                 "verified") as DeliveryVerificationStatus;
               const config = statusConfig[status];
 
+              const isHighlighted = highlightedGrn != null &&
+                delivery.grn_number?.toLowerCase() === highlightedGrn.toLowerCase();
+
               return (
                 <Grid key={delivery.id} size={{ xs: 12, sm: 6, md: 4 }}>
-                  <Card variant="outlined">
+                  <Card
+                    variant="outlined"
+                    sx={isHighlighted ? { borderColor: "primary.main", boxShadow: 3 } : undefined}
+                  >
                     <CardContent>
                       <Stack spacing={1}>
                         <Box

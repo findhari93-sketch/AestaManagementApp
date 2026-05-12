@@ -63,6 +63,7 @@ interface SettlementsTabProps {
   cancelPending?: boolean
   deletePending?: boolean
   deleteUnsettledPending?: boolean
+  highlightCode?: string | null
 }
 
 export default function SettlementsTab({
@@ -80,6 +81,7 @@ export default function SettlementsTab({
   cancelPending,
   deletePending,
   deleteUnsettledPending,
+  highlightCode,
 }: SettlementsTabProps) {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
 
@@ -327,8 +329,16 @@ export default function SettlementsTab({
                 </TableRow>
               ))
             ) : filteredRows.length > 0 ? (
-              filteredRows.map((row) => (
-                <TableRow key={row.id} hover>
+              filteredRows.map((row) => {
+                const isHighlighted = !!highlightCode &&
+                  !!row.code &&
+                  row.code.toLowerCase() === highlightCode.toLowerCase()
+                return (
+                <TableRow
+                  key={row.id}
+                  hover
+                  sx={isHighlighted ? { backgroundColor: 'action.selected', outline: '2px solid', outlineColor: 'primary.main' } : undefined}
+                >
                   <TableCell>
                     {row.code ? (
                       <Typography variant="body2" fontWeight={500} sx={{ fontFamily: 'monospace' }}>
@@ -384,7 +394,8 @@ export default function SettlementsTab({
                     {getActions(row)}
                   </TableCell>
                 </TableRow>
-              ))
+                )
+              })
             ) : (
               <TableRow>
                 <TableCell colSpan={9} align="center" sx={{ py: 4 }}>

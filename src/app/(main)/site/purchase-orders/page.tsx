@@ -143,6 +143,8 @@ export default function PurchaseOrdersPage() {
 
   // Track if we've already processed URL params
   const hasProcessedParams = useRef(false);
+  // Track if we've already processed the highlight param
+  const hasProcessedHighlight = useRef(false);
 
   // Extract specific param values to use as stable dependencies
   const isNewParam = searchParams.get("new");
@@ -151,6 +153,7 @@ export default function PurchaseOrdersPage() {
   const materialNameParam = searchParams.get("materialName");
   const unitParam = searchParams.get("unit");
   const sourceParam = searchParams.get("source");
+  const highlightParam = searchParams.get("highlight");
 
   // Handle URL params for prefilled data (from material-search)
   // Redirect to material requests page to enforce the proper workflow
@@ -293,6 +296,19 @@ export default function PurchaseOrdersPage() {
     setSelectedPO(po);
     setDetailsDrawerOpen(true);
   }, []);
+
+  // Deep-link: auto-open the PO details drawer when ?highlight=PO-xxx is present
+  useEffect(() => {
+    if (!highlightParam || hasProcessedHighlight.current) return;
+    if (isLoading || allPOs.length === 0) return;
+    const match = allPOs.find(
+      (po) => po.po_number.toLowerCase() === highlightParam.toLowerCase()
+    );
+    if (match) {
+      hasProcessedHighlight.current = true;
+      handleViewDetails(match);
+    }
+  }, [highlightParam, isLoading, allPOs, handleViewDetails]);
 
   const handleCloseDetails = useCallback(() => {
     setDetailsDrawerOpen(false);

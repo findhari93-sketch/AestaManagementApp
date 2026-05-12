@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, lazy, Suspense, useRef } from 'react'
+import { useState, lazy, Suspense, useRef, useEffect } from 'react'
+import { useSearchParams } from 'next/navigation'
 import {
   Box,
   Typography,
@@ -120,6 +121,11 @@ export default function InterSiteSettlementPage() {
   // Snackbar for error messages
   const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: 'error' | 'warning' | 'success' | 'info' }>({ open: false, message: '', severity: 'error' })
 
+  // Deep-link: read ?code=SET-xxx param
+  const searchParams = useSearchParams()
+  const codeParam = searchParams.get('code')
+  const hasProcessedCode = useRef(false)
+
   // Track which tabs have been visited to avoid unmounting fetched data
   const visitedTabs = useRef(new Set<number>([0]))
   if (!visitedTabs.current.has(tabValue)) {
@@ -137,13 +143,27 @@ export default function InterSiteSettlementPage() {
     groupMembership?.groupId
   )
 
-  // Tab-conditional queries — only fetch when the tab has been visited
+  // Tab-conditional queries — only fetch when the tab has been visited (or when deep-linking to a settlement)
   const tab0Active = visitedTabs.current.has(0)
   const tab1Active = visitedTabs.current.has(1)
 
   const { data: settlements = [], isLoading: settlementsLoading } = useInterSiteSettlements(
-    tab1Active ? selectedSite?.id : undefined
+    tab1Active || !!codeParam ? selectedSite?.id : undefined
   )
+
+  // Deep-link: auto-switch to Settlements tab and highlight when ?code=SET-xxx is present
+  useEffect(() => {
+    if (!codeParam || hasProcessedCode.current) return
+    if (settlementsLoading || settlements.length === 0) return
+    const match = settlements.find(
+      (s) => s.settlement_code?.toLowerCase() === codeParam.toLowerCase()
+    )
+    if (match) {
+      hasProcessedCode.current = true
+      setTabValue(1)
+    }
+  }, [codeParam, settlementsLoading, settlements])
+
   // Transactions only needed for list view in StockBatchesTab
   const { data: transactions = [], isLoading: transactionsLoading } = useGroupStockTransactions(
     tab0Active ? groupMembership?.groupId : undefined,
@@ -511,6 +531,7 @@ export default function InterSiteSettlementPage() {
                 cancelPending={cancelCompletedSettlement.isPending || cancelPendingSettlement.isPending}
                 deletePending={deleteSettlement.isPending}
                 deleteUnsettledPending={deleteUnsettledUsage.isPending}
+                highlightCode={codeParam}
               />
             </Suspense>
           </Box>
