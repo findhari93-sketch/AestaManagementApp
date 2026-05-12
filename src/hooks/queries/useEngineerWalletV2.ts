@@ -196,7 +196,7 @@ export function useCurrentUserWalletEnabled(
         .eq("user_id", userId as string)
         .eq("company_id", companyId as string)
         .maybeSingle();
-      return data?.wallet_enabled ?? false;
+      return (data as any)?.wallet_enabled ?? false;
     },
   });
 }

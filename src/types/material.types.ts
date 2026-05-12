@@ -747,7 +747,7 @@ export interface DailyMaterialUsage {
   site_id: string;
   section_id: string | null;
   usage_date: string;
-  usage_date_end: string | null;  // null means single-day entry
+  usage_date_end?: string | null;
   material_id: string;
   brand_id: string | null;
   quantity: number;

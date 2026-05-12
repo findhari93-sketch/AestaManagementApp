@@ -162,6 +162,7 @@ export function useMaterialUsage(
           site_id: item.usage_site_id, // Usage site
           section_id: null, // batch_usage_records doesn't have section
           usage_date: item.usage_date,
+          usage_date_end: item.usage_date_end ?? null,
           material_id: item.material_id,
           brand_id: item.brand_id,
           quantity: item.quantity,

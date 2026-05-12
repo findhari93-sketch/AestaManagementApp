@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, useCallback } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import dynamic from "next/dynamic";
 import { useSearchParams, useRouter } from "next/navigation";
 import {
@@ -48,6 +49,7 @@ import {
   Delete as DeleteIcon,
   ViewList as ViewListIcon,
   ViewModule as ViewModuleIcon,
+  GridView as GridViewIcon,
   ExpandMore as ExpandMoreIcon,
   Store as OwnStockIcon,
   Groups as GroupsIcon,
@@ -97,6 +99,8 @@ const BulkUsageEntryDialog = dynamic(
 );
 import UsageDeleteConfirmDialog from "@/components/inventory/UsageDeleteConfirmDialog";
 import UsageEditDialog from "@/components/inventory/UsageEditDialog";
+import { InventoryCardGrid } from "@/components/inventory/InventoryCardGrid";
+import { QuickUsageSheet } from "@/components/inventory/QuickUsageSheet";
 import PODetailsDrawer from "@/components/materials/PODetailsDrawer";
 import { usePOByBatchCode } from "@/hooks/queries/useStockInventory";
 
@@ -176,6 +180,11 @@ export default function InventoryPage() {
   // PO drawer state (batch card → PO details)
   const [poDrawerBatchCode, setPODrawerBatchCode] = useState<string | null>(null);
   const [poDrawerOpen, setPODrawerOpen] = useState(false);
+
+  // Card view state
+  const queryClient = useQueryClient();
+  const [cardView, setCardView] = useState(true);
+  const [quickSheetItem, setQuickSheetItem] = useState<ConsolidatedStockItem | null>(null);
 
   // Date range for usage
   const { dateFrom, dateTo } = formatForApi();
@@ -305,6 +314,11 @@ export default function InventoryPage() {
   const consolidatedStock = useMemo(
     () => consolidateStock(filteredStock),
     [filteredStock]
+  );
+
+  const lowStockIds = useMemo(
+    () => new Set(lowStockAlerts.map((a) => a.material_id)),
+    [lowStockAlerts]
   );
 
   // Calculate stats
@@ -1432,28 +1446,61 @@ export default function InventoryPage() {
               sx={{ minWidth: 300 }}
             />
             {stockTab !== "completed" && (
-              <ToggleButtonGroup
-                value={stockViewMode}
-                exclusive
-                onChange={(_, value) => value && setStockViewMode(value)}
-                size="small"
-              >
-                <ToggleButton value="consolidated">
-                  <Tooltip title="By Material (consolidated)">
-                    <ViewListIcon fontSize="small" />
-                  </Tooltip>
-                </ToggleButton>
-                <ToggleButton value="batch">
-                  <Tooltip title="By Batch (detailed)">
-                    <ViewModuleIcon fontSize="small" />
-                  </Tooltip>
-                </ToggleButton>
-              </ToggleButtonGroup>
+              <>
+                {/* Cards / Table primary toggle */}
+                <ToggleButtonGroup
+                  value={cardView ? "cards" : "table"}
+                  exclusive
+                  onChange={(_, v) => v && setCardView(v === "cards")}
+                  size="small"
+                >
+                  <ToggleButton value="cards" aria-label="card view">
+                    <Tooltip title="Card view">
+                      <GridViewIcon fontSize="small" />
+                    </Tooltip>
+                  </ToggleButton>
+                  <ToggleButton value="table" aria-label="table view">
+                    <Tooltip title="Table view">
+                      <ViewListIcon fontSize="small" />
+                    </Tooltip>
+                  </ToggleButton>
+                </ToggleButtonGroup>
+
+                {/* Table sub-toggle (consolidated / batch) — only visible in table mode */}
+                {!cardView && (
+                  <ToggleButtonGroup
+                    value={stockViewMode}
+                    exclusive
+                    onChange={(_, value) => value && setStockViewMode(value)}
+                    size="small"
+                  >
+                    <ToggleButton value="consolidated">
+                      <Tooltip title="By Material (consolidated)">
+                        <ViewListIcon fontSize="small" />
+                      </Tooltip>
+                    </ToggleButton>
+                    <ToggleButton value="batch">
+                      <Tooltip title="By Batch (detailed)">
+                        <ViewModuleIcon fontSize="small" />
+                      </Tooltip>
+                    </ToggleButton>
+                  </ToggleButtonGroup>
+                )}
+              </>
             )}
           </Box>
 
+          {/* Card Grid View (default) */}
+          {stockTab !== "completed" && cardView && (
+            <InventoryCardGrid
+              items={consolidatedStock}
+              lowStockIds={lowStockIds}
+              onRecordUsage={(item) => setQuickSheetItem(item)}
+            />
+          )}
+
           {/* Stock Table - Active Stock (All, Site, Shared) */}
-          {stockTab !== "completed" && stockViewMode === "consolidated" && (
+          {stockTab !== "completed" && !cardView && stockViewMode === "consolidated" && (
             <DataTable
               columns={consolidatedColumns}
               data={consolidatedStock}
@@ -1470,7 +1517,7 @@ export default function InventoryPage() {
             />
           )}
 
-          {stockTab !== "completed" && stockViewMode === "batch" && (
+          {stockTab !== "completed" && !cardView && stockViewMode === "batch" && (
             <DataTable
               columns={stockColumns}
               data={filteredStock}
@@ -1692,6 +1739,18 @@ export default function InventoryPage() {
             </Alert>
           ) : undefined
         }
+      />
+
+      {/* Quick Usage Bottom Sheet (triggered from card grid) */}
+      <QuickUsageSheet
+        open={quickSheetItem !== null}
+        item={quickSheetItem}
+        siteId={selectedSite?.id ?? ""}
+        onClose={() => setQuickSheetItem(null)}
+        onSaved={() => {
+          setQuickSheetItem(null);
+          queryClient.invalidateQueries({ queryKey: ["siteStock", selectedSite?.id] });
+        }}
       />
     </Box>
   );
