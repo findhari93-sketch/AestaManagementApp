@@ -17,6 +17,19 @@ import type {
   BatchUsageRecord,
 } from "./material.types";
 
+export interface JourneyApproverUser {
+  id: string;
+  name: string;
+  display_name: string | null;
+}
+
+export interface JourneyBrand {
+  id: string;
+  brand_name: string;
+  variant_name: string | null;
+  image_url: string | null;
+}
+
 /**
  * Overall status of a request journey through its complete lifecycle
  */
@@ -40,51 +53,30 @@ export type JourneyPhaseStatus = "done" | "active" | "pending" | "blocked";
  * Aggregates the request, purchase order, delivery, expense, and settlement data
  */
 export interface RequestJourney {
-  /**
-   * The original material request with its items
-   */
-  request: MaterialRequest & { items: MaterialRequestItem[] };
+  request: MaterialRequest & {
+    items: MaterialRequestItem[];
+    approved_by_user: JourneyApproverUser | null;
+  };
 
-  /**
-   * Associated purchase order if created from this request
-   * Null if request not yet converted to PO
-   */
-  po: (PurchaseOrder & { items: PurchaseOrderItem[] }) | null;
+  po: (PurchaseOrder & {
+    items: (PurchaseOrderItem & { brand: JourneyBrand | null })[];
+  }) | null;
 
-  /**
-   * Deliveries recorded against the PO or request
-   */
   deliveries: (Delivery & { items: DeliveryItem[] })[];
 
-  /**
-   * Expense record for the purchase (vendor payment tracking)
-   * Null if not yet paid/recorded
-   */
   expense: MaterialPurchaseExpense | null;
 
-  /**
-   * Per-site usage records for group stock purchases
-   * Empty array if not a group stock purchase or no usage yet
-   */
   batchUsage: BatchUsageRecord[];
 
-  /**
-   * Inter-site settlement if materials were shared across multiple sites
-   * Null if single-site or not yet settled
-   */
   settlement: (InterSiteSettlement & {
     items: InterSiteSettlementItem[];
     payments: InterSiteSettlementPayment[];
   }) | null;
 
-  /**
-   * Overall status indicating where the request is in its journey
-   */
   overallStatus: JourneyOverallStatus;
 
-  /**
-   * True if this is a group stock purchase (shared across multiple sites)
-   * False if single-site own stock
-   */
   isGroupPO: boolean;
+
+  /** Average unit price for the request's brand from price_history. Null when no brand or no history. */
+  brandAvgPrice: number | null;
 }
