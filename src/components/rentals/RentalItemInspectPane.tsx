@@ -21,10 +21,12 @@ import AddShoppingCartIcon from "@mui/icons-material/AddShoppingCart";
 import { useRentalItemSizes, useRentalInventoryForItem } from "@/hooks/queries/useRentals";
 import { getRateForSize } from "@/lib/utils/rentalCatalogUtils";
 import { useEstimateBasket } from "./EstimateBasket";
+import type { RentalRateType } from "@/types/rental.types";
 
 interface RentalItemInspectPaneProps {
   itemId: string | null;
   itemName?: string;          // optional — shown in header while item loads
+  rateType?: RentalRateType;
   isOpen: boolean;
   onClose: () => void;
   zIndex?: number;
@@ -33,6 +35,7 @@ interface RentalItemInspectPaneProps {
 export function RentalItemInspectPane({
   itemId,
   itemName,
+  rateType = "daily",
   isOpen,
   onClose,
   zIndex = 1200,
@@ -208,7 +211,7 @@ export function RentalItemInspectPane({
                       )}
                     </Box>
                     <Typography variant="subtitle2" color="warning.main" fontWeight={700}>
-                      ₹{inv.rate}/day
+                      ₹{inv.rate}/{rateType === "hourly" ? "hour" : "day"}
                     </Typography>
                     {inv.transport_cost != null && Number(inv.transport_cost) > 0 && (
                       <Typography variant="caption" color="text.secondary">
@@ -249,7 +252,7 @@ export function RentalItemInspectPane({
             sx={{ flex: 1 }}
           />
           <TextField
-            label="Days"
+            label={rateType === "hourly" ? "Hours" : "Days"}
             type="number"
             size="small"
             value={days}

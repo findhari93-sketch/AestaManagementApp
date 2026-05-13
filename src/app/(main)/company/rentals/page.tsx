@@ -284,6 +284,7 @@ function CompanyRentalsPageInner() {
           <RentalItemInspectPane
             itemId={selectedItem.id}
             itemName={selectedItem.name}
+            rateType={selectedItem.rate_type}
             isOpen
             onClose={() => setSelectedItem(null)}
           />
