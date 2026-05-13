@@ -94,20 +94,7 @@ export function RentalItemInspectPane({
     if (!item) return;
     await updateItem.mutateAsync({
       id: item.id,
-      data: {
-        name: item.name,
-        code: item.code || "",
-        local_name: item.local_name || "",
-        category_id: item.category_id || "",
-        description: item.description || "",
-        rental_type: item.rental_type,
-        source_type: item.source_type || "store",
-        rate_type: item.rate_type,
-        unit: item.unit,
-        specifications: item.specifications || {},
-        default_daily_rate: item.default_daily_rate || undefined,
-        image_url: url || "",
-      },
+      data: { image_url: url ?? undefined },
     });
   };
 
