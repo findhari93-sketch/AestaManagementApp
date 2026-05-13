@@ -1210,37 +1210,21 @@ function PriceHistoryTab({
   // "ALL" = all brands, "NO_BRAND" = entries with no brand, string = specific brand id
   const [selectedBrandId, setSelectedBrandId] = useState<string>("ALL");
 
-  // Auto-select the most recently purchased variant + brand when entries arrive
+  // Reset brand selection when material changes
   useEffect(() => {
-    if (entries.length === 0) return;
     if (initializedFor.current === parentMaterialId) return;
     initializedFor.current = parentMaterialId;
-    const recent = entries[0]; // already sorted desc by recorded_date
-    setSelectedVariantId(
-      recent.material_id === parentMaterialId ? null : recent.material_id
-    );
-    setSelectedBrandId(recent.brand_id ?? "NO_BRAND");
-  }, [entries, parentMaterialId]);
+    setSelectedVariantId(null);
+    setSelectedBrandId("ALL");
+  }, [parentMaterialId]);
 
-  // Which variants actually have price entries
-  const variantIdsWithEntries = useMemo(
-    () => new Set(entries.map((e) => e.material_id)),
-    [entries]
-  );
-  const variantsWithEntries = variants.filter((v) =>
-    variantIdsWithEntries.has(v.id)
-  );
-  const hasParentEntries = variantIdsWithEntries.has(parentMaterialId);
-
-  // Filter by selected variant
+  // Filter by selected variant: null = all entries (across parent + all variants)
   const variantFiltered = useMemo(
     () =>
-      entries.filter((e) =>
-        selectedVariantId === null
-          ? e.material_id === parentMaterialId
-          : e.material_id === selectedVariantId
-      ),
-    [entries, selectedVariantId, parentMaterialId]
+      selectedVariantId === null
+        ? entries
+        : entries.filter((e) => e.material_id === selectedVariantId),
+    [entries, selectedVariantId]
   );
 
   // Available brands within the variant-filtered set
@@ -1333,8 +1317,8 @@ function PriceHistoryTab({
 
   return (
     <Box sx={{ p: 1.5, display: "flex", flexDirection: "column", gap: 1.25 }}>
-      {/* Variant selector chips */}
-      {(hasParentEntries || variantsWithEntries.length > 0) && (
+      {/* Variant selector chips — show all variants regardless of whether they have entries */}
+      {variants.length > 0 && (
         <Box>
           <Typography
             sx={{
@@ -1349,20 +1333,18 @@ function PriceHistoryTab({
             Grade / Variant
           </Typography>
           <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
-            {hasParentEntries && (
-              <Chip
-                label="All grades"
-                size="small"
-                variant={selectedVariantId === null ? "filled" : "outlined"}
-                color={selectedVariantId === null ? "primary" : "default"}
-                onClick={() => {
-                  setSelectedVariantId(null);
-                  setSelectedBrandId("ALL");
-                }}
-                sx={{ fontSize: 11, height: 24 }}
-              />
-            )}
-            {variantsWithEntries.map((v) => (
+            <Chip
+              label="All grades"
+              size="small"
+              variant={selectedVariantId === null ? "filled" : "outlined"}
+              color={selectedVariantId === null ? "primary" : "default"}
+              onClick={() => {
+                setSelectedVariantId(null);
+                setSelectedBrandId("ALL");
+              }}
+              sx={{ fontSize: 11, height: 24 }}
+            />
+            {variants.map((v) => (
               <Chip
                 key={v.id}
                 label={v.name}
