@@ -231,6 +231,7 @@ export interface RentalOrder {
   created_at: string;
   updated_at: string;
   created_by: string | null;
+  exclude_start_date: boolean;
 }
 
 export interface RentalOrderItem {
@@ -430,6 +431,7 @@ export interface RentalOrderFormData {
   vendor_slip_url?: string;
   notes?: string;
   negotiated_discount_percentage?: number;
+  exclude_start_date?: boolean;
   items: RentalOrderItemFormData[];
 }
 
