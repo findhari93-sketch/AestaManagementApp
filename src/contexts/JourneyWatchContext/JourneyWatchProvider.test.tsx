@@ -1,7 +1,7 @@
 // src/contexts/JourneyWatchContext/JourneyWatchProvider.test.tsx
 import React from "react";
 import { renderHook, act } from "@testing-library/react";
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { JourneyWatchProvider } from "./JourneyWatchProvider";
 import { useJourneyWatch } from "./index";
 
