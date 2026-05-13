@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Box,
   Button,
@@ -337,6 +337,7 @@ export function MaterialInspectPane({
                 isLoading={historyLoading}
                 entries={priceHistory}
                 variants={variants}
+                parentMaterialId={material.id}
                 onAddPrice={() => setRecordPriceOpen(true)}
               />
               {material && (
@@ -1192,35 +1193,243 @@ function PriceHistoryTab({
   isLoading,
   entries,
   variants,
+  parentMaterialId,
   onAddPrice,
 }: {
   isLoading: boolean;
   entries: PriceHistoryWithDetails[];
   variants: Material[];
+  parentMaterialId: string;
   onAddPrice: () => void;
 }) {
-  const variantNameById = Object.fromEntries(
-    variants.map((v) => [v.id, v.name])
+  // Track which material we last initialized for, so selection resets on material change
+  const initializedFor = useRef<string | null>(null);
+
+  // null = parent material, string = variant id
+  const [selectedVariantId, setSelectedVariantId] = useState<string | null>(null);
+  // "ALL" = all brands, "NO_BRAND" = entries with no brand, string = specific brand id
+  const [selectedBrandId, setSelectedBrandId] = useState<string>("ALL");
+
+  // Auto-select the most recently purchased variant + brand when entries arrive
+  useEffect(() => {
+    if (entries.length === 0) return;
+    if (initializedFor.current === parentMaterialId) return;
+    initializedFor.current = parentMaterialId;
+    const recent = entries[0]; // already sorted desc by recorded_date
+    setSelectedVariantId(
+      recent.material_id === parentMaterialId ? null : recent.material_id
+    );
+    setSelectedBrandId(recent.brand_id ?? "NO_BRAND");
+  }, [entries, parentMaterialId]);
+
+  // Which variants actually have price entries
+  const variantIdsWithEntries = useMemo(
+    () => new Set(entries.map((e) => e.material_id)),
+    [entries]
+  );
+  const variantsWithEntries = variants.filter((v) =>
+    variantIdsWithEntries.has(v.id)
+  );
+  const hasParentEntries = variantIdsWithEntries.has(parentMaterialId);
+
+  // Filter by selected variant
+  const variantFiltered = useMemo(
+    () =>
+      entries.filter((e) =>
+        selectedVariantId === null
+          ? e.material_id === parentMaterialId
+          : e.material_id === selectedVariantId
+      ),
+    [entries, selectedVariantId, parentMaterialId]
   );
 
-  const sparklinePoints = entries.map((e) => ({
+  // Available brands within the variant-filtered set
+  const brandsInFilter = useMemo(() => {
+    const map = new Map<string, string>();
+    let hasNoBrand = false;
+    for (const e of variantFiltered) {
+      if (e.brand_id && e.brand?.brand_name) {
+        map.set(e.brand_id, e.brand.brand_name);
+      } else if (!e.brand_id) {
+        hasNoBrand = true;
+      }
+    }
+    return { brands: Array.from(map.entries()), hasNoBrand };
+  }, [variantFiltered]);
+
+  // Filter by selected brand
+  const brandFiltered = useMemo(() => {
+    if (selectedBrandId === "ALL") return variantFiltered;
+    if (selectedBrandId === "NO_BRAND")
+      return variantFiltered.filter((e) => !e.brand_id);
+    return variantFiltered.filter((e) => e.brand_id === selectedBrandId);
+  }, [variantFiltered, selectedBrandId]);
+
+  // Deduplicate: same date + vendor + price = one data point (avoids delivery-receipt fan-out)
+  const dedupedEntries = useMemo(() => {
+    const seen = new Set<string>();
+    return brandFiltered.filter((e) => {
+      const key = `${e.recorded_date}|${e.vendor_id}|${e.price}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [brandFiltered]);
+
+  // Sort desc by date for display
+  const sortedEntries = useMemo(
+    () =>
+      [...dedupedEntries].sort(
+        (a, b) =>
+          new Date(b.recorded_date).getTime() -
+          new Date(a.recorded_date).getTime()
+      ),
+    [dedupedEntries]
+  );
+
+  const sparklinePoints = sortedEntries.map((e) => ({
     date: e.recorded_date,
     price: e.price,
   }));
 
+  const latestPrice = sortedEntries[0]?.price;
+  const prices = sortedEntries.map((e) => e.price);
+  const minPrice = prices.length ? Math.min(...prices) : null;
+  const maxPrice = prices.length ? Math.max(...prices) : null;
+
   if (isLoading) {
     return (
       <Box sx={{ p: 1.5 }}>
-        <Skeleton variant="rounded" height={64} sx={{ mb: 1 }} />
+        <Skeleton variant="rounded" height={40} sx={{ mb: 1 }} />
         <Skeleton variant="rounded" height={32} sx={{ mb: 1 }} />
+        <Skeleton variant="rounded" height={64} sx={{ mb: 1 }} />
+        <Skeleton variant="rounded" height={32} sx={{ mb: 0.5 }} />
         <Skeleton variant="rounded" height={32} />
       </Box>
     );
   }
 
+  if (entries.length === 0) {
+    return (
+      <Box sx={{ p: 1.5, display: "flex", flexDirection: "column", gap: 1 }}>
+        <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
+          <Button
+            size="small"
+            startIcon={<AddCircleOutlineIcon sx={{ fontSize: 14 }} />}
+            onClick={onAddPrice}
+            sx={{ fontSize: 11, py: 0.4, px: 1 }}
+          >
+            Record Price
+          </Button>
+        </Box>
+        <Box sx={{ p: 3, textAlign: "center" }}>
+          <Typography variant="body2" color="text.secondary">
+            No price history recorded yet.
+          </Typography>
+        </Box>
+      </Box>
+    );
+  }
+
   return (
-    <Box sx={{ p: 1.5, display: "flex", flexDirection: "column", gap: 1 }}>
-      {/* Header: count + sparkline + add button */}
+    <Box sx={{ p: 1.5, display: "flex", flexDirection: "column", gap: 1.25 }}>
+      {/* Variant selector chips */}
+      {(hasParentEntries || variantsWithEntries.length > 0) && (
+        <Box>
+          <Typography
+            sx={{
+              fontSize: 9.5,
+              fontWeight: 700,
+              color: "text.secondary",
+              textTransform: "uppercase",
+              letterSpacing: 0.4,
+              mb: 0.5,
+            }}
+          >
+            Grade / Variant
+          </Typography>
+          <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
+            {hasParentEntries && (
+              <Chip
+                label="All grades"
+                size="small"
+                variant={selectedVariantId === null ? "filled" : "outlined"}
+                color={selectedVariantId === null ? "primary" : "default"}
+                onClick={() => {
+                  setSelectedVariantId(null);
+                  setSelectedBrandId("ALL");
+                }}
+                sx={{ fontSize: 11, height: 24 }}
+              />
+            )}
+            {variantsWithEntries.map((v) => (
+              <Chip
+                key={v.id}
+                label={v.name}
+                size="small"
+                variant={selectedVariantId === v.id ? "filled" : "outlined"}
+                color={selectedVariantId === v.id ? "primary" : "default"}
+                onClick={() => {
+                  setSelectedVariantId(v.id);
+                  setSelectedBrandId("ALL");
+                }}
+                sx={{ fontSize: 11, height: 24 }}
+              />
+            ))}
+          </Box>
+        </Box>
+      )}
+
+      {/* Brand selector chips */}
+      {(brandsInFilter.brands.length > 0 || brandsInFilter.hasNoBrand) && (
+        <Box>
+          <Typography
+            sx={{
+              fontSize: 9.5,
+              fontWeight: 700,
+              color: "text.secondary",
+              textTransform: "uppercase",
+              letterSpacing: 0.4,
+              mb: 0.5,
+            }}
+          >
+            Brand
+          </Typography>
+          <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
+            <Chip
+              label="All"
+              size="small"
+              variant={selectedBrandId === "ALL" ? "filled" : "outlined"}
+              color={selectedBrandId === "ALL" ? "primary" : "default"}
+              onClick={() => setSelectedBrandId("ALL")}
+              sx={{ fontSize: 11, height: 24 }}
+            />
+            {brandsInFilter.brands.map(([id, name]) => (
+              <Chip
+                key={id}
+                label={name}
+                size="small"
+                variant={selectedBrandId === id ? "filled" : "outlined"}
+                color={selectedBrandId === id ? "primary" : "default"}
+                onClick={() => setSelectedBrandId(id)}
+                sx={{ fontSize: 11, height: 24 }}
+              />
+            ))}
+            {brandsInFilter.hasNoBrand && (
+              <Chip
+                label="No brand"
+                size="small"
+                variant={selectedBrandId === "NO_BRAND" ? "filled" : "outlined"}
+                color={selectedBrandId === "NO_BRAND" ? "primary" : "default"}
+                onClick={() => setSelectedBrandId("NO_BRAND")}
+                sx={{ fontSize: 11, height: 24 }}
+              />
+            )}
+          </Box>
+        </Box>
+      )}
+
+      {/* Summary card: latest price + sparkline + Record Price button */}
       <Box
         sx={{
           px: 1.5,
@@ -1230,127 +1439,120 @@ function PriceHistoryTab({
           borderRadius: 1.5,
           display: "flex",
           alignItems: "center",
-          justifyContent: "space-between",
           gap: 1,
         }}
       >
-        <Typography
-          sx={{
-            fontSize: 9.5,
-            fontWeight: 700,
-            color: "text.secondary",
-            textTransform: "uppercase",
-            letterSpacing: 0.4,
-          }}
-        >
-          {entries.length} entries
-        </Typography>
-        {entries.length > 0 && (
-          <PriceHistorySparkline points={sparklinePoints} width={100} height={36} />
+        <Box sx={{ flex: 1, minWidth: 0 }}>
+          {latestPrice != null && (
+            <Typography
+              sx={{
+                fontSize: 18,
+                fontWeight: 800,
+                fontVariantNumeric: "tabular-nums",
+                lineHeight: 1.1,
+              }}
+            >
+              {formatCurrency(latestPrice)}
+            </Typography>
+          )}
+          {minPrice != null && maxPrice != null && minPrice !== maxPrice && (
+            <Typography sx={{ fontSize: 10, color: "text.secondary" }}>
+              Range: {formatCurrency(minPrice)} – {formatCurrency(maxPrice)}
+            </Typography>
+          )}
+          <Typography sx={{ fontSize: 9.5, color: "text.secondary" }}>
+            {sortedEntries.length} data point
+            {sortedEntries.length !== 1 ? "s" : ""}
+          </Typography>
+        </Box>
+        {sortedEntries.length > 1 && (
+          <PriceHistorySparkline
+            points={sparklinePoints}
+            width={90}
+            height={40}
+          />
         )}
         <Button
           size="small"
           startIcon={<AddCircleOutlineIcon sx={{ fontSize: 14 }} />}
           onClick={onAddPrice}
-          sx={{ fontSize: 11, py: 0.4, px: 1, minWidth: 0, whiteSpace: "nowrap" }}
+          sx={{
+            fontSize: 11,
+            py: 0.4,
+            px: 1,
+            minWidth: 0,
+            whiteSpace: "nowrap",
+            flexShrink: 0,
+          }}
         >
           Record Price
         </Button>
       </Box>
 
-      {entries.length === 0 ? (
-        <Box sx={{ p: 3, textAlign: "center" }}>
-          <Typography variant="body2" color="text.secondary">
-            No price history recorded yet.
+      {/* Price entry list */}
+      {sortedEntries.length === 0 ? (
+        <Box sx={{ p: 2, textAlign: "center" }}>
+          <Typography variant="body2" color="text.secondary" sx={{ fontSize: 12 }}>
+            No entries for this selection.
           </Typography>
         </Box>
       ) : (
         <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
-          {[...entries]
-            .sort(
-              (a, b) =>
-                new Date(b.recorded_date).getTime() -
-                new Date(a.recorded_date).getTime()
-            )
-            .slice(0, 30)
-            .map((entry) => {
-              const variantName = variantNameById[entry.material_id];
-              return (
-                <Box
-                  key={entry.id}
+          {sortedEntries.slice(0, 30).map((entry) => (
+            <Box
+              key={entry.id}
+              sx={{
+                display: "grid",
+                gridTemplateColumns: "60px 1fr auto",
+                alignItems: "center",
+                gap: 0.75,
+                px: 1.25,
+                py: 0.75,
+                border: 1,
+                borderColor: "divider",
+                borderRadius: 1,
+                bgcolor: "background.paper",
+              }}
+            >
+              <Typography
+                sx={{
+                  fontSize: 10,
+                  color: "text.secondary",
+                  textTransform: "uppercase",
+                  letterSpacing: 0.3,
+                }}
+              >
+                {formatDate(entry.recorded_date)}
+              </Typography>
+              <Typography
+                sx={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {entry.vendor?.name ?? "—"}
+              </Typography>
+              <Box sx={{ textAlign: "right" }}>
+                <Typography
                   sx={{
-                    display: "grid",
-                    gridTemplateColumns: "60px 1fr auto",
-                    alignItems: "center",
-                    gap: 0.75,
-                    px: 1.25,
-                    py: 0.75,
-                    border: 1,
-                    borderColor: "divider",
-                    borderRadius: 1,
-                    bgcolor: "background.paper",
+                    fontSize: 13,
+                    fontWeight: 700,
+                    fontVariantNumeric: "tabular-nums",
                   }}
                 >
-                  {/* Date */}
-                  <Typography
-                    sx={{
-                      fontSize: 10,
-                      color: "text.secondary",
-                      textTransform: "uppercase",
-                      letterSpacing: 0.3,
-                    }}
-                  >
-                    {formatDate(entry.recorded_date)}
+                  {formatCurrency(entry.price)}
+                </Typography>
+                {entry.quantity != null && (
+                  <Typography sx={{ fontSize: 10, color: "text.secondary" }}>
+                    {entry.quantity} {entry.unit ?? ""}
                   </Typography>
-
-                  {/* Vendor · Brand · Variant */}
-                  <Box sx={{ minWidth: 0 }}>
-                    <Typography
-                      sx={{
-                        fontSize: 11,
-                        fontWeight: 600,
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {entry.vendor?.name ?? "—"}
-                    </Typography>
-                    <Typography
-                      sx={{
-                        fontSize: 10,
-                        color: "text.secondary",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {[entry.brand?.brand_name, variantName]
-                        .filter(Boolean)
-                        .join(" · ") || "No brand / variant"}
-                    </Typography>
-                  </Box>
-
-                  {/* Price */}
-                  <Box sx={{ textAlign: "right" }}>
-                    <Typography
-                      sx={{
-                        fontSize: 13,
-                        fontWeight: 700,
-                        fontVariantNumeric: "tabular-nums",
-                      }}
-                    >
-                      {formatCurrency(entry.price)}
-                    </Typography>
-                    {entry.quantity != null && (
-                      <Typography sx={{ fontSize: 10, color: "text.secondary" }}>
-                        {entry.quantity} {entry.unit ?? ""}
-                      </Typography>
-                    )}
-                  </Box>
-                </Box>
-              );
-            })}
+                )}
+              </Box>
+            </Box>
+          ))}
         </Box>
       )}
     </Box>

@@ -25,7 +25,7 @@ const BASE_MATERIAL: Material = {
   category_id: null,
   parent_id: null,
   description: null,
-  unit: "BAG",
+  unit: "bag",
   secondary_unit: null,
   conversion_factor: null,
   hsn_code: null,
