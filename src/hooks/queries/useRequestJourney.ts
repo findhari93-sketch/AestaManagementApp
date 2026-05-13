@@ -85,13 +85,17 @@ export function useRequestJourney(requestId: string | null | undefined): {
         .select(
           `
           *,
-          items:material_request_items(*)
+          items:material_request_items(*),
+          approved_by_user:users!approved_by(id, name, display_name)
         `
         )
         .eq("id", requestId)
         .single();
       if (error) throw error;
-      return data as MaterialRequest & { items: MaterialRequestItem[] };
+      return data as MaterialRequest & {
+        items: MaterialRequestItem[];
+        approved_by_user: { id: string; name: string; display_name: string | null } | null;
+      };
     }),
     enabled: !!requestId,
     staleTime: 60_000,
@@ -120,6 +124,28 @@ export function useRequestJourney(requestId: string | null | undefined): {
 
   const effectivePoId = poId ?? fallbackPoIdQuery.data ?? null;
 
+  // ── 1c. Fetch brand avg price for est. cost (when brand_id is set on request item) ─
+  const firstItemBrandId = request?.items?.[0]?.brand_id ?? null;
+  const firstItemMaterialId = request?.items?.[0]?.material_id ?? null;
+
+  const brandAvgPriceQuery = useQuery({
+    queryKey: ["journey", "brand-avg-price", firstItemMaterialId ?? "none", firstItemBrandId ?? "none"],
+    queryFn: wrapQueryFn(async () => {
+      if (!firstItemBrandId || !firstItemMaterialId) return null;
+      const { data, error } = await supabase
+        .from("price_history")
+        .select("price")
+        .eq("material_id", firstItemMaterialId)
+        .eq("brand_id", firstItemBrandId);
+      if (error) throw error;
+      if (!data || data.length === 0) return null;
+      const avg = (data as { price: number }[]).reduce((sum, r) => sum + r.price, 0) / data.length;
+      return avg;
+    }),
+    enabled: !!firstItemBrandId && !!firstItemMaterialId,
+    staleTime: 300_000,
+  });
+
   // ── 2. Fetch the PO + items (enabled once we have a PO id) ───────────────
   const poQuery = useQuery({
     queryKey: ["journey", "po", effectivePoId ?? "none"],
@@ -130,13 +156,17 @@ export function useRequestJourney(requestId: string | null | undefined): {
         .select(
           `
           *,
-          items:purchase_order_items(*)
+          items:purchase_order_items(*, brand:material_brands!brand_id(id, brand_name, variant_name, image_url))
         `
         )
         .eq("id", effectivePoId)
         .single();
       if (error) throw error;
-      return data as PurchaseOrder & { items: PurchaseOrderItem[] };
+      return data as PurchaseOrder & {
+        items: (PurchaseOrderItem & {
+          brand: { id: string; brand_name: string; variant_name: string | null; image_url: string | null } | null;
+        })[];
+      };
     }),
     enabled: !!effectivePoId,
     staleTime: 60_000,
@@ -246,9 +276,11 @@ export function useRequestJourney(requestId: string | null | undefined): {
     (!!effectivePoId && poQuery.isLoading) ||
     (!!po?.id && (deliveriesQuery.isLoading || expenseQuery.isLoading)) ||
     (!!batchRefCode && batchUsageQuery.isLoading) ||
-    (batchUsage.length > 0 && !!settlementId && settlementQuery.isLoading);
+    (batchUsage.length > 0 && !!settlementId && settlementQuery.isLoading) ||
+    (!!firstItemBrandId && brandAvgPriceQuery.isLoading);
 
   const error =
+    (brandAvgPriceQuery.error as Error | null) ??
     (requestQuery.error as Error | null) ??
     (fallbackPoIdQuery.error as Error | null) ??
     (poQuery.error as Error | null) ??
@@ -281,6 +313,7 @@ export function useRequestJourney(requestId: string | null | undefined): {
     settlement,
     overallStatus,
     isGroupPO,
+    brandAvgPrice: brandAvgPriceQuery.data ?? null,
   };
 
   return { journey, isLoading, error };
