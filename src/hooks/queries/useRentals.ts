@@ -826,6 +826,7 @@ export function useCreateRentalOrder() {
           return sum + item.quantity * item.daily_rate_actual * (item.hours_used || 0);
         } else {
           // Daily: quantity × rate × days
+          const excludeStart = data.exclude_start_date ?? false;
           const days = data.expected_return_date
             ? Math.max(
                 1,
@@ -833,7 +834,7 @@ export function useCreateRentalOrder() {
                   (new Date(data.expected_return_date).getTime() -
                     new Date(data.start_date).getTime()) /
                     (1000 * 60 * 60 * 24)
-                ) + 1 // Add 1 because both start and end days are rental days
+                ) + (excludeStart ? 0 : 1)
               )
             : 30;
           return sum + item.quantity * item.daily_rate_actual * days;
