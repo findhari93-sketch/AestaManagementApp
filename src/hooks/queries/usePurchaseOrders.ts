@@ -28,19 +28,22 @@ import type {
 // ============================================
 
 /**
- * Fetch purchase orders for a site with optional status filter
+ * Fetch purchase orders for a site with optional status filter.
+ * When siteGroupId is provided, also fetches group stock POs from other sites in the same group.
  */
 export function usePurchaseOrders(
   siteId: string | undefined,
-  status?: POStatus | null
+  status?: POStatus | null,
+  options?: { siteGroupId?: string }
 ) {
   const supabase = createClient() as any;
+  const siteGroupId = options?.siteGroupId;
 
   return useQuery({
     queryKey: siteId
       ? status
-        ? [...queryKeys.purchaseOrders.bySite(siteId), status]
-        : queryKeys.purchaseOrders.bySite(siteId)
+        ? [...queryKeys.purchaseOrders.bySite(siteId), status, siteGroupId]
+        : [...queryKeys.purchaseOrders.bySite(siteId), siteGroupId]
       : ["purchase-orders", "unknown"],
     queryFn: wrapQueryFn(async () => {
       if (!siteId) return [];
@@ -51,6 +54,7 @@ export function usePurchaseOrders(
           `
           *,
           vendor:vendors(id, name, phone, email),
+          site:sites(id, name),
           items:purchase_order_items(
             *,
             material:materials(id, name, code, unit, weight_per_unit, weight_unit, length_per_piece, length_unit, image_url),
@@ -58,8 +62,14 @@ export function usePurchaseOrders(
           )
         `
         )
-        .eq("site_id", siteId)
         .order("created_at", { ascending: false });
+
+      // When siteGroupId is available, fetch both own-site POs and group stock POs from other sites
+      if (siteGroupId) {
+        query = query.or(`site_id.eq.${siteId},site_group_id.eq.${siteGroupId}`);
+      } else {
+        query = query.eq("site_id", siteId);
+      }
 
       if (status) {
         query = query.eq("status", status);
@@ -215,6 +225,7 @@ export function useCreatePurchaseOrder() {
           payment_timing: data.payment_timing || "on_delivery",
           notes: data.notes,
           internal_notes: data.internal_notes,
+          site_group_id: (data as any).site_group_id || null,
           transport_cost: data.transport_cost || null,
           vendor_bill_url: data.vendor_bill_url || null,
           subtotal,
@@ -1645,6 +1656,39 @@ export function useDeliveries(
 }
 
 /**
+ * Fetch all deliveries for a PO regardless of which site recorded them.
+ * Use this for group stock POs where deliveries may be recorded by different sites.
+ */
+export function useDeliveriesByPO(poId: string | undefined) {
+  const supabase = createClient() as any;
+
+  return useQuery({
+    queryKey: ["deliveries-by-po", poId],
+    queryFn: async () => {
+      if (!poId) return [];
+      const { data, error } = await supabase
+        .from("deliveries")
+        .select(
+          `
+          *,
+          vendor:vendors(id, name, phone),
+          items:delivery_items(
+            id, material_id, received_qty, accepted_qty, rejected_qty, unit_price,
+            material:materials(id, name, code, unit, image_url),
+            brand:material_brands(id, brand_name, image_url)
+          )
+        `
+        )
+        .eq("po_id", poId)
+        .order("delivery_date", { ascending: false });
+      if (error) throw error;
+      return data as DeliveryWithDetails[];
+    },
+    enabled: !!poId,
+  });
+}
+
+/**
  * Fetch a single delivery by ID
  */
 export function useDelivery(id: string | undefined) {
@@ -1755,7 +1799,7 @@ export function useRecordDelivery() {
         vehicle_number: data.vehicle_number || null,
         driver_name: data.driver_name || null,
         driver_phone: data.driver_phone || null,
-        delivery_photos: data.delivery_photos && data.delivery_photos.length > 0 ? JSON.stringify(data.delivery_photos) : null,
+        delivery_photos: data.delivery_photos && data.delivery_photos.length > 0 ? data.delivery_photos : null,
         recorded_by: authUserId,  // References auth.users(id)
         recorded_at: new Date().toISOString(),
         notes: data.notes || null,
@@ -2304,7 +2348,7 @@ export function useRecordAndVerifyDelivery() {
         verification_status: verificationStatus,
         requires_verification: false, // Already verified
         // Recording fields
-        delivery_photos: data.photos.length > 0 ? JSON.stringify(data.photos) : null,
+        delivery_photos: data.photos.length > 0 ? data.photos : null,
         recorded_by: authUserId,  // References auth.users(id)
         recorded_at: now,
         // Verification fields (set simultaneously)

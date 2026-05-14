@@ -109,14 +109,21 @@ function fmtMoney(n: number | null | undefined): string {
   return formatCurrency(n);
 }
 
+function parsePhotoUrls(value: unknown): string[] {
+  if (!value) return [];
+  if (Array.isArray(value)) return value as string[];
+  if (typeof value === "string") {
+    try { return JSON.parse(value) as string[]; } catch { return []; }
+  }
+  return [];
+}
+
 function deliveryPhotos(delivery: RequestJourney["deliveries"][0]): WorkPhoto[] {
   const photos: WorkPhoto[] = [];
-  const raw = delivery.delivery_photos as string[] | null;
-  const verif = delivery.verification_photos as string[] | null;
-  (raw ?? []).forEach((url, i) =>
+  parsePhotoUrls(delivery.delivery_photos).forEach((url, i) =>
     photos.push({ id: `dp-${i}`, url, description: "Delivery photo", uploadedAt: "" })
   );
-  (verif ?? []).forEach((url, i) =>
+  parsePhotoUrls(delivery.verification_photos).forEach((url, i) =>
     photos.push({ id: `vp-${i}`, url, description: "Verification photo", uploadedAt: "" })
   );
   if (delivery.invoice_url) {
