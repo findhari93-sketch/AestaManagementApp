@@ -483,7 +483,7 @@ export function useRentalOrders(
           site:sites(id, name),
           items:rental_order_items(
             *,
-            rental_item:rental_items(id, name, code, rental_type, unit)
+            rental_item:rental_items(id, name, code, rental_type, unit, image_url)
           ),
           advances:rental_advances(*),
           settlement:rental_settlements(*)

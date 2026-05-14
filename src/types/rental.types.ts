@@ -36,11 +36,18 @@ export type TransportHandler = "vendor" | "company" | "laborer";
 
 export type RentalPriceSource = "rental" | "quotation" | "manual";
 
-export type RentalSettlementPartyType = "vendor" | "transport" | "loading_unloading";
+export type RentalSettlementPartyType =
+  | "vendor"
+  | "transport"
+  | "transport_inbound"
+  | "transport_outbound"
+  | "loading_unloading";
 
 export const RENTAL_SETTLEMENT_PARTY_LABELS: Record<RentalSettlementPartyType, string> = {
   vendor: "Equipment Vendor",
   transport: "Transport",
+  transport_inbound: "Inbound Transport",
+  transport_outbound: "Outbound / Return Transport",
   loading_unloading: "Loading / Unloading",
 };
 
@@ -492,6 +499,8 @@ export interface RentalSettlementFormData {
   upi_screenshot_url?: string;
   subcontract_id?: string;
   notes?: string;
+  engineer_transaction_id?: string | null;
+  settlement_reference?: string | null;
 }
 
 // ============================================
