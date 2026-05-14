@@ -3,6 +3,7 @@
 import { useState } from "react";
 import {
   Alert,
+  Autocomplete,
   Box,
   Button,
   Chip,
@@ -28,6 +29,7 @@ import { calculateSpentToDate } from "@/lib/utils/rentalCostUtils";
 import { useAuth } from "@/contexts/AuthContext";
 import { createClient } from "@/lib/supabase/client";
 import { recordSpend } from "@/lib/services/engineerWalletV2";
+import { useSiteSubcontracts } from "@/hooks/queries/useSubcontracts";
 
 interface MultiPartySettlementDialogProps {
   open: boolean;
@@ -41,10 +43,12 @@ interface PartyState {
   payment_mode: string;
   party_name: string;
   amount: number;
+  subcontract_id: string | null;
 }
 
 const PAYER_SOURCES = ["Company Account", "Site Cash", "Engineer Wallet"];
 const PAYMENT_MODES = ["Cash", "Bank Transfer", "UPI", "Cheque"];
+const ENGINEER_PAYMENT_MODES = ["Cash", "UPI", "Bank Transfer"];
 
 const WALLET_PAYMENT_MODE_MAP: Record<string, "cash" | "upi" | "bank_transfer"> = {
   Cash: "cash",
@@ -58,6 +62,8 @@ export function MultiPartySettlementDialog({ open, onClose, order }: MultiPartyS
   const { userProfile } = useAuth();
   const isSiteEngineer = userProfile?.role === "site_engineer";
   const supabase = createClient();
+
+  const { data: subcontracts } = useSiteSubcontracts(order.site_id);
 
   const totalAdvances = (order.advances ?? []).reduce((s, a) => s + (a.amount ?? 0), 0);
   const rentalAmount =
@@ -76,6 +82,9 @@ export function MultiPartySettlementDialog({ open, onClose, order }: MultiPartyS
     ((order as any).loading_cost_return ?? 0) +
     ((order as any).unloading_cost_return ?? 0);
 
+  const grossTotal = rentalAmount + inboundAmount + outboundAmount;
+  const vendorBalance = Math.max(0, rentalAmount - totalAdvances);
+
   const alreadySettled = new Set((order.settlements ?? []).map((s) => s.party_type));
 
   const defaultPayer = isSiteEngineer ? "Engineer Wallet" : "Company Account";
@@ -86,7 +95,8 @@ export function MultiPartySettlementDialog({ open, onClose, order }: MultiPartyS
       payer_source: defaultPayer,
       payment_mode: isSiteEngineer ? "Cash" : "Bank Transfer",
       party_name: order.vendor?.name ?? "",
-      amount: Math.max(0, rentalAmount - totalAdvances),
+      amount: vendorBalance,
+      subcontract_id: null,
     },
     transport: {
       skipped: true,
@@ -94,6 +104,7 @@ export function MultiPartySettlementDialog({ open, onClose, order }: MultiPartyS
       payment_mode: "Cash",
       party_name: "",
       amount: inboundAmount + outboundAmount,
+      subcontract_id: null,
     },
     transport_inbound: {
       skipped: inboundAmount === 0,
@@ -101,6 +112,7 @@ export function MultiPartySettlementDialog({ open, onClose, order }: MultiPartyS
       payment_mode: "Cash",
       party_name: "",
       amount: inboundAmount,
+      subcontract_id: null,
     },
     transport_outbound: {
       skipped: outboundAmount === 0,
@@ -108,6 +120,7 @@ export function MultiPartySettlementDialog({ open, onClose, order }: MultiPartyS
       payment_mode: "Cash",
       party_name: "",
       amount: outboundAmount,
+      subcontract_id: null,
     },
     loading_unloading: {
       skipped: true,
@@ -115,6 +128,7 @@ export function MultiPartySettlementDialog({ open, onClose, order }: MultiPartyS
       payment_mode: "Cash",
       party_name: "Site Laborers",
       amount: loadingAmount,
+      subcontract_id: null,
     },
   });
 
@@ -169,6 +183,7 @@ export function MultiPartySettlementDialog({ open, onClose, order }: MultiPartyS
         payer_name: p.party_name,
         engineer_transaction_id: engineerTransactionId,
         settlement_reference: settlementRef,
+        subcontract_id: p.subcontract_id ?? undefined,
       });
     } catch (err: any) {
       setErrors((prev) => ({ ...prev, [partyType]: err?.message ?? "Settlement failed" }));
@@ -181,6 +196,7 @@ export function MultiPartySettlementDialog({ open, onClose, order }: MultiPartyS
     "transport_outbound",
     "loading_unloading",
   ];
+
   const partyColors: Record<RentalSettlementPartyType, "success" | "info" | "warning"> = {
     vendor: "success",
     transport: "info",
@@ -190,7 +206,7 @@ export function MultiPartySettlementDialog({ open, onClose, order }: MultiPartyS
   };
 
   const originalAmounts: Partial<Record<RentalSettlementPartyType, number>> = {
-    vendor: Math.max(0, rentalAmount - totalAdvances),
+    vendor: vendorBalance,
     transport_inbound: inboundAmount,
     transport_outbound: outboundAmount,
     loading_unloading: loadingAmount,
@@ -200,41 +216,44 @@ export function MultiPartySettlementDialog({ open, onClose, order }: MultiPartyS
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
       <DialogTitle>Settlement — {order.rental_order_number}</DialogTitle>
 
+      {/* Summary bar */}
       <Box sx={{ px: 2.5, pb: 1 }}>
         <Stack direction="row" spacing={1}>
           <Box sx={{ flex: 1, bgcolor: "success.light", borderRadius: 1, p: 1, textAlign: "center" }}>
-            <Typography variant="caption" display="block" sx={{ fontSize: 9 }}>
-              RENTAL
-            </Typography>
-            <Typography variant="body2" fontWeight={700}>
-              ₹{rentalAmount.toLocaleString("en-IN")}
-            </Typography>
+            <Typography variant="caption" display="block" sx={{ fontSize: 9 }}>RENTAL</Typography>
+            <Typography variant="body2" fontWeight={700}>₹{rentalAmount.toLocaleString("en-IN")}</Typography>
           </Box>
           <Box sx={{ flex: 1, bgcolor: "info.light", borderRadius: 1, p: 1, textAlign: "center" }}>
-            <Typography variant="caption" display="block" sx={{ fontSize: 9 }}>
-              INBOUND
-            </Typography>
-            <Typography variant="body2" fontWeight={700}>
-              ₹{inboundAmount.toLocaleString("en-IN")}
-            </Typography>
+            <Typography variant="caption" display="block" sx={{ fontSize: 9 }}>INBOUND</Typography>
+            <Typography variant="body2" fontWeight={700}>₹{inboundAmount.toLocaleString("en-IN")}</Typography>
           </Box>
           <Box sx={{ flex: 1, bgcolor: "info.light", borderRadius: 1, p: 1, textAlign: "center" }}>
-            <Typography variant="caption" display="block" sx={{ fontSize: 9 }}>
-              OUTBOUND
-            </Typography>
-            <Typography variant="body2" fontWeight={700}>
-              ₹{outboundAmount.toLocaleString("en-IN")}
-            </Typography>
+            <Typography variant="caption" display="block" sx={{ fontSize: 9 }}>OUTBOUND</Typography>
+            <Typography variant="body2" fontWeight={700}>₹{outboundAmount.toLocaleString("en-IN")}</Typography>
           </Box>
           <Box sx={{ flex: 1, bgcolor: "warning.light", borderRadius: 1, p: 1, textAlign: "center" }}>
-            <Typography variant="caption" display="block" sx={{ fontSize: 9 }}>
-              LOADING
-            </Typography>
-            <Typography variant="body2" fontWeight={700}>
-              ₹{loadingAmount.toLocaleString("en-IN")}
-            </Typography>
+            <Typography variant="caption" display="block" sx={{ fontSize: 9 }}>LOADING</Typography>
+            <Typography variant="body2" fontWeight={700}>₹{loadingAmount.toLocaleString("en-IN")}</Typography>
           </Box>
         </Stack>
+
+        {/* Gross total + advances context */}
+        <Box sx={{ mt: 1, p: 1, bgcolor: "grey.50", borderRadius: 1 }}>
+          <Box display="flex" justifyContent="space-between">
+            <Typography variant="caption" color="text.secondary">Gross Total</Typography>
+            <Typography variant="caption" fontWeight={600}>₹{grossTotal.toLocaleString("en-IN")}</Typography>
+          </Box>
+          {totalAdvances > 0 && (
+            <Box display="flex" justifyContent="space-between">
+              <Typography variant="caption" color="text.secondary">Advances Paid</Typography>
+              <Typography variant="caption" color="warning.main" fontWeight={600}>− ₹{totalAdvances.toLocaleString("en-IN")}</Typography>
+            </Box>
+          )}
+          <Box display="flex" justifyContent="space-between" sx={{ borderTop: "1px solid", borderColor: "divider", mt: 0.5, pt: 0.5 }}>
+            <Typography variant="caption" color="text.secondary">Balance to Settle</Typography>
+            <Typography variant="caption" fontWeight={700} color="success.main">₹{(grossTotal - totalAdvances).toLocaleString("en-IN")}</Typography>
+          </Box>
+        </Box>
       </Box>
 
       {isSiteEngineer && (
@@ -251,6 +270,7 @@ export function MultiPartySettlementDialog({ open, onClose, order }: MultiPartyS
           const isSettled = alreadySettled.has(partyType);
           const color = partyColors[partyType];
           const original = originalAmounts[partyType] ?? 0;
+          const isNegotiated = Math.abs(p.amount - original) > 0.01;
 
           return (
             <Box
@@ -264,9 +284,7 @@ export function MultiPartySettlementDialog({ open, onClose, order }: MultiPartyS
                 opacity: p.skipped ? 0.5 : 1,
               }}
             >
-              <Box
-                sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 1 }}
-              >
+              <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 1 }}>
                 <Box>
                   <Typography variant="caption" color={`${color}.dark`} fontWeight={700}>
                     {RENTAL_SETTLEMENT_PARTY_LABELS[partyType].toUpperCase()}
@@ -294,7 +312,9 @@ export function MultiPartySettlementDialog({ open, onClose, order }: MultiPartyS
                       sx={{ mb: 1 }}
                     />
                   )}
-                  <Stack direction="row" spacing={1} sx={{ mb: 1 }}>
+
+                  {/* Amount + payer */}
+                  <Stack direction="row" spacing={1} sx={{ mb: 0.5 }}>
                     <Box sx={{ flex: 1 }}>
                       <TextField
                         label="Negotiated Final Amount (₹)"
@@ -302,15 +322,8 @@ export function MultiPartySettlementDialog({ open, onClose, order }: MultiPartyS
                         size="small"
                         fullWidth
                         value={p.amount}
-                        onChange={(e) =>
-                          updateParty(partyType, { amount: parseFloat(e.target.value) || 0 })
-                        }
+                        onChange={(e) => updateParty(partyType, { amount: parseFloat(e.target.value) || 0 })}
                       />
-                      {original > 0 && Math.abs(p.amount - original) > 0.01 && (
-                        <Typography variant="caption" color="text.secondary">
-                          Original: ₹{original.toLocaleString("en-IN")}
-                        </Typography>
-                      )}
                     </Box>
                     {!isSiteEngineer ? (
                       <Select
@@ -320,75 +333,72 @@ export function MultiPartySettlementDialog({ open, onClose, order }: MultiPartyS
                         sx={{ flex: 1 }}
                       >
                         {PAYER_SOURCES.map((s) => (
-                          <MenuItem key={s} value={s}>
-                            {s}
-                          </MenuItem>
+                          <MenuItem key={s} value={s}>{s}</MenuItem>
                         ))}
                       </Select>
                     ) : (
-                      <Box
-                        sx={{
-                          flex: 1,
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 0.5,
-                          px: 1,
-                          border: "1px solid",
-                          borderColor: "divider",
-                          borderRadius: 1,
-                        }}
-                      >
+                      <Box sx={{ flex: 1, display: "flex", alignItems: "center", gap: 0.5, px: 1, border: "1px solid", borderColor: "divider", borderRadius: 1 }}>
                         <AccountBalanceWalletIcon fontSize="small" color="action" />
-                        <Typography variant="body2" color="text.secondary">
-                          Engineer Wallet
-                        </Typography>
+                        <Typography variant="body2" color="text.secondary">Engineer Wallet</Typography>
                       </Box>
                     )}
                   </Stack>
-                  {!isSiteEngineer && (
-                    <Select
+
+                  {/* Bargain context: show original vs negotiated */}
+                  {original > 0 && (
+                    <Box sx={{ mb: 1 }}>
+                      {isNegotiated ? (
+                        <Typography variant="caption" color="warning.main">
+                          Bargained down from ₹{original.toLocaleString("en-IN")} — saving ₹{(original - p.amount).toLocaleString("en-IN")}
+                        </Typography>
+                      ) : (
+                        <Typography variant="caption" color="text.secondary">
+                          Full amount: ₹{original.toLocaleString("en-IN")}
+                          {partyType === "vendor" && totalAdvances > 0 && ` (after ₹${totalAdvances.toLocaleString("en-IN")} advance)`}
+                        </Typography>
+                      )}
+                    </Box>
+                  )}
+
+                  {/* Payment mode */}
+                  <Select
+                    size="small"
+                    fullWidth
+                    value={p.payment_mode}
+                    onChange={(e) => updateParty(partyType, { payment_mode: e.target.value })}
+                    sx={{ mb: 1 }}
+                  >
+                    {(isSiteEngineer ? ENGINEER_PAYMENT_MODES : PAYMENT_MODES).map((m) => (
+                      <MenuItem key={m} value={m}>{m}</MenuItem>
+                    ))}
+                  </Select>
+
+                  {/* Subcontract / Mesthri link */}
+                  {subcontracts && subcontracts.length > 0 && (
+                    <Autocomplete
                       size="small"
-                      fullWidth
-                      value={p.payment_mode}
-                      onChange={(e) => updateParty(partyType, { payment_mode: e.target.value })}
+                      options={subcontracts}
+                      getOptionLabel={(s) =>
+                        `${s.title}${s.laborer_name ? ` — ${s.laborer_name}` : ""}`
+                      }
+                      value={subcontracts.find((s) => s.id === p.subcontract_id) ?? null}
+                      onChange={(_, val) => updateParty(partyType, { subcontract_id: val?.id ?? null })}
+                      slotProps={{ popper: { disablePortal: false } }}
+                      renderInput={(params) => (
+                        <TextField
+                          {...params}
+                          label="Link to Subcontract / Mesthri (optional)"
+                          placeholder="Search subcontracts…"
+                        />
+                      )}
                       sx={{ mb: 1 }}
-                    >
-                      {PAYMENT_MODES.map((m) => (
-                        <MenuItem key={m} value={m}>
-                          {m}
-                        </MenuItem>
-                      ))}
-                    </Select>
+                    />
                   )}
-                  {isSiteEngineer && (
-                    <Select
-                      size="small"
-                      fullWidth
-                      value={p.payment_mode}
-                      onChange={(e) => updateParty(partyType, { payment_mode: e.target.value })}
-                      sx={{ mb: 1 }}
-                    >
-                      {["Cash", "UPI", "Bank Transfer"].map((m) => (
-                        <MenuItem key={m} value={m}>
-                          {m}
-                        </MenuItem>
-                      ))}
-                    </Select>
-                  )}
-                  {partyType === "vendor" && totalAdvances > 0 && (
-                    <Typography
-                      variant="caption"
-                      color="text.secondary"
-                      sx={{ mb: 1, display: "block" }}
-                    >
-                      Advances paid: ₹{totalAdvances.toLocaleString("en-IN")} (already deducted above)
-                    </Typography>
-                  )}
+
                   {errors[partyType] && (
-                    <Alert severity="error" sx={{ mb: 1, py: 0 }}>
-                      {errors[partyType]}
-                    </Alert>
+                    <Alert severity="error" sx={{ mb: 1, py: 0 }}>{errors[partyType]}</Alert>
                   )}
+
                   <Stack direction="row" spacing={1}>
                     <Button
                       variant="contained"
@@ -407,9 +417,7 @@ export function MultiPartySettlementDialog({ open, onClose, order }: MultiPartyS
                         onClick={() => updateParty(partyType, { skipped: true })}
                         sx={{ fontSize: 10 }}
                       >
-                        {partyType === "loading_unloading"
-                          ? "Skip — our laborers"
-                          : "Skip — vendor included"}
+                        {partyType === "loading_unloading" ? "Skip — our laborers" : "Skip — vendor included"}
                       </Button>
                     )}
                   </Stack>
