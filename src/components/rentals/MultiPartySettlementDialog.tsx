@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   Alert,
   Autocomplete,
@@ -30,6 +30,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { createClient } from "@/lib/supabase/client";
 import { recordSpend } from "@/lib/services/engineerWalletV2";
 import { useSiteSubcontracts } from "@/hooks/queries/useSubcontracts";
+import FileUploader, { type UploadedFile } from "@/components/common/FileUploader";
 
 interface MultiPartySettlementDialogProps {
   open: boolean;
@@ -43,7 +44,9 @@ interface PartyState {
   payment_mode: string;
   party_name: string;
   amount: number;
+  settlement_date: string;
   subcontract_id: string | null;
+  upi_proof: UploadedFile | null;
 }
 
 const PAYER_SOURCES = ["Company Account", "Site Cash", "Engineer Wallet"];
@@ -57,11 +60,13 @@ const WALLET_PAYMENT_MODE_MAP: Record<string, "cash" | "upi" | "bank_transfer"> 
   Cheque: "bank_transfer",
 };
 
+const today = new Date().toISOString().split("T")[0];
+
 export function MultiPartySettlementDialog({ open, onClose, order }: MultiPartySettlementDialogProps) {
   const settleParty = useCreateRentalSettlementParty();
   const { userProfile } = useAuth();
   const isSiteEngineer = userProfile?.role === "site_engineer";
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
 
   const { data: subcontracts } = useSiteSubcontracts(order.site_id);
 
@@ -86,50 +91,34 @@ export function MultiPartySettlementDialog({ open, onClose, order }: MultiPartyS
   const vendorBalance = Math.max(0, rentalAmount - totalAdvances);
 
   const alreadySettled = new Set((order.settlements ?? []).map((s) => s.party_type));
-
   const defaultPayer = isSiteEngineer ? "Engineer Wallet" : "Company Account";
+
+  // Default settlement date: use actual_return_date for completed orders, else today
+  const defaultDate = order.actual_return_date
+    ? order.actual_return_date.split("T")[0]
+    : today;
+
+  const makeParty = (amount: number, skipped: boolean): PartyState => ({
+    skipped,
+    payer_source: defaultPayer,
+    payment_mode: isSiteEngineer ? "Cash" : "Cash",
+    party_name: "",
+    amount,
+    settlement_date: defaultDate,
+    subcontract_id: null,
+    upi_proof: null,
+  });
 
   const [parties, setParties] = useState<Record<RentalSettlementPartyType, PartyState>>({
     vendor: {
-      skipped: false,
-      payer_source: defaultPayer,
+      ...makeParty(vendorBalance, false),
       payment_mode: isSiteEngineer ? "Cash" : "Bank Transfer",
       party_name: order.vendor?.name ?? "",
-      amount: vendorBalance,
-      subcontract_id: null,
     },
-    transport: {
-      skipped: true,
-      payer_source: defaultPayer,
-      payment_mode: "Cash",
-      party_name: "",
-      amount: inboundAmount + outboundAmount,
-      subcontract_id: null,
-    },
-    transport_inbound: {
-      skipped: inboundAmount === 0,
-      payer_source: defaultPayer,
-      payment_mode: "Cash",
-      party_name: "",
-      amount: inboundAmount,
-      subcontract_id: null,
-    },
-    transport_outbound: {
-      skipped: outboundAmount === 0,
-      payer_source: defaultPayer,
-      payment_mode: "Cash",
-      party_name: "",
-      amount: outboundAmount,
-      subcontract_id: null,
-    },
-    loading_unloading: {
-      skipped: true,
-      payer_source: defaultPayer,
-      payment_mode: "Cash",
-      party_name: "Site Laborers",
-      amount: loadingAmount,
-      subcontract_id: null,
-    },
+    transport: makeParty(inboundAmount + outboundAmount, true),
+    transport_inbound: makeParty(inboundAmount, inboundAmount === 0),
+    transport_outbound: makeParty(outboundAmount, outboundAmount === 0),
+    loading_unloading: { ...makeParty(loadingAmount, true), party_name: "Site Laborers" },
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -152,6 +141,7 @@ export function MultiPartySettlementDialog({ open, onClose, order }: MultiPartyS
           site_id: order.site_id,
           amount: p.amount,
           payment_mode: walletMode,
+          transaction_date: p.settlement_date,
           description: `Rental settlement — ${order.rental_order_number} (${RENTAL_SETTLEMENT_PARTY_LABELS[partyType]})`,
           recorded_by: userProfile.name ?? userProfile.id,
           recorded_by_user_id: userProfile.id,
@@ -170,7 +160,7 @@ export function MultiPartySettlementDialog({ open, onClose, order }: MultiPartyS
         rental_order_id: order.id,
         party_type: partyType,
         party_name: p.party_name || null,
-        settlement_date: new Date().toISOString().split("T")[0],
+        settlement_date: p.settlement_date,
         total_rental_amount: partyType === "vendor" ? rentalAmount : 0,
         total_transport_amount: isTransport ? p.amount : 0,
         total_damage_amount: 0,
@@ -184,6 +174,7 @@ export function MultiPartySettlementDialog({ open, onClose, order }: MultiPartyS
         engineer_transaction_id: engineerTransactionId,
         settlement_reference: settlementRef,
         subcontract_id: p.subcontract_id ?? undefined,
+        upi_screenshot_url: p.upi_proof?.url ?? undefined,
       });
     } catch (err: any) {
       setErrors((prev) => ({ ...prev, [partyType]: err?.message ?? "Settlement failed" }));
@@ -271,6 +262,7 @@ export function MultiPartySettlementDialog({ open, onClose, order }: MultiPartyS
           const color = partyColors[partyType];
           const original = originalAmounts[partyType] ?? 0;
           const isNegotiated = Math.abs(p.amount - original) > 0.01;
+          const isUpi = p.payment_mode === "UPI";
 
           return (
             <Box
@@ -313,6 +305,19 @@ export function MultiPartySettlementDialog({ open, onClose, order }: MultiPartyS
                     />
                   )}
 
+                  {/* Settlement date */}
+                  <TextField
+                    label="Settlement Date"
+                    type="date"
+                    size="small"
+                    fullWidth
+                    value={p.settlement_date}
+                    onChange={(e) => updateParty(partyType, { settlement_date: e.target.value })}
+                    inputProps={{ max: today }}
+                    sx={{ mb: 1 }}
+                    InputLabelProps={{ shrink: true }}
+                  />
+
                   {/* Amount + payer */}
                   <Stack direction="row" spacing={1} sx={{ mb: 0.5 }}>
                     <Box sx={{ flex: 1 }}>
@@ -344,7 +349,7 @@ export function MultiPartySettlementDialog({ open, onClose, order }: MultiPartyS
                     )}
                   </Stack>
 
-                  {/* Bargain context: show original vs negotiated */}
+                  {/* Bargain hint */}
                   {original > 0 && (
                     <Box sx={{ mb: 1 }}>
                       {isNegotiated ? (
@@ -365,13 +370,35 @@ export function MultiPartySettlementDialog({ open, onClose, order }: MultiPartyS
                     size="small"
                     fullWidth
                     value={p.payment_mode}
-                    onChange={(e) => updateParty(partyType, { payment_mode: e.target.value })}
+                    onChange={(e) => {
+                      updateParty(partyType, { payment_mode: e.target.value, upi_proof: null });
+                    }}
                     sx={{ mb: 1 }}
                   >
                     {(isSiteEngineer ? ENGINEER_PAYMENT_MODES : PAYMENT_MODES).map((m) => (
                       <MenuItem key={m} value={m}>{m}</MenuItem>
                     ))}
                   </Select>
+
+                  {/* UPI screenshot upload */}
+                  {isUpi && (
+                    <Box sx={{ mb: 1 }}>
+                      <FileUploader
+                        supabase={supabase as any}
+                        bucketName="settlement-proofs"
+                        folderPath={`rentals/${order.site_id}/${order.id}/${partyType}`}
+                        fileNamePrefix="upi"
+                        accept="image"
+                        maxSizeMB={10}
+                        label="UPI screenshot"
+                        helperText="Upload UPI payment screenshot"
+                        value={p.upi_proof}
+                        onUpload={(file) => updateParty(partyType, { upi_proof: file })}
+                        onRemove={() => updateParty(partyType, { upi_proof: null })}
+                        compact
+                      />
+                    </Box>
+                  )}
 
                   {/* Subcontract / Mesthri link */}
                   {subcontracts && subcontracts.length > 0 && (
@@ -405,7 +432,7 @@ export function MultiPartySettlementDialog({ open, onClose, order }: MultiPartyS
                       color={color}
                       size="small"
                       onClick={() => handleSettle(partyType)}
-                      disabled={settleParty.isPending}
+                      disabled={settleParty.isPending || (isUpi && !p.upi_proof)}
                       sx={{ flex: 1 }}
                     >
                       Settle ₹{p.amount.toLocaleString("en-IN")}
