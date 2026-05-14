@@ -433,9 +433,10 @@ export default function MainLayout({
   const syncStatus = useSyncStatus();
   const { selectedSite } = useSelectedSite();
 
-  // Material workflow badge counts for sidebar
+  // Material workflow badge counts for sidebar — only needed on materials-related pages
+  const isMaterialsPath = /\/(materials|purchase-orders|delivery-verification|material-settlements|material-expenses)/.test(pathname);
   const workflowSummary = useMaterialWorkflowSummary(
-    activeTab === "site" ? selectedSite?.id : undefined
+    activeTab === "site" && isMaterialsPath ? selectedSite?.id : undefined
   );
   const materialBadges = getBadgeCounts(workflowSummary);
   const {

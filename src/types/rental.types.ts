@@ -618,3 +618,48 @@ export interface VendorEstimate {
   }[];
   is_cheapest: boolean;
 }
+
+// ============================================
+// HISTORICAL RENTAL RECORD TYPES
+// ============================================
+
+export interface HistoricalRentalItemFormData {
+  item_name: string;
+  quantity: number;
+  daily_rate: number;
+  days: number;
+}
+
+export interface HistoricalTransportFormData {
+  amount: number;
+  paid_to: "vendor" | "driver";
+  driver_name?: string;
+}
+
+export interface HistoricalAdvanceFormData {
+  advance_date: string;
+  amount: number;
+  payer_source: string;
+  payment_mode: string;
+}
+
+export interface HistoricalSettlementFormData {
+  final_amount: number;
+  settlement_date: string;
+  payer_source: string;
+  payment_mode: string;
+}
+
+export interface HistoricalRentalFormData {
+  site_id: string;
+  vendor_id: string;
+  bill_ref?: string;
+  start_date: string;
+  end_date: string;
+  items: HistoricalRentalItemFormData[];
+  rental_total: number;
+  inbound_transport?: HistoricalTransportFormData;
+  outbound_transport?: HistoricalTransportFormData;
+  advances: HistoricalAdvanceFormData[];
+  settlement?: HistoricalSettlementFormData;
+}

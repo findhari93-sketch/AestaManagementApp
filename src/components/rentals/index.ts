@@ -3,6 +3,7 @@
 // Dialogs
 export { default as RentalItemDialog } from "./RentalItemDialog";
 export { default as RentalOrderDialog } from "./RentalOrderDialog";
+export { default as HistoricalRentalDialog } from "./HistoricalRentalDialog";
 export { default as RentalReturnDialog } from "./RentalReturnDialog";
 export { default as RentalAdvanceDialog } from "./RentalAdvanceDialog";
 export { default as RentalSettlementDialog } from "./RentalSettlementDialog";

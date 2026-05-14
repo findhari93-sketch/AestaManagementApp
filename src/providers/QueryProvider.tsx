@@ -422,8 +422,9 @@ function SyncInitializer({ queryClient }: { queryClient: QueryClient }) {
       );
 
       // Cancel in-flight queries from the old site so they don't land into the new
-      // site's view with stale-site data.
-      queryClient.cancelQueries();
+      // site's view with stale-site data. Scoped to fetchStatus:'fetching' so
+      // new-site queries that are still pending are not cancelled.
+      queryClient.cancelQueries({ fetchStatus: "fetching" });
 
       const isSiteSpecific = (queryKey: readonly unknown[]) => {
         if (!Array.isArray(queryKey) || queryKey.length === 0) return false;

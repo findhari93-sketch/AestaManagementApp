@@ -426,15 +426,13 @@ class SessionManager {
       try {
         const qc = this.state.queryClient;
 
-        // Drop zombie fetches before they complete with the stale token and
-        // pollute the cache or trigger 401-handling races against our refresh.
-        if (qc) {
-          try {
-            await qc.cancelQueries();
-          } catch (err) {
-            console.warn("[SessionManager] cancelQueries threw:", err);
-          }
-        }
+        // NOTE: cancelQueries() intentionally removed here. Supabase JS SDK has
+        // autoRefreshToken:true and attaches the current token at request time,
+        // so in-flight queries will either complete with a valid token (if the
+        // SDK refreshed it first) or get a 401 that the QueryCache.onError
+        // handler retries. Cancelling all fetching queries produced cascading
+        // CancelledErrors on every idle-wake, making every page appear broken
+        // until the IdleRecoveryHandler's invalidateQueries fired 1 second later.
 
         const ok = await this.refreshSessionDeduped();
 

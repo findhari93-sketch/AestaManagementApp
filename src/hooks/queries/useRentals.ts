@@ -29,6 +29,7 @@ import type {
   RentalItemSize,
   RentalItemSizeFormData,
   SizeRates,
+  HistoricalRentalFormData,
 } from "@/types/rental.types";
 
 // ============================================
@@ -465,13 +466,14 @@ export function useDeleteRentalItem() {
 
 export function useRentalOrders(
   siteId: string,
-  filters?: RentalOrderFilterState
+  filters?: RentalOrderFilterState,
+  options?: { enabled?: boolean }
 ) {
   const supabase = createClient();
 
   return useQuery({
     queryKey: [...rentalQueryKeys.orders.bySite(siteId), filters],
-    queryFn: async () => {
+    queryFn: wrapQueryFn(async () => {
       let query = supabase
         .from("rental_orders")
         .select(
@@ -569,8 +571,9 @@ export function useRentalOrders(
           is_overdue: isOverdue,
         } as RentalOrderWithDetails;
       });
-    },
-    enabled: !!siteId,
+    }, { operationName: "useRentalOrders" }),
+    staleTime: 5 * 60 * 1000,
+    enabled: (options?.enabled ?? true) && !!siteId,
   });
 }
 
@@ -579,7 +582,7 @@ export function useOngoingRentals(siteId: string) {
 
   return useQuery({
     queryKey: rentalQueryKeys.orders.ongoing(siteId),
-    queryFn: async () => {
+    queryFn: wrapQueryFn(async () => {
       const { data, error } = await supabase
         .from("rental_orders")
         .select(
@@ -646,7 +649,8 @@ export function useOngoingRentals(siteId: string) {
           is_overdue: isOverdue,
         } as RentalOrderWithDetails;
       });
-    },
+    }, { operationName: "useOngoingRentals" }),
+    staleTime: 5 * 60 * 1000,
     enabled: !!siteId,
   });
 }
@@ -1385,7 +1389,7 @@ export function useRentalSummary(siteId: string) {
 
   return useQuery({
     queryKey: rentalQueryKeys.summary(siteId),
-    queryFn: async () => {
+    queryFn: wrapQueryFn(async () => {
       // Fetch ongoing orders
       const { data: ongoingOrders, error: ongoingError } = await supabase
         .from("rental_orders")
@@ -1518,7 +1522,8 @@ export function useRentalSummary(siteId: string) {
         totalSettledAmount,
         totalOutstandingBalance,
       } as RentalSummary;
-    },
+    }, { operationName: "useRentalSummary" }),
+    staleTime: 5 * 60 * 1000,
     enabled: !!siteId,
   });
 }
@@ -1970,6 +1975,171 @@ export function useCreateRentalSettlementParty() {
     onSuccess: (_, vars) => {
       qc.invalidateQueries({ queryKey: rentalQueryKeys.orders.byId(vars.rental_order_id) });
       qc.invalidateQueries({ queryKey: rentalQueryKeys.orders.all });
+    },
+  });
+}
+
+// ============================================
+// HISTORICAL RENTAL RECORD
+// ============================================
+
+export function useCreateHistoricalRental() {
+  const queryClient = useQueryClient();
+  const supabase = createClient();
+
+  return useMutation({
+    mutationFn: async (data: HistoricalRentalFormData) => {
+      await ensureFreshSession();
+
+      const { data: orderNumber, error: numError } = await supabase.rpc(
+        "generate_rental_order_number",
+        { p_site_id: data.site_id }
+      );
+      if (numError) throw new Error(`Failed to generate order number: ${numError.message}`);
+
+      const inbound = data.inbound_transport;
+      const outbound = data.outbound_transport;
+      const inboundAmount = inbound?.amount ?? 0;
+      const outboundAmount = outbound?.amount ?? 0;
+
+      const { data: order, error: orderError } = await supabase
+        .from("rental_orders")
+        .insert({
+          site_id: data.site_id,
+          vendor_id: data.vendor_id,
+          rental_order_number: orderNumber,
+          order_date: data.end_date,
+          start_date: data.start_date,
+          expected_return_date: data.end_date,
+          actual_return_date: data.end_date,
+          status: "completed",
+          estimated_total: data.rental_total,
+          actual_total: data.rental_total,
+          transport_cost_outward: inboundAmount,
+          transport_cost_return: outboundAmount,
+          outward_by: inbound?.paid_to === "driver" ? "company" : inbound ? "vendor" : null,
+          return_by: outbound?.paid_to === "driver" ? "company" : outbound ? "vendor" : null,
+          vendor_slip_url: data.bill_ref ?? null,
+          notes: data.bill_ref ? `Bill/Ref: ${data.bill_ref}` : null,
+        })
+        .select()
+        .single();
+
+      if (orderError) throw new Error(`Failed to create order: ${orderError.message}`);
+
+      // Insert items if provided
+      if (data.items.length > 0) {
+        const itemsToInsert = data.items.map((item) => ({
+          rental_order_id: order.id,
+          rental_item_id: null,
+          item_name_override: item.item_name,
+          quantity: item.quantity,
+          daily_rate_default: item.daily_rate,
+          daily_rate_actual: item.daily_rate,
+          rate_type: "daily" as const,
+          item_start_date: data.start_date,
+          item_expected_return_date: data.end_date,
+          status: "returned" as const,
+          quantity_returned: item.quantity,
+        }));
+
+        const { error: itemsError } = await supabase
+          .from("rental_order_items")
+          .insert(itemsToInsert as any);
+
+        if (itemsError) throw new Error(`Failed to create items: ${itemsError.message}`);
+      }
+
+      // Insert advances if provided
+      if (data.advances.length > 0) {
+        const advancesToInsert = data.advances.map((adv) => ({
+          rental_order_id: order.id,
+          advance_date: adv.advance_date,
+          amount: adv.amount,
+          payment_mode: adv.payment_mode,
+          payment_channel: "direct",
+          payer_source: adv.payer_source,
+        }));
+
+        const { error: advErr } = await supabase
+          .from("rental_advances")
+          .insert(advancesToInsert);
+
+        if (advErr) throw new Error(`Failed to create advances: ${advErr.message}`);
+      }
+
+      // Insert settlement(s) if provided
+      if (data.settlement) {
+        const sett = data.settlement;
+        const totalAdvances = data.advances.reduce((s, a) => s + a.amount, 0);
+
+        // Vendor-paid transport = any inbound/outbound not paid to a separate driver
+        const vendorTransport =
+          (inbound?.paid_to === "vendor" ? inboundAmount : 0) +
+          (outbound?.paid_to === "vendor" ? outboundAmount : 0);
+
+        const { data: settRef } = await supabase.rpc(
+          "generate_rental_settlement_reference",
+          { p_site_id: data.site_id }
+        );
+
+        const { error: settErr } = await supabase
+          .from("rental_settlements")
+          .insert({
+            rental_order_id: order.id,
+            party_type: "vendor",
+            settlement_date: sett.settlement_date,
+            settlement_reference: settRef,
+            total_rental_amount: data.rental_total,
+            total_transport_amount: vendorTransport,
+            total_damage_amount: 0,
+            total_advance_paid: totalAdvances,
+            balance_amount: sett.final_amount,
+            payment_mode: sett.payment_mode,
+            payment_channel: "direct",
+            payer_source: sett.payer_source,
+          });
+
+        if (settErr) throw new Error(`Failed to create settlement: ${settErr.message}`);
+
+        // Separate driver settlement(s)
+        const driverSettlements: Array<{ transport: HistoricalRentalFormData["inbound_transport"]; label: string }> = [];
+        if (inbound?.paid_to === "driver") driverSettlements.push({ transport: inbound, label: "Inbound" });
+        if (outbound?.paid_to === "driver") driverSettlements.push({ transport: outbound, label: "Outbound" });
+
+        for (const { transport, label } of driverSettlements) {
+          if (!transport) continue;
+          const { data: driverRef } = await supabase.rpc(
+            "generate_rental_settlement_reference",
+            { p_site_id: data.site_id }
+          );
+          const { error: dErr } = await supabase
+            .from("rental_settlements")
+            .insert({
+              rental_order_id: order.id,
+              party_type: "transport",
+              party_name: transport.driver_name ?? `${label} Driver`,
+              settlement_date: sett.settlement_date,
+              settlement_reference: driverRef,
+              total_rental_amount: 0,
+              total_transport_amount: transport.amount,
+              total_damage_amount: 0,
+              total_advance_paid: 0,
+              balance_amount: transport.amount,
+              payment_mode: sett.payment_mode,
+              payment_channel: "direct",
+              payer_source: sett.payer_source,
+            });
+          if (dErr) throw new Error(`Failed to create driver settlement: ${dErr.message}`);
+        }
+      }
+
+      return order as RentalOrder;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: rentalQueryKeys.orders.all });
+      queryClient.invalidateQueries({ queryKey: rentalQueryKeys.orders.bySite(data.site_id) });
+      queryClient.invalidateQueries({ queryKey: ["expenses"] });
     },
   });
 }

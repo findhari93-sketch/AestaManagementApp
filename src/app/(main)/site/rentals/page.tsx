@@ -47,6 +47,7 @@ import {
   Info as InfoIcon,
   Close as CloseIcon,
   Description as BillIcon,
+  History as HistoryIcon,
 } from "@mui/icons-material";
 import ScreenshotViewer from "@/components/common/ScreenshotViewer";
 import PageHeader from "@/components/layout/PageHeader";
@@ -61,6 +62,7 @@ import {
 import {
   OngoingRentalsList,
   RentalOrderDialog,
+  HistoricalRentalDialog,
   RentalRequestForm,
   RentalOrderCard,
 } from "@/components/rentals";
@@ -142,6 +144,7 @@ export default function SiteRentalsPage() {
   const searchParams = useSearchParams();
   const { selectedSite } = useSite();
   const [orderDialogOpen, setOrderDialogOpen] = useState(false);
+  const [historicalDialogOpen, setHistoricalDialogOpen] = useState(false);
   const [requestFormOpen, setRequestFormOpen] = useState(false);
   const [statusFilter, setStatusFilter] = useState<RentalOrderStatus | "all">("all");
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -170,14 +173,15 @@ export default function SiteRentalsPage() {
 
   const { data: pendingOrders = [] } = useRentalOrders(siteId, { status: "pending" } as any);
 
-  // Fetch all rentals for the "all" and "history" tabs
+  // Fetch all rentals for the "all" and "history" tabs — not needed on "ongoing"
   const { data: allRentals = [], isLoading: loadingAllRentals } = useRentalOrders(
     siteId,
     currentTab === "history"
       ? { status: "completed" }
       : currentTab === "all"
         ? (statusFilter !== "all" ? { status: statusFilter } : undefined)
-        : undefined
+        : undefined,
+    { enabled: currentTab !== "ongoing" }
   );
 
   // Filter rentals based on tab
@@ -241,6 +245,13 @@ export default function SiteRentalsPage() {
               size="small"
             >
               New Request
+            </Button>
+            <Button
+              variant="outlined"
+              startIcon={<HistoryIcon />}
+              onClick={() => setHistoricalDialogOpen(true)}
+            >
+              Historical Record
             </Button>
             <Button
               variant="contained"
@@ -383,6 +394,7 @@ export default function SiteRentalsPage() {
             onViewOrder={handleViewOrder}
             onCreateOrder={handleCreateOrder}
             showOverdueAlert={false}
+            overdueRentals={overdueRentals}
           />
         </>
       )}
@@ -711,6 +723,13 @@ export default function SiteRentalsPage() {
       <RentalOrderDialog
         open={orderDialogOpen}
         onClose={() => setOrderDialogOpen(false)}
+        siteId={siteId}
+      />
+
+      {/* Historical Rental Record Dialog */}
+      <HistoricalRentalDialog
+        open={historicalDialogOpen}
+        onClose={() => setHistoricalDialogOpen(false)}
         siteId={siteId}
       />
 

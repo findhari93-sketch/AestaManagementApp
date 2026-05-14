@@ -14,7 +14,7 @@ import {
   Add as AddIcon,
   Warning as WarningIcon,
 } from "@mui/icons-material";
-import { useOngoingRentals, useOverdueRentals } from "@/hooks/queries/useRentals";
+import { useOngoingRentals } from "@/hooks/queries/useRentals";
 import RentalOrderCard from "./RentalOrderCard";
 import RentalReturnDialog from "./RentalReturnDialog";
 import RentalAdvanceDialog from "./RentalAdvanceDialog";
@@ -25,6 +25,7 @@ interface OngoingRentalsListProps {
   onViewOrder?: (orderId: string) => void;
   onCreateOrder?: () => void;
   showOverdueAlert?: boolean;
+  overdueRentals?: RentalOrderWithDetails[];
 }
 
 export default function OngoingRentalsList({
@@ -32,9 +33,9 @@ export default function OngoingRentalsList({
   onViewOrder,
   onCreateOrder,
   showOverdueAlert = true,
+  overdueRentals = [],
 }: OngoingRentalsListProps) {
   const { data: ongoingRentals = [], isLoading, error } = useOngoingRentals(siteId);
-  const { data: overdueRentals = [] } = useOverdueRentals(siteId);
 
   const [selectedOrder, setSelectedOrder] = useState<RentalOrderWithDetails | null>(null);
   const [returnDialogOpen, setReturnDialogOpen] = useState(false);
