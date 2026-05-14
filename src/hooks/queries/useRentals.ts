@@ -1126,6 +1126,25 @@ export function useRecordRentalAdvance() {
   });
 }
 
+export function useDeleteRentalAdvance() {
+  const queryClient = useQueryClient();
+  const supabase = createClient();
+
+  return useMutation({
+    mutationFn: async ({ id, rental_order_id }: { id: string; rental_order_id: string }) => {
+      await ensureFreshSession();
+      const { error } = await supabase.from("rental_advances").delete().eq("id", id);
+      if (error) throw error;
+      return { id, rental_order_id };
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({
+        queryKey: rentalQueryKeys.orders.byId(variables.rental_order_id),
+      });
+    },
+  });
+}
+
 // ============================================
 // RENTAL SETTLEMENTS
 // ============================================
@@ -2021,6 +2040,8 @@ export function useCreateRentalSettlementParty() {
     onSuccess: (_, vars) => {
       qc.invalidateQueries({ queryKey: rentalQueryKeys.orders.byId(vars.rental_order_id) });
       qc.invalidateQueries({ queryKey: rentalQueryKeys.orders.all });
+      // rental_settlements are included in v_all_expenses via UNION — invalidate expenses cache
+      qc.invalidateQueries({ queryKey: ["expenses"] });
     },
   });
 }

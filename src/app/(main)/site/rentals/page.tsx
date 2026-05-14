@@ -500,29 +500,29 @@ export default function SiteRentalsPage() {
                     const settledPartySet = new Set(rentalSettlements.map((s: any) => s.party_type as string));
                     const inboundNeedSettlement = (rental.transport_cost_outward ?? 0) > 0 && !settledPartySet.has("transport_inbound") && !settledPartySet.has("transport");
                     const outboundNeedSettlement = (rental.transport_cost_return ?? 0) > 0 && !settledPartySet.has("transport_outbound") && !settledPartySet.has("transport");
-                    const isFullySettled = settledPartySet.has("vendor") && !inboundNeedSettlement && !outboundNeedSettlement;
+                    const vendorSettled = settledPartySet.has("vendor");
+                    const isFullySettled = vendorSettled && !inboundNeedSettlement && !outboundNeedSettlement;
                     const isSettled = rental.status === "completed" && isFullySettled;
+                    const transportPending = (inboundNeedSettlement ? (rental.transport_cost_outward || 0) : 0)
+                      + (outboundNeedSettlement ? (rental.transport_cost_return || 0) : 0);
 
-                    // Calculate paid and balance based on settlement status
-                    let totalPaid: number;
+                    // Total money actually paid = all advances + sum of all settlement final amounts
+                    const totalSettlementPaid = rentalSettlements.reduce((sum: number, s: any) =>
+                      sum + (s.negotiated_final_amount ?? 0), 0);
+                    const totalPaid = (rental.total_advance_paid || 0) + totalSettlementPaid;
+                    const finalTotal = estimatedTotal; // always show gross
+
+                    // Discount: if vendor settled and totalPaid < gross (bargained)
+                    const wasNegotiated = vendorSettled && totalPaid < estimatedTotal - 0.5;
+
+                    // Balance: remaining amount still owed
                     let balance: number;
-                    let finalTotal: number;
-                    let wasNegotiated = false;
-
-                    if (isSettled) {
-                      // Settled order - use settlement data
-                      const settleData = settlement as any;
-                      const originalTotal = (settleData.total_rental_amount || 0) +
-                        (settleData.total_transport_amount || 0) +
-                        (settleData.total_damage_amount || 0);
-                      finalTotal = settleData.negotiated_final_amount || originalTotal;
-                      wasNegotiated = !!settleData.negotiated_final_amount && settleData.negotiated_final_amount !== originalTotal;
-                      totalPaid = finalTotal; // Total amount was paid in full (advances + balance)
-                      balance = 0; // Settled = no balance
+                    if (isFullySettled) {
+                      balance = 0;
+                    } else if (vendorSettled) {
+                      // Only transport remains
+                      balance = transportPending;
                     } else {
-                      // Not settled - use advances
-                      totalPaid = rental.total_advance_paid || 0;
-                      finalTotal = estimatedTotal;
                       balance = estimatedTotal - totalPaid;
                     }
 
@@ -640,18 +640,16 @@ export default function SiteRentalsPage() {
                           />
                         </TableCell>
                         <TableCell align="right">
-                          <Box>
-                            {wasNegotiated ? (
-                              <>
-                                <Typography variant="body2" sx={{ textDecoration: "line-through", color: "text.secondary" }}>
-                                  {formatCurrency(estimatedTotal)}
-                                </Typography>
-                                <Typography variant="body2" color="success.main" fontWeight={500}>
-                                  {formatCurrency(finalTotal)}
-                                </Typography>
-                              </>
-                            ) : (
-                              formatCurrency(finalTotal)
+                          <Box sx={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 0.25 }}>
+                            <Typography variant="body2">{formatCurrency(finalTotal)}</Typography>
+                            {wasNegotiated && (
+                              <Chip
+                                size="small"
+                                label={`-${formatCurrency(estimatedTotal - totalPaid)}`}
+                                color="success"
+                                variant="outlined"
+                                sx={{ height: 16, fontSize: "0.6rem" }}
+                              />
                             )}
                           </Box>
                         </TableCell>
@@ -685,6 +683,20 @@ export default function SiteRentalsPage() {
                                   </IconButton>
                                 </Tooltip>
                               )}
+                            </Box>
+                          ) : vendorSettled && transportPending > 0 ? (
+                            <Box sx={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 0.5 }}>
+                              <Typography color="warning.main" fontWeight={500} variant="body2">
+                                {formatCurrency(transportPending)}
+                              </Typography>
+                              <Chip
+                                size="small"
+                                icon={<WarningIcon sx={{ fontSize: "12px !important" }} />}
+                                label="Transport"
+                                color="warning"
+                                variant="outlined"
+                                sx={{ height: 18, fontSize: "0.65rem" }}
+                              />
                             </Box>
                           ) : (
                             <Typography

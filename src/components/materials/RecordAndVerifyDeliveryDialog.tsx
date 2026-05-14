@@ -117,18 +117,24 @@ export default function RecordAndVerifyDeliveryDialog({
     if (!open) return;
 
     if (purchaseOrder?.items) {
+      const isBatchDelivery = purchaseOrder.status === 'partial_delivered';
       const deliveryItems: DeliveryItemRow[] = purchaseOrder.items
         .filter((item) => {
           const pending = item.quantity - (item.received_qty || 0);
           return pending > 0;
         })
-        .map((item) => ({
+        .map((item) => {
+          const pendingQty = item.quantity - (item.received_qty || 0);
+          // For batch deliveries (partial_delivered), start at 0 so engineer enters
+          // only today's batch qty rather than accidentally submitting full pending
+          const defaultReceivedQty = isBatchDelivery ? 0 : pendingQty;
+          return {
           po_item_id: item.id,
           material_id: item.material_id,
           brand_id: item.brand_id || undefined,
           ordered_qty: item.quantity,
-          received_qty: item.quantity - (item.received_qty || 0),
-          accepted_qty: item.quantity - (item.received_qty || 0),
+          received_qty: defaultReceivedQty,
+          accepted_qty: defaultReceivedQty,
           rejected_qty: 0,
           unit_price: item.unit_price,
           materialName: item.material?.name,
@@ -141,7 +147,8 @@ export default function RecordAndVerifyDeliveryDialog({
           tax_rate: item.tax_rate,
           hasIssue: false,
           issueType: undefined,
-        }));
+        };
+        });
       setItems(deliveryItems);
     } else {
       setItems([]);
@@ -664,6 +671,27 @@ export default function RecordAndVerifyDeliveryDialog({
               </Box>
             </Paper>
           </Grid>
+
+          {/* Batch delivery context banner */}
+          {purchaseOrder.status === 'partial_delivered' && (
+            <Grid size={12}>
+              <Alert severity="info" icon={<InventoryIcon />}>
+                <Typography variant="body2" fontWeight={600}>
+                  Batch delivery — enter only the quantity arriving TODAY
+                </Typography>
+                {purchaseOrder.items?.map((item) => {
+                  const alreadyReceived = item.received_qty || 0;
+                  const stillPending = item.quantity - alreadyReceived;
+                  if (alreadyReceived === 0) return null;
+                  return (
+                    <Typography key={item.id} variant="caption" display="block">
+                      {item.material?.name}: {alreadyReceived} {item.material?.unit} received so far · {stillPending} {item.material?.unit} still pending
+                    </Typography>
+                  );
+                })}
+              </Alert>
+            </Grid>
+          )}
 
           {/* Items Table */}
           <Grid size={12}>

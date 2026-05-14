@@ -36,6 +36,7 @@ interface MultiPartySettlementDialogProps {
   open: boolean;
   onClose: () => void;
   order: RentalOrderWithDetails;
+  focusedPartyType?: RentalSettlementPartyType;
 }
 
 interface PartyState {
@@ -62,7 +63,7 @@ const WALLET_PAYMENT_MODE_MAP: Record<string, "cash" | "upi" | "bank_transfer"> 
 
 const today = new Date().toISOString().split("T")[0];
 
-export function MultiPartySettlementDialog({ open, onClose, order }: MultiPartySettlementDialogProps) {
+export function MultiPartySettlementDialog({ open, onClose, order, focusedPartyType }: MultiPartySettlementDialogProps) {
   const settleParty = useCreateRentalSettlementParty();
   const { userProfile } = useAuth();
   const isSiteEngineer = userProfile?.role === "site_engineer";
@@ -188,6 +189,11 @@ export function MultiPartySettlementDialog({ open, onClose, order }: MultiPartyS
     "loading_unloading",
   ];
 
+  // Only show parties that haven't been settled yet; if focusedPartyType is set, show only that one
+  const visiblePartyTypes = focusedPartyType
+    ? activePartyTypes.filter((pt) => pt === focusedPartyType && !alreadySettled.has(pt))
+    : activePartyTypes.filter((pt) => !alreadySettled.has(pt));
+
   const partyColors: Record<RentalSettlementPartyType, "success" | "info" | "warning"> = {
     vendor: "success",
     transport: "info",
@@ -205,7 +211,11 @@ export function MultiPartySettlementDialog({ open, onClose, order }: MultiPartyS
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
-      <DialogTitle>Settlement — {order.rental_order_number}</DialogTitle>
+      <DialogTitle>
+        {focusedPartyType
+          ? `${RENTAL_SETTLEMENT_PARTY_LABELS[focusedPartyType]} Settlement — ${order.rental_order_number}`
+          : `Settlement — ${order.rental_order_number}`}
+      </DialogTitle>
 
       {/* Summary bar */}
       <Box sx={{ px: 2.5, pb: 1 }}>
@@ -256,7 +266,7 @@ export function MultiPartySettlementDialog({ open, onClose, order }: MultiPartyS
       )}
 
       <DialogContent sx={{ pt: 1 }}>
-        {activePartyTypes.map((partyType) => {
+        {visiblePartyTypes.map((partyType) => {
           const p = parties[partyType];
           const isSettled = alreadySettled.has(partyType);
           const color = partyColors[partyType];

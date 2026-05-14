@@ -11,6 +11,7 @@ import {
   TableRow,
   Chip,
   Divider,
+  Tooltip,
 } from "@mui/material";
 import {
   Warning as WarningIcon,
@@ -25,6 +26,9 @@ interface RentalCostBreakdownProps {
   showItemDetails?: boolean;
   compact?: boolean;
   settlement?: RentalSettlement | null;
+  settledPartyTypes?: Set<string>;
+  onSettleInbound?: () => void;
+  onSettleOutbound?: () => void;
 }
 
 export default function RentalCostBreakdown({
@@ -32,6 +36,9 @@ export default function RentalCostBreakdown({
   showItemDetails = true,
   compact = false,
   settlement = null,
+  settledPartyTypes,
+  onSettleInbound,
+  onSettleOutbound,
 }: RentalCostBreakdownProps) {
   const {
     startDate,
@@ -226,27 +233,61 @@ export default function RentalCostBreakdown({
           </Box>
         )}
 
-        {transportCostOutward > 0 && (
-          <Box display="flex" justifyContent="space-between">
-            <Typography variant="body2" color="text.secondary">
-              Transport (Outward)
-            </Typography>
-            <Typography variant="body2">
-              ₹{transportCostOutward.toLocaleString()}
-            </Typography>
-          </Box>
-        )}
+        {transportCostOutward > 0 && (() => {
+          const isSettled = settledPartyTypes?.has("transport_inbound") || settledPartyTypes?.has("transport");
+          return (
+            <Box display="flex" justifyContent="space-between" alignItems="center">
+              <Typography variant="body2" color="text.secondary">
+                Transport (Outward)
+              </Typography>
+              <Box display="flex" alignItems="center" gap={0.75}>
+                <Typography variant="body2">₹{transportCostOutward.toLocaleString()}</Typography>
+                {isSettled ? (
+                  <CheckIcon sx={{ fontSize: 16 }} color="success" />
+                ) : onSettleInbound ? (
+                  <Tooltip title="Settle inbound transport">
+                    <Chip
+                      label="Settle"
+                      size="small"
+                      color="info"
+                      variant="outlined"
+                      onClick={onSettleInbound}
+                      sx={{ height: 20, fontSize: "0.65rem", cursor: "pointer" }}
+                    />
+                  </Tooltip>
+                ) : null}
+              </Box>
+            </Box>
+          );
+        })()}
 
-        {transportCostReturn > 0 && (
-          <Box display="flex" justifyContent="space-between">
-            <Typography variant="body2" color="text.secondary">
-              Transport (Return)
-            </Typography>
-            <Typography variant="body2">
-              ₹{transportCostReturn.toLocaleString()}
-            </Typography>
-          </Box>
-        )}
+        {transportCostReturn > 0 && (() => {
+          const isSettled = settledPartyTypes?.has("transport_outbound") || settledPartyTypes?.has("transport");
+          return (
+            <Box display="flex" justifyContent="space-between" alignItems="center">
+              <Typography variant="body2" color="text.secondary">
+                Transport (Return)
+              </Typography>
+              <Box display="flex" alignItems="center" gap={0.75}>
+                <Typography variant="body2">₹{transportCostReturn.toLocaleString()}</Typography>
+                {isSettled ? (
+                  <CheckIcon sx={{ fontSize: 16 }} color="success" />
+                ) : onSettleOutbound ? (
+                  <Tooltip title="Settle return transport">
+                    <Chip
+                      label="Settle"
+                      size="small"
+                      color="info"
+                      variant="outlined"
+                      onClick={onSettleOutbound}
+                      sx={{ height: 20, fontSize: "0.65rem", cursor: "pointer" }}
+                    />
+                  </Tooltip>
+                ) : null}
+              </Box>
+            </Box>
+          );
+        })()}
 
         {damagesCost > 0 && (
           <Box display="flex" justifyContent="space-between">

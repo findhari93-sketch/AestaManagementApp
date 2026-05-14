@@ -26,6 +26,8 @@ import { useRecordRentalAdvance } from "@/hooks/queries/useRentals";
 import FileUploader, { UploadedFile } from "@/components/common/FileUploader";
 import PayerSourceSelector from "@/components/settlement/PayerSourceSelector";
 import { createClient } from "@/lib/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
+import AccountBalanceWalletIcon from "@mui/icons-material/AccountBalanceWallet";
 import type {
   RentalOrderWithDetails,
   RentalAdvanceFormData,
@@ -63,6 +65,8 @@ export default function RentalAdvanceDialog({
   const isMobile = useIsMobile();
   const supabase = createClient();
   const recordAdvance = useRecordRentalAdvance();
+  const { userProfile } = useAuth();
+  const isSiteEngineer = userProfile?.role === "site_engineer";
 
   const [error, setError] = useState("");
   const [formData, setFormData] = useState<Omit<RentalAdvanceFormData, "rental_order_id">>({
@@ -80,14 +84,24 @@ export default function RentalAdvanceDialog({
 
   // Calculate current totals
   const totalAdvancesPaid = order.total_advance_paid || 0;
-  const accruedCost = order.accrued_rental_cost || 0;
+  // For completed orders use stored actual_total; live accrual would over-count past today
+  const accruedCost =
+    order.status === "completed"
+      ? (order.actual_total || order.accrued_rental_cost || 0)
+      : (order.accrued_rental_cost || 0);
   const currentBalance = accruedCost - totalAdvancesPaid;
+
+  // For completed/historical orders default to return date; otherwise today
+  const defaultDate =
+    order.status === "completed" && order.actual_return_date
+      ? dayjs(order.actual_return_date).format("YYYY-MM-DD")
+      : dayjs().format("YYYY-MM-DD");
 
   useEffect(() => {
     if (open) {
       // Reset form
       setFormData({
-        advance_date: dayjs().format("YYYY-MM-DD"),
+        advance_date: defaultDate,
         amount: Math.max(0, currentBalance),
         payment_mode: "upi",
         payment_channel: "direct",
@@ -100,7 +114,7 @@ export default function RentalAdvanceDialog({
       setCustomPayerName("");
       setError("");
     }
-  }, [open, currentBalance]);
+  }, [open, currentBalance, defaultDate]);
 
   const handleChange = (field: keyof typeof formData, value: unknown) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
@@ -114,15 +128,16 @@ export default function RentalAdvanceDialog({
     }
 
     try {
+      const effectivePayerSource: PayerSource = isSiteEngineer ? "own_money" : payerSource;
       await recordAdvance.mutateAsync({
         rental_order_id: order.id,
         advance_date: formData.advance_date,
         amount: formData.amount,
         payment_mode: formData.payment_mode,
-        payment_channel: formData.payment_channel,
-        payer_source: payerSource,
+        payment_channel: isSiteEngineer ? "engineer_wallet" : formData.payment_channel,
+        payer_source: effectivePayerSource,
         payer_name:
-          payerSource === "custom" || payerSource === "other_site_money"
+          !isSiteEngineer && (payerSource === "custom" || payerSource === "other_site_money")
             ? customPayerName
             : undefined,
         proof_url: formData.proof_url || undefined,
@@ -180,7 +195,7 @@ export default function RentalAdvanceDialog({
             <Paper variant="outlined" sx={{ p: 2 }}>
               <Box display="flex" justifyContent="space-between" mb={1}>
                 <Typography variant="body2" color="text.secondary">
-                  Accrued Rental Cost
+                  {order.status === "completed" ? "Total Rental Amount" : "Accrued Rental Cost"}
                 </Typography>
                 <Typography variant="body2" fontWeight={600}>
                   ₹{accruedCost.toLocaleString()}
@@ -287,13 +302,34 @@ export default function RentalAdvanceDialog({
 
           {/* Payer Source */}
           <Grid size={12}>
-            <PayerSourceSelector
-              value={payerSource}
-              customName={customPayerName}
-              onChange={setPayerSource}
-              onCustomNameChange={setCustomPayerName}
-              compact
-            />
+            {isSiteEngineer ? (
+              <Box
+                sx={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 1,
+                  px: 1.5,
+                  py: 1,
+                  border: "1px solid",
+                  borderColor: "divider",
+                  borderRadius: 1,
+                  bgcolor: "grey.50",
+                }}
+              >
+                <AccountBalanceWalletIcon fontSize="small" color="action" />
+                <Typography variant="body2" color="text.secondary">
+                  Payment source: <strong>Engineer Wallet</strong>
+                </Typography>
+              </Box>
+            ) : (
+              <PayerSourceSelector
+                value={payerSource}
+                customName={customPayerName}
+                onChange={setPayerSource}
+                onCustomNameChange={setCustomPayerName}
+                compact
+              />
+            )}
           </Grid>
 
           {/* Payment Proof */}

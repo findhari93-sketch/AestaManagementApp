@@ -503,6 +503,9 @@ export default function UnifiedPurchaseOrderDialog({
       setNotes("");
       setItems([]);
       setIsGroupStock(request?.purchase_type === 'group_stock');
+      if (request?.delivery_type === 'bulk') {
+        setPaymentTiming('advance');
+      }
       setPayingSiteId(siteId);
       setTransportCost("");
       setVendorBillUrl("");

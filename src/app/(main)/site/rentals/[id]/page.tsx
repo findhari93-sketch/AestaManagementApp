@@ -11,6 +11,7 @@ import {
   CircularProgress,
   Alert,
   Divider,
+  Stack,
   Table,
   TableBody,
   TableCell,
@@ -33,6 +34,7 @@ import {
   Receipt as ReceiptIcon,
   Screenshot as UpiIcon,
   Edit as EditIcon,
+  DeleteOutline as DeleteIcon,
 } from "@mui/icons-material";
 import PageHeader from "@/components/layout/PageHeader";
 import { useSite } from "@/contexts/SiteContext";
@@ -40,6 +42,7 @@ import {
   useRentalOrder,
   useRentalCostCalculation,
   useUpdateRentalOrderStatus,
+  useDeleteRentalAdvance,
 } from "@/hooks/queries/useRentals";
 import {
   RentalCostBreakdown,
@@ -75,7 +78,11 @@ export default function RentalOrderDetailsPage() {
   const [settlementDialogOpen, setSettlementDialogOpen] = useState(false);
   const [editingSettlement, setEditingSettlement] = useState<import("@/types/rental.types").RentalSettlement | null>(null);
   const [multiSettlementDialogOpen, setMultiSettlementDialogOpen] = useState(false);
+  const [inboundSettleOpen, setInboundSettleOpen] = useState(false);
+  const [outboundSettleOpen, setOutboundSettleOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState<RentalOrderItemWithDetails | undefined>();
+  const [deletingAdvanceId, setDeletingAdvanceId] = useState<string | null>(null);
+  const deleteAdvance = useDeleteRentalAdvance();
 
   const handleRecordReturn = (item?: RentalOrderItemWithDetails) => {
     setSelectedItem(item);
@@ -451,6 +458,7 @@ export default function RentalOrderDetailsPage() {
                     <TableCell>Mode</TableCell>
                     <TableCell align="right">Amount</TableCell>
                     <TableCell>Notes</TableCell>
+                    <TableCell />
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -473,6 +481,39 @@ export default function RentalOrderDetailsPage() {
                         <Typography variant="caption" color="text.secondary">
                           {adv.notes || "-"}
                         </Typography>
+                      </TableCell>
+                      <TableCell align="right">
+                        {deletingAdvanceId === adv.id ? (
+                          <Box display="flex" alignItems="center" gap={0.5}>
+                            <Typography variant="caption" color="error">Delete?</Typography>
+                            <Button
+                              size="small"
+                              color="error"
+                              variant="contained"
+                              sx={{ minWidth: 0, px: 1, py: 0.25, fontSize: "0.65rem" }}
+                              disabled={deleteAdvance.isPending}
+                              onClick={async () => {
+                                await deleteAdvance.mutateAsync({ id: adv.id, rental_order_id: order.id });
+                                setDeletingAdvanceId(null);
+                              }}
+                            >
+                              Yes
+                            </Button>
+                            <Button
+                              size="small"
+                              sx={{ minWidth: 0, px: 1, py: 0.25, fontSize: "0.65rem" }}
+                              onClick={() => setDeletingAdvanceId(null)}
+                            >
+                              No
+                            </Button>
+                          </Box>
+                        ) : (
+                          <Tooltip title="Delete advance">
+                            <IconButton size="small" color="error" onClick={() => setDeletingAdvanceId(adv.id)}>
+                              <DeleteIcon sx={{ fontSize: 16 }} />
+                            </IconButton>
+                          </Tooltip>
+                        )}
                       </TableCell>
                     </TableRow>
                   ))}
@@ -568,12 +609,63 @@ export default function RentalOrderDetailsPage() {
                     </Box>
                   </Box>
                   <Box display="flex" flexDirection="column" gap={0.75}>
-                    <Box display="flex" justifyContent="space-between">
-                      <Typography variant="body2" color="text.secondary">Amount</Typography>
-                      <Typography variant="body2" fontWeight={600} color="success.main">
-                        {formatCurrency(s.negotiated_final_amount ?? (s.total_rental_amount || 0) + (s.total_transport_amount || 0))}
-                      </Typography>
-                    </Box>
+                    {(() => {
+                      const gross = (s.total_rental_amount || 0) + (s.total_transport_amount || 0);
+                      // Use live advance total for vendor (stored snapshot may be stale if advance was recorded after settlement)
+                      const advance = s.party_type === "vendor"
+                        ? (order.total_advance_paid || s.total_advance_paid || 0)
+                        : (s.total_advance_paid || 0);
+                      const finalSettlement = s.negotiated_final_amount ?? (gross - advance);
+                      const totalPaid = advance + finalSettlement;
+                      const savings = gross - totalPaid;
+                      const hasAdvance = advance > 0;
+                      const hasDiscount = savings > 0.5;
+                      return (
+                        <>
+                          {gross > 0 && (
+                            <Box display="flex" justifyContent="space-between">
+                              <Typography variant="body2" color="text.secondary">Gross</Typography>
+                              <Typography variant="body2" color="text.secondary">{formatCurrency(gross)}</Typography>
+                            </Box>
+                          )}
+                          {hasAdvance && (
+                            <Box display="flex" justifyContent="space-between">
+                              <Typography variant="body2" color="text.secondary">Advance paid</Typography>
+                              <Typography variant="body2" color="warning.dark" fontWeight={500}>
+                                −{formatCurrency(advance)}
+                              </Typography>
+                            </Box>
+                          )}
+                          <Box display="flex" justifyContent="space-between">
+                            <Typography variant="body2" color="text.secondary">
+                              {hasAdvance ? "Final settlement" : "Settled"}
+                            </Typography>
+                            <Typography variant="body2" fontWeight={700} color="success.main">
+                              {formatCurrency(finalSettlement)}
+                            </Typography>
+                          </Box>
+                          {hasAdvance && (
+                            <>
+                              <Divider sx={{ my: 0.25 }} />
+                              <Box display="flex" justifyContent="space-between">
+                                <Typography variant="body2" fontWeight={600}>Total paid</Typography>
+                                <Typography variant="body2" fontWeight={700} color="success.dark">
+                                  {formatCurrency(totalPaid)}
+                                </Typography>
+                              </Box>
+                            </>
+                          )}
+                          {hasDiscount && (
+                            <Box display="flex" justifyContent="space-between">
+                              <Typography variant="caption" color="warning.dark">Discount saved</Typography>
+                              <Typography variant="caption" fontWeight={600} color="warning.dark">
+                                {formatCurrency(savings)} off
+                              </Typography>
+                            </Box>
+                          )}
+                        </>
+                      );
+                    })()}
                     <Box display="flex" justifyContent="space-between">
                       <Typography variant="body2" color="text.secondary">Date</Typography>
                       <Typography variant="body2">{formatDate(s.settlement_date)}</Typography>
@@ -655,6 +747,17 @@ export default function RentalOrderDetailsPage() {
               calculation={costCalculation}
               showItemDetails
               settlement={settlement as any}
+              settledPartyTypes={settledPartyTypes}
+              onSettleInbound={
+                order.status === "completed" && !inboundSettled
+                  ? () => setInboundSettleOpen(true)
+                  : undefined
+              }
+              onSettleOutbound={
+                order.status === "completed" && !outboundSettled
+                  ? () => setOutboundSettleOpen(true)
+                  : undefined
+              }
             />
           )}
 
@@ -697,6 +800,20 @@ export default function RentalOrderDetailsPage() {
         open={multiSettlementDialogOpen}
         onClose={() => setMultiSettlementDialogOpen(false)}
         order={order}
+      />
+
+      <MultiPartySettlementDialog
+        open={inboundSettleOpen}
+        onClose={() => setInboundSettleOpen(false)}
+        order={order}
+        focusedPartyType="transport_inbound"
+      />
+
+      <MultiPartySettlementDialog
+        open={outboundSettleOpen}
+        onClose={() => setOutboundSettleOpen(false)}
+        order={order}
+        focusedPartyType="transport_outbound"
       />
 
       {editingSettlement && (
