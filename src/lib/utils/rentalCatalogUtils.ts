@@ -1,4 +1,6 @@
 import type {
+  RentalItem,
+  RentalItemSize,
   RentalStoreInventoryWithDetails,
   EstimateBasketItem,
   VendorEstimate,
@@ -97,4 +99,31 @@ export function cheapestVendorId(estimates: VendorEstimate[]): string | null {
   return estimates.reduce((best, e) =>
     e.total_rental_cost < best.total_rental_cost ? e : best
   ).vendor_id;
+}
+
+/**
+ * Daily/hourly rate for an order line. Priority:
+ *   1. vendor size_rates[label] (existing override)
+ *   2. variant default (daily_rate or default_hourly_rate based on parent rate_type)
+ *   3. parent default_daily_rate
+ *   4. 0
+ */
+export function resolveVariantRate(
+  parent: Pick<RentalItem, "default_daily_rate" | "rate_type">,
+  variant: RentalItemSize | null,
+  vendorInventory: RentalStoreInventoryWithDetails | null
+): number {
+  const isHourly = parent.rate_type === "hourly";
+
+  if (variant && vendorInventory?.size_rates) {
+    const override = vendorInventory.size_rates[variant.size_label];
+    if (typeof override === "number") return override;
+  }
+
+  if (variant) {
+    const variantRate = isHourly ? variant.default_hourly_rate : variant.daily_rate;
+    if (typeof variantRate === "number") return variantRate;
+  }
+
+  return parent.default_daily_rate ?? 0;
 }

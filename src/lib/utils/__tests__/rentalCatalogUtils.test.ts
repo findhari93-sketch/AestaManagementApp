@@ -93,3 +93,95 @@ describe("cheapestVendorId", () => {
     expect(cheapestVendorId([])).toBeNull();
   });
 });
+
+import { resolveVariantRate } from "../rentalCatalogUtils";
+import type {
+  RentalItem,
+  RentalItemSize,
+  RentalStoreInventoryWithDetails,
+} from "@/types/rental.types";
+
+const makeItem = (overrides: Partial<RentalItem> = {}): RentalItem => ({
+  id: "item-1",
+  name: "Roof Sheet",
+  code: null,
+  local_name: null,
+  category_id: null,
+  description: null,
+  rental_type: "scaffolding",
+  source_type: "store",
+  rate_type: "daily",
+  unit: "piece",
+  specifications: null,
+  default_daily_rate: 5,
+  image_url: null,
+  is_active: true,
+  created_at: "",
+  updated_at: "",
+  created_by: null,
+  ...overrides,
+});
+
+const makeVariant = (overrides: Partial<RentalItemSize> = {}): RentalItemSize => ({
+  id: "size-1",
+  rental_item_id: "item-1",
+  size_label: "3×2",
+  display_order: 0,
+  is_active: true,
+  created_at: "",
+  daily_rate: 2,
+  default_hourly_rate: null,
+  image_url: null,
+  ...overrides,
+});
+
+describe("resolveVariantRate", () => {
+  it("uses vendor size_rates override when present", () => {
+    const item = makeItem();
+    const variant = makeVariant({ size_label: "3×2", daily_rate: 2 });
+    const vendorInv = {
+      id: "inv-1",
+      vendor_id: "v1",
+      rental_item_id: "item-1",
+      daily_rate: 10,
+      size_rates: { "3×2": 4 },
+    } as RentalStoreInventoryWithDetails;
+    expect(resolveVariantRate(item, variant, vendorInv)).toBe(4);
+  });
+
+  it("falls back to variant.daily_rate when vendor has no size override", () => {
+    const item = makeItem();
+    const variant = makeVariant({ daily_rate: 2 });
+    const vendorInv = {
+      id: "inv-1",
+      vendor_id: "v1",
+      rental_item_id: "item-1",
+      daily_rate: 10,
+      size_rates: { "different-size": 4 },
+    } as RentalStoreInventoryWithDetails;
+    expect(resolveVariantRate(item, variant, vendorInv)).toBe(2);
+  });
+
+  it("falls back to parent default_daily_rate when variant has no rate", () => {
+    const item = makeItem({ default_daily_rate: 5 });
+    const variant = makeVariant({ daily_rate: null });
+    expect(resolveVariantRate(item, variant, null)).toBe(5);
+  });
+
+  it("uses parent default when no variant is picked", () => {
+    const item = makeItem({ default_daily_rate: 7 });
+    expect(resolveVariantRate(item, null, null)).toBe(7);
+  });
+
+  it("returns 0 when nothing is set anywhere", () => {
+    const item = makeItem({ default_daily_rate: null });
+    const variant = makeVariant({ daily_rate: null });
+    expect(resolveVariantRate(item, variant, null)).toBe(0);
+  });
+
+  it("prefers variant.default_hourly_rate when parent rate_type is hourly", () => {
+    const item = makeItem({ rate_type: "hourly", default_daily_rate: 1 });
+    const variant = makeVariant({ daily_rate: 2, default_hourly_rate: 9 });
+    expect(resolveVariantRate(item, variant, null)).toBe(9);
+  });
+});
