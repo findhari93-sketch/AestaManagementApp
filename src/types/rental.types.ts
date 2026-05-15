@@ -208,6 +208,7 @@ export interface RentalOrder {
   status: RentalOrderStatus;
   estimated_total: number;
   actual_total: number | null;
+  is_historical: boolean;
 
   // Transport outward
   transport_cost_outward: number;
