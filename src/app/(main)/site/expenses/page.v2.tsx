@@ -856,7 +856,7 @@ export default function ExpensesPageV2() {
         <Table stickyHeader size="small">
           <TableHead>
             <TableRow>
-              {["Date", "Ref", "Vendor / Description", "Trade", "Kind", "Status", "Amount", ""].map((h) => (
+              {["Date", "Ref", "Vendor / Description", "Trade / Subcontract", "Kind", "Status", "Amount", ""].map((h) => (
                 <TableCell
                   key={h}
                   align={h === "Amount" ? "right" : "left"}
@@ -969,15 +969,41 @@ export default function ExpensesPageV2() {
                       )}
                     </TableCell>
 
-                    {/* Trade */}
-                    <TableCell sx={{ py: dense ? 0.5 : 1 }}>
+                    {/* Trade / Subcontract */}
+                    <TableCell sx={{ py: dense ? 0.5 : 1, maxWidth: 200 }}>
                       {tradeInfo ? (
                         <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
                           <Box sx={{ width: 8, height: 8, borderRadius: "50%", bgcolor: "primary.main", flexShrink: 0 }} />
                           <Typography variant="caption" noWrap>{tradeInfo.name}</Typography>
                         </Box>
                       ) : (
-                        <Typography variant="caption" color="text.disabled">Site-wide</Typography>
+                        <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                          <Box sx={{ width: 8, height: 8, borderRadius: "50%", bgcolor: "grey.400", flexShrink: 0 }} />
+                          <Typography variant="caption" color="text.disabled">—</Typography>
+                        </Box>
+                      )}
+                      {!dense && (
+                        row.contract_id && contractToSubcontract.has(row.contract_id) ? (
+                          <Typography
+                            variant="caption"
+                            color="text.secondary"
+                            noWrap
+                            display="block"
+                            sx={{ fontSize: 11, mt: 0.25, ml: 1.5 }}
+                          >
+                            {contractToSubcontract.get(row.contract_id)!.title}
+                          </Typography>
+                        ) : (
+                          <Box sx={{ mt: 0.25, ml: 1.5 }}>
+                            <Chip
+                              label="Unlinked"
+                              size="small"
+                              color="warning"
+                              variant="outlined"
+                              sx={{ height: 18, fontSize: 10, "& .MuiChip-label": { px: 0.75 } }}
+                            />
+                          </Box>
+                        )
                       )}
                     </TableCell>
 
