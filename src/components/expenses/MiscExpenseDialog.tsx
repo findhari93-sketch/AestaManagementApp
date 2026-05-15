@@ -30,7 +30,6 @@ import { Close as CloseIcon } from "@mui/icons-material";
 import { createClient } from "@/lib/supabase/client";
 import FileUploader, { UploadedFile } from "@/components/common/FileUploader";
 import PayerSourceSelector from "@/components/settlement/PayerSourceSelector";
-import BatchSelector from "@/components/wallet/BatchSelector";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSite } from "@/contexts/SiteContext";
 import { createMiscExpense, updateMiscExpense } from "@/lib/services/miscExpenseService";
@@ -41,7 +40,6 @@ import { useLaborers } from "@/hooks/queries/useLaborers";
 import type { Database } from "@/types/database.types";
 
 type PaymentMode = Database["public"]["Enums"]["payment_mode"];
-import type { BatchAllocation } from "@/types/wallet.types";
 import dayjs from "dayjs";
 
 interface ExpenseCategory {
@@ -96,9 +94,6 @@ export default function MiscExpenseDialog({
   const [subcontractId, setSubcontractId] = useState<string>("");
   const [notes, setNotes] = useState("");
   const [proofUrl, setProofUrl] = useState<string | null>(null);
-
-  // Batch allocations for engineer wallet
-  const [batchAllocations, setBatchAllocations] = useState<BatchAllocation[]>([]);
 
   // Data lists
   const [categories, setCategories] = useState<ExpenseCategory[]>([]);
@@ -164,7 +159,6 @@ export default function MiscExpenseDialog({
         setSubcontractId(defaultSubcontractId || "");
         setNotes("");
         setProofUrl(null);
-        setBatchAllocations([]);
       }
       setError(null);
     }
@@ -266,11 +260,6 @@ export default function MiscExpenseDialog({
       return;
     }
 
-    if (payerType === "site_engineer" && createWalletTransaction && batchAllocations.length === 0) {
-      setError("Please select wallet batches to allocate from");
-      return;
-    }
-
     setLoading(true);
     setError(null);
 
@@ -321,7 +310,10 @@ export default function MiscExpenseDialog({
           proofUrl: proofUrl || undefined,
           userId: userProfile?.id || "",
           userName: userProfile?.name || "System",
-          batchAllocations: payerType === "site_engineer" ? batchAllocations : undefined,
+          // Misc expense engineer-wallet payments now use the v2 wallet
+          // primitive (single LIFO pool, no batches). Other v1 callers
+          // (settlement/rental) keep the legacy batch path until they migrate.
+          useV2Wallet: payerType === "site_engineer" && createWalletTransaction,
         });
 
         if (!result.success) {
@@ -467,7 +459,6 @@ export default function MiscExpenseDialog({
               setPayerType(e.target.value as "site_engineer" | "company_direct");
               if (e.target.value === "company_direct") {
                 setSelectedEngineerId("");
-                setBatchAllocations([]);
               }
             }}
           >
@@ -495,8 +486,7 @@ export default function MiscExpenseDialog({
                   value={selectedEngineerId}
                   onChange={(e) => {
                     setSelectedEngineerId(e.target.value);
-                    setBatchAllocations([]);
-                  }}
+                      }}
                   label="Select Engineer"
                   disabled={isEditMode}
                 >
@@ -519,37 +509,23 @@ export default function MiscExpenseDialog({
               </FormControl>
 
               {!isEditMode && selectedEngineerId && (
-                <>
-                  <FormControlLabel
-                    control={
-                      <Checkbox
-                        checked={createWalletTransaction}
-                        onChange={(e) => setCreateWalletTransaction(e.target.checked)}
-                        size="small"
-                      />
-                    }
-                    label={
-                      <Box>
-                        <Typography variant="body2">Deduct from wallet</Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          Record as &quot;Spent on Behalf&quot; in engineer wallet
-                        </Typography>
-                      </Box>
-                    }
-                  />
-
-                  {createWalletTransaction && amount > 0 && (
-                    <Box sx={{ mt: 2 }}>
-                      <BatchSelector
-                        engineerId={selectedEngineerId}
-                        siteId={selectedSite?.id || null}
-                        requiredAmount={amount}
-                        selectedBatches={batchAllocations}
-                        onSelectionChange={setBatchAllocations}
-                      />
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={createWalletTransaction}
+                      onChange={(e) => setCreateWalletTransaction(e.target.checked)}
+                      size="small"
+                    />
+                  }
+                  label={
+                    <Box>
+                      <Typography variant="body2">Deduct from wallet</Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        Debits the engineer&apos;s LIFO wallet pool for this site
+                      </Typography>
                     </Box>
-                  )}
-                </>
+                  }
+                />
               )}
             </Box>
           )}

@@ -10,6 +10,7 @@ import type {
 } from "@/types/misc-expense.types";
 import type { PayerSource } from "@/types/settlement.types";
 import { recordWalletSpending } from "./walletService";
+import { recordSpend } from "./engineerWalletV2";
 
 /**
  * Create a new miscellaneous expense with full payment tracking.
@@ -20,7 +21,15 @@ export async function createMiscExpense(
   config: CreateMiscExpenseConfig
 ): Promise<MiscExpenseResult> {
   try {
-    const { siteId, formData, proofUrl, userId, userName, batchAllocations } = config;
+    const {
+      siteId,
+      formData,
+      proofUrl,
+      userId,
+      userName,
+      batchAllocations,
+      useV2Wallet,
+    } = config;
     let engineerTransactionId: string | null = null;
     let referenceNumber: string | undefined;
 
@@ -41,34 +50,60 @@ export async function createMiscExpense(
 
     // 2. If via engineer wallet, record spending transaction
     if (formData.payer_type === "site_engineer" && formData.site_engineer_id) {
-      // Validate batch allocations are provided
-      if (!batchAllocations || batchAllocations.length === 0) {
-        throw new Error("Batch allocation required for engineer wallet payment. Please select which wallet batches to use.");
+      if (useV2Wallet) {
+        // v2 path: single LIFO pool, no batches. Atomic via RPC with WLT01 on
+        // insufficient balance. The wallet ledger only models cash/upi/bank
+        // — cheque/other modes collapse to cash for ledger attribution.
+        const walletMode =
+          formData.payment_mode === "upi"
+            ? "upi"
+            : formData.payment_mode === "bank_transfer"
+            ? "bank_transfer"
+            : "cash";
+        const spendResult = await recordSpend(supabase, {
+          engineer_id: formData.site_engineer_id,
+          site_id: siteId,
+          amount: formData.amount,
+          transaction_date: formData.date,
+          payment_mode: walletMode,
+          proof_url: proofUrl ?? null,
+          notes: formData.notes ?? null,
+          recorded_by: userName,
+          recorded_by_user_id: userId,
+          description: `Misc expense ${referenceNumber}${formData.vendor_name ? ` - ${formData.vendor_name}` : ""}`,
+        });
+        engineerTransactionId = spendResult.id;
+      } else {
+        // v1 legacy path: batch-allocated. Required for callers that still
+        // surface a BatchSelector UI.
+        if (!batchAllocations || batchAllocations.length === 0) {
+          throw new Error("Batch allocation required for engineer wallet payment. Please select which wallet batches to use.");
+        }
+
+        const spendingResult = await recordWalletSpending(supabase, {
+          engineerId: formData.site_engineer_id,
+          amount: formData.amount,
+          siteId: siteId,
+          description: `Misc expense ${referenceNumber}${formData.vendor_name ? ` - ${formData.vendor_name}` : ""}`,
+          recipientType: "vendor",
+          paymentMode: formData.payment_mode,
+          moneySource: "wallet",
+          batchAllocations: batchAllocations,
+          subcontractId: formData.subcontract_id || undefined,
+          proofUrl: proofUrl,
+          notes: formData.notes,
+          transactionDate: formData.date,
+          userName: userName,
+          userId: userId,
+          settlementReference: referenceNumber,
+        });
+
+        if (!spendingResult.success) {
+          throw new Error(spendingResult.error || "Failed to record wallet spending");
+        }
+
+        engineerTransactionId = spendingResult.transactionId || null;
       }
-
-      const spendingResult = await recordWalletSpending(supabase, {
-        engineerId: formData.site_engineer_id,
-        amount: formData.amount,
-        siteId: siteId,
-        description: `Misc expense ${referenceNumber}${formData.vendor_name ? ` - ${formData.vendor_name}` : ""}`,
-        recipientType: "vendor",
-        paymentMode: formData.payment_mode,
-        moneySource: "wallet",
-        batchAllocations: batchAllocations,
-        subcontractId: formData.subcontract_id || undefined,
-        proofUrl: proofUrl,
-        notes: formData.notes,
-        transactionDate: formData.date,
-        userName: userName,
-        userId: userId,
-        settlementReference: referenceNumber,
-      });
-
-      if (!spendingResult.success) {
-        throw new Error(spendingResult.error || "Failed to record wallet spending");
-      }
-
-      engineerTransactionId = spendingResult.transactionId || null;
     }
 
     // 3. Create misc_expenses record

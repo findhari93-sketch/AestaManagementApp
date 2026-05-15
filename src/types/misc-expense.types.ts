@@ -75,6 +75,14 @@ export interface CreateMiscExpenseConfig {
   userId: string;
   userName: string;
   batchAllocations?: BatchAllocation[];
+  /**
+   * When true, use the v2 wallet primitive (`recordSpend` — single LIFO pool,
+   * no batches). When false/undefined, use the legacy v1 path
+   * (`recordWalletSpending` with batchAllocations required). MiscExpenseDialog
+   * passes true for engineer-wallet payments now that the rest of the app has
+   * moved to v2; v1 stays available for callers that still need batch picking.
+   */
+  useV2Wallet?: boolean;
 }
 
 /**
