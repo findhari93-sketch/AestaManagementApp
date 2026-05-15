@@ -7,11 +7,13 @@ import {
   Button,
   Chip,
   Dialog,
+  DialogActions,
   DialogContent,
   DialogTitle,
   Divider,
   IconButton,
   Stack,
+  TextField,
   Typography,
 } from "@mui/material";
 import {
@@ -24,7 +26,8 @@ import {
   EditNote as EditIcon,
 } from "@mui/icons-material";
 import dayjs from "dayjs";
-import { useRouter } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
+import { createClient } from "@/lib/supabase/client";
 import type { DailyPeekSite } from "@/hooks/queries/useCompanyDailyPeek";
 import type { WorkPhoto } from "@/types/work-updates.types";
 import PhotoLightbox from "./PhotoLightbox";
@@ -43,8 +46,12 @@ function buildWhatsAppUrl(phone: string, siteName: string, date: string): string
 }
 
 export default function SitePeekModal({ open, site, date, onClose }: SitePeekModalProps) {
-  const router = useRouter();
+  const queryClient = useQueryClient();
   const [lightbox, setLightbox] = useState<{ photos: WorkPhoto[]; index: number } | null>(null);
+  const [phoneDialog, setPhoneDialog] = useState(false);
+  const [phoneInput, setPhoneInput] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   if (!site) return null;
 
@@ -153,7 +160,11 @@ export default function SitePeekModal({ open, site, date, onClose }: SitePeekMod
                   <Button
                     variant="outlined"
                     startIcon={<EditIcon />}
-                    onClick={() => router.push(`/company/sites`)}
+                    onClick={() => {
+                      setPhoneInput(site.engineerPhone || "");
+                      setSaveError(null);
+                      setPhoneDialog(true);
+                    }}
                   >
                     Add engineer phone
                   </Button>
@@ -365,6 +376,74 @@ export default function SitePeekModal({ open, site, date, onClose }: SitePeekMod
         startIndex={lightbox?.index ?? 0}
         onClose={() => setLightbox(null)}
       />
+
+      <Dialog
+        open={phoneDialog}
+        onClose={() => (saving ? null : setPhoneDialog(false))}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>Engineer phone for {site.siteName}</DialogTitle>
+        <DialogContent>
+          <Stack spacing={1.5} sx={{ pt: 1 }}>
+            <Typography variant="body2" color="text.secondary">
+              Saved to this site. Used to send the WhatsApp nudge.
+            </Typography>
+            <TextField
+              autoFocus
+              fullWidth
+              label="Phone number"
+              placeholder="e.g. 9944420304 or +919944420304"
+              value={phoneInput}
+              onChange={(e) => setPhoneInput(e.target.value)}
+              disabled={saving}
+              inputMode="tel"
+            />
+            {saveError && <Alert severity="error">{saveError}</Alert>}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setPhoneDialog(false)} disabled={saving}>
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            disabled={saving}
+            onClick={async () => {
+              const trimmed = phoneInput.trim();
+              const digits = trimmed.replace(/[^\d]/g, "");
+              if (digits.length < 10) {
+                setSaveError("Enter at least 10 digits.");
+                return;
+              }
+              setSaving(true);
+              setSaveError(null);
+              try {
+                const supabase = createClient();
+                const { error } = await (supabase as unknown as {
+                  from: (t: string) => {
+                    update: (v: Record<string, unknown>) => {
+                      eq: (col: string, val: string) => Promise<{ error: { message: string } | null }>;
+                    };
+                  };
+                })
+                  .from("sites")
+                  .update({ engineer_phone: trimmed })
+                  .eq("id", site.siteId);
+                if (error) throw new Error(error.message);
+                await queryClient.invalidateQueries({ queryKey: ["company-daily-peek"] });
+                setPhoneDialog(false);
+              } catch (err) {
+                setSaveError(err instanceof Error ? err.message : "Failed to save phone.");
+              } finally {
+                setSaving(false);
+              }
+            }}
+          >
+            {saving ? "Saving…" : "Save"}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </>
   );
 }
