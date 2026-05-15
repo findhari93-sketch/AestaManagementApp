@@ -57,6 +57,7 @@ import {
 import { useAuth } from "@/contexts/AuthContext";
 import VendorAutocomplete from "@/components/common/VendorAutocomplete";
 import PayerSourceSelector from "@/components/settlement/PayerSourceSelector";
+import { resolveVariantRate } from "@/lib/utils/rentalCatalogUtils";
 import { formatCurrency } from "@/lib/formatters";
 import { hardenedUpload } from "@/lib/storage/uploadHelpers";
 import { createClient } from "@/lib/supabase/client";
@@ -273,6 +274,8 @@ export default function HistoricalRentalDialog({
       return {
         item_name: it.item_name_override ?? it.rental_item?.name ?? "",
         rental_item_id: it.rental_item_id ?? null,
+        rental_item_size_id: it.rental_item_size_id ?? null,
+        size_label: it.size_label_snapshot ?? null,
         quantity: it.quantity,
         daily_rate: it.daily_rate_actual,
         days,
@@ -671,6 +674,7 @@ export default function HistoricalRentalDialog({
                       <TableHead>
                         <TableRow>
                           <TableCell>Item Name</TableCell>
+                          <TableCell sx={{ minWidth: 100 }}>Variant</TableCell>
                           <TableCell align="right" sx={{ minWidth: 60 }}>Qty</TableCell>
                           <TableCell align="right" sx={{ minWidth: 80 }}>Rate/day</TableCell>
                           <TableCell align="right" sx={{ minWidth: 60 }}>Days</TableCell>
@@ -692,7 +696,12 @@ export default function HistoricalRentalDialog({
                                 inputValue={item.item_name}
                                 onInputChange={(_, val, reason) => {
                                   if (reason !== "reset") {
-                                    updateItem(idx, { item_name: val, rental_item_id: null });
+                                    updateItem(idx, {
+                                      item_name: val,
+                                      rental_item_id: null,
+                                      rental_item_size_id: null,
+                                      size_label: null,
+                                    });
                                   }
                                 }}
                                 onChange={(_, val) => {
@@ -701,10 +710,17 @@ export default function HistoricalRentalDialog({
                                     updateItem(idx, {
                                       item_name: catalogItem.name,
                                       rental_item_id: catalogItem.id,
+                                      rental_item_size_id: null,
+                                      size_label: null,
                                       daily_rate: catalogItem.default_daily_rate ?? item.daily_rate,
                                     });
                                   } else if (typeof val === "string") {
-                                    updateItem(idx, { item_name: val, rental_item_id: null });
+                                    updateItem(idx, {
+                                      item_name: val,
+                                      rental_item_id: null,
+                                      rental_item_size_id: null,
+                                      size_label: null,
+                                    });
                                   }
                                 }}
                                 renderInput={(params) => (
@@ -717,6 +733,41 @@ export default function HistoricalRentalDialog({
                                 )}
                                 slotProps={{ popper: { disablePortal: false } }}
                               />
+                            </TableCell>
+                            <TableCell sx={{ minWidth: 100 }}>
+                              {(() => {
+                                const catalogItem = item.rental_item_id
+                                  ? allRentalItems.find((ci) => ci.id === item.rental_item_id)
+                                  : null;
+                                const variants = (catalogItem?.sizes ?? []).filter((s) => s.is_active);
+                                if (variants.length === 0) {
+                                  return <Typography variant="caption" color="text.disabled">—</Typography>;
+                                }
+                                return (
+                                  <Select
+                                    size="small"
+                                    variant="standard"
+                                    value={item.rental_item_size_id ?? ""}
+                                    onChange={(e) => {
+                                      const sizeId = (e.target.value as string) || null;
+                                      const v = sizeId ? variants.find((s) => s.id === sizeId) ?? null : null;
+                                      const resolved = v ? resolveVariantRate(catalogItem!, v, null) : item.daily_rate;
+                                      updateItem(idx, {
+                                        rental_item_size_id: sizeId,
+                                        size_label: v?.size_label ?? null,
+                                        daily_rate: v ? resolved : item.daily_rate,
+                                      });
+                                    }}
+                                    displayEmpty
+                                    sx={{ minWidth: 80, fontSize: "0.875rem" }}
+                                  >
+                                    <MenuItem value=""><em>—</em></MenuItem>
+                                    {variants.map((v) => (
+                                      <MenuItem key={v.id} value={v.id}>{v.size_label}</MenuItem>
+                                    ))}
+                                  </Select>
+                                );
+                              })()}
                             </TableCell>
                             <TableCell align="right">
                               <TextField

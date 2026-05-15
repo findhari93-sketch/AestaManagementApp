@@ -650,6 +650,8 @@ export interface VendorEstimate {
 export interface HistoricalRentalItemFormData {
   item_name: string;
   rental_item_id?: string | null;
+  rental_item_size_id?: string | null;
+  size_label?: string | null;
   quantity: number;
   daily_rate: number;
   days: number;

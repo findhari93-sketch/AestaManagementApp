@@ -2176,6 +2176,8 @@ export function useCreateHistoricalRental() {
           return {
             rental_order_id: order.id,
             rental_item_id: item.rental_item_id ?? null,
+            rental_item_size_id: item.rental_item_size_id ?? null,
+            size_label_snapshot: item.size_label ?? null,
             item_name_override: item.item_name,
             quantity: item.quantity,
             daily_rate_default: item.daily_rate,
@@ -2348,6 +2350,8 @@ export function useUpdateHistoricalRental() {
           return {
             rental_order_id: orderId,
             rental_item_id: item.rental_item_id ?? null,
+            rental_item_size_id: item.rental_item_size_id ?? null,
+            size_label_snapshot: item.size_label ?? null,
             item_name_override: item.item_name,
             quantity: item.quantity,
             daily_rate_default: item.daily_rate,
