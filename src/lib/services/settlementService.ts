@@ -18,7 +18,6 @@ import type {
 import type { PayerSource, SettlementRecord } from "@/types/settlement.types";
 import { requiresPayerName } from "@/types/settlement.types";
 import type { BatchAllocation } from "@/types/wallet.types";
-import { recordWalletSpending } from "./walletService";
 import { recordSpend } from "./engineerWalletV2";
 
 export interface SettlementResult {
@@ -352,33 +351,36 @@ export async function processSettlement(
     settlementGroupId = groupData.id;
     settlementReference = groupData.settlement_reference;
 
-    // 2. If via engineer wallet, record spending transaction (deducts from wallet batches)
+    // 2. If via engineer wallet, debit the wallet atomically via wallet-v2 RPC.
+    // Mirrors the contract-payment path — recordSpend wraps
+    // atomic_record_wallet_spend (per-engineer advisory lock + balance check)
+    // and writes a transaction_type='spend' row that v_engineer_wallet_balance
+    // recognises. Replaces the legacy recordWalletSpending call which still
+    // wrote dropped columns (is_settled / settlement_status / …) and the
+    // unrecognised 'received_from_company' transaction type.
     if (config.paymentChannel === "engineer_wallet" && config.engineerId) {
-      // v2 SHIM (2026-05-09): batchAllocations is no longer required — wallet v2 has no
-      // batches, just a per-(engineer, site) running balance. recordWalletSpending forwards
-      // to atomic_record_wallet_spend internally.
-      const walletPaymentMode = config.paymentMode === "net_banking" ? "bank_transfer" : config.paymentMode;
-      const spendingResult = await recordWalletSpending(supabase, {
-        engineerId: config.engineerId,
-        amount: config.totalAmount,
-        siteId: config.siteId,
-        description: config.engineerReference || `Salary settlement ${settlementReference}`,
-        recipientType: "laborer",
-        paymentMode: walletPaymentMode as any,
-        moneySource: "wallet",
-        batchAllocations: config.batchAllocations,
-        subcontractId: effectiveSubcontractId,
-        proofUrl: config.proofUrl,
-        notes: config.notes,
-        transactionDate: paymentDate,
-        userName: config.userName,
-        userId: config.userId,
-        settlementReference: settlementReference,
-        settlementGroupId: settlementGroupId,
-      });
-
-      if (!spendingResult.success) {
-        // Rollback: cancel the settlement group since wallet spending failed
+      const walletPaymentMode =
+        config.paymentMode === "upi"
+          ? "upi"
+          : config.paymentMode === "bank_transfer" || config.paymentMode === "net_banking"
+          ? "bank_transfer"
+          : "cash";
+      try {
+        const { id: txId } = await recordSpend(supabase, {
+          engineer_id: config.engineerId,
+          site_id: config.siteId,
+          amount: config.totalAmount,
+          transaction_date: paymentDate,
+          payment_mode: walletPaymentMode,
+          proof_url: config.proofUrl || null,
+          notes: config.notes || null,
+          recorded_by: config.userName,
+          recorded_by_user_id: config.userId,
+          description:
+            config.engineerReference || `Salary settlement ${settlementReference}`,
+        });
+        engineerTransactionId = txId;
+      } catch (walletErr: any) {
         await supabase
           .from("settlement_groups")
           .update({
@@ -386,24 +388,19 @@ export async function processSettlement(
             cancelled_at: new Date().toISOString(),
             cancelled_by: config.userName,
             cancelled_by_user_id: config.userId,
-            cancellation_reason: `Wallet spending failed: ${spendingResult.error}`,
+            cancellation_reason: `Engineer wallet debit failed: ${walletErr?.message ?? walletErr}`,
           })
           .eq("id", settlementGroupId);
-        throw new Error(spendingResult.error || "Failed to record wallet spending");
+        throw walletErr;
       }
 
-      engineerTransactionId = spendingResult.transactionId || null;
+      const { error: updateError } = await supabase
+        .from("settlement_groups")
+        .update({ engineer_transaction_id: engineerTransactionId })
+        .eq("id", settlementGroupId);
 
-      // Update settlement_group with the engineer_transaction_id
-      if (engineerTransactionId) {
-        const { error: updateError } = await supabase
-          .from("settlement_groups")
-          .update({ engineer_transaction_id: engineerTransactionId })
-          .eq("id", settlementGroupId);
-
-        if (updateError) {
-          console.warn("Could not update settlement_group with engineer_transaction_id:", updateError);
-        }
+      if (updateError) {
+        console.warn("Could not update settlement_group with engineer_transaction_id:", updateError);
       }
     }
 
@@ -612,31 +609,33 @@ export async function processWeeklySettlement(
     settlementGroupId = groupData.id;
     settlementReference = groupData.settlement_reference;
 
-    // 3. If via engineer wallet, record spending transaction
+    // 3. If via engineer wallet, debit via wallet-v2 RPC. See processSettlement
+    // for the rationale (legacy site_engineer_transactions columns dropped +
+    // unrecognised transaction_type).
     if (config.paymentChannel === "engineer_wallet" && config.engineerId) {
-      // v2 SHIM (2026-05-09): batchAllocations no longer required — see recordWalletSpending.
-      const walletPaymentMode = config.paymentMode === "net_banking" ? "bank_transfer" : config.paymentMode;
-      const spendingResult = await recordWalletSpending(supabase, {
-        engineerId: config.engineerId,
-        amount: config.totalAmount,
-        siteId: config.siteId,
-        description: config.engineerReference || `Weekly settlement ${settlementReference} (${config.dateFrom} - ${config.dateTo})`,
-        recipientType: "laborer",
-        paymentMode: walletPaymentMode as any,
-        moneySource: "wallet",
-        batchAllocations: config.batchAllocations,
-        subcontractId: config.subcontractId,
-        proofUrl: config.proofUrl,
-        notes: config.notes,
-        transactionDate: paymentDate,
-        userName: config.userName,
-        userId: config.userId,
-        settlementReference: settlementReference,
-        settlementGroupId: settlementGroupId,
-      });
-
-      if (!spendingResult.success) {
-        // Rollback: cancel the settlement group
+      const walletPaymentMode =
+        config.paymentMode === "upi"
+          ? "upi"
+          : config.paymentMode === "bank_transfer" || config.paymentMode === "net_banking"
+          ? "bank_transfer"
+          : "cash";
+      try {
+        const { id: txId } = await recordSpend(supabase, {
+          engineer_id: config.engineerId,
+          site_id: config.siteId,
+          amount: config.totalAmount,
+          transaction_date: paymentDate,
+          payment_mode: walletPaymentMode,
+          proof_url: config.proofUrl || null,
+          notes: config.notes || null,
+          recorded_by: config.userName,
+          recorded_by_user_id: config.userId,
+          description:
+            config.engineerReference ||
+            `Weekly settlement ${settlementReference} (${config.dateFrom} - ${config.dateTo})`,
+        });
+        engineerTransactionId = txId;
+      } catch (walletErr: any) {
         await supabase
           .from("settlement_groups")
           .update({
@@ -644,21 +643,16 @@ export async function processWeeklySettlement(
             cancelled_at: new Date().toISOString(),
             cancelled_by: config.userName,
             cancelled_by_user_id: config.userId,
-            cancellation_reason: `Wallet spending failed: ${spendingResult.error}`,
+            cancellation_reason: `Engineer wallet debit failed: ${walletErr?.message ?? walletErr}`,
           })
           .eq("id", settlementGroupId);
-        throw new Error(spendingResult.error || "Failed to record wallet spending");
+        throw walletErr;
       }
 
-      engineerTransactionId = spendingResult.transactionId || null;
-
-      // Update settlement_group with engineer_transaction_id
-      if (engineerTransactionId) {
-        await supabase
-          .from("settlement_groups")
-          .update({ engineer_transaction_id: engineerTransactionId })
-          .eq("id", settlementGroupId);
-      }
+      await supabase
+        .from("settlement_groups")
+        .update({ engineer_transaction_id: engineerTransactionId })
+        .eq("id", settlementGroupId);
     }
 
     // 4. Update attendance records with settlement_group_id
