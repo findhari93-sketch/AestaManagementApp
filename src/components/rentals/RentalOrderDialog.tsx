@@ -50,6 +50,7 @@ import type {
   RentalRateType,
 } from "@/types/rental.types";
 import { TRANSPORT_HANDLER_LABELS } from "@/types/rental.types";
+import { resolveVariantRate } from "@/lib/utils/rentalCatalogUtils";
 import type { Vendor } from "@/types/material.types";
 import dayjs from "dayjs";
 
@@ -98,9 +99,20 @@ export default function RentalOrderDialog({
 
   // Item selection state
   const [selectedItem, setSelectedItem] = useState<RentalItemWithDetails | null>(null);
+  const [selectedSizeId, setSelectedSizeId] = useState<string | null>(null);
   const [itemQuantity, setItemQuantity] = useState(1);
   const [itemRate, setItemRate] = useState(0);
   const [itemHours, setItemHours] = useState<number>(8); // Default 8 hours for hourly items
+
+  const itemVariants = useMemo(() => {
+    if (!selectedItem) return [];
+    return ((selectedItem as RentalItemWithDetails).sizes ?? []).filter((s) => s.is_active);
+  }, [selectedItem]);
+
+  const selectedVariant = useMemo(
+    () => itemVariants.find((v) => v.id === selectedSizeId) ?? null,
+    [itemVariants, selectedSizeId]
+  );
 
   useEffect(() => {
     if (!open) {
@@ -117,6 +129,7 @@ export default function RentalOrderDialog({
       setDiscountPercentage(0);
       setExcludeStartDate(false);
       setSelectedItem(null);
+      setSelectedSizeId(null);
       setItemQuantity(1);
       setItemRate(0);
       setItemHours(8);
@@ -124,23 +137,27 @@ export default function RentalOrderDialog({
     }
   }, [open]);
 
-  // Get rate from vendor inventory when item is selected
+  // Get rate from vendor inventory when item / variant is selected
   useEffect(() => {
-    if (selectedItem && selectedVendor) {
-      const inventoryItem = vendorInventory.find(
-        (inv) => inv.rental_item_id === selectedItem.id
-      );
-      if (inventoryItem) {
-        setItemRate(inventoryItem.daily_rate);
-      } else {
-        setItemRate(selectedItem.default_daily_rate || 0);
-      }
+    if (!selectedItem) {
+      setItemRate(0);
+      return;
     }
-  }, [selectedItem, selectedVendor, vendorInventory]);
+    const vendorInv =
+      (selectedVendor &&
+        vendorInventory.find((inv) => inv.rental_item_id === selectedItem.id)) ||
+      null;
+    const rate = resolveVariantRate(selectedItem, selectedVariant, vendorInv ?? null);
+    setItemRate(rate);
+  }, [selectedItem, selectedVendor, vendorInventory, selectedVariant]);
 
   const handleAddItem = () => {
     if (!selectedItem) {
       setError("Please select an item");
+      return;
+    }
+    if (itemVariants.length > 0 && !selectedVariant) {
+      setError("Please select a variant");
       return;
     }
     if (itemQuantity <= 0) {
@@ -152,25 +169,20 @@ export default function RentalOrderDialog({
       return;
     }
 
-    // Check if item already exists
+    // Each (item, variant) pair is its own line — don't merge across variants.
     const existingIndex = lineItems.findIndex(
-      (li) => li.rental_item_id === selectedItem.id
+      (li) =>
+        li.rental_item_id === selectedItem.id &&
+        (li.rental_item_size_id ?? null) === (selectedVariant?.id ?? null)
     );
 
     if (existingIndex >= 0) {
-      // Update existing
       setLineItems((prev) =>
         prev.map((li, i) =>
-          i === existingIndex
-            ? {
-                ...li,
-                quantity: li.quantity + itemQuantity,
-              }
-            : li
+          i === existingIndex ? { ...li, quantity: li.quantity + itemQuantity } : li
         )
       );
     } else {
-      // Add new
       const isHourly = selectedItem.rate_type === "hourly";
       const newItem: OrderLineItem = {
         tempId: `temp-${Date.now()}`,
@@ -178,16 +190,18 @@ export default function RentalOrderDialog({
         itemName: selectedItem.name,
         itemRateType: selectedItem.rate_type || "daily",
         quantity: itemQuantity,
-        daily_rate_default: selectedItem.default_daily_rate || itemRate,
+        daily_rate_default: itemRate,
         daily_rate_actual: itemRate,
         rate_type: selectedItem.rate_type || "daily",
         hours_used: isHourly ? itemHours : undefined,
+        rental_item_size_id: selectedVariant?.id ?? null,
+        size_label_snapshot: selectedVariant?.size_label ?? null,
       };
       setLineItems((prev) => [...prev, newItem]);
     }
 
-    // Reset selection
     setSelectedItem(null);
+    setSelectedSizeId(null);
     setItemQuantity(1);
     setItemRate(0);
     setItemHours(8);
@@ -282,6 +296,8 @@ export default function RentalOrderDialog({
           daily_rate_actual: li.daily_rate_actual,
           rate_type: li.rate_type,
           hours_used: li.hours_used,
+          rental_item_size_id: li.rental_item_size_id ?? undefined,
+          size_label_snapshot: li.size_label_snapshot ?? undefined,
         })),
       };
 
@@ -414,7 +430,7 @@ export default function RentalOrderDialog({
               options={allRentalItems}
               getOptionLabel={(option) => `${option.name} (${option.code || ""})`}
               value={selectedItem}
-              onChange={(_, value) => setSelectedItem(value)}
+              onChange={(_, value) => { setSelectedItem(value); setSelectedSizeId(null); }}
               renderInput={(params) => (
                 <TextField
                   {...params}
@@ -425,6 +441,26 @@ export default function RentalOrderDialog({
               )}
             />
           </Grid>
+
+          {itemVariants.length > 0 && (
+            <Grid size={{ xs: 12, md: 3 }}>
+              <FormControl fullWidth size="small" required>
+                <InputLabel>Variant</InputLabel>
+                <Select
+                  value={selectedSizeId ?? ""}
+                  label="Variant"
+                  onChange={(e) => setSelectedSizeId((e.target.value as string) || null)}
+                >
+                  {itemVariants.map((v) => (
+                    <MenuItem key={v.id} value={v.id}>
+                      {v.size_label}
+                      {v.daily_rate != null && ` (₹${v.daily_rate}/${selectedItem?.rate_type === "hourly" ? "hr" : "day"})`}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
+          )}
 
           <Grid size={{ xs: 4, md: 2 }}>
             <TextField
@@ -506,6 +542,14 @@ export default function RentalOrderDialog({
                         <TableRow key={li.tempId}>
                           <TableCell>
                             {li.itemName}
+                            {li.size_label_snapshot && (
+                              <Chip
+                                label={li.size_label_snapshot}
+                                size="small"
+                                sx={{ ml: 1 }}
+                                variant="outlined"
+                              />
+                            )}
                             {isHourly && (
                               <Chip label="Hourly" size="small" sx={{ ml: 1 }} />
                             )}
