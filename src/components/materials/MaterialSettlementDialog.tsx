@@ -41,9 +41,10 @@ import { useSettleMaterialPurchase } from "@/hooks/queries/useMaterialPurchases"
 import { useRecordAdvancePayment } from "@/hooks/queries/usePurchaseOrders";
 import { useVerifyBill } from "@/hooks/queries/useBillVerification";
 import { useSiteGroupMembership } from "@/hooks/queries/useSiteGroups";
-import { useEngineerWalletBalance, useLatestDepositSource } from "@/hooks/queries/useEngineerWalletV2";
+import { useEngineerWalletBalance, useLatestDepositSource, broadcastWalletChange } from "@/hooks/queries/useEngineerWalletV2";
 import { usePayerSources } from "@/hooks/queries/usePayerSources";
 import { recordSpend } from "@/lib/services/engineerWalletV2";
+import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSite } from "@/contexts/SiteContext";
 import type { MaterialPurchaseExpenseWithDetails, MaterialPaymentMode, PurchaseOrderWithDetails } from "@/types/material.types";
@@ -73,6 +74,7 @@ export default function MaterialSettlementDialog({
   onSuccess,
 }: MaterialSettlementDialogProps) {
   const supabase = createClient();
+  const queryClient = useQueryClient();
   const { user, userProfile } = useAuth();
   const { selectedSite } = useSite();
   const isSiteEngineer = userProfile?.role === "site_engineer";
@@ -263,6 +265,11 @@ export default function MaterialSettlementDialog({
           recorded_by_user_id: engineerId,
           description: `Material payment: ${vendorName} (${refCode})`,
         });
+        // recordSpend hits site_engineer_transactions directly (no useMutation
+        // wrapper), so wallet balance/ledger caches must be refreshed manually
+        // and other tabs notified.
+        await queryClient.invalidateQueries({ queryKey: ["engineer-wallet"] });
+        broadcastWalletChange();
       }
 
       onSuccess?.();

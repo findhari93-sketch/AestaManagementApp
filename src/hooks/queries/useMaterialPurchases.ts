@@ -982,10 +982,15 @@ export function useSettleMaterialPurchase() {
 
       return { id: data.id, settlement_reference: settlementRef };
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.materialPurchases.all });
-      queryClient.invalidateQueries({ queryKey: queryKeys.expenses.all });
-      queryClient.invalidateQueries({ queryKey: queryKeys.materialStock.all });
+    onSuccess: async () => {
+      // Await so mutateAsync doesn't resolve until the list query has refetched —
+      // otherwise callers (e.g. MaterialSettlementDialog's engineer-wallet branch)
+      // can close the dialog while the row is still showing as "Pending".
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.materialPurchases.all }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.expenses.all }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.materialStock.all }),
+      ]);
     },
   });
 }
