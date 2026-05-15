@@ -19,7 +19,6 @@ import {
   Alert,
   InputAdornment,
   Stack,
-  Chip,
 } from "@mui/material";
 import { Close as CloseIcon } from "@mui/icons-material";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -29,6 +28,8 @@ import {
   useRentalCategories,
   useRentalItemSizes,
   useCreateRentalItemSize,
+  useUpdateRentalItemSize,
+  useDeleteRentalItemSize,
 } from "@/hooks/queries/useRentals";
 import { createClient } from "@/lib/supabase/client";
 import ImageUploadWithCrop from "@/components/common/ImageUploadWithCrop";
@@ -76,9 +77,25 @@ export default function RentalItemDialog({
 
   const { data: existingSizes = [] } = useRentalItemSizes(item?.id);
   const createSize = useCreateRentalItemSize();
+  const updateSize = useUpdateRentalItemSize();
+  const deleteSize = useDeleteRentalItemSize();
 
   const [error, setError] = useState("");
-  const [newSizeLabel, setNewSizeLabel] = useState("");
+
+  // Variant staging — for both new and edit. Each entry has either `id` (persisted) or `tempId` (pending).
+  type VariantRow = {
+    id?: string;
+    tempId?: string;
+    size_label: string;
+    daily_rate: number | "";
+    default_hourly_rate: number | "";
+    image_url: string;
+    is_active: boolean;
+    _dirty?: boolean;       // for edits — needs UPDATE on save
+    _new?: boolean;         // for new rows — needs INSERT on save
+  };
+  const [variants, setVariants] = useState<VariantRow[]>([]);
+  const [newRow, setNewRow] = useState<{ size_label: string; daily_rate: string }>({ size_label: "", daily_rate: "" });
   const [formData, setFormData] = useState<RentalItemFormData>({
     name: "",
     code: "",
@@ -127,21 +144,72 @@ export default function RentalItemDialog({
       });
     }
     setError("");
+    setNewRow({ size_label: "", daily_rate: "" });
+    // On create, clear the variant staging area immediately
+    if (!item) setVariants([]);
+    // On edit, variants are seeded by the existingSizes effect below
   }, [item, open]);
+
+  useEffect(() => {
+    // Seed variants from server data when editing — only runs when existingSizes arrives
+    if (item && existingSizes.length > 0) {
+      setVariants(
+        existingSizes.map((s) => ({
+          id: s.id,
+          size_label: s.size_label,
+          daily_rate: s.daily_rate ?? "",
+          default_hourly_rate: s.default_hourly_rate ?? "",
+          image_url: s.image_url ?? "",
+          is_active: s.is_active,
+        }))
+      );
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [existingSizes]);
 
   const handleChange = (field: keyof RentalItemFormData, value: unknown) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
     setError("");
   };
 
-  const handleAddSize = async () => {
-    if (!item?.id || !newSizeLabel.trim()) return;
-    await createSize.mutateAsync({
-      rental_item_id: item.id,
-      size_label: newSizeLabel.trim(),
-      display_order: existingSizes.length,
-    });
-    setNewSizeLabel("");
+  const handleAddVariant = () => {
+    const label = newRow.size_label.trim();
+    if (!label) return;
+    if (variants.some((v) => v.size_label === label)) {
+      setError(`Variant "${label}" already exists`);
+      return;
+    }
+    const rate = newRow.daily_rate.trim() === "" ? "" : parseFloat(newRow.daily_rate);
+    setVariants((prev) => [
+      ...prev,
+      {
+        tempId: `tmp-${Date.now()}`,
+        size_label: label,
+        daily_rate: rate === "" || Number.isNaN(rate as number) ? "" : (rate as number),
+        default_hourly_rate: "",
+        image_url: "",
+        is_active: true,
+        _new: true,
+      },
+    ]);
+    setNewRow({ size_label: "", daily_rate: "" });
+  };
+
+  const updateVariant = (key: string, patch: Partial<VariantRow>) => {
+    setVariants((prev) =>
+      prev.map((v) => {
+        const k = v.id ?? v.tempId;
+        if (k !== key) return v;
+        return { ...v, ...patch, _dirty: v.id ? true : v._dirty };
+      })
+    );
+  };
+
+  const removeVariant = async (row: VariantRow) => {
+    if (row.id && item) {
+      await deleteSize.mutateAsync({ id: row.id, rental_item_id: item.id });
+    }
+    setVariants((prev) => prev.filter((v) => (v.id ?? v.tempId) !== (row.id ?? row.tempId)));
   };
 
   const handleSubmit = async () => {
@@ -151,11 +219,38 @@ export default function RentalItemDialog({
     }
 
     try {
+      let parentId: string;
       if (isEdit && item) {
         await updateItem.mutateAsync({ id: item.id, data: formData });
+        parentId = item.id;
       } else {
-        await createItem.mutateAsync(formData);
+        const created = await createItem.mutateAsync(formData);
+        parentId = created.id;
       }
+
+      // Persist variant changes
+      for (const v of variants) {
+        const payload = {
+          daily_rate: v.daily_rate === "" ? null : Number(v.daily_rate),
+          default_hourly_rate: v.default_hourly_rate === "" ? null : Number(v.default_hourly_rate),
+          image_url: v.image_url || null,
+        };
+        if (v._new) {
+          await createSize.mutateAsync({
+            rental_item_id: parentId,
+            size_label: v.size_label,
+            display_order: 0,
+            ...payload,
+          });
+        } else if (v.id && v._dirty) {
+          await updateSize.mutateAsync({
+            id: v.id,
+            rental_item_id: parentId,
+            data: { size_label: v.size_label, ...payload },
+          });
+        }
+      }
+
       onClose();
     } catch (err: unknown) {
       const error = err as Error;
@@ -344,6 +439,7 @@ export default function RentalItemDialog({
                 ),
               }}
               placeholder="0"
+              helperText="Used when an order line doesn't pick a variant"
             />
           </Grid>
 
@@ -360,36 +456,107 @@ export default function RentalItemDialog({
           </Grid>
         </Grid>
 
-        {item?.id && (
-          <Box sx={{ mt: 2 }}>
-            <Typography variant="subtitle2" gutterBottom>Size Variants</Typography>
-            {existingSizes.length > 0 && (
-              <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
-                {existingSizes.map((s) => (
-                  <Chip key={s.id} label={s.size_label} size="small" />
-                ))}
-              </Stack>
-            )}
-            <Box sx={{ display: "flex", gap: 1 }}>
-              <TextField
-                size="small"
-                label='Add size (e.g. 6×1½)'
-                value={newSizeLabel}
-                onChange={(e) => setNewSizeLabel(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleAddSize(); } }}
-                sx={{ flex: 1 }}
-              />
-              <Button
-                variant="outlined"
-                size="small"
-                onClick={handleAddSize}
-                disabled={!newSizeLabel.trim() || createSize.isPending}
-              >
-                Add
-              </Button>
-            </Box>
+        <Box sx={{ mt: 2 }}>
+          <Typography variant="subtitle2" gutterBottom>
+            Size Variants
+          </Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
+            Each variant has its own rate and optional photo. The parent rate above is used when no variant is picked on an order.
+          </Typography>
+
+          {variants.length > 0 && (
+            <Stack spacing={1} sx={{ mb: 1 }}>
+              {variants.map((v) => {
+                const key = v.id ?? v.tempId!;
+                return (
+                  <Box
+                    key={key}
+                    sx={{
+                      p: 1,
+                      bgcolor: "grey.50",
+                      borderRadius: 1,
+                      display: "flex",
+                      gap: 1,
+                      alignItems: "center",
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <TextField
+                      size="small"
+                      label="Size"
+                      value={v.size_label}
+                      onChange={(e) => updateVariant(key, { size_label: e.target.value })}
+                      sx={{ flex: "1 1 120px" }}
+                    />
+                    <TextField
+                      size="small"
+                      type="number"
+                      label={formData.rate_type === "hourly" ? "₹/hr" : "₹/day"}
+                      value={
+                        formData.rate_type === "hourly"
+                          ? (v.default_hourly_rate as number | "")
+                          : (v.daily_rate as number | "")
+                      }
+                      onChange={(e) => {
+                        const num = e.target.value === "" ? "" : parseFloat(e.target.value);
+                        if (formData.rate_type === "hourly") {
+                          updateVariant(key, { default_hourly_rate: num as number | "" });
+                        } else {
+                          updateVariant(key, { daily_rate: num as number | "" });
+                        }
+                      }}
+                      sx={{ width: 110 }}
+                    />
+                    <Box sx={{ width: 64 }}>
+                      <ImageUploadWithCrop
+                        supabase={supabase}
+                        bucketName="rental-items"
+                        folderPath="variant-photos"
+                        fileNamePrefix={`variant-${key}`}
+                        value={v.image_url || null}
+                        onChange={(url) => updateVariant(key, { image_url: url || "" })}
+                        disabled={isLoading}
+                        label=""
+                        aspectRatio={1}
+                        maxSizeKB={300}
+                        cropShape="rect"
+                      />
+                    </Box>
+                    <IconButton size="small" color="error" onClick={() => removeVariant(v)}>
+                      <CloseIcon fontSize="small" />
+                    </IconButton>
+                  </Box>
+                );
+              })}
+            </Stack>
+          )}
+
+          <Box sx={{ display: "flex", gap: 1 }}>
+            <TextField
+              size="small"
+              label='Size (e.g. 3×2)'
+              value={newRow.size_label}
+              onChange={(e) => setNewRow((r) => ({ ...r, size_label: e.target.value }))}
+              sx={{ flex: 1 }}
+            />
+            <TextField
+              size="small"
+              type="number"
+              label={formData.rate_type === "hourly" ? "₹/hr" : "₹/day"}
+              value={newRow.daily_rate}
+              onChange={(e) => setNewRow((r) => ({ ...r, daily_rate: e.target.value }))}
+              sx={{ width: 110 }}
+            />
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={handleAddVariant}
+              disabled={!newRow.size_label.trim()}
+            >
+              Add
+            </Button>
           </Box>
-        )}
+        </Box>
       </DialogContent>
 
       <DialogActions sx={{ px: 3, py: 2 }}>
