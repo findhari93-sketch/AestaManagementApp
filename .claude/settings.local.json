@@ -314,7 +314,15 @@
       "PowerShell(python3 -c \"print\\(open\\(r'C:\\\\Users\\\\Haribabu\\\\.claude\\\\projects\\\\c--Users-Haribabu-Documents-AppsCopilot-AestaManagementApp\\\\80f4a0b3-58ae-4995-a240-7c27ec4c7370\\\\tool-results\\\\mcp-supabase-list_tables-1778735504281.txt'\\).read\\(\\)[80000:160000]\\)\")",
       "PowerShell(python3 -c \"print\\(open\\(r'C:\\\\Users\\\\Haribabu\\\\.claude\\\\projects\\\\c--Users-Haribabu-Documents-AppsCopilot-AestaManagementApp\\\\80f4a0b3-58ae-4995-a240-7c27ec4c7370\\\\tool-results\\\\mcp-supabase-list_tables-1778735504281.txt'\\).read\\(\\)[160000:240000]\\)\")",
       "PowerShell(python3 -c \"print\\(open\\(r'C:\\\\Users\\\\Haribabu\\\\.claude\\\\projects\\\\c--Users-Haribabu-Documents-AppsCopilot-AestaManagementApp\\\\80f4a0b3-58ae-4995-a240-7c27ec4c7370\\\\tool-results\\\\mcp-supabase-list_tables-1778735504281.txt'\\).read\\(\\)[240000:320000]\\)\")",
-      "PowerShell(python3 -c \"print\\(open\\(r'C:\\\\Users\\\\Haribabu\\\\.claude\\\\projects\\\\c--Users-Haribabu-Documents-AppsCopilot-AestaManagementApp\\\\80f4a0b3-58ae-4995-a240-7c27ec4c7370\\\\tool-results\\\\mcp-supabase-list_tables-1778735504281.txt'\\).read\\(\\)[320000:400000]\\)\")"
+      "PowerShell(python3 -c \"print\\(open\\(r'C:\\\\Users\\\\Haribabu\\\\.claude\\\\projects\\\\c--Users-Haribabu-Documents-AppsCopilot-AestaManagementApp\\\\80f4a0b3-58ae-4995-a240-7c27ec4c7370\\\\tool-results\\\\mcp-supabase-list_tables-1778735504281.txt'\\).read\\(\\)[320000:400000]\\)\")",
+      "Skill(superpowers:systematic-debugging)",
+      "Skill(superpowers:systematic-debugging:*)",
+      "Skill(superpowers:brainstorming)",
+      "Skill(superpowers:brainstorming:*)",
+      "Skill(superpowers:writing-plans)",
+      "Skill(superpowers:writing-plans:*)",
+      "Skill(superpowers:subagent-driven-development)",
+      "Skill(superpowers:subagent-driven-development:*)"
     ],
     "deny": [],
     "ask": [],

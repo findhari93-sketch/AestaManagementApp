@@ -197,7 +197,67 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, [supabase, fetchUserProfile]);
 
-  // Watchdog: keep retrying profile fetch as long as we have an auth user but
+  // Watchdog #2: recover from "init finished with no user" state. If the
+  // initial getSession() stalled past the 5+3s safety budget (cross-tab
+  // auth-lock contention through the Cloudflare proxy on 3rd+ tab), loading
+  // flips false with user=null even though a session does exist in storage.
+  // SiteProvider then clears sites → "No sites available". This watchdog
+  // re-polls getSession() with backoff while user remains null and the page
+  // is loaded; it stops the moment a user is set (which kicks watchdog #1).
+  useEffect(() => {
+    if (loading || user) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let attempt = 0;
+
+    const tryRecover = async () => {
+      if (cancelled) return;
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        if (cancelled) return;
+        if (session?.user) {
+          console.log("[AuthContext] Watchdog#2 recovered stalled session");
+          setUser(session.user);
+          await fetchUserProfile(session.user.id);
+          initializeSessionManager();
+          return;
+        }
+      } catch (err) {
+        console.warn("[AuthContext] Watchdog#2 getSession error:", err);
+      }
+      attempt++;
+      if (attempt >= 6) return; // ~2+4+8+16+30+30s before giving up
+      const delay = Math.min(2000 * Math.pow(2, attempt - 1), 30000);
+      console.log(`[AuthContext] Watchdog#2 retry in ${delay}ms (attempt ${attempt + 1})`);
+      timer = setTimeout(tryRecover, delay);
+    };
+
+    timer = setTimeout(tryRecover, 2000);
+
+    const onVisible = () => {
+      if (typeof document === "undefined") return;
+      if (document.visibilityState === "visible" && !user) {
+        if (timer) clearTimeout(timer);
+        attempt = 0;
+        tryRecover();
+      }
+    };
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", onVisible);
+    }
+
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", onVisible);
+      }
+    };
+  }, [loading, user, supabase, fetchUserProfile]);
+
+  // Watchdog #1: keep retrying profile fetch as long as we have an auth user but
   // no profile. The 5s+3s safety-timeout recovery is one-shot; if it ran during
   // a window of cross-tab auth-lock contention or proxy slowness, the second
   // tab would otherwise sit forever with userProfile=null and SiteProvider
