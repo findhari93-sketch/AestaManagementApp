@@ -282,8 +282,12 @@ export default function HistoricalRentalDialog({
       };
     });
     setItems(loadedItems);
-    setRentalTotal(String(existingOrder.actual_total ?? ""));
-    setTotalManuallyEdited(true);
+    // Drafts persist the entered total in estimated_total only (actual_total stays null
+    // until completion). Fall back so re-opening a draft pre-fills the user's last value
+    // instead of an empty field that fails validation on Complete — Settle Later.
+    const preFilledTotal = existingOrder.actual_total ?? existingOrder.estimated_total ?? null;
+    setRentalTotal(preFilledTotal !== null ? String(preFilledTotal) : "");
+    setTotalManuallyEdited(preFilledTotal !== null);
 
     const inAmt = existingOrder.transport_cost_outward ?? 0;
     const outAmt = existingOrder.transport_cost_return ?? 0;
