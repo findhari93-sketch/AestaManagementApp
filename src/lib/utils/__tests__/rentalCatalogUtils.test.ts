@@ -98,7 +98,6 @@ import { resolveVariantRate } from "../rentalCatalogUtils";
 import type {
   RentalItem,
   RentalItemSize,
-  RentalStoreInventoryWithDetails,
 } from "@/types/rental.types";
 
 const makeItem = (overrides: Partial<RentalItem> = {}): RentalItem => ({
@@ -145,7 +144,7 @@ describe("resolveVariantRate", () => {
       rental_item_id: "item-1",
       daily_rate: 10,
       size_rates: { "3×2": 4 },
-    } as RentalStoreInventoryWithDetails;
+    } as unknown as RentalStoreInventoryWithDetails;
     expect(resolveVariantRate(item, variant, vendorInv)).toBe(4);
   });
 
@@ -158,7 +157,7 @@ describe("resolveVariantRate", () => {
       rental_item_id: "item-1",
       daily_rate: 10,
       size_rates: { "different-size": 4 },
-    } as RentalStoreInventoryWithDetails;
+    } as unknown as RentalStoreInventoryWithDetails;
     expect(resolveVariantRate(item, variant, vendorInv)).toBe(2);
   });
 
