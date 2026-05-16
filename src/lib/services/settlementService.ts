@@ -359,10 +359,13 @@ export async function processSettlement(
     // wrote dropped columns (is_settled / settlement_status / …) and the
     // unrecognised 'received_from_company' transaction type.
     if (config.paymentChannel === "engineer_wallet" && config.engineerId) {
-      const walletPaymentMode =
+      // SettlementConfig.paymentMode is "upi" | "cash" | "net_banking" | "other".
+      // The wallet-v2 RPC accepts only "cash" | "upi" | "bank_transfer", so net_banking
+      // maps to bank_transfer (closest ledger equivalent) and "other" falls back to cash.
+      const walletPaymentMode: "cash" | "upi" | "bank_transfer" =
         config.paymentMode === "upi"
           ? "upi"
-          : config.paymentMode === "bank_transfer" || config.paymentMode === "net_banking"
+          : config.paymentMode === "net_banking"
           ? "bank_transfer"
           : "cash";
       try {
@@ -613,10 +616,11 @@ export async function processWeeklySettlement(
     // for the rationale (legacy site_engineer_transactions columns dropped +
     // unrecognised transaction_type).
     if (config.paymentChannel === "engineer_wallet" && config.engineerId) {
-      const walletPaymentMode =
+      // See processSettlement for the paymentMode mapping rationale.
+      const walletPaymentMode: "cash" | "upi" | "bank_transfer" =
         config.paymentMode === "upi"
           ? "upi"
-          : config.paymentMode === "bank_transfer" || config.paymentMode === "net_banking"
+          : config.paymentMode === "net_banking"
           ? "bank_transfer"
           : "cash";
       try {
@@ -1034,15 +1038,21 @@ export async function processContractPayment(
     // doesn't carry an orphan reference.
     if (config.paymentChannel === "engineer_wallet" && config.engineerId) {
       try {
+        // ContractPaymentConfig.paymentMode is "upi" | "cash" | "net_banking" | "other".
+        // wallet-v2 RPC accepts "cash" | "upi" | "bank_transfer"; net_banking maps to
+        // bank_transfer (closest ledger equivalent) and "other" falls back to cash.
+        const walletPaymentMode: "cash" | "upi" | "bank_transfer" =
+          config.paymentMode === "upi"
+            ? "upi"
+            : config.paymentMode === "net_banking"
+            ? "bank_transfer"
+            : "cash";
         const { id: txId } = await recordSpend(supabase, {
           engineer_id: config.engineerId,
           site_id: config.siteId,
           amount: config.amount,
           transaction_date: config.actualPaymentDate,
-          payment_mode:
-            config.paymentMode === "upi" || config.paymentMode === "bank_transfer"
-              ? config.paymentMode
-              : "cash",
+          payment_mode: walletPaymentMode,
           proof_url: config.proofUrl || null,
           notes: config.notes || null,
           recorded_by: config.userName,
@@ -2302,16 +2312,21 @@ export async function processDateWiseContractSettlement(
     // for the rationale on why the legacy site_engineer_transactions insert was
     // removed.
     if (config.paymentChannel === "engineer_wallet" && config.engineerId) {
+      // DateWiseSettlementConfig.paymentMode is PaymentMode ("upi" | "cash" |
+      // "net_banking" | "other"). See processSettlement for the v2 RPC mapping.
+      const walletPaymentMode: "cash" | "upi" | "bank_transfer" =
+        config.paymentMode === "upi"
+          ? "upi"
+          : config.paymentMode === "net_banking"
+          ? "bank_transfer"
+          : "cash";
       try {
         const { id: txId } = await recordSpend(supabase, {
           engineer_id: config.engineerId,
           site_id: config.siteId,
           amount: config.totalAmount,
           transaction_date: paymentDate,
-          payment_mode:
-            config.paymentMode === "upi" || config.paymentMode === "bank_transfer"
-              ? config.paymentMode
-              : "cash",
+          payment_mode: walletPaymentMode,
           proof_url: config.proofUrls?.[0] || null,
           notes: config.notes || null,
           recorded_by: config.userName,

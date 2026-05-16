@@ -43,6 +43,7 @@ import FileUploader, { UploadedFile } from "@/components/common/FileUploader";
 import PayerSourceSelector from "@/components/settlement/PayerSourceSelector";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSite } from "@/contexts/SiteContext";
+import { recordSpend } from "@/lib/services/engineerWalletV2";
 import type { Database } from "@/types/database.types";
 
 type TeaShopAccount = Database["public"]["Tables"]["tea_shop_accounts"]["Row"];
@@ -481,30 +482,32 @@ export default function TeaShopSettlementDialog({
     try {
       let engineerTransactionId: string | null = null;
 
-      // If site engineer is paying, create wallet transaction
+      // If site engineer is paying, debit the wallet via wallet-v2 RPC. The RPC
+      // enforces a per-engineer advisory lock + balance check and writes a
+      // transaction_type='spend' row that v_engineer_wallet_balance recognises.
       if (payerType === "site_engineer" && createWalletTransaction && !isEditMode) {
-        const transactionData = {
-          user_id: selectedEngineerId,
-          site_id: selectedSite?.id,
-          transaction_type: "spent_on_behalf",
+        if (!selectedSite?.id) {
+          throw new Error("Site is required when paying via site engineer.");
+        }
+        // payment_mode for wallet RPC accepts cash/upi/bank_transfer. Map cheque
+        // and other modes to bank_transfer (closest equivalent for ledger purposes).
+        const walletPaymentMode =
+          paymentMode === "cash" || paymentMode === "upi" || paymentMode === "bank_transfer"
+            ? paymentMode
+            : "bank_transfer";
+        const { id: txId } = await recordSpend(supabase, {
+          engineer_id: selectedEngineerId,
+          site_id: selectedSite.id,
           amount: amountPaying,
           transaction_date: paymentDate,
+          payment_mode: walletPaymentMode,
+          proof_url: proofUrl ?? null,
           description: `Tea shop payment - ${shop.shop_name}`,
-          recipient_type: "vendor",
-          payment_mode: paymentMode,
-          is_settled: false,
+          notes: notes.trim() || null,
           recorded_by: userProfile?.name || "System",
-          recorded_by_user_id: userProfile?.id || null,
-        };
-
-        const { data: txData, error: txError } = await (supabase
-          .from("site_engineer_transactions") as any)
-          .insert(transactionData)
-          .select()
-          .single();
-
-        if (txError) throw txError;
-        engineerTransactionId = txData?.id || null;
+          recorded_by_user_id: userProfile?.id ?? "",
+        });
+        engineerTransactionId = txId;
       }
 
       // Generate settlement reference for new settlements

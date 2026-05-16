@@ -58,6 +58,7 @@ type PaymentMode = Database["public"]["Enums"]["payment_mode"];
 type PaymentType = Database["public"]["Enums"]["contract_payment_type"];
 type PaymentChannel = string;
 import { calculateSubcontractTotals } from "@/lib/services/subcontractService";
+import { recordSpend } from "@/lib/services/engineerWalletV2";
 import { withTimeout, TIMEOUTS } from "@/lib/utils/timeout";
 import dayjs from "dayjs";
 
@@ -472,31 +473,35 @@ export default function SiteSubcontractsPage() {
     try {
       let siteEngineerTransactionId: string | null = null;
 
-      // If payment is via site engineer, create a wallet transaction first
+      // If payment is via site engineer, debit the wallet via wallet-v2 RPC.
+      // The RPC enforces a per-engineer advisory lock + balance check and writes
+      // a transaction_type='spend' row that v_engineer_wallet_balance recognises.
       if (paymentForm.payment_channel === "via_site_engineer" && selectedSiteEngineer) {
-        const txResult = await withTimeout(
-          (supabase.from("site_engineer_transactions") as any).insert({
-            user_id: selectedSiteEngineer,
-            transaction_type: "spent_on_behalf",
+        // payment_mode for wallet RPC accepts cash/upi/bank_transfer. Map cheque
+        // and other modes to bank_transfer (closest equivalent for ledger purposes).
+        const walletPaymentMode =
+          paymentForm.payment_mode === "cash" ||
+          paymentForm.payment_mode === "upi" ||
+          paymentForm.payment_mode === "bank_transfer"
+            ? paymentForm.payment_mode
+            : "bank_transfer";
+        const { id: txId } = await withTimeout(
+          recordSpend(supabase, {
+            engineer_id: selectedSiteEngineer,
+            site_id: selectedSite.id,
             amount: paymentForm.amount,
             transaction_date: paymentForm.payment_date,
-            site_id: selectedSite.id,
+            payment_mode: walletPaymentMode,
+            proof_url: null,
             description: `Payment to Mesthri - ${selectedSubcontract.title}`,
-            recipient_type: "mesthri",
-            recipient_id: selectedSubcontract.team_id,
-            payment_mode: paymentForm.payment_mode,
-            related_subcontract_id: selectedSubcontract.id,
-            is_settled: false,
             notes: paymentForm.notes || null,
             recorded_by: userProfile.name || userProfile.email,
             recorded_by_user_id: userProfile.id,
-          }).select("id").single(),
+          }),
           TIMEOUTS.DATABASE_OPERATION,
           "Transaction creation timed out. Please check your connection and try again."
-        ) as { data: { id: string } | null; error: any };
-
-        if (txResult.error) throw txResult.error;
-        siteEngineerTransactionId = txResult.data?.id || null;
+        );
+        siteEngineerTransactionId = txId;
       }
 
       // Get the payer name based on channel
