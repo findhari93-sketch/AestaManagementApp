@@ -77,10 +77,22 @@ export default function GroupStockBatchCard({
 }: GroupStockBatchCardProps) {
   const originalQty = batch.original_quantity ?? 0;
   const remainingQty = batch.remaining_quantity ?? 0;
+  const deliveredQty = batch.delivered_quantity ?? 0;
+  const inStockQty = batch.in_stock_quantity ?? 0;
+
+  // Delivery progress: how much of the PO has physically arrived
+  const deliveryPercent = originalQty > 0 ? (deliveredQty / originalQty) * 100 : 0;
+  const isPartialDelivery = deliveredQty < originalQty && deliveredQty > 0;
+  const nothingDelivered = deliveredQty === 0 && originalQty > 0;
+
+  // Usage progress: how much of what was delivered has been used
+  const usedQty = deliveredQty - inStockQty;
   const usagePercent =
-    originalQty > 0
-      ? ((originalQty - remainingQty) / originalQty) * 100
-      : 0;
+    deliveredQty > 0
+      ? (usedQty / deliveredQty) * 100
+      : originalQty > 0
+        ? ((originalQty - remainingQty) / originalQty) * 100
+        : 0;
 
   // Compute display status from actual quantities (not DB status) to handle stale data
   // e.g. DB may say 'completed' but remaining_qty > 0 after usage deletion
@@ -250,9 +262,40 @@ export default function GroupStockBatchCard({
                 {batch.status === "completed" ? "100% allocated" : `${usagePercent.toFixed(0)}% used`}
               </Typography>
             </Box>
+            {/* Delivery progress bar — shown when batch not fully received yet */}
+            {(isPartialDelivery || nothingDelivered) && batch.status !== "completed" && (
+              <Box mb={1}>
+                <Box display="flex" justifyContent="space-between" mb={0.5}>
+                  <Typography variant="caption" color="text.secondary" fontWeight={500}>
+                    Delivery progress
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    {deliveredQty.toFixed(0)} / {originalQty.toFixed(0)} delivered
+                  </Typography>
+                </Box>
+                <LinearProgress
+                  variant="determinate"
+                  value={deliveryPercent}
+                  sx={{
+                    height: 6,
+                    borderRadius: 1,
+                    bgcolor: "grey.200",
+                    "& .MuiLinearProgress-bar": {
+                      borderRadius: 1,
+                      bgcolor: nothingDelivered ? "grey.400" : "info.main",
+                    },
+                  }}
+                />
+                <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: "block" }}>
+                  {(originalQty - deliveredQty).toFixed(0)} bags pending delivery
+                </Typography>
+              </Box>
+            )}
+
+            {/* Stock usage bar */}
             <LinearProgress
               variant="determinate"
-              value={batch.status === "completed" ? 100 : usagePercent}
+              value={batch.status === "completed" ? 100 : Math.min(usagePercent, 100)}
               sx={{
                 height: 8,
                 borderRadius: 1,
@@ -276,10 +319,10 @@ export default function GroupStockBatchCard({
               ) : (
                 <>
                   <Typography variant="caption" color="text.secondary">
-                    Remaining: {(batch.remaining_quantity ?? 0).toFixed(2)}
+                    In stock: {inStockQty > 0 ? inStockQty.toFixed(2) : (remainingQty).toFixed(2)}
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
-                    Original: {(batch.original_quantity ?? 0).toFixed(2)}
+                    Ordered: {originalQty.toFixed(2)}
                   </Typography>
                 </>
               )}

@@ -1917,6 +1917,8 @@ export interface GroupStockBatch {
   is_paid: boolean;
   original_quantity: number;
   remaining_quantity: number;
+  delivered_quantity: number;  // bags physically arrived at site so far
+  in_stock_quantity: number;   // bags currently in warehouse (delivered minus used)
   status: MaterialBatchStatus;
   bill_url: string | null;
   payment_mode: MaterialPaymentMode | null;

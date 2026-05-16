@@ -149,7 +149,7 @@ export function useSiteStock(
         ownStockQuery = ownStockQuery.eq("location_id", locationId);
       }
 
-      const { data: ownStockData, error: ownError } = await ownStockQuery.order("material(name)");
+      const { data: ownStockData, error: ownError } = await ownStockQuery.order("last_received_date", { ascending: false });
       if (ownError) throw ownError;
 
       // Collect batch codes from own stock for unit cost lookup
@@ -507,7 +507,7 @@ export function useSiteStockAll(siteId: string | undefined) {
         `
         )
         .eq("site_id", siteId)
-        .order("material(name)");
+        .order("last_received_date", { ascending: false });
 
       if (error) throw error;
       return (data as unknown) as StockInventoryWithDetails[];

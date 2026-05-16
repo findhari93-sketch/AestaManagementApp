@@ -759,6 +759,34 @@ export function useBatchesWithUsage(groupId: string | undefined) {
           throw usageError;
         }
 
+        // Get actual delivered quantities from deliveries/delivery_items via purchase_order_id.
+        // group_stock_inventory is skipped when the expense row already exists (advance-pay flow),
+        // so deliveries is the only reliable source of truth for delivery progress.
+        const poIds = batches
+          .map((b: any) => b.purchase_order_id)
+          .filter(Boolean);
+
+        const deliveredByPO = new Map<string, number>();
+        if (poIds.length > 0) {
+          const { data: deliveryData } = await (supabase as any)
+            .from("deliveries")
+            .select(`
+              po_id,
+              delivery_items(accepted_qty)
+            `)
+            .in("po_id", poIds)
+            .eq("delivery_status", "delivered");
+
+          (deliveryData || []).forEach((del: any) => {
+            const prev = deliveredByPO.get(del.po_id) || 0;
+            const delQty = (del.delivery_items || []).reduce(
+              (s: number, di: any) => s + Number(di.accepted_qty || 0),
+              0
+            );
+            deliveredByPO.set(del.po_id, prev + delQty);
+          });
+        }
+
         // Group usage by batch
         const usageByBatch = new Map<string, any[]>();
         (usageRecords || []).forEach((u: any) => {
@@ -832,11 +860,18 @@ export function useBatchesWithUsage(groupId: string | undefined) {
             }
           });
 
+          // delivered_quantity = total accepted_qty from deliveries for this batch's PO
+          const delivered_quantity = deliveredByPO.get(batch.purchase_order_id) ?? 0;
+          // in_stock_quantity = delivered minus what's been consumed via batch_usage_records
+          const in_stock_quantity = Math.max(0, delivered_quantity - used_quantity);
+
           return {
             ...batch,
             items: effectiveItems,
             original_quantity,
             remaining_quantity,
+            delivered_quantity,
+            in_stock_quantity,
             site_allocations: Array.from(siteUsageMap.values()),
           };
         });
