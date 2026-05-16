@@ -311,11 +311,6 @@ const companyNavCategories: NavCategory[] = [
         icon: <DescriptionIcon />,
         path: "/company/contracts",
       },
-      {
-        text: "Engineer Wallet",
-        icon: <PaymentIcon />,
-        path: "/company/engineer-wallet",
-      },
     ],
   },
   {

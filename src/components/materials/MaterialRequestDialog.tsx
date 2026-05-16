@@ -253,11 +253,8 @@ export default function MaterialRequestDialog({
     setItems(items.filter((_, i) => i !== index));
   };
 
-  const handleSubmit = async () => {
-    // Prevent double submissions using ref (synchronous check)
-    if (isSubmittingRef.current) {
-      return;
-    }
+  const handleSave = async (targetStatus: 'pending' | 'draft') => {
+    if (isSubmittingRef.current) return;
     isSubmittingRef.current = true;
 
     if (!userProfile?.id) {
@@ -273,7 +270,7 @@ export default function MaterialRequestDialog({
 
     try {
       if (isEdit) {
-        // Update request-level fields
+        const isDraftBeingSubmitted = request.status === 'draft' && targetStatus === 'pending';
         await updateRequest.mutateAsync({
           id: request.id,
           data: {
@@ -282,14 +279,12 @@ export default function MaterialRequestDialog({
             required_by_date: requiredByDate || undefined,
             priority,
             notes: notes || undefined,
+            ...(isDraftBeingSubmitted ? { status: 'pending' } : {}),
           },
         });
 
-        // Determine new items (items without an id are new)
         const newItems = items.filter((item) => !item.id);
-
         if (removedItemIds.length > 0 || newItems.length > 0) {
-          // Use the edit items RPC for add/remove with cascade
           await editItems.mutateAsync({
             requestId: request.id,
             siteId,
@@ -301,8 +296,7 @@ export default function MaterialRequestDialog({
               notes: item.notes,
             })),
           });
-        } else if (linkedPOsCount > 0) {
-          // Only revert POs if no item changes but request fields changed
+        } else if (linkedPOsCount > 0 && !isDraftBeingSubmitted) {
           try {
             await revertPOsToDraft.mutateAsync({ requestId: request.id, siteId });
           } catch (revertError) {
@@ -317,6 +311,7 @@ export default function MaterialRequestDialog({
           request_date: requestDate || undefined,
           required_by_date: deliveryType === 'one_time' ? (requiredByDate || undefined) : undefined,
           priority: deliveryType === 'one_time' ? priority : 'normal',
+          status: targetStatus,
           purchase_type: purchaseType,
           delivery_type: deliveryType,
           notes: notes || undefined,
@@ -337,17 +332,12 @@ export default function MaterialRequestDialog({
       onClose();
     } catch (err: unknown) {
       console.error("[MaterialRequestDialog] Submit error:", err);
-      // Extract error details
       let message = "Failed to save request";
-      if (err instanceof Error) {
-        message = err.message;
-      }
-      // Check for 409 Conflict (duplicate/already exists)
+      if (err instanceof Error) message = err.message;
       const errObj = err as Record<string, unknown>;
       if (errObj?.code === "23505" || errObj?.status === 409 || message.includes("409")) {
         message = "A request with this number already exists. Please try again.";
       }
-      // Check for timeout errors
       if (message.includes("timed out")) {
         showToastError("Request timed out. Please check your connection and try again.", 8000);
       }
@@ -732,14 +722,23 @@ export default function MaterialRequestDialog({
         <Button onClick={onClose} disabled={isSubmitting}>
           Cancel
         </Button>
+        {(!isEdit || request?.status === 'draft') && (
+          <Button
+            variant="outlined"
+            onClick={() => handleSave('draft')}
+            disabled={isSubmitting || items.length === 0}
+          >
+            {isSubmitting ? "Saving..." : "Save Draft"}
+          </Button>
+        )}
         <Button
           variant="contained"
-          onClick={handleSubmit}
+          onClick={() => handleSave('pending')}
           disabled={isSubmitting || items.length === 0}
         >
           {isSubmitting
             ? "Submitting..."
-            : isEdit
+            : isEdit && request?.status !== 'draft'
             ? "Update Request"
             : "Submit Request"}
         </Button>

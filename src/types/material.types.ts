@@ -1349,6 +1349,7 @@ export interface MaterialRequestFormData {
   request_date?: string;
   required_by_date?: string;
   priority: RequestPriority;
+  status?: MaterialRequestStatus;
   notes?: string;
   purchase_type?: 'own_site' | 'group_stock';
   delivery_type?: 'one_time' | 'bulk';

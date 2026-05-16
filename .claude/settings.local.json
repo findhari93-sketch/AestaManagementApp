@@ -345,7 +345,8 @@
       "PowerShell($ports=@\\(3000,3001\\); foreach \\($p in $ports\\) { try { $c=Get-NetTCPConnection -State Listen -LocalPort $p -ErrorAction Stop; Write-Output \"Port $p LISTENING\" } catch { Write-Output \"Port $p free\" } })",
       "Bash(awk '/^\\(export \\)?\\(async \\)?function|^export async function/{fname=$0} /is_settled: false/{print NR\": \"fname}' src/lib/services/settlementService.ts)",
       "Bash(awk 'NR>=278 && NR<=525 && /site_engineer_transactions|recordWalletSpending|recordSpend/' src/lib/services/settlementService.ts)",
-      "Bash(awk '/^\\(export \\)?\\(async \\)?function|^export async function/{fname=$0} /recordWalletSpending\\\\\\(/{print NR\": \"fname}' src/lib/services/settlementService.ts)"
+      "Bash(awk '/^\\(export \\)?\\(async \\)?function|^export async function/{fname=$0} /recordWalletSpending\\\\\\(/{print NR\": \"fname}' src/lib/services/settlementService.ts)",
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\Haribabu\\\\Documents\\\\AppsCopilot\\\\AestaManagementApp\\\\src\\\\app\\\\\\(main\\)\\\\site\\\\payments\" -Recurse -File)"
     ],
     "deny": [],
     "ask": [],

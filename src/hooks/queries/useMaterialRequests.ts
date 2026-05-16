@@ -231,7 +231,7 @@ export function useCreateMaterialRequest() {
             request_date: data.request_date || new Date().toISOString().split("T")[0],
             required_by_date: data.required_by_date || null,
             priority: data.priority,
-            status: "pending",
+            status: data.status ?? "pending",
             notes: data.notes || null,
             purchase_type: data.purchase_type ?? 'own_site',
             delivery_type: data.delivery_type ?? 'one_time',
@@ -407,6 +407,7 @@ export function useUpdateMaterialRequest() {
       };
       if (data.purchase_type !== undefined) updatePayload.purchase_type = data.purchase_type;
       if (data.delivery_type !== undefined) updatePayload.delivery_type = data.delivery_type;
+      if (data.status !== undefined) updatePayload.status = data.status;
       if (resolvedSiteGroupId !== undefined) updatePayload.site_group_id = resolvedSiteGroupId;
 
       const { data: result, error } = await withTimeout(
