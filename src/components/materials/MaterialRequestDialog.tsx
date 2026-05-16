@@ -133,6 +133,8 @@ export default function MaterialRequestDialog({
   const [error, setError] = useState("");
   const [removedItemIds, setRemovedItemIds] = useState<string[]>([]);
   const [sectionId, setSectionId] = useState("");
+  const today = new Date().toISOString().split("T")[0];
+  const [requestDate, setRequestDate] = useState(today);
   const [requiredByDate, setRequiredByDate] = useState("");
   const [priority, setPriority] = useState<RequestPriority>("normal");
   const [purchaseType, setPurchaseType] = useState<'own_site' | 'group_stock'>('own_site');
@@ -161,6 +163,7 @@ export default function MaterialRequestDialog({
   useEffect(() => {
     if (request) {
       setSectionId(request.section_id || "");
+      setRequestDate(request.request_date || today);
       setRequiredByDate(request.required_by_date || "");
       setPriority(request.priority);
       setPurchaseType(request.purchase_type ?? 'own_site');
@@ -182,6 +185,7 @@ export default function MaterialRequestDialog({
       setItems(existingItems);
     } else {
       setSectionId("");
+      setRequestDate(today);
       setRequiredByDate("");
       setPriority("normal");
       setPurchaseType('own_site');
@@ -274,6 +278,7 @@ export default function MaterialRequestDialog({
           id: request.id,
           data: {
             section_id: sectionId || undefined,
+            request_date: requestDate || undefined,
             required_by_date: requiredByDate || undefined,
             priority,
             notes: notes || undefined,
@@ -309,6 +314,7 @@ export default function MaterialRequestDialog({
           site_id: siteId,
           section_id: sectionId || undefined,
           requested_by: userProfile.id,
+          request_date: requestDate || undefined,
           required_by_date: deliveryType === 'one_time' ? (requiredByDate || undefined) : undefined,
           priority: deliveryType === 'one_time' ? priority : 'normal',
           purchase_type: purchaseType,
@@ -424,8 +430,24 @@ export default function MaterialRequestDialog({
             </FormControl>
           </Grid>
 
+          {/* Request Date — defaults to today; allow backdating for historical entries */}
+          <Grid size={{ xs: 12, md: 4 }}>
+            <TextField
+              fullWidth
+              type="date"
+              label="Request Date"
+              value={requestDate}
+              onChange={(e) => setRequestDate(e.target.value)}
+              slotProps={{
+                inputLabel: { shrink: true },
+                htmlInput: { max: today },
+              }}
+              helperText="Backdate for historical entries"
+            />
+          </Grid>
+
           {/* Delivery type toggle — always visible */}
-          <Grid size={{ xs: 12, md: 8 }}>
+          <Grid size={{ xs: 12, md: 4 }}>
             <Box>
               <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.5 }}>
                 Delivery type

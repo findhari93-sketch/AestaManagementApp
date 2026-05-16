@@ -399,6 +399,7 @@ export function useUpdateMaterialRequest() {
 
       const updatePayload: Record<string, unknown> = {
         section_id: data.section_id,
+        request_date: data.request_date,
         required_by_date: data.required_by_date,
         priority: data.priority,
         notes: data.notes,
