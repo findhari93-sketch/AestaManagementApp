@@ -30,6 +30,9 @@ export interface SettlementListRow {
    *  the top of each tab so the user can review and assign one inline. */
   subcontractId: string | null;
   subcontractTitle: string | null;
+  /** trade_category_id of the linked subcontract. Used in the Civil view to
+   *  exclude settlements that belong to a trade (e.g. Painting) category. */
+  subcontractCategoryId: string | null;
   recordedByName: string | null;
 }
 
@@ -81,7 +84,7 @@ export function useSettlementsList(args: UseSettlementsListArgs) {
           proof_urls,
           subcontract_id,
           created_by_name,
-          subcontract:subcontracts ( title ),
+          subcontract:subcontracts ( title, trade_category_id ),
           labor_payments!labor_payments_settlement_group_id_fkey ( is_under_contract )
           `
         )
@@ -135,7 +138,11 @@ export function useSettlementsList(args: UseSettlementsListArgs) {
           recordedByName: sg.created_by_name ?? null,
           subcontractTitle:
             sg.subcontract && typeof sg.subcontract === "object"
-              ? ((sg.subcontract as { title?: string | null }).title ?? null)
+              ? ((sg.subcontract as { title?: string | null; trade_category_id?: string | null }).title ?? null)
+              : null,
+          subcontractCategoryId:
+            sg.subcontract && typeof sg.subcontract === "object"
+              ? ((sg.subcontract as { title?: string | null; trade_category_id?: string | null }).trade_category_id ?? null)
               : null,
         };
       });

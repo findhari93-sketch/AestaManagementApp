@@ -6,7 +6,7 @@ import {
 } from './calculatorMath';
 import { TMT_WEIGHTS_PER_METER } from './weightCalculation';
 
-export type UnitOption = 'ft' | 'in' | 'mm' | 'm' | 'pcs' | 'sqft' | 'sqm' | '%';
+export type UnitOption = 'ft' | 'in' | 'mm' | 'm' | 'pcs' | 'sqft' | 'sqm' | '%' | 'cft';
 
 export type CalculatorInputField = {
   key: string;
@@ -85,6 +85,30 @@ Extract tiling requirements and return ONLY valid JSON (no markdown, no prose):
     "area_sqft": number,
     "tile_size_sqft": number,
     "wastage_pct": number,
+    "brand": "string | null"
+  }
+]`;
+
+// ─── AGG: Sand & Aggregates ───────────────────────────────────────────────────
+
+const AGG_AI_PROMPT = `I am uploading a drawing or specification.
+Extract aggregate/sand requirements and return ONLY valid JSON (no markdown, no prose):
+[
+  {
+    "name": "string (e.g. M Sand, Jalli, River Sand)",
+    "qty_cft": number,
+    "brand": "string | null"
+  }
+]`;
+
+// ─── CEM: Cement & Binding ────────────────────────────────────────────────────
+
+const CEM_AI_PROMPT = `I am uploading a drawing or specification.
+Extract cement requirements and return ONLY valid JSON (no markdown, no prose):
+[
+  {
+    "name": "string (e.g. PPC Cement, OPC 53 Grade)",
+    "bags": number,
     "brand": "string | null"
   }
 ]`;
@@ -184,6 +208,52 @@ export const CALCULATOR_TEMPLATES: Record<string, CalculatorTemplate> = {
     },
     computeCost: calculateLinearCost,
     aiPrompt: TILES_AI_PROMPT,
+  },
+
+  // Matches material_categories.code = 'AGG'
+  AGG: {
+    categoryCode: 'AGG',
+    inputs: [
+      {
+        key: 'qty',
+        label: 'Quantity',
+        unitOptions: ['cft'],
+        defaultUnit: 'cft',
+        defaultValue: 1,
+        min: 0.1,
+        step: 0.5,
+      },
+    ],
+    outputUnit: 'cft',
+    outputLabel: 'Total quantity (cft)',
+    pricingDimension: 'brand',
+    pricingDimensionLabel: 'Brand',
+    computeOutput: (values) => values.qty ?? 0,
+    computeCost: calculateLinearCost,
+    aiPrompt: AGG_AI_PROMPT,
+  },
+
+  // Matches material_categories.code = 'CEM'
+  CEM: {
+    categoryCode: 'CEM',
+    inputs: [
+      {
+        key: 'qty',
+        label: 'Bags',
+        unitOptions: ['pcs'],
+        defaultUnit: 'pcs',
+        defaultValue: 1,
+        min: 1,
+        step: 1,
+      },
+    ],
+    outputUnit: 'bags',
+    outputLabel: 'Total bags',
+    pricingDimension: 'brand',
+    pricingDimensionLabel: 'Brand',
+    computeOutput: (values) => values.qty ?? 0,
+    computeCost: calculateLinearCost,
+    aiPrompt: CEM_AI_PROMPT,
   },
 };
 

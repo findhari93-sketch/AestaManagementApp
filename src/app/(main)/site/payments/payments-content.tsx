@@ -554,9 +554,23 @@ export default function PaymentsContent() {
   // used to render the strip summary "N settlements · M cancelled" plus the
   // filtered list itself.
   const settlementRowsAll = settlementsListQuery.data ?? [];
-  const settlementRowsVisible = hideCancelled
-    ? settlementRowsAll.filter((r) => !r.isCancelled)
-    : settlementRowsAll;
+  // When Civil chip is selected, exclude settlements linked to trade-category
+  // subcontracts (e.g. Painting). Those belong in their TradeSettlementView.
+  const tradeCategoryIdSet = useMemo(
+    () => new Set((sitTradesForChip ?? []).map((t) => t.category.id)),
+    [sitTradesForChip]
+  );
+  const settlementRowsVisible = useMemo(() => {
+    let rows = hideCancelled
+      ? settlementRowsAll.filter((r) => !r.isCancelled)
+      : settlementRowsAll;
+    if (tradeChipSelection.kind === "civil") {
+      rows = rows.filter(
+        (r) => !r.subcontractCategoryId || !tradeCategoryIdSet.has(r.subcontractCategoryId)
+      );
+    }
+    return rows;
+  }, [settlementRowsAll, hideCancelled, tradeChipSelection, tradeCategoryIdSet]);
   const tabCancelledCount = cancelledForTab(activeTab);
 
   const pendingDailyMarketCount = (dailyMarketLedgerQuery.data ?? []).filter(
