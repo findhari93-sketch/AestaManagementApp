@@ -538,6 +538,76 @@ export const CATEGORY_VARIANT_TEMPLATES: Record<string, CategoryVariantTemplate>
       },
     ],
   },
+
+  // ============================================
+  // Wood & Timber (WOD)
+  // ============================================
+  wood_timber: {
+    fields: [
+      {
+        key: 'length_value',
+        name: 'Length',
+        type: 'number' as const,
+        required: false,
+        placeholder: '7',
+        helperText: 'e.g. 7 for 7 feet',
+        columnWidth: 90,
+      },
+      {
+        key: 'length_unit',
+        name: 'L-Unit',
+        type: 'select' as const,
+        required: false,
+        options: [
+          { value: 'ft', label: 'ft' },
+          { value: 'in', label: 'in' },
+        ],
+        defaultValue: 'ft',
+        columnWidth: 70,
+      },
+      {
+        key: 'width_value',
+        name: 'Width',
+        type: 'number' as const,
+        required: false,
+        placeholder: '3',
+        columnWidth: 80,
+      },
+      {
+        key: 'width_unit',
+        name: 'W-Unit',
+        type: 'select' as const,
+        required: false,
+        options: [
+          { value: 'in', label: 'in' },
+          { value: 'ft', label: 'ft' },
+        ],
+        defaultValue: 'in',
+        columnWidth: 70,
+      },
+      {
+        key: 'thickness_value',
+        name: 'Thickness',
+        type: 'number' as const,
+        required: false,
+        placeholder: '1.5',
+        columnWidth: 90,
+      },
+      {
+        key: 'thickness_unit',
+        name: 'T-Unit',
+        type: 'select' as const,
+        required: false,
+        options: [
+          { value: 'in', label: 'in' },
+          { value: 'ft', label: 'ft' },
+        ],
+        defaultValue: 'in',
+        columnWidth: 70,
+      },
+    ],
+    defaultUnit: 'cft',
+  },
 };
 
 /**
@@ -565,6 +635,7 @@ const CATEGORY_CODE_MAP: Record<string, string> = {
   PAINT: 'paint',
   WP: 'waterproofing',
   FIT: 'fittings',
+  WOD: 'wood_timber',
 };
 
 /**
@@ -583,6 +654,8 @@ const CATEGORY_PATTERNS: Array<{ pattern: RegExp; templateKey: string }> = [
   { pattern: /\b(brick|block|aac|clc|fly\s*ash)\b/i, templateKey: 'bricks' },
   // Cement
   { pattern: /\b(cement|ppc|opc|psc)\b/i, templateKey: 'cement' },
+  // Wood & Timber
+  { pattern: /\b(wood|timber|lumber|plywood|particle\s*board|mdf)\b/i, templateKey: 'wood_timber' },
   // Pipes
   { pattern: /\b(pipe|pvc|cpvc|upvc|hdpe|plumbing)\b/i, templateKey: 'pipes' },
   // Wire / Cable
