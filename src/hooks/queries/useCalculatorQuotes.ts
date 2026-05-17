@@ -48,20 +48,15 @@ export function useCalculatorVendorQuotes(
         // vendor_inventory accumulates multiple price-history rows per vendor.
         const bestByVendor = new Map<string, (typeof rows)[number]>();
         for (const row of rows ?? []) {
+          if (!row.vendor_id || row.current_price == null) continue;
           const existing = bestByVendor.get(row.vendor_id);
-          if (
-            !existing ||
-            (row.current_price as number) < (existing.current_price as number)
-          ) {
+          if (!existing || row.current_price < existing.current_price!) {
             bestByVendor.set(row.vendor_id, row);
           }
         }
 
         return Array.from(bestByVendor.values())
-          .sort(
-            (a, b) =>
-              (a.current_price as number) - (b.current_price as number),
-          )
+          .sort((a, b) => a.current_price! - b.current_price!)
           .map((row): VendorQuote => {
             const vendorData = row.vendors as { name: string } | null;
             return {
