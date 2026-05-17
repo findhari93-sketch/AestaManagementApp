@@ -557,7 +557,11 @@ export default function PaymentsContent() {
   // When Civil chip is selected, exclude settlements linked to trade-category
   // subcontracts (e.g. Painting). Those belong in their TradeSettlementView.
   const tradeCategoryIdSet = useMemo(
-    () => new Set((sitTradesForChip ?? []).map((t) => t.category.id)),
+    () => new Set(
+      (sitTradesForChip ?? [])
+        .filter((t) => t.category.name !== "Civil")
+        .map((t) => t.category.id)
+    ),
     [sitTradesForChip]
   );
   const settlementRowsVisible = useMemo(() => {
