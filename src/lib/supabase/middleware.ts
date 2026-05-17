@@ -44,6 +44,7 @@ export async function updateSession(request: NextRequest) {
   const isPublicRoute =
     request.nextUrl.pathname.startsWith("/login") ||
     request.nextUrl.pathname.startsWith("/dev-login") ||
+    request.nextUrl.pathname.startsWith("/api/dev-ensure-password") ||
     request.nextUrl.pathname.startsWith("/debug");
 
   // Check if this is an RSC (React Server Component) request
