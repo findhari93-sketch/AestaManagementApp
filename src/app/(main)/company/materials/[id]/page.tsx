@@ -43,6 +43,10 @@ import MaterialVendorsTab from "@/components/materials/MaterialVendorsTab";
 import MaterialVariantsTab from "@/components/materials/MaterialVariantsTab";
 import BrandsPricingTab from "@/components/materials/BrandsPricingTab";
 import MaterialPriceIntelligenceTab from "@/components/materials/MaterialPriceIntelligenceTab";
+const CalculatorWorkspace = dynamic(
+  () => import("@/components/calculator/CalculatorWorkspace"),
+  { ssr: false }
+);
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -317,6 +321,7 @@ export default function MaterialDetailsPage() {
               </Box>
             }
           />
+          <Tab label="Estimate" />
         </Tabs>
       </Box>
 
@@ -331,7 +336,8 @@ export default function MaterialDetailsPage() {
         const brandsPricingIndex = hasBrands ? currentIndex++ : -1;
         const priceIntelligenceIndex = currentIndex++; // Always visible
         const variantsIndex = hasVariants ? currentIndex++ : -1;
-        const vendorsIndex = currentIndex;
+        const vendorsIndex = currentIndex++;
+        const estimateIndex = currentIndex;
 
         return (
           <>
@@ -485,6 +491,15 @@ export default function MaterialDetailsPage() {
             {/* All Vendors Tab */}
             <TabPanel value={tabValue} index={vendorsIndex}>
               <MaterialVendorsTab material={material} />
+            </TabPanel>
+
+            {/* Estimate Tab */}
+            <TabPanel value={tabValue} index={estimateIndex}>
+              <CalculatorWorkspace
+                fixedMaterialId={material.id}
+                fixedMaterialName={material.name}
+                fixedCategoryCode={material.category?.code ?? undefined}
+              />
             </TabPanel>
           </>
         );
