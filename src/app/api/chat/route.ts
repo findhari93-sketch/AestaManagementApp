@@ -49,6 +49,33 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       return NextResponse.json<ChatApiResponse>({ answer: "", error: "Not authenticated" }, { status: 401 });
     }
 
+    // 2a. Look up the user's company_id from the database (server-verified, not client-supplied)
+    // users.auth_id -> users.id -> company_members.user_id -> company_members.company_id
+    const { data: userRow } = await supabase
+      .from("users")
+      .select("id")
+      .eq("auth_id", user.id)
+      .single();
+
+    if (!userRow?.id) {
+      return NextResponse.json<ChatApiResponse>({ answer: "", error: "User profile not found" }, { status: 403 });
+    }
+
+    // Get the user's primary company (or first membership if no primary)
+    const { data: membership } = await supabase
+      .from("company_members")
+      .select("company_id")
+      .eq("user_id", userRow.id)
+      .order("is_primary", { ascending: false })
+      .limit(1)
+      .single();
+
+    if (!membership?.company_id) {
+      return NextResponse.json<ChatApiResponse>({ answer: "", error: "User has no company membership" }, { status: 403 });
+    }
+
+    const verifiedCompanyId: string = membership.company_id;
+
     // 3. Verify GROQ_API_KEY is configured
     if (!process.env.GROQ_API_KEY) {
       return NextResponse.json<ChatApiResponse>(
@@ -63,10 +90,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     // 4. Build initial messages
     const systemMessage = {
       role: "system" as const,
-      content: SYSTEM_PROMPT({ siteName, siteId, companyId, dateFrom, dateTo, today }),
+      content: SYSTEM_PROMPT({ siteName, siteId, companyId: verifiedCompanyId, dateFrom, dateTo, today }),
     };
 
-    const historyMessages = (history ?? []).map((h) => ({
+    const MAX_HISTORY = 20;
+    const historyMessages = (history ?? []).slice(-MAX_HISTORY).map((h) => ({
       role: h.role as "user" | "assistant",
       content: h.content,
     }));
@@ -94,6 +122,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         return NextResponse.json<ChatApiResponse>({ answer: "No response from AI. Please try again." });
       }
 
+      // Handle truncated response (context/token limit reached)
+      if (choice.finish_reason === "length") {
+        const partial = choice.message.content ?? "";
+        return NextResponse.json<ChatApiResponse>({
+          answer: partial + (partial ? "\n\n_(Response was cut off — try a more specific question.)_" : "I couldn't generate an answer. Please try a more specific question."),
+        });
+      }
+
       // If Groq finished (no more tool calls), return the answer
       if (choice.finish_reason === "stop" || !choice.message.tool_calls?.length) {
         return NextResponse.json<ChatApiResponse>({
@@ -104,7 +140,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       // Execute all tool calls in parallel
       const toolCallResults = await Promise.all(
         choice.message.tool_calls.map(async (tc) => {
-          const args = JSON.parse(tc.function.arguments ?? "{}") as Record<string, unknown>;
+          let args: Record<string, unknown> = {};
+          try {
+            args = JSON.parse(tc.function.arguments ?? "{}");
+          } catch {
+            return {
+              role: "tool" as const,
+              tool_call_id: tc.id,
+              content: JSON.stringify({ error: "Invalid tool arguments" }),
+            };
+          }
           const result = await executeTool(tc.function.name, args, supabase);
           return {
             role: "tool" as const,
