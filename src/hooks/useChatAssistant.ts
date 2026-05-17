@@ -57,7 +57,7 @@ export function useChatAssistant(options: UseChatAssistantOptions = {}) {
   );
 
   const getCompanyId = useCallback((): string => {
-    return (sites[0] as any)?.company_id ?? "";
+    return sites[0]?.company_id ?? "";
   }, [sites]);
 
   // Send a message and get a response
@@ -74,25 +74,32 @@ export function useChatAssistant(options: UseChatAssistantOptions = {}) {
         // --- Primary path: Groq API route ---
         const dateFrom = filters.dateFrom
           ? dayjs(filters.dateFrom).format("YYYY-MM-DD")
-          : dayjs().format("YYYY-MM-DD");
+          : dayjs().subtract(30, "day").format("YYYY-MM-DD");
         const dateTo = filters.dateTo
           ? dayjs(filters.dateTo).format("YYYY-MM-DD")
           : dayjs().format("YYYY-MM-DD");
 
-        const response = await fetch("/api/chat", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            question: trimmed,
-            siteId: filters.siteId === "all" ? null : filters.siteId,
-            companyId: getCompanyId(),
-            siteName: getSiteName(filters.siteId),
-            dateFrom,
-            dateTo,
-            history: conversationHistory,
-          }),
-          signal: AbortSignal.timeout(30_000),
-        });
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 30_000);
+        let response: Response;
+        try {
+          response = await fetch("/api/chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              question: trimmed,
+              siteId: filters.siteId === "all" ? null : filters.siteId,
+              companyId: getCompanyId(),
+              siteName: getSiteName(filters.siteId),
+              dateFrom,
+              dateTo,
+              history: conversationHistory,
+            }),
+            signal: controller.signal,
+          });
+        } finally {
+          clearTimeout(timeoutId);
+        }
 
         if (!response.ok) {
           throw new Error(`API error: ${response.status}`);
@@ -114,7 +121,7 @@ export function useChatAssistant(options: UseChatAssistantOptions = {}) {
         setMessages((prev) => [...prev, assistantMessage]);
 
         setConversationHistory((prev) => [
-          ...prev,
+          ...prev.slice(-18),
           { role: "user", content: trimmed },
           { role: "assistant", content: answer },
         ]);
