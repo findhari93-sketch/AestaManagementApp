@@ -29,7 +29,7 @@ function formatDimensions(item: EstimateItem): string {
     .map((field) => {
       const val = item.inputs[field.key];
       const unit = item.units[field.key] ?? field.defaultUnit;
-      if (!val || val === 0) return null;
+      if (!val) return null;
       return `${val} ${unit}`;
     })
     .filter((p): p is string => p !== null)
@@ -151,7 +151,7 @@ export function EstimateBasketPanel({ onConvertToRequest }: EstimateBasketPanelP
         position: { md: "sticky" },
         top: { md: 80 },
         maxHeight: { md: "calc(100vh - 100px)" },
-        overflow: "hidden",
+        overflow: "hidden", // clips border-radius; inner Box handles scroll
       }}
     >
       {/* Header */}
@@ -264,6 +264,7 @@ export function EstimateBasketPanel({ onConvertToRequest }: EstimateBasketPanelP
               fullWidth
               variant="contained"
               color="primary"
+              disabled={items.length === 0}
               onClick={onConvertToRequest}
             >
               Convert to Material Request →
