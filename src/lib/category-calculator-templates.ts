@@ -96,7 +96,8 @@ Extract aggregate/sand requirements and return ONLY valid JSON (no markdown, no 
 [
   {
     "name": "string (e.g. M Sand, Jalli, River Sand)",
-    "qty_cft": number,
+    "qty": number,
+    "unit": "cft",
     "brand": "string | null"
   }
 ]`;
@@ -108,7 +109,8 @@ Extract cement requirements and return ONLY valid JSON (no markdown, no prose):
 [
   {
     "name": "string (e.g. PPC Cement, OPC 53 Grade)",
-    "bags": number,
+    "qty": number,
+    "unit": "bags",
     "brand": "string | null"
   }
 ]`;
