@@ -6,24 +6,26 @@ import { wrapQueryFn } from "@/lib/utils/timeout";
 import type { VendorQuote } from "@/lib/category-calculator-templates";
 
 /**
- * Fetches vendor prices for a given material + optional brand combination,
- * formatted as calculator-ready VendorQuote[].
+ * Fetches vendor prices for a given material, deduplicated to one row per vendor
+ * (lowest price wins). Vendor prices are per-material — quality/brand selection
+ * does NOT filter vendors because vendor_inventory has no brand_id associations
+ * for most materials.
  *
- * @param materialId - The material to fetch prices for. Pass null to disable the query.
- * @param brandId    - Optional brand_id from material_brands. Pass null to fetch all brands for the material.
+ * @param materialId - Pass null to disable the query.
+ * @param _brandId   - Retained in signature for call-site compatibility; unused.
  */
 export function useCalculatorVendorQuotes(
   materialId: string | null,
-  brandId: string | null,
+  _brandId?: string | null,
 ): { quotes: VendorQuote[]; isLoading: boolean; error: Error | null } {
   const supabase = createClient();
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ["calculatorQuotes", materialId, brandId],
+    queryKey: ["calculatorQuotes", materialId],
     enabled: materialId !== null,
     queryFn: wrapQueryFn(
       async () => {
-        let query = supabase
+        const { data: rows, error: queryError } = await supabase
           .from("vendor_inventory")
           .select(
             `
@@ -37,18 +39,29 @@ export function useCalculatorVendorQuotes(
           )
           .eq("material_id", materialId as string)
           .eq("is_available", true)
+          .gt("current_price", 0)
           .order("current_price", { ascending: true });
-
-        if (brandId !== null) {
-          query = query.eq("brand_id", brandId);
-        }
-
-        const { data: rows, error: queryError } = await query;
 
         if (queryError) throw new Error(queryError.message);
 
-        return (rows ?? [])
-          .filter((row) => row.current_price !== null)
+        // Deduplicate by vendor_id — keep the row with the lowest price.
+        // vendor_inventory accumulates multiple price-history rows per vendor.
+        const bestByVendor = new Map<string, (typeof rows)[number]>();
+        for (const row of rows ?? []) {
+          const existing = bestByVendor.get(row.vendor_id);
+          if (
+            !existing ||
+            (row.current_price as number) < (existing.current_price as number)
+          ) {
+            bestByVendor.set(row.vendor_id, row);
+          }
+        }
+
+        return Array.from(bestByVendor.values())
+          .sort(
+            (a, b) =>
+              (a.current_price as number) - (b.current_price as number),
+          )
           .map((row): VendorQuote => {
             const vendorData = row.vendors as { name: string } | null;
             return {
@@ -62,7 +75,7 @@ export function useCalculatorVendorQuotes(
       },
       { operationName: "useCalculatorVendorQuotes" },
     ),
-    staleTime: 5 * 60 * 1000, // 5 minutes — prices don't change frequently
+    staleTime: 5 * 60 * 1000,
   });
 
   return {
