@@ -90,9 +90,10 @@ export default function LegacyBand({
       }}
     >
       <Box
-        component="button"
-        type="button"
+        role="button"
+        tabIndex={0}
         onClick={toggle}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } }}
         aria-expanded={expanded}
         aria-label={expanded ? "Collapse legacy band" : "Expand legacy band"}
         sx={{
@@ -103,10 +104,8 @@ export default function LegacyBand({
           px: 1.5,
           py: 0.875,
           bgcolor: tone.bg,
-          border: 0,
           cursor: "pointer",
           textAlign: "left",
-          font: "inherit",
         }}
       >
         <Typography
