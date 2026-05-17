@@ -32,7 +32,7 @@ interface EstimateBasketContextType {
   items: EstimateItem[];
   addItem: (item: Omit<EstimateItem, "id">) => void;
   removeItem: (id: string) => void;
-  updateItem: (id: string, patch: Partial<EstimateItem>) => void;
+  updateItem: (id: string, patch: Partial<Omit<EstimateItem, 'id'>>) => void;
   clearBasket: () => void;
   totalItems: number;
 }
@@ -61,10 +61,13 @@ export function EstimateBasketProvider({
   }, []);
 
   const updateItem = useCallback(
-    (id: string, patch: Partial<EstimateItem>) => {
-      setItems((prev) =>
-        prev.map((item) => (item.id === id ? { ...item, ...patch } : item))
-      );
+    (id: string, patch: Partial<Omit<EstimateItem, 'id'>>) => {
+      setItems((prev) => {
+        if (process.env.NODE_ENV !== 'production' && !prev.some((item) => item.id === id)) {
+          console.warn(`[EstimateBasket] updateItem: no item with id "${id}"`);
+        }
+        return prev.map((item) => (item.id === id ? { ...item, ...patch } : item));
+      });
     },
     []
   );
