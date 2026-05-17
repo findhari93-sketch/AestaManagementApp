@@ -90,5 +90,59 @@ ON CONFLICT (id) DO NOTHING;
 -- - 3 building sections for site 1
 -- - 5 test laborers
 --
--- To login, create auth users via Supabase Studio or sign up via the app.
--- Then update the users table to link auth_id.
+-- ============================================
+-- PLAYWRIGHT TEST USER (auth + profile)
+-- ============================================
+-- Fixed UUID so seed is idempotent.
+-- Password: Padma@123 (bcrypt hash generated at seed time via gen_salt)
+
+INSERT INTO auth.users (
+  id,
+  instance_id,
+  aud,
+  role,
+  email,
+  encrypted_password,
+  email_confirmed_at,
+  created_at,
+  updated_at,
+  raw_app_meta_data,
+  raw_user_meta_data,
+  is_super_admin
+) VALUES (
+  'eeeeeeee-eeee-eeee-eeee-eeeeeeeeee01',
+  '00000000-0000-0000-0000-000000000000',
+  'authenticated',
+  'authenticated',
+  'haribabu@nerasmclasses.onmicrosoft.com',
+  crypt('Padma@123', gen_salt('bf', 10)),
+  now(),
+  now(),
+  now(),
+  '{"provider":"email","providers":["email"]}',
+  '{}',
+  false
+)
+ON CONFLICT (id) DO UPDATE SET
+  encrypted_password = crypt('Padma@123', gen_salt('bf', 10)),
+  updated_at = now();
+
+INSERT INTO public.users (
+  id,
+  auth_id,
+  email,
+  name,
+  role,
+  status
+) VALUES (
+  'eeeeeeee-eeee-eeee-eeee-eeeeeeeeee01',
+  'eeeeeeee-eeee-eeee-eeee-eeeeeeeeee01',
+  'haribabu@nerasmclasses.onmicrosoft.com',
+  'Haribabu (Test)',
+  'admin',
+  'active'
+)
+ON CONFLICT (id) DO NOTHING;
+
+-- To login locally: use haribabu@nerasmclasses.onmicrosoft.com / Padma@123
+-- Navigate to /dev-login for auto-auth (used by Playwright)

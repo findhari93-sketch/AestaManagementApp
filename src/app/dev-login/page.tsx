@@ -15,7 +15,7 @@ export default function DevLoginPage() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    if (process.env.NODE_ENV === "production") {
+    if (process.env.NEXT_PUBLIC_ENABLE_DEV_LOGIN !== "true") {
       setError("Dev login is not available in production.");
       return;
     }
@@ -32,6 +32,14 @@ export default function DevLoginPage() {
 
     async function autoLogin() {
       try {
+        // Use admin SDK (via API route) to set password through GoTrue — correct hash format guaranteed
+        setStatus("Preparing dev session...");
+        const res = await fetch("/api/dev-ensure-password", { method: "POST" });
+        if (!res.ok) {
+          const data = await res.json();
+          throw new Error(data.error || "Failed to prepare dev session");
+        }
+
         setStatus("Signing in...");
         await signIn(DEV_EMAIL, DEV_PASSWORD);
         if (!cancelled) {

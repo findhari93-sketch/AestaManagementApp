@@ -29,29 +29,13 @@ async function globalSetup(config: FullConfig) {
   const page = await context.newPage();
 
   try {
-    // Navigate to login page
-    await page.goto(`${baseURL}/login`);
+    // Use dev-login page which auto-authenticates on mount (no form interaction)
+    await page.goto(`${baseURL}/dev-login`);
 
-    // Wait for login form to be ready
-    await page.waitForSelector('input[type="email"]', { timeout: 10000 });
-
-    // Fill credentials
-    await page.fill(
-      'input[type="email"]',
-      "Haribabu@nerasmclasses.onmicrosoft.com"
-    );
-    await page.fill('input[type="password"]', "Padma@123");
-
-    // Click sign in button
-    await page.click('button[type="submit"]');
-
-    // Wait for successful login (redirect away from login page)
-    await page.waitForURL((url) => !url.pathname.includes("/login"), {
+    // Wait for redirect to dashboard (dev-login handles auth and redirects)
+    await page.waitForURL((url) => url.pathname.includes("/dashboard"), {
       timeout: 30000,
     });
-
-    // Wait a bit for session to be fully established
-    await page.waitForTimeout(1000);
 
     // Save storage state (localStorage + cookies)
     await context.storageState({ path: AUTH_FILE });
