@@ -1,11 +1,12 @@
 "use client";
 
-import {
+import React, {
   createContext,
   useContext,
   useState,
   useCallback,
   useRef,
+  forwardRef,
   ReactNode,
 } from "react";
 import {
@@ -229,13 +230,10 @@ export function ToastProvider({ children }: { children: ReactNode }) {
  *   - error: filled red, error icon, optional retry button
  * Other AlertColor variants fall back to MUI's filled Alert.
  */
-function ToastSurface({
-  toast,
-  onDismiss,
-}: {
-  toast: ToastMessage;
-  onDismiss: () => void;
-}) {
+const ToastSurface = forwardRef<
+  HTMLDivElement,
+  { toast: ToastMessage; onDismiss: () => void }
+>(function ToastSurface({ toast, onDismiss }, ref) {
   const isProgress = toast.severity === "progress";
   const isSuccess = toast.severity === "success";
   const isError = toast.severity === "error";
@@ -243,6 +241,7 @@ function ToastSurface({
   if (isProgress) {
     return (
       <Box
+        ref={ref}
         role="status"
         aria-live="polite"
         sx={(theme) => ({
@@ -285,6 +284,7 @@ function ToastSurface({
   if (isSuccess) {
     return (
       <Box
+        ref={ref}
         role="status"
         aria-live="polite"
         onClick={onDismiss}
@@ -320,6 +320,7 @@ function ToastSurface({
   if (isError) {
     return (
       <Box
+        ref={ref}
         role="alert"
         sx={(theme) => ({
           display: "flex",
@@ -382,6 +383,7 @@ function ToastSurface({
   // Fallback for info / warning — MUI filled Alert keeps existing look.
   return (
     <Alert
+      ref={ref as React.Ref<HTMLDivElement>}
       onClose={onDismiss}
       severity={toast.severity as AlertColor}
       variant="filled"
@@ -395,7 +397,7 @@ function ToastSurface({
       {toast.message}
     </Alert>
   );
-}
+});
 
 export function useToast() {
   const context = useContext(ToastContext);
