@@ -98,6 +98,7 @@ import {
 } from "@/hooks/queries/useMaterialWorkflowSummary";
 import { JourneyWatchProvider } from "@/contexts/JourneyWatchContext";
 import { JourneyOverlay } from "@/components/materials/journey/JourneyOverlay";
+import { EstimateBasketProvider } from "@/contexts/EstimateBasketContext";
 
 const drawerWidth = 260;
 const iconBarWidth = 64;
@@ -1086,6 +1087,7 @@ export default function MainLayout({
   );
 
   return (
+    <EstimateBasketProvider>
     <JourneyWatchProvider>
     <Box
       sx={{
@@ -1458,5 +1460,6 @@ export default function MainLayout({
       </Snackbar>
     </Box>
     </JourneyWatchProvider>
+    </EstimateBasketProvider>
   );
 }
