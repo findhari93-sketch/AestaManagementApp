@@ -7,6 +7,7 @@ import { recordSpend } from "@/lib/services/engineerWalletV2";
 import { ENGINEER_WALLET_KEYS } from "@/hooks/queries/useEngineerWalletV2";
 import { generateOptimisticId } from "@/lib/optimistic";
 import { wrapQueryFn } from "@/lib/utils/timeout";
+import { StaleStateError } from "@/lib/utils/staleState";
 import type {
   PurchaseOrder,
   PurchaseOrderWithDetails,
@@ -854,9 +855,10 @@ export function useSubmitPOForApproval() {
         .eq("id", id)
         .eq("status", "draft")
         .select()
-        .single();
+        .maybeSingle();
 
       if (error) throw error;
+      if (!data) throw new StaleStateError("purchase order");
       return data as PurchaseOrder;
     },
     onSuccess: (result) => {
@@ -893,9 +895,10 @@ export function useApprovePurchaseOrder() {
         .eq("id", id)
         .eq("status", "pending_approval")
         .select()
-        .single();
+        .maybeSingle();
 
       if (error) throw error;
+      if (!data) throw new StaleStateError("purchase order");
       return data as PurchaseOrder;
     },
     onSuccess: (result) => {
@@ -931,9 +934,10 @@ export function useMarkPOAsOrdered() {
         .eq("id", id)
         .in("status", ["draft", "approved"]) // Allow from draft or approved
         .select()
-        .single();
+        .maybeSingle();
 
       if (error) throw error;
+      if (!data) throw new StaleStateError("purchase order");
       return data as PurchaseOrder;
     },
     onSuccess: (result) => {
@@ -978,14 +982,12 @@ export function useCancelPurchaseOrder() {
         })
         .eq("id", id)
         .select()
-        .single();
+        .maybeSingle();
 
       if (error) {
         throw new Error(error.message || "Failed to cancel purchase order. You may not have permission to perform this action.");
       }
-      if (!data) {
-        throw new Error("Purchase order not found or you do not have permission to cancel it.");
-      }
+      if (!data) throw new StaleStateError("purchase order");
       return data as PurchaseOrder;
     },
     onSuccess: (result) => {

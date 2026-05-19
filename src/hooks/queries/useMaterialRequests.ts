@@ -3,6 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { createClient, ensureFreshSession } from "@/lib/supabase/client";
 import { queryKeys } from "@/lib/cache/keys";
+import { StaleStateError } from "@/lib/utils/staleState";
 import { useOptimisticMutation } from "@/hooks/mutations/useOptimisticMutation";
 import {
   createStatusUpdater,
@@ -475,9 +476,10 @@ export function useApproveMaterialRequest() {
         .eq("id", id)
         .eq("status", "pending")
         .select()
-        .single();
+        .maybeSingle();
 
       if (requestError) throw requestError;
+      if (!request) throw new StaleStateError("material request");
 
       // Update item approved quantities in parallel (optimized from sequential loop)
       const updatePromises = approvedItems.map((item) =>
@@ -582,9 +584,10 @@ export function useRejectMaterialRequest() {
         .eq("id", id)
         .eq("status", "pending")
         .select()
-        .single();
+        .maybeSingle();
 
       if (error) throw error;
+      if (!data) throw new StaleStateError("material request");
       return data as MaterialRequest;
     },
     // Optimistic update: Show rejected status immediately
@@ -666,9 +669,10 @@ export function useCancelMaterialRequest() {
         .eq("id", id)
         .in("status", ["draft", "pending"])
         .select()
-        .single();
+        .maybeSingle();
 
       if (error) throw error;
+      if (!data) throw new StaleStateError("material request");
       return data as MaterialRequest;
     },
     onSuccess: (result) => {

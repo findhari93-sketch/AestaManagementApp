@@ -14,6 +14,7 @@ import {
   setSessionManagerQueryClient,
 } from "@/lib/auth/sessionManager";
 import { isAbortOrTimeoutError } from "@/lib/utils/timeout";
+import { isStaleStateError } from "@/lib/utils/staleState";
 
 /**
  * Checks if an error is a session/auth related error that should redirect to login.
@@ -259,6 +260,9 @@ export default function QueryProvider({
         },
         mutations: {
           retry: (failureCount, error: any) => {
+            // StaleStateError is deterministic — retrying won't make the row
+            // match the guard. Surface to the user immediately.
+            if (isStaleStateError(error)) return false;
             // Don't retry on timeouts/aborts. The user already waited the
             // full 25s (timeoutFetch) or wrapMutationFn ceiling once —
             // retrying just makes them wait again on the same poisoned
@@ -321,6 +325,23 @@ export default function QueryProvider({
           },
           networkMode: "always",
           onError: async (error) => {
+            // StaleStateError — a guarded mutation matched 0 rows because the
+            // entity is no longer in the expected state (e.g. another tab/user
+            // already approved this request, or the dialog opened on stale
+            // IDB-restored cache). Surface as a toast and silently invalidate
+            // active queries so the UI reconciles to truth.
+            if (isStaleStateError(error)) {
+              if (typeof window !== "undefined") {
+                window.dispatchEvent(
+                  new CustomEvent("stale-state-error", {
+                    detail: { message: error.message },
+                  }),
+                );
+              }
+              clientRef.current?.invalidateQueries({ refetchType: "active" });
+              return;
+            }
+
             // Mutation timeout: same pool-recovery dance as the query side
             // (cancel in-flight + invalidate active), so the user's NEXT
             // attempt opens fresh sockets instead of queuing behind the

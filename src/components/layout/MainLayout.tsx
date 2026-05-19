@@ -88,6 +88,7 @@ import NotificationBell from "@/components/notifications/NotificationBell";
 import ActiveSectionChip from "@/components/layout/ActiveSectionChip";
 import SettlementDialogManager from "@/components/settlement/SettlementDialogManager";
 import ChatAssistant from "@/components/chat-assistant/ChatAssistant";
+import StaleStateSnackbar from "@/components/layout/StaleStateSnackbar";
 import ThemeToggle from "@/components/common/ThemeToggle";
 import DateRangePicker from "@/components/common/DateRangePicker";
 import ManualRefreshButton from "@/components/common/ManualRefreshButton";
@@ -1447,6 +1448,11 @@ export default function MainLayout({
 
       {/* Chat Assistant */}
       <ChatAssistant open={chatOpen} onClose={() => setChatOpen(false)} />
+
+      {/* Stale-state toast — fires when a guarded mutation hits a row that
+          no longer matches its expected state (e.g. dialog opened on stale
+          IDB cache after idle, another tab already approved it). */}
+      <StaleStateSnackbar />
 
       {/* Refresh feedback snackbar */}
       <Snackbar
