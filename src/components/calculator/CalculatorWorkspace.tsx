@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import {
   Autocomplete,
   Badge,
@@ -8,6 +8,8 @@ import {
   Button,
   Chip,
   Divider,
+  MenuItem,
+  Select,
   TextField,
   Typography,
   alpha,
@@ -21,6 +23,7 @@ import {
   getCalculatorTemplate,
   type UnitOption,
 } from "@/lib/category-calculator-templates";
+import { toFeet, type LengthUnit } from "@/lib/calculatorMath";
 import {
   useMaterialSearchOptions,
   filterMaterialSearchOptions,
@@ -69,9 +72,76 @@ export default function CalculatorWorkspace({
   const [selectedCategoryCode, setSelectedCategoryCode] = useState<
     string | undefined
   >(fixedCategoryCode);
+  const [selectedMaterialCode, setSelectedMaterialCode] = useState<
+    string | null
+  >(null);
 
   // ── Template ───────────────────────────────────────────────────────────────
   const template = getCalculatorTemplate(selectedCategoryCode);
+
+  // ── Teak wood: Log / Palagai with output unit picker ──────────────────────
+  // Activated when the selected material is TEA-0001 (the teak parent material).
+  // Type determines input set + default output unit; user can flip output unit
+  // and the math + auto-rate-fill follow.
+  const TEAK_TYPES = ['Log', 'Palagai'] as const;
+  type TeakType = (typeof TEAK_TYPES)[number];
+  type TeakOutputUnit = 'cft' | 'sqft' | 'ft';
+  const DEFAULT_TEAK_UNIT: Record<TeakType, TeakOutputUnit> = {
+    Log: 'cft',
+    Palagai: 'sqft',
+  };
+  const PALAGAI_THICKNESS_IN = 1.5;
+  const isTeak = selectedMaterialCode === 'TEA-0001';
+
+  const [teakType, setTeakType] = useState<TeakType>('Log');
+  const [outputUnit, setOutputUnit] = useState<TeakOutputUnit>('cft');
+
+  const effectiveTemplate = useMemo(() => {
+    if (!isTeak) return template;
+
+    // Strip thickness input for Palagai (locked at 1.5") and pick label by unit
+    const inputs =
+      teakType === 'Palagai'
+        ? template.inputs.filter((f) => f.key !== 'thickness')
+        : template.inputs;
+
+    const labelByUnit: Record<TeakOutputUnit, string> = {
+      cft: 'Gana adi (cft)',
+      sqft: 'Square feet (sqft)',
+      ft: 'Running feet (ft)',
+    };
+
+    return {
+      ...template,
+      inputs,
+      outputUnit,
+      outputLabel: labelByUnit[outputUnit],
+      computeOutput: (
+        values: Record<string, number>,
+        units: Record<string, UnitOption>,
+      ) => {
+        const lengthFt = toFeet(
+          values.length ?? 0,
+          (units.length ?? 'ft') as LengthUnit,
+        );
+        const widthFt = toFeet(
+          values.width ?? 0,
+          (units.width ?? 'in') as LengthUnit,
+        );
+        const thicknessFt =
+          teakType === 'Log'
+            ? toFeet(
+                values.thickness ?? 0,
+                (units.thickness ?? 'in') as LengthUnit,
+              )
+            : PALAGAI_THICKNESS_IN / 12;
+        const qty = values.qty ?? 0;
+        if (outputUnit === 'cft') return lengthFt * widthFt * thicknessFt * qty;
+        if (outputUnit === 'sqft') return lengthFt * widthFt * qty;
+        return lengthFt * qty; // 'ft' (running)
+      },
+    };
+  }, [isTeak, teakType, outputUnit, template]);
 
   // ── Dimension inputs ───────────────────────────────────────────────────────
   const [values, setValues] = useState<Record<string, number | "">>(() =>
@@ -102,9 +172,17 @@ export default function CalculatorWorkspace({
   );
 
   // ── Vendor quotes ──────────────────────────────────────────────────────────
+  // For teak we only auto-fill rates when the user is on the default unit for
+  // that type (cft for Log, sqft for Palagai). On non-default units the brand's
+  // stored unit won't match, so the query returns nothing — manual rate entry
+  // would be a v2 feature.
+  const teakUnitMatchesDefault = isTeak
+    ? outputUnit === DEFAULT_TEAK_UNIT[teakType]
+    : true;
   const { quotes, isLoading: quotesLoading } = useCalculatorVendorQuotes(
     selectedMaterialId,
-    selectedBrandId,
+    isTeak ? selectedBrandId : null,
+    isTeak && teakUnitMatchesDefault ? outputUnit : null,
   );
 
   // ── Selected vendor ────────────────────────────────────────────────────────
@@ -114,15 +192,21 @@ export default function CalculatorWorkspace({
   const numericValues = Object.fromEntries(
     Object.entries(values).map(([k, v]) => [k, typeof v === "number" ? v : 0]),
   );
-  const computedOutput = template.computeOutput(numericValues, units);
+  const computedOutput = effectiveTemplate.computeOutput(numericValues, units);
 
   // ── Handlers ───────────────────────────────────────────────────────────────
 
-  function handleMaterialChange(materialId: string, materialName: string, categoryCode: string | undefined) {
+  function handleMaterialChange(
+    materialId: string,
+    materialName: string,
+    categoryCode: string | undefined,
+    materialCode: string | null,
+  ) {
     const newTemplate = getCalculatorTemplate(categoryCode);
     setSelectedMaterialId(materialId);
     setSelectedMaterialName(materialName);
     setSelectedCategoryCode(categoryCode);
+    setSelectedMaterialCode(materialCode);
     // Reset inputs to new template defaults
     setValues(
       Object.fromEntries(
@@ -137,6 +221,8 @@ export default function CalculatorWorkspace({
     setSelectedBrandId(null);
     setSelectedBrandName(null);
     setSelectedVendorId(null);
+    setTeakType('Log');
+    setOutputUnit('cft');
   }
 
   function handleAddToBasket() {
@@ -151,8 +237,8 @@ export default function CalculatorWorkspace({
         Object.entries(units).map(([k, u]) => [k, u as string]),
       ),
       computedOutput,
-      outputUnit: template.outputUnit,
-      outputLabel: template.outputLabel,
+      outputUnit: effectiveTemplate.outputUnit,
+      outputLabel: effectiveTemplate.outputLabel,
       pricingDimensionValue: selectedBrandName,
       vendorQuotes: quotes.map((q) => ({
         vendorId: q.vendorId,
@@ -164,7 +250,7 @@ export default function CalculatorWorkspace({
     });
 
     showSuccess(
-      `Added to basket — ${computedOutput.toFixed(3)} ${template.outputUnit}`,
+      `Added to basket — ${computedOutput.toFixed(3)} ${effectiveTemplate.outputUnit}`,
     );
   }
 
@@ -209,6 +295,7 @@ export default function CalculatorWorkspace({
               setSelectedMaterialId(null);
               setSelectedMaterialName("");
               setSelectedCategoryCode(undefined);
+              setSelectedMaterialCode(null);
               setSelectedBrandId(null);
               setSelectedBrandName(null);
               setSelectedVendorId(null);
@@ -219,7 +306,12 @@ export default function CalculatorWorkspace({
             const categoryCode =
               (targetMaterial.category as { code?: string } | null)?.code ??
               undefined;
-            handleMaterialChange(targetMaterial.id, targetMaterial.name, categoryCode);
+            handleMaterialChange(
+              targetMaterial.id,
+              targetMaterial.name,
+              categoryCode,
+              targetMaterial.code ?? null,
+            );
           }}
           renderInput={(params) => (
             <TextField
@@ -243,7 +335,49 @@ export default function CalculatorWorkspace({
         />
       )}
 
-      {/* Brand/quality chips */}
+      {/* Teak wood type chips — TEA-0001 only */}
+      {isTeak && (
+        <Box>
+          <Typography
+            variant="caption"
+            color="text.secondary"
+            display="block"
+            sx={{ mb: 0.75 }}
+          >
+            Wood type
+          </Typography>
+          <Box sx={{ display: 'flex', gap: 0.5 }}>
+            {TEAK_TYPES.map((t) => (
+              <Chip
+                key={t}
+                label={t === 'Palagai' ? 'Palagai (1.5")' : t}
+                onClick={() => {
+                  setTeakType(t);
+                  setOutputUnit(DEFAULT_TEAK_UNIT[t]);
+                  // Preserve quality across type switch: if user had "Log · 1st"
+                  // and switches to Palagai, try to land on "Palagai · 1st".
+                  const qualitySuffix = selectedBrandName?.split(' · ')[1];
+                  if (qualitySuffix) {
+                    const next = brands.find(
+                      (b) => b.brand_name === `${t} · ${qualitySuffix}`,
+                    );
+                    setSelectedBrandId(next?.id ?? null);
+                    setSelectedBrandName(next?.brand_name ?? null);
+                  } else {
+                    setSelectedBrandId(null);
+                    setSelectedBrandName(null);
+                  }
+                  setSelectedVendorId(null);
+                }}
+                variant={teakType === t ? 'filled' : 'outlined'}
+                color={teakType === t ? 'primary' : 'default'}
+              />
+            ))}
+          </Box>
+        </Box>
+      )}
+
+      {/* Brand/quality chips — for teak, filter to the active type's brands */}
       {showBrandChips && (
         <Box>
           <Typography
@@ -255,10 +389,19 @@ export default function CalculatorWorkspace({
             {template.pricingDimensionLabel}
           </Typography>
           <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
-            {brands.map((b) => (
+            {(isTeak
+              ? brands.filter((b) =>
+                  b.brand_name.startsWith(`${teakType} · `),
+                )
+              : brands
+            ).map((b) => (
               <Chip
                 key={b.id}
-                label={b.brand_name}
+                label={
+                  isTeak
+                    ? b.brand_name.replace(`${teakType} · `, '')
+                    : b.brand_name
+                }
                 onClick={() => {
                   setSelectedBrandId(b.id);
                   setSelectedBrandName(b.brand_name);
@@ -276,7 +419,7 @@ export default function CalculatorWorkspace({
       {/* Dimension inputs */}
       {hasMaterial && (
         <CalculatorInputs
-          template={template}
+          template={effectiveTemplate}
           values={values}
           units={units}
           onValueChange={(key, value) =>
@@ -299,11 +442,57 @@ export default function CalculatorWorkspace({
           }}
         >
           <Typography variant="caption" color="text.secondary">
-            {template.outputLabel}
+            {effectiveTemplate.outputLabel}
           </Typography>
-          <Typography variant="h5" color="primary.main" fontWeight={700}>
-            {computedOutput.toFixed(3)} {template.outputUnit}
-          </Typography>
+          <Box
+            sx={{
+              display: "flex",
+              gap: 1,
+              alignItems: "baseline",
+              justifyContent: "center",
+              flexWrap: "wrap",
+            }}
+          >
+            <Typography variant="h5" color="primary.main" fontWeight={700}>
+              {computedOutput.toFixed(3)}
+            </Typography>
+            {isTeak ? (
+              <Select
+                size="small"
+                value={outputUnit}
+                onChange={(e) =>
+                  setOutputUnit(e.target.value as TeakOutputUnit)
+                }
+                sx={{
+                  ".MuiSelect-select": { py: 0.25, fontWeight: 700 },
+                  bgcolor: "background.paper",
+                }}
+              >
+                <MenuItem value="cft">cft</MenuItem>
+                <MenuItem value="sqft">sqft</MenuItem>
+                <MenuItem value="ft">ft</MenuItem>
+              </Select>
+            ) : (
+              <Typography
+                variant="h5"
+                color="primary.main"
+                fontWeight={700}
+                component="span"
+              >
+                {effectiveTemplate.outputUnit}
+              </Typography>
+            )}
+          </Box>
+          {isTeak && !teakUnitMatchesDefault && (
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              sx={{ display: "block", mt: 0.5 }}
+            >
+              Vendor rates only auto-fill on the default unit
+              (cft for Log, sqft for Palagai). Switch back to see prices.
+            </Typography>
+          )}
         </Box>
       )}
 
@@ -318,7 +507,7 @@ export default function CalculatorWorkspace({
             quotes={quotes}
             isLoading={quotesLoading}
             computedOutput={computedOutput}
-            outputUnit={template.outputUnit}
+            outputUnit={effectiveTemplate.outputUnit}
             selectedVendorId={selectedVendorId}
             onSelectVendor={setSelectedVendorId}
           />

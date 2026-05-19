@@ -100,7 +100,7 @@ export function VendorQuoteDialog({
       setVendor(lockedVendor ?? null);
       setBrand(null);
       setPrice("");
-      setUnit(lockedMaterial?.unit ?? "");
+      setUnit(lockedMaterial?.category?.code === 'WOD' ? 'cft' : (lockedMaterial?.unit ?? ""));
       setPriceIncludesGst(false);
       setGstRate(lockedMaterial?.gst_rate?.toString() ?? "");
       setPriceIncludesTransport(false);
@@ -114,11 +114,20 @@ export function VendorQuoteDialog({
 
   // When a material is selected, default unit + GST rate
   useEffect(() => {
-    if (material && !unit) setUnit(material.unit as MaterialUnit);
+    if (material && !unit)
+      setUnit(material.category?.code === 'WOD' ? 'cft' : (material.unit as MaterialUnit));
     if (material && !gstRate && material.gst_rate != null) {
       setGstRate(material.gst_rate.toString());
     }
   }, [material]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // For teak, the brand name encodes the product type (Log → cft, Palagai → sqft).
+  // Auto-snap the unit when the user picks (or changes) the brand.
+  useEffect(() => {
+    if (!brand) return;
+    if (brand.brand_name.startsWith('Palagai')) setUnit('sqft');
+    else if (brand.brand_name.startsWith('Log')) setUnit('cft');
+  }, [brand]);
 
   const handleQuickAddCreated = (args: {
     kind: "material" | "vendor";

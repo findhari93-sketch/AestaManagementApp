@@ -7,25 +7,27 @@ import type { VendorQuote } from "@/lib/category-calculator-templates";
 
 /**
  * Fetches vendor prices for a given material, deduplicated to one row per vendor
- * (lowest price wins). Vendor prices are per-material — quality/brand selection
- * does NOT filter vendors because vendor_inventory has no brand_id associations
- * for most materials.
+ * (lowest price wins). Optionally filters by brand and/or unit when supplied —
+ * needed for teak where the same material has multiple (type × quality) brand
+ * rows priced in different units (cft for Log, sqft for Palagai).
  *
  * @param materialId - Pass null to disable the query.
- * @param _brandId   - Retained in signature for call-site compatibility; unused.
+ * @param brandId    - Pass to filter to a specific brand row (composite type×quality).
+ * @param unit       - Pass to filter vendor_inventory.unit (e.g. 'cft' or 'sqft').
  */
 export function useCalculatorVendorQuotes(
   materialId: string | null,
-  _brandId?: string | null,
+  brandId?: string | null,
+  unit?: string | null,
 ): { quotes: VendorQuote[]; isLoading: boolean; error: Error | null } {
   const supabase = createClient();
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ["calculatorQuotes", materialId],
+    queryKey: ["calculatorQuotes", materialId, brandId ?? null, unit ?? null],
     enabled: materialId !== null,
     queryFn: wrapQueryFn(
       async () => {
-        const { data: rows, error: queryError } = await supabase
+        let q = supabase
           .from("vendor_inventory")
           .select(
             `
@@ -41,6 +43,11 @@ export function useCalculatorVendorQuotes(
           .eq("is_available", true)
           .gt("current_price", 0)
           .order("current_price", { ascending: true });
+
+        if (brandId) q = q.eq("brand_id", brandId);
+        if (unit) q = q.eq("unit", unit);
+
+        const { data: rows, error: queryError } = await q;
 
         if (queryError) throw new Error(queryError.message);
 
