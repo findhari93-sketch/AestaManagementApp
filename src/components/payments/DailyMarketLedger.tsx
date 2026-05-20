@@ -558,8 +558,8 @@ function LaborerTooltipBody({
             fontSize: 11,
           }}
         >
-          Settled separately under Contract Settlement (waterfall) —
-          not part of this row&rsquo;s ₹{rowAmount.toLocaleString("en-IN")}.
+          Excluded from DAILY tile in the drawer — included in row total
+          {" "}₹{rowAmount.toLocaleString("en-IN")}.
         </Typography>
       )}
     </Box>
