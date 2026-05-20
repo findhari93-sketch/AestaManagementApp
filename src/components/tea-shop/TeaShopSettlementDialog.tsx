@@ -41,6 +41,7 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import FileUploader, { UploadedFile } from "@/components/common/FileUploader";
 import PayerSourceSelector from "@/components/settlement/PayerSourceSelector";
+import { isSiteEngineerPayingFromWallet } from "@/components/expenses/walletPayerLock";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSite } from "@/contexts/SiteContext";
 import { recordSpend } from "@/lib/services/engineerWalletV2";
@@ -1010,14 +1011,21 @@ export default function TeaShopSettlementDialog({
           )}
         </Paper>
 
-        {/* Payment Source */}
-        <PayerSourceSelector
-          value={payerSource}
-          customName={customPayerName}
-          onChange={setPayerSource}
-          onCustomNameChange={setCustomPayerName}
-          compact
-        />
+        {/* Payment Source — hidden for site engineers paying from wallet
+            (source derived from wallet deposit attribution in Phase 2). */}
+        {!isSiteEngineerPayingFromWallet({
+          userRole: userProfile?.role,
+          payerType,
+          createWalletTransaction,
+        }) && (
+          <PayerSourceSelector
+            value={payerSource}
+            customName={customPayerName}
+            onChange={setPayerSource}
+            onCustomNameChange={setCustomPayerName}
+            compact
+          />
+        )}
 
         {/* Link to Subcontract (Optional) */}
         <FormControl fullWidth size="small" sx={{ mb: 3 }}>

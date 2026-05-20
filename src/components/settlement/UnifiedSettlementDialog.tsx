@@ -59,6 +59,7 @@ import { useSite } from "@/contexts/SiteContext";
 import FileUploader, { UploadedFile } from "@/components/common/FileUploader";
 import SubcontractLinkSelector from "@/components/payments/SubcontractLinkSelector";
 import PayerSourceSelector from "./PayerSourceSelector";
+import { isSiteEngineerPayingFromWallet } from "@/components/expenses/walletPayerLock";
 import BatchSelector from "@/components/wallet/BatchSelector";
 import dayjs from "dayjs";
 import type {
@@ -738,14 +739,21 @@ export default function UnifiedSettlementDialog({
 
         <Divider sx={{ my: 2 }} />
 
-        {/* Payer Source — locked to deposit source when settling via wallet */}
-        <PayerSourceSelector
-          value={payerSource}
-          customName={customPayerName}
-          onChange={setPayerSource}
-          onCustomNameChange={setCustomPayerName}
-          disabled={settlementMutation.isPending || paymentChannel === "engineer_wallet"}
-        />
+        {/* Payer Source — hidden for site engineers paying from wallet
+            (source is derived from deposits). Admin sees it disabled when wallet. */}
+        {!isSiteEngineerPayingFromWallet({
+          userRole: userProfile?.role,
+          payerType: "site_engineer",
+          createWalletTransaction: paymentChannel === "engineer_wallet",
+        }) && (
+          <PayerSourceSelector
+            value={payerSource}
+            customName={customPayerName}
+            onChange={setPayerSource}
+            onCustomNameChange={setCustomPayerName}
+            disabled={settlementMutation.isPending || paymentChannel === "engineer_wallet"}
+          />
+        )}
 
         {/* Payment Mode */}
         <Box sx={{ mb: 2 }}>

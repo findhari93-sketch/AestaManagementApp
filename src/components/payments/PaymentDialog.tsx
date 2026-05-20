@@ -47,6 +47,7 @@ import { getLatestDepositPayerSource } from "@/lib/services/engineerWalletV2";
 import FileUploader, { UploadedFile } from "@/components/common/FileUploader";
 import SubcontractLinkSelector from "./SubcontractLinkSelector";
 import PayerSourceSelector from "@/components/settlement/PayerSourceSelector";
+import { isSiteEngineerPayingFromWallet } from "@/components/expenses/walletPayerLock";
 import { useToast } from "@/contexts/ToastContext";
 import dayjs from "dayjs";
 import type {
@@ -735,14 +736,21 @@ export default function PaymentDialog({
           </Box>
         )}
 
-        {/* Money Source — locked to deposit source when settling via wallet */}
-        <PayerSourceSelector
-          value={moneySource}
-          customName={moneySourceName}
-          onChange={setMoneySource}
-          onCustomNameChange={setMoneySourceName}
-          disabled={processing || paymentChannel === "engineer_wallet"}
-        />
+        {/* Money Source — hidden for site engineers paying from wallet (source
+            is derived from deposits). Admin still sees it disabled when wallet. */}
+        {!isSiteEngineerPayingFromWallet({
+          userRole: userProfile?.role,
+          payerType: "site_engineer",
+          createWalletTransaction: paymentChannel === "engineer_wallet",
+        }) && (
+          <PayerSourceSelector
+            value={moneySource}
+            customName={moneySourceName}
+            onChange={setMoneySource}
+            onCustomNameChange={setMoneySourceName}
+            disabled={processing || paymentChannel === "engineer_wallet"}
+          />
+        )}
 
         {/* Engineer Selection */}
         <Collapse in={paymentChannel === "engineer_wallet"}>

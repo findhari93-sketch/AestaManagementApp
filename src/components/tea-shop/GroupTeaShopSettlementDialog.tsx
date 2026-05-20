@@ -39,6 +39,7 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import FileUploader, { UploadedFile } from "@/components/common/FileUploader";
 import PayerSourceSelector from "@/components/settlement/PayerSourceSelector";
+import { isSiteEngineerPayingFromWallet } from "@/components/expenses/walletPayerLock";
 import { useAuth } from "@/contexts/AuthContext";
 import type { Database } from "@/types/database.types";
 
@@ -499,12 +500,18 @@ export default function GroupTeaShopSettlementDialog({
                 label="Create wallet transaction for reimbursement"
               />
 
-              <PayerSourceSelector
-                value={payerSource}
-                onChange={setPayerSource}
-                customName={customPayerName}
-                onCustomNameChange={setCustomPayerName}
-              />
+              {!isSiteEngineerPayingFromWallet({
+                userRole: userProfile?.role,
+                payerType,
+                createWalletTransaction,
+              }) && (
+                <PayerSourceSelector
+                  value={payerSource}
+                  onChange={setPayerSource}
+                  customName={customPayerName}
+                  onCustomNameChange={setCustomPayerName}
+                />
+              )}
             </>
           )}
 

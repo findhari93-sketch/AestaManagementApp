@@ -33,6 +33,8 @@ import {
 import { useSiteSubcontracts } from "@/hooks/queries/useSubcontracts";
 import FileUploader, { UploadedFile } from "@/components/common/FileUploader";
 import PayerSourceSelector from "@/components/settlement/PayerSourceSelector";
+import { useAuth } from "@/contexts/AuthContext";
+import { isSiteEngineerPayingFromWallet } from "@/components/expenses/walletPayerLock";
 import { createClient } from "@/lib/supabase/client";
 import type {
   RentalOrderWithDetails,
@@ -74,6 +76,12 @@ export default function RentalSettlementDialog({
   const isMobile = useIsMobile();
   const supabase = createClient();
   const settleRental = useSettleRental();
+  const { userProfile } = useAuth();
+  const walletOnly = isSiteEngineerPayingFromWallet({
+    userRole: userProfile?.role,
+    payerType: "site_engineer",
+    createWalletTransaction: true,
+  });
 
   // Get cost calculation
   const costCalc = useRentalCostCalculation(order.id);
@@ -457,16 +465,19 @@ export default function RentalSettlementDialog({
             </FormControl>
           </Grid>
 
-          {/* Payer Source */}
-          <Grid size={12}>
-            <PayerSourceSelector
-              value={payerSource}
-              customName={customPayerName}
-              onChange={setPayerSource}
-              onCustomNameChange={setCustomPayerName}
-              compact
-            />
-          </Grid>
+          {/* Payer Source — hidden for site engineers (source derived from
+              wallet deposit attribution in Phase 2). */}
+          {!walletOnly && (
+            <Grid size={12}>
+              <PayerSourceSelector
+                value={payerSource}
+                customName={customPayerName}
+                onChange={setPayerSource}
+                onCustomNameChange={setCustomPayerName}
+                compact
+              />
+            </Grid>
+          )}
 
           {/* Vendor Bill */}
           <Grid size={12}>

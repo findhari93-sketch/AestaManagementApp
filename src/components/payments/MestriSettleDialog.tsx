@@ -34,6 +34,7 @@ import type {
 } from "@/types/payment.types";
 import type { PayerSource } from "@/types/settlement.types";
 import PayerSourceSelector from "@/components/settlement/PayerSourceSelector";
+import { isSiteEngineerPayingFromWallet } from "@/components/expenses/walletPayerLock";
 
 interface MestriSettleDialogProps {
   open: boolean;
@@ -518,15 +519,22 @@ export function MestriSettleDialog({
             </Box>
           )}
 
-          {/* Payer source — canonical 6-option selector with collapse for custom/other-site name */}
-          <PayerSourceSelector
-            siteId={siteId}
-            value={payerSource}
-            customName={customPayerName}
-            onChange={setPayerSource}
-            onCustomNameChange={setCustomPayerName}
-            compact
-          />
+          {/* Payer source — hidden for site engineers paying from wallet
+              (source is derived from deposit attribution in Phase 2). */}
+          {!isSiteEngineerPayingFromWallet({
+            userRole: userProfile?.role,
+            payerType: "site_engineer",
+            createWalletTransaction: true,
+          }) && (
+            <PayerSourceSelector
+              siteId={siteId}
+              value={payerSource}
+              customName={customPayerName}
+              onChange={setPayerSource}
+              onCustomNameChange={setCustomPayerName}
+              compact
+            />
+          )}
 
           {/* Notes */}
           <TextField
