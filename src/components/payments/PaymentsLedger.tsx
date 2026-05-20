@@ -27,6 +27,11 @@ export interface PaymentsLedgerRow {
    *  sites always get 'current'. Used to bucket rows into legacy/current bands. */
   period: "legacy" | "current";
   paymentChannel?: string;   // 'direct' | 'engineer_wallet' | undefined (pending rows)
+  // Structured laborer counts for daily-market rows (zero on weekly rows).
+  // Drive the by-date row's chip label + per-chip hover tooltips.
+  dailyCnt: number;     // roster laborers paid as daily wage
+  contractCnt: number;  // contract-typed laborers paid via this settlement (paid rows only)
+  mktCnt: number;       // ad-hoc market hires
   // Set on synthetic parent rows produced by the same-week + same-subtype
   // grouping below. Children retain their original flat shape.
   subRows?: PaymentsLedgerRow[];
@@ -37,19 +42,18 @@ function isGroupParent(r: PaymentsLedgerRow): boolean {
 }
 
 // Derive the laborer-type slice for a daily-market ledger row from its
-// human-facing `forLabel` (e.g. "2 mkt", "3 lab", "1 lab + 2 mkt"). Used by
-// the InspectPane → Settle dialog flow to ensure the dialog fetches the same
-// slice as the clicked row. Mixed labels and unknown formats fall back to
-// "all" (no filter), preserving prior behaviour.
+// structured counts. Used by the InspectPane → Settle dialog flow to ensure
+// the dialog fetches the same slice as the clicked row. Contract counts
+// roll into "daily" (they were settled as daily wages on this row). Mixed
+// rows fall back to "all" (no filter), preserving prior behaviour.
 export function derivePendingLaborerType(
   row: PaymentsLedgerRow
 ): "daily" | "market" | "all" {
   if (row.type !== "daily-market") return "all";
-  const label = (row.forLabel ?? "").toLowerCase();
-  const hasMkt = /\bmkt\b/.test(label);
-  const hasDaily = /\blab\b/.test(label);
-  if (hasMkt && !hasDaily) return "market";
-  if (hasDaily && !hasMkt) return "daily";
+  const hasDailySide = (row.dailyCnt ?? 0) + (row.contractCnt ?? 0) > 0;
+  const hasMkt = (row.mktCnt ?? 0) > 0;
+  if (hasMkt && !hasDailySide) return "market";
+  if (hasDailySide && !hasMkt) return "daily";
   return "all";
 }
 
@@ -134,6 +138,9 @@ export default function PaymentsLedger({
         siteId: first.siteId,
         // All grouped children share a date+weekEnd, so they share a period.
         period: first.period,
+        dailyCnt: 0,
+        contractCnt: 0,
+        mktCnt: 0,
         subRows: children,
       });
     }

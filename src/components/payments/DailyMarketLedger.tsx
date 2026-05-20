@@ -1,10 +1,20 @@
 "use client";
 
-import React, { useMemo } from "react";
-import { Box, Chip, Skeleton, Typography, useTheme, alpha } from "@mui/material";
+import React, { useMemo, useState } from "react";
+import {
+  Box,
+  Chip,
+  Divider,
+  Skeleton,
+  Tooltip,
+  Typography,
+  useTheme,
+  alpha,
+} from "@mui/material";
 import { AccountBalanceWallet as AccountBalanceWalletIcon } from "@mui/icons-material";
 import dayjs from "dayjs";
 import { weekStartStr, weekEndStr } from "@/lib/utils/weekUtils";
+import { useAttendanceForDate } from "@/hooks/queries/useAttendanceForDate";
 import type { PaymentsLedgerRow } from "./PaymentsLedger";
 
 interface DailyMarketLedgerProps {
@@ -253,18 +263,22 @@ function LedgerRow({ row, pending, onClick, onSettle }: LedgerRowProps) {
           }}
         />
       </Box>
-      <Box>
-        <Typography sx={{ fontSize: 12.5 }}>
-          {dayjs(row.date).format("DD MMM")}
-          <span
-            style={{
-              color: theme.palette.text.secondary,
-              marginLeft: 8,
-            }}
-          >
-            · {row.forLabel}
-          </span>
-        </Typography>
+      <Box sx={{ minWidth: 0 }}>
+        <Box
+          sx={{
+            display: "flex",
+            alignItems: "center",
+            flexWrap: "wrap",
+            columnGap: 0.75,
+            rowGap: 0.25,
+            fontSize: 12.5,
+          }}
+        >
+          <Typography component="span" sx={{ fontSize: 12.5 }}>
+            {dayjs(row.date).format("DD MMM")}
+          </Typography>
+          <LaborerChipList row={row} />
+        </Box>
       </Box>
       <Typography
         sx={{
@@ -297,6 +311,256 @@ function LedgerRow({ row, pending, onClick, onSettle }: LedgerRowProps) {
             }}
           />
         </Box>
+      )}
+    </Box>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Chip list rendered per row: shows up to 3 chips (daily / contract / market)
+// with non-zero counts only. Each chip's hover tooltip fetches per-laborer
+// detail lazily via useAttendanceForDate so the list doesn't pre-fetch.
+// ---------------------------------------------------------------------------
+function LaborerChipList({ row }: { row: PaymentsLedgerRow }) {
+  const theme = useTheme();
+  const chips: Array<{ kind: "daily" | "contract" | "market"; count: number }> = [];
+  if (row.dailyCnt > 0) chips.push({ kind: "daily", count: row.dailyCnt });
+  if (row.contractCnt > 0) chips.push({ kind: "contract", count: row.contractCnt });
+  if (row.mktCnt > 0) chips.push({ kind: "market", count: row.mktCnt });
+
+  if (chips.length === 0) {
+    // Fallback for older rows or unexpected shapes — keep the legacy text so
+    // we never render a blank cell.
+    return (
+      <Typography
+        component="span"
+        sx={{ color: theme.palette.text.secondary, fontSize: 12 }}
+      >
+        · {row.forLabel}
+      </Typography>
+    );
+  }
+
+  return (
+    <>
+      <Typography component="span" sx={{ color: theme.palette.text.secondary, fontSize: 12 }}>
+        ·
+      </Typography>
+      {chips.map((c, idx) => (
+        <React.Fragment key={c.kind}>
+          {idx > 0 && (
+            <Typography
+              component="span"
+              sx={{ color: theme.palette.text.disabled, fontSize: 12 }}
+            >
+              ·
+            </Typography>
+          )}
+          <LaborerChip
+            kind={c.kind}
+            count={c.count}
+            siteId={row.siteId}
+            date={row.date}
+            rowAmount={row.amount}
+          />
+        </React.Fragment>
+      ))}
+    </>
+  );
+}
+
+function LaborerChip({
+  kind,
+  count,
+  siteId,
+  date,
+  rowAmount,
+}: {
+  kind: "daily" | "contract" | "market";
+  count: number;
+  siteId: string;
+  date: string;
+  rowAmount: number;
+}) {
+  const theme = useTheme();
+  const [open, setOpen] = useState(false);
+
+  return (
+    <Tooltip
+      open={open}
+      onOpen={() => setOpen(true)}
+      onClose={() => setOpen(false)}
+      arrow
+      placement="top"
+      enterDelay={250}
+      leaveDelay={80}
+      title={
+        open ? (
+          <LaborerTooltipBody
+            kind={kind}
+            siteId={siteId}
+            date={date}
+            rowAmount={rowAmount}
+          />
+        ) : (
+          ""
+        )
+      }
+      slotProps={{
+        tooltip: {
+          sx: {
+            bgcolor: "background.paper",
+            color: "text.primary",
+            border: `1px solid ${theme.palette.divider}`,
+            boxShadow: theme.shadows[4],
+            maxWidth: 360,
+            p: 0,
+          },
+        },
+        arrow: { sx: { color: theme.palette.background.paper, "&::before": { border: `1px solid ${theme.palette.divider}` } } },
+      }}
+    >
+      <Box
+        component="span"
+        onClick={(e) => e.stopPropagation()}
+        sx={{
+          display: "inline-flex",
+          alignItems: "center",
+          color: theme.palette.text.secondary,
+          fontSize: 12,
+          cursor: "help",
+          textDecoration: "underline dotted",
+          textDecorationColor: alpha(theme.palette.text.secondary, 0.35),
+          textUnderlineOffset: 3,
+        }}
+      >
+        {count} {kind}
+      </Box>
+    </Tooltip>
+  );
+}
+
+function LaborerTooltipBody({
+  kind,
+  siteId,
+  date,
+  rowAmount,
+}: {
+  kind: "daily" | "contract" | "market";
+  siteId: string;
+  date: string;
+  rowAmount: number;
+}) {
+  const theme = useTheme();
+  const { data, isLoading } = useAttendanceForDate(siteId, date, { enabled: true });
+
+  const title = kind === "daily" ? "Daily" : kind === "contract" ? "Contract" : "Market";
+
+  if (isLoading || !data) {
+    return (
+      <Box sx={{ p: 1.25, minWidth: 220 }}>
+        <Skeleton variant="text" width="60%" />
+        <Skeleton variant="text" width="80%" />
+        <Skeleton variant="text" width="50%" />
+      </Box>
+    );
+  }
+
+  if (kind === "market") {
+    const list = data.marketLaborers;
+    return (
+      <Box sx={{ p: 1.25, minWidth: 240 }}>
+        <Typography
+          sx={{ fontWeight: 700, fontSize: 12, mb: 0.75 }}
+        >
+          {title}
+        </Typography>
+        {list.length === 0 && (
+          <Typography sx={{ fontSize: 12, color: "text.secondary" }}>
+            No market laborers on this date.
+          </Typography>
+        )}
+        {list.map((m) => (
+          <Box
+            key={m.id}
+            sx={{ display: "flex", justifyContent: "space-between", gap: 1.5, fontSize: 12, py: 0.25 }}
+          >
+            <span>
+              {m.role} × {m.count}
+            </span>
+            <span style={{ fontVariantNumeric: "tabular-nums" }}>
+              ₹{m.amount.toLocaleString("en-IN")}
+            </span>
+          </Box>
+        ))}
+        <Divider sx={{ my: 0.75 }} />
+        <Box sx={{ display: "flex", justifyContent: "space-between", fontSize: 12, fontWeight: 700 }}>
+          <span>Total</span>
+          <span style={{ fontVariantNumeric: "tabular-nums" }}>
+            ₹{data.marketTotal.toLocaleString("en-IN")}
+          </span>
+        </Box>
+      </Box>
+    );
+  }
+
+  const list =
+    kind === "daily"
+      ? data.dailyLaborersByType?.daily ?? []
+      : data.dailyLaborersByType?.contract ?? [];
+  const total = list.reduce((s, l) => s + l.amount, 0);
+  const showInline = list.slice(0, 5);
+  const overflow = list.length - showInline.length;
+
+  return (
+    <Box sx={{ p: 1.25, minWidth: 240 }}>
+      <Typography sx={{ fontWeight: 700, fontSize: 12, mb: 0.75 }}>
+        {title}
+      </Typography>
+      {list.length === 0 && (
+        <Typography sx={{ fontSize: 12, color: "text.secondary" }}>
+          None recorded for this date.
+        </Typography>
+      )}
+      {showInline.map((l) => (
+        <Box
+          key={l.id}
+          sx={{ display: "flex", justifyContent: "space-between", gap: 1.5, fontSize: 12, py: 0.25 }}
+        >
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
+            {l.name} · {l.role} · {l.fullDay ? "Full" : "Half"} day
+          </span>
+          <span style={{ fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
+            ₹{l.amount.toLocaleString("en-IN")}
+          </span>
+        </Box>
+      ))}
+      {overflow > 0 && (
+        <Typography sx={{ fontSize: 11.5, color: "text.secondary", mt: 0.25 }}>
+          …{overflow} more
+        </Typography>
+      )}
+      <Divider sx={{ my: 0.75 }} />
+      <Box sx={{ display: "flex", justifyContent: "space-between", fontSize: 12, fontWeight: 700 }}>
+        <span>Total</span>
+        <span style={{ fontVariantNumeric: "tabular-nums" }}>
+          ₹{total.toLocaleString("en-IN")}
+        </span>
+      </Box>
+      {kind === "contract" && (
+        <Typography
+          variant="caption"
+          sx={{
+            display: "block",
+            mt: 0.75,
+            fontStyle: "italic",
+            color: theme.palette.text.secondary,
+            fontSize: 11,
+          }}
+        >
+          Excluded from DAILY tile in the drawer — included in row total
+          {" "}₹{rowAmount.toLocaleString("en-IN")}.
+        </Typography>
       )}
     </Box>
   );

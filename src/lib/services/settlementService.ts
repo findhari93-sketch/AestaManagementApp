@@ -544,26 +544,29 @@ export async function processWeeklySettlement(
     let laborerCount = 0;
 
     if (config.settlementType === "daily" || config.settlementType === "all") {
+      // laborer_type lives on `laborers`, not `daily_attendance`. Use embedded
+      // join + dotted filter so PostgREST applies it as a WHERE clause on the
+      // joined column.
       const { count } = await supabase
         .from("daily_attendance")
-        .select("*", { count: "exact", head: true })
+        .select("*, laborers!inner(laborer_type)", { count: "exact", head: true })
         .eq("site_id", config.siteId)
         .gte("date", config.dateFrom)
         .lte("date", config.dateTo)
         .eq("is_paid", false)
-        .neq("laborer_type", "contract");
+        .neq("laborers.laborer_type", "contract");
       laborerCount += count || 0;
     }
 
     if (config.settlementType === "contract" || config.settlementType === "all") {
       const { count } = await supabase
         .from("daily_attendance")
-        .select("*", { count: "exact", head: true })
+        .select("*, laborers!inner(laborer_type)", { count: "exact", head: true })
         .eq("site_id", config.siteId)
         .gte("date", config.dateFrom)
         .lte("date", config.dateTo)
         .eq("is_paid", false)
-        .eq("laborer_type", "contract");
+        .eq("laborers.laborer_type", "contract");
       laborerCount += count || 0;
     }
 
@@ -683,31 +686,51 @@ export async function processWeeklySettlement(
       let recordsUpdated = 0;
 
       if (config.settlementType === "daily" || config.settlementType === "all") {
-        const { error: dailyError, count } = await supabase
+        // PostgREST embedded-resource filters only work on SELECT, not UPDATE.
+        // Pre-query the IDs with the inner join + dotted filter, then UPDATE
+        // by ID. Two round-trips, but correct — vs. the previous code which
+        // filtered on `daily_attendance.laborer_type` (non-existent column,
+        // 400 error). See migration 20260520150000 for the defensive trigger
+        // that catches the bug class.
+        const { data: dailyRows, error: dailyQueryError } = await supabase
           .from("daily_attendance")
-          .update(updateData)
+          .select("id, laborers!inner(laborer_type)")
           .eq("site_id", config.siteId)
           .gte("date", config.dateFrom)
           .lte("date", config.dateTo)
           .eq("is_paid", false)
-          .neq("laborer_type", "contract");
-
-        if (dailyError) throw dailyError;
-        recordsUpdated += count || 0;
+          .neq("laborers.laborer_type", "contract");
+        if (dailyQueryError) throw dailyQueryError;
+        const dailyIds = (dailyRows ?? []).map((r: any) => r.id);
+        if (dailyIds.length > 0) {
+          const { error: dailyError, count } = await supabase
+            .from("daily_attendance")
+            .update(updateData)
+            .in("id", dailyIds);
+          if (dailyError) throw dailyError;
+          recordsUpdated += count || 0;
+        }
       }
 
       if (config.settlementType === "contract" || config.settlementType === "all") {
-        const { error: contractError, count } = await supabase
+        const { data: contractRows, error: contractQueryError } = await supabase
           .from("daily_attendance")
-          .update(updateData)
+          .select("id, laborers!inner(laborer_type)")
           .eq("site_id", config.siteId)
           .gte("date", config.dateFrom)
           .lte("date", config.dateTo)
           .eq("is_paid", false)
-          .eq("laborer_type", "contract");
-
-        if (contractError) throw contractError;
-        recordsUpdated += count || 0;
+          .eq("laborers.laborer_type", "contract");
+        if (contractQueryError) throw contractQueryError;
+        const contractIds = (contractRows ?? []).map((r: any) => r.id);
+        if (contractIds.length > 0) {
+          const { error: contractError, count } = await supabase
+            .from("daily_attendance")
+            .update(updateData)
+            .in("id", contractIds);
+          if (contractError) throw contractError;
+          recordsUpdated += count || 0;
+        }
       }
 
       if (config.settlementType === "market" || config.settlementType === "all") {

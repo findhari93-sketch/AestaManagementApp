@@ -59,11 +59,15 @@ function toNumber(v: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-export function useAttendanceForDate(siteId: string, date: string) {
+export function useAttendanceForDate(
+  siteId: string,
+  date: string,
+  options?: { enabled?: boolean },
+) {
   const supabase = createClient();
   return useQuery<AttendanceForDateData>({
     queryKey: ["inspect-attendance-date", siteId, date],
-    enabled: Boolean(siteId && date),
+    enabled: Boolean(siteId && date) && (options?.enabled ?? true),
     staleTime: 60_000,
     queryFn: async ({ signal }): Promise<AttendanceForDateData> => {
       // Diagnostics: this query has a recurring "stuck on skeleton" bug

@@ -49,6 +49,9 @@ export function usePaymentsLedger(args: UsePaymentsLedgerArgs) {
         laborer_id: string | null;
         period: string | null;
         payment_channel: string | null;
+        daily_cnt: number | string | null;
+        contract_cnt: number | string | null;
+        mkt_cnt: number | string | null;
       }>;
       return rows.map<PaymentsLedgerRow>((r) => ({
         id:            r.id,
@@ -65,6 +68,9 @@ export function usePaymentsLedger(args: UsePaymentsLedgerArgs) {
         siteId:        siteId as string,
         period:        (r.period === "legacy" ? "legacy" : "current"),
         paymentChannel: r.payment_channel ?? undefined,
+        dailyCnt:      Number(r.daily_cnt) || 0,
+        contractCnt:   Number(r.contract_cnt) || 0,
+        mktCnt:        Number(r.mkt_cnt) || 0,
       }));
     },
   });

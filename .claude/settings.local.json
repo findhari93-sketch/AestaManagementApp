@@ -400,7 +400,8 @@
       "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\Haribabu\\\\Documents\\\\AppsCopilot\\\\AestaManagementApp\" -Recurse -Directory -ErrorAction SilentlyContinue)",
       "PowerShell($r = Invoke-WebRequest -Uri \"http://localhost:3000/_next/static/chunks/webpack.js\" -UseBasicParsing -ErrorAction SilentlyContinue; \"webpack: $\\($r.StatusCode\\)\"; $r2 = Invoke-WebRequest -Uri \"http://localhost:3000/\" -UseBasicParsing -ErrorAction SilentlyContinue; \"root: $\\($r2.StatusCode\\)\")",
       "Skill(using-superpowers)",
-      "Skill(using-superpowers:*)"
+      "Skill(using-superpowers:*)",
+      "mcp__playwright__browser_hover"
     ],
     "deny": [],
     "ask": [],
