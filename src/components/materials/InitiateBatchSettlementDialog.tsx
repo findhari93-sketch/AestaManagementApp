@@ -40,6 +40,7 @@ import {
 import PayerSourceSelector from "@/components/settlement/PayerSourceSelector";
 import type { PayerSource } from "@/types/settlement.types";
 import { requiresPayerName } from "@/types/settlement.types";
+import { isSiteEngineerPayingFromWallet } from "@/components/expenses/walletPayerLock";
 
 interface InitiateBatchSettlementDialogProps {
   open: boolean;
@@ -63,7 +64,12 @@ export default function InitiateBatchSettlementDialog({
   amount,
 }: InitiateBatchSettlementDialogProps) {
   const isMobile = useIsMobile();
-  const { user } = useAuth();
+  const { user, userProfile } = useAuth();
+  const walletOnly = isSiteEngineerPayingFromWallet({
+    userRole: userProfile?.role,
+    payerType: "site_engineer",
+    createWalletTransaction: true,
+  });
 
   // Hooks
   const { data: batchSummary } = useBatchSettlementSummary(batchRefCode);
@@ -469,16 +475,18 @@ export default function InitiateBatchSettlementDialog({
 
           {/* Payer Source — captured on the debtor BEXP-* row so /site/expenses
               can show which money pool funded this settlement. */}
-          <Grid size={12}>
-            <PayerSourceSelector
-              value={payerSource}
-              customName={payerName}
-              onChange={setPayerSource}
-              onCustomNameChange={setPayerName}
-              siteId={debtorSiteId}
-              compact
-            />
-          </Grid>
+          {!walletOnly && (
+            <Grid size={12}>
+              <PayerSourceSelector
+                value={payerSource}
+                customName={payerName}
+                onChange={setPayerSource}
+                onCustomNameChange={setPayerName}
+                siteId={debtorSiteId}
+                compact
+              />
+            </Grid>
+          )}
 
           {/* Info Alert */}
           <Grid size={12}>
