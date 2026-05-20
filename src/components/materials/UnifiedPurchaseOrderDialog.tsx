@@ -531,6 +531,54 @@ export default function UnifiedPurchaseOrderDialog({
     }
   }, [isRequestMode, requestItems, requestItemsState.length]);
 
+  // Auto-pick vendor when every request line agrees on the same suggested vendor
+  // (e.g. a basket built on /company/calculator where the engineer picked one vendor
+  // for all lines). Only fires once per dialog opening, and only when no vendor is
+  // already prefilled — keeps the office user's manual choice intact.
+  const hasAppliedSuggestedVendor = useRef(false);
+  useEffect(() => {
+    if (!open) {
+      hasAppliedSuggestedVendor.current = false;
+      return;
+    }
+    if (
+      hasAppliedSuggestedVendor.current ||
+      !isRequestMode ||
+      selectedVendor ||
+      requestItemsState.length === 0 ||
+      vendors.length === 0
+    ) {
+      return;
+    }
+    const firstId = requestItemsState[0]?.suggested_vendor_id ?? null;
+    const unanimous =
+      firstId !== null &&
+      requestItemsState.every((it) => it.suggested_vendor_id === firstId);
+    if (!unanimous) return;
+    const match = vendors.find((v) => v.id === firstId);
+    if (match) {
+      setSelectedVendor(match);
+      hasAppliedSuggestedVendor.current = true;
+    }
+  }, [open, isRequestMode, selectedVendor, requestItemsState, vendors]);
+
+  // Reset per-row unit_price when the dialog's vendor changes so the row-level
+  // useVendorMaterialPrice catalog auto-fill (or the suggestion seed for matching
+  // vendors) can re-fire. Skip the initial render and skip when prices were just
+  // seeded from a freshly fetched request — only act on genuine vendor swaps.
+  const prevVendorIdRef = useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    if (!isRequestMode) return;
+    const currentId = selectedVendor?.id ?? null;
+    const prev = prevVendorIdRef.current;
+    prevVendorIdRef.current = currentId;
+    if (prev === undefined) return; // first observation — nothing to reset
+    if (prev === currentId) return;
+    setRequestItemsState((prev2) =>
+      prev2.map((item) => ({ ...item, unit_price: 0, tax_rate: 0 })),
+    );
+  }, [isRequestMode, selectedVendor?.id]);
+
   // Reset request items state when dialog closes
   useEffect(() => {
     if (!open) {

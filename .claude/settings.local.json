@@ -397,7 +397,10 @@
       "Bash(Get-Content -Path \"C:\\\\Users\\\\Haribabu\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-Haribabu-Documents-AppsCopilot-AestaManagementApp\\\\76a50d05-139b-4eb8-ac3c-9c0515d60dc1\\\\tasks\\\\bsvtphegk.output\" -Tail 20)",
       "Bash(Get-Content \"C:\\\\Users\\\\Haribabu\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-Haribabu-Documents-AppsCopilot-AestaManagementApp\\\\76a50d05-139b-4eb8-ac3c-9c0515d60dc1\\\\tasks\\\\btbu5yl81.output\" -Tail 50)",
       "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\Haribabu\\\\Documents\\\\AppsCopilot\\\\AestaManagementApp\" -Recurse -Filter \"*calculator*\" -ErrorAction SilentlyContinue)",
-      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\Haribabu\\\\Documents\\\\AppsCopilot\\\\AestaManagementApp\" -Recurse -Directory -ErrorAction SilentlyContinue)"
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\Haribabu\\\\Documents\\\\AppsCopilot\\\\AestaManagementApp\" -Recurse -Directory -ErrorAction SilentlyContinue)",
+      "PowerShell($r = Invoke-WebRequest -Uri \"http://localhost:3000/_next/static/chunks/webpack.js\" -UseBasicParsing -ErrorAction SilentlyContinue; \"webpack: $\\($r.StatusCode\\)\"; $r2 = Invoke-WebRequest -Uri \"http://localhost:3000/\" -UseBasicParsing -ErrorAction SilentlyContinue; \"root: $\\($r2.StatusCode\\)\")",
+      "Skill(using-superpowers)",
+      "Skill(using-superpowers:*)"
     ],
     "deny": [],
     "ask": [],

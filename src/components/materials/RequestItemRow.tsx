@@ -121,6 +121,35 @@ export default function RequestItemRow({
     item.selected_brand_id
   );
 
+  // Reset the once-per-mount auto-fill latch whenever the vendor/brand/variant
+  // changes so the suggestion seed and the catalog auto-fill below can re-run
+  // for the new combination. Without this the row would freeze at its first
+  // auto-filled price even after the office user swaps vendors.
+  // Declared first so it runs before the seed/catalog effects on a vendor swap.
+  useEffect(() => {
+    hasAutoFilled.current = false;
+  }, [vendorId, effectiveMaterialId, item.selected_brand_id]);
+
+  // If the row carries a calculator-time suggestion AND the dialog's chosen
+  // vendor matches, seed unit_price from the suggestion before the catalog
+  // auto-fill can run. This is what makes the office user's PO approval dialog
+  // arrive with the engineer's basket pricing already populated.
+  useEffect(() => {
+    if (!item.selected) return;
+    if (hasAutoFilled.current) return;
+    if (
+      item.suggested_vendor_id &&
+      vendorId === item.suggested_vendor_id &&
+      item.suggested_unit_price != null &&
+      item.suggested_unit_price > 0 &&
+      item.unit_price === 0
+    ) {
+      hasAutoFilled.current = true;
+      onPriceChange(item.suggested_unit_price.toString());
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vendorId, item.selected, item.suggested_vendor_id, item.suggested_unit_price]);
+
   // Auto-fill price, GST rate, and pricing mode when price data is available (once)
   useEffect(() => {
     if (priceData && item.selected && !hasAutoFilled.current) {

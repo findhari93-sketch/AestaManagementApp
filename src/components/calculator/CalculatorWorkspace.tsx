@@ -273,6 +273,15 @@ export default function CalculatorWorkspace({
   function handleAddToBasket() {
     if (!selectedMaterialId || computedOutput <= 0) return;
 
+    const basketQuotes = displayQuotes.map((q) => ({
+      vendorId: q.vendorId,
+      vendorName: q.vendorName,
+      unitPrice: q.unitPrice,
+      subtotal: computedOutput * q.unitPrice,
+    }));
+    // Auto-pick cheapest vendor if user didn't explicitly click one
+    const effectiveVendorId = selectedVendorId ?? basketQuotes[0]?.vendorId ?? null;
+
     addItem({
       materialId: selectedMaterialId,
       materialName: selectedMaterialName,
@@ -286,13 +295,8 @@ export default function CalculatorWorkspace({
       outputLabel: effectiveTemplate.outputLabel,
       brandId: selectedBrandId,
       pricingDimensionValue: selectedBrandName,
-      vendorQuotes: displayQuotes.map((q) => ({
-        vendorId: q.vendorId,
-        vendorName: q.vendorName,
-        unitPrice: q.unitPrice,
-        subtotal: computedOutput * q.unitPrice,
-      })),
-      selectedVendorId,
+      vendorQuotes: basketQuotes,
+      selectedVendorId: effectiveVendorId,
     });
 
     showSuccess(

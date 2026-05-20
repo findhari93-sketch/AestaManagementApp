@@ -845,6 +845,8 @@ export interface MaterialRequestItem {
   estimated_cost: number | null;
   notes: string | null;
   created_at: string;
+  suggested_vendor_id: string | null;
+  suggested_unit_price: number | null;
 }
 
 // ============================================
@@ -1056,6 +1058,10 @@ export interface RequestItemForConversion {
   pricing_mode: "per_piece" | "per_kg";
   calculated_weight?: number | null;
   actual_weight?: number | null;
+  // Suggestions carried over from the request (e.g. the cost calculator's vendor + price pick)
+  suggested_vendor_id?: string | null;
+  suggested_vendor_name?: string | null;
+  suggested_unit_price?: number | null;
 }
 
 /**
@@ -1363,6 +1369,10 @@ export interface MaterialRequestItemFormData {
   requested_qty: number;
   notes?: string;
   estimated_cost?: number;
+  /** Vendor picked at request time (e.g. by the cost calculator). Pre-fills the PO approval dialog. */
+  suggested_vendor_id?: string | null;
+  /** Unit price (excl. GST) captured at request time. Pre-fills the PO approval dialog when vendor matches. */
+  suggested_unit_price?: number | null;
 }
 
 export interface PurchaseOrderFormData {

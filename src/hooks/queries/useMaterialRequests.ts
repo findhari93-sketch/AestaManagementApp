@@ -260,6 +260,9 @@ export function useCreateMaterialRequest() {
         estimated_cost: item.estimated_cost || null,
         notes: item.notes || null,
         fulfilled_qty: 0,
+        suggested_vendor_id: item.suggested_vendor_id || null,
+        suggested_unit_price:
+          item.suggested_unit_price != null ? item.suggested_unit_price : null,
       }));
 
       console.log("[useCreateMaterialRequest] Inserting", requestItems.length, "items...");
@@ -1109,8 +1112,10 @@ export function useRequestItemsForConversion(requestId: string | undefined) {
         .select(
           `
           id, material_id, brand_id, requested_qty, approved_qty, fulfilled_qty, estimated_cost,
+          suggested_vendor_id, suggested_unit_price,
           material:materials(id, name, code, unit, gst_rate, parent_id, weight_per_unit, weight_unit, length_per_piece, length_unit, image_url),
-          brand:material_brands(id, brand_name, image_url)
+          brand:material_brands(id, brand_name, image_url),
+          suggested_vendor:vendors!material_request_items_suggested_vendor_id_fkey(id, name)
         `
         )
         .eq("request_id", requestId);
@@ -1233,6 +1238,11 @@ export function useRequestItemsForConversion(requestId: string | undefined) {
           pricing_mode: (material?.weight_per_unit ? "per_kg" : "per_piece") as "per_kg" | "per_piece",
           calculated_weight: calculatedWeight,
           actual_weight: null,
+          // Calculator-time suggestions (pre-fill PO approval dialog if vendor matches)
+          suggested_vendor_id: item.suggested_vendor_id ?? null,
+          suggested_vendor_name: (item.suggested_vendor as { name?: string } | null)?.name ?? null,
+          suggested_unit_price:
+            item.suggested_unit_price != null ? Number(item.suggested_unit_price) : null,
         } as RequestItemForConversion;
       });
     },

@@ -116,9 +116,18 @@ export default function RequestApprovalDialog({
       });
       onClose();
     } catch (err: unknown) {
-      const message =
+      const rawMessage =
         err instanceof Error ? err.message : "Failed to approve request";
-      setError(message);
+      const isNetwork =
+        rawMessage.toLowerCase().includes("fetch") ||
+        rawMessage.toLowerCase().includes("network") ||
+        rawMessage.toLowerCase().includes("timeout") ||
+        rawMessage.toLowerCase().includes("err_name_not_resolved");
+      setError(
+        isNetwork
+          ? `${rawMessage}. Your typed quantities are saved — just click "Approve Request" again when you're back online.`
+          : rawMessage,
+      );
     }
   };
 
@@ -243,14 +252,29 @@ export default function RequestApprovalDialog({
                       {item.unit}
                     </Typography>
                     {item.notes && (
-                      <Typography
-                        variant="caption"
-                        color="text.secondary"
-                        display="block"
-                        sx={{ mt: 0.25, fontStyle: "italic" }}
+                      <Box
+                        sx={{
+                          mt: 0.5,
+                          px: 1,
+                          py: 0.5,
+                          bgcolor: "action.hover",
+                          borderLeft: 3,
+                          borderColor: "primary.main",
+                          borderRadius: 0.5,
+                        }}
                       >
-                        {item.notes}
-                      </Typography>
+                        {item.notes.split("\n").map((line, i) => (
+                          <Typography
+                            key={i}
+                            variant="caption"
+                            color="text.primary"
+                            display="block"
+                            sx={{ lineHeight: 1.4, whiteSpace: "pre-wrap" }}
+                          >
+                            {line}
+                          </Typography>
+                        ))}
+                      </Box>
                     )}
                   </TableCell>
                   <TableCell align="right">{item.requested_qty}</TableCell>

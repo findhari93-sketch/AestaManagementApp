@@ -31,11 +31,20 @@ export function calculateLinearCost(qty: number, unitPrice: number): number {
   return qty * unitPrice;
 }
 
-/** Format a number as Indian Rupees (no decimals). */
+/** Format a number as Indian Rupees (no decimals).
+ * Manual formatter avoids Node.js vs browser Intl locale divergence
+ * that causes React hydration mismatches on SSR-ed pages.
+ */
 export function formatINR(amount: number): string {
-  return new Intl.NumberFormat('en-IN', {
-    style: 'currency',
-    currency: 'INR',
-    maximumFractionDigits: 0,
-  }).format(amount);
+  const rounded = Math.round(amount);
+  const str = Math.abs(rounded).toString();
+  let formatted: string;
+  if (str.length <= 3) {
+    formatted = str;
+  } else {
+    const last3 = str.slice(-3);
+    const rest = str.slice(0, -3);
+    formatted = rest.replace(/\B(?=(\d{2})+(?!\d))/g, ',') + ',' + last3;
+  }
+  return (rounded < 0 ? '-₹' : '₹') + formatted;
 }

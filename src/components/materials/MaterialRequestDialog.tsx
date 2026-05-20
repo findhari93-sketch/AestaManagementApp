@@ -68,6 +68,10 @@ export type MRInitialItem = {
   brandId?: string | null;
   /** Display unit override — needed when the brand's price unit (e.g. cft, ft) differs from material.unit. */
   unit?: string;
+  /** Vendor the requester picked at calculator time — pre-fills PO approval dialog. */
+  vendorId?: string | null;
+  /** Unit price (excl. GST) captured at calculator time — pre-fills PO approval dialog when vendor matches. */
+  unitPrice?: number | null;
 };
 
 interface MaterialRequestDialogProps {
@@ -84,6 +88,9 @@ interface RequestItemRow extends MaterialRequestItemFormData {
   unit?: string;
   availableStock?: number;
   first_batch_qty?: number;
+  // `suggested_vendor_id` + `suggested_unit_price` are inherited from
+  // MaterialRequestItemFormData and only set when the row was prefilled
+  // from the cost calculator (so `useCreateMaterialRequest` can persist them).
 }
 
 const PRIORITY_OPTIONS: { value: RequestPriority; label: string }[] = [
@@ -292,6 +299,8 @@ export default function MaterialRequestDialog({
             // Honour the basket's pricing unit (cft / ft) over the catalog default (piece).
             unit: item.unit ?? mat?.unit,
             availableStock: getAvailableStock(item.materialId),
+            suggested_vendor_id: item.vendorId ?? null,
+            suggested_unit_price: item.unitPrice ?? null,
           };
         });
         setItems(prefilled);
@@ -508,6 +517,8 @@ export default function MaterialRequestDialog({
               brand_id: item.brand_id,
               requested_qty: item.requested_qty,
               notes: batchNote || undefined,
+              suggested_vendor_id: item.suggested_vendor_id ?? null,
+              suggested_unit_price: item.suggested_unit_price ?? null,
             };
           }),
         });

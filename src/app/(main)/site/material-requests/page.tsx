@@ -425,7 +425,7 @@ export default function MaterialRequestsPage() {
                     color: "primary.main",
                     "&:hover": { textDecoration: "underline" },
                   }}
-                  onClick={() => window.open(`/site/purchase-orders?highlight=${po.id}`, "_blank")}
+                  onClick={(e) => { e.stopPropagation(); setSelectedRequestId(row.original.id); }}
                 >
                   → {po.po_number}
                 </Typography>
@@ -457,7 +457,10 @@ export default function MaterialRequestsPage() {
                 </Box>
               }
             >
-              <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+              <Box
+                sx={{ display: "flex", alignItems: "center", gap: 0.5, cursor: "pointer" }}
+                onClick={(e) => { e.stopPropagation(); setSelectedRequestId(row.original.id); }}
+              >
                 <Typography variant="body2" color="primary.main">
                   {summary.totalLinkedPOs} POs
                 </Typography>
@@ -886,9 +889,7 @@ export default function MaterialRequestsPage() {
         mobileHiddenColumns={mobileHiddenColumns}
         initialState={tableInitialState}
         muiTableBodyRowProps={({ row }) => ({
-          onClick: () => setSelectedRequestId(row.original.id),
           sx: {
-            cursor: "pointer",
             backgroundColor:
               selectedRequestId === row.original.id
                 ? `${theme.palette.action.selected} !important`

@@ -48,6 +48,7 @@ function BasketItemRow({
   item: EstimateItem;
   onRemove: () => void;
 }) {
+  const { updateItem } = useEstimateBasket();
   const selectedQuote = item.selectedVendorId
     ? item.vendorQuotes.find((q) => q.vendorId === item.selectedVendorId)
     : null;
@@ -99,13 +100,42 @@ function BasketItemRow({
 
           {/* Vendor + subtotal */}
           {selectedQuote ? (
-            <Box sx={{ mt: 0.5, display: "flex", gap: 1, alignItems: "baseline" }}>
+            <Box sx={{ mt: 0.5, display: "flex", gap: 1, alignItems: "baseline", flexWrap: "wrap" }}>
               <Typography variant="caption" color="text.secondary">
                 {selectedQuote.vendorName}
               </Typography>
               <Typography variant="caption" fontWeight={700} color="text.primary">
                 {formatINR(selectedQuote.subtotal)}
               </Typography>
+              {item.vendorQuotes.length > 1 && (
+                <Typography
+                  variant="caption"
+                  color="primary.main"
+                  sx={{ cursor: "pointer", textDecoration: "underline" }}
+                  onClick={() => updateItem(item.id, { selectedVendorId: null })}
+                >
+                  change
+                </Typography>
+              )}
+            </Box>
+          ) : item.vendorQuotes.length > 0 ? (
+            <Box sx={{ mt: 0.5 }}>
+              <Typography variant="caption" color="warning.main" display="block">
+                Tap to select vendor:
+              </Typography>
+              <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5, mt: 0.25 }}>
+                {item.vendorQuotes.map((q) => (
+                  <Chip
+                    key={q.vendorId}
+                    label={`${q.vendorName} · ${formatINR(q.subtotal)}`}
+                    size="small"
+                    variant="outlined"
+                    color="primary"
+                    onClick={() => updateItem(item.id, { selectedVendorId: q.vendorId })}
+                    sx={{ fontSize: "0.65rem", height: 20, cursor: "pointer" }}
+                  />
+                ))}
+              </Box>
             </Box>
           ) : (
             <Typography
@@ -114,7 +144,7 @@ function BasketItemRow({
               display="block"
               sx={{ mt: 0.5 }}
             >
-              No vendor selected
+              No vendor on record
             </Typography>
           )}
         </Box>
