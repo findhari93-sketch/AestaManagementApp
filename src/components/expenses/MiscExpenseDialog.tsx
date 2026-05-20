@@ -164,11 +164,13 @@ export default function MiscExpenseDialog({
     }
   }, [open, expense, isEditMode, defaultSubcontractId]);
 
-  // Site engineers always pay via their own wallet — auto-select and pre-fill.
+  // Site engineers always pay via their own wallet — auto-select, pre-fill, and
+  // force the wallet debit so there is no opt-out path to a "company direct" record.
   useEffect(() => {
     if (isSiteEngineer && userProfile?.id && !isEditMode) {
       setPayerType("site_engineer");
       setSelectedEngineerId(userProfile.id);
+      setCreateWalletTransaction(true);
     }
   }, [isSiteEngineer, userProfile?.id, isEditMode]);
 
@@ -488,7 +490,7 @@ export default function MiscExpenseDialog({
                     setSelectedEngineerId(e.target.value);
                       }}
                   label="Select Engineer"
-                  disabled={isEditMode}
+                  disabled={isEditMode || isSiteEngineer}
                 >
                   {engineers.map((eng) => (
                     <MenuItem key={eng.id} value={eng.id}>
@@ -509,23 +511,30 @@ export default function MiscExpenseDialog({
               </FormControl>
 
               {!isEditMode && selectedEngineerId && (
-                <FormControlLabel
-                  control={
-                    <Checkbox
-                      checked={createWalletTransaction}
-                      onChange={(e) => setCreateWalletTransaction(e.target.checked)}
-                      size="small"
-                    />
-                  }
-                  label={
-                    <Box>
-                      <Typography variant="body2">Deduct from wallet</Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        Debits the engineer&apos;s LIFO wallet pool for this site
-                      </Typography>
-                    </Box>
-                  }
-                />
+                isSiteEngineer ? (
+                  <Alert severity="info" sx={{ mt: 1 }}>
+                    Wallet auto-debit: ON. Site engineer purchases must always settle
+                    from your own site wallet — no direct-pay option.
+                  </Alert>
+                ) : (
+                  <FormControlLabel
+                    control={
+                      <Checkbox
+                        checked={createWalletTransaction}
+                        onChange={(e) => setCreateWalletTransaction(e.target.checked)}
+                        size="small"
+                      />
+                    }
+                    label={
+                      <Box>
+                        <Typography variant="body2">Deduct from wallet</Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          Debits the engineer&apos;s LIFO wallet pool for this site
+                        </Typography>
+                      </Box>
+                    }
+                  />
+                )
               )}
             </Box>
           )}
