@@ -1196,7 +1196,7 @@ export function useSiteMaterialExpenses(siteId: string | undefined) {
           .select(`
             *,
             vendor:vendors(id, name, qr_code_url, upi_id),
-            purchase_order:purchase_orders(id, po_number, vendor_bill_url, bill_verified, total_amount, transport_cost),
+            purchase_order:purchase_orders(id, po_number, vendor_bill_url, bill_verified, subtotal, tax_amount, discount_amount, transport_cost, other_charges, total_amount),
             paying_site:sites!material_purchase_expenses_paying_site_id_fkey(id, name),
             items:material_purchase_expense_items(
               *,
@@ -1236,7 +1236,7 @@ export function useSiteMaterialExpenses(siteId: string | undefined) {
             .select(`
               *,
               vendor:vendors(id, name, qr_code_url, upi_id),
-              purchase_order:purchase_orders(id, po_number, vendor_bill_url, bill_verified, total_amount, transport_cost),
+              purchase_order:purchase_orders(id, po_number, vendor_bill_url, bill_verified, subtotal, tax_amount, discount_amount, transport_cost, other_charges, total_amount),
               paying_site:sites!material_purchase_expenses_paying_site_id_fkey(id, name),
               items:material_purchase_expense_items(
                 *,
@@ -1331,17 +1331,17 @@ export function useSiteMaterialExpenses(siteId: string | undefined) {
         })));
         console.log("[useSiteMaterialExpenses] Fetched advance POs:", advancePOs.length);
 
-        // Calculate total from both expenses and advance POs (include transport costs)
+        // purchase_orders.total_amount already includes transport_cost (see
+        // usePurchaseOrders save path). Adding transport_cost on top here was
+        // the cause of the "₹100 too high" KPI shown in production.
         const expensesTotal = expenses.reduce((sum, exp) => {
-          // For expenses with linked PO, use PO's total_amount + transport_cost
           if (exp.purchase_order?.total_amount) {
-            return sum + Number(exp.purchase_order.total_amount) + Number(exp.purchase_order.transport_cost || 0);
+            return sum + Number(exp.purchase_order.total_amount);
           }
-          // For direct expenses (no PO), total_amount already includes transport
           return sum + Number(exp.total_amount || 0);
         }, 0);
         const advancePOsTotal = advancePOs.reduce(
-          (sum, po) => sum + Number(po.total_amount || 0) + Number(po.transport_cost || 0), 0
+          (sum, po) => sum + Number(po.total_amount || 0), 0
         );
         const total = expensesTotal + advancePOsTotal;
 

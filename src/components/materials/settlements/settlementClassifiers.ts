@@ -42,15 +42,16 @@ export function getSourceKind(item: SettlementItem): SourceKind {
 }
 
 export function getItemAmount(item: SettlementItem): number {
+  // purchase_orders.total_amount already includes transport_cost (the PO save
+  // path stamps it as subtotal + tax + transport — see usePurchaseOrders.ts).
+  // Adding transport_cost on top of total_amount here was the source of the
+  // "₹100 too high" display bug.
   if (item.itemType === "po") {
-    return Number(item.total_amount || 0) + Number(item.transport_cost || 0);
+    return Number(item.total_amount || 0);
   }
   const purchase = item as MaterialPurchaseExpenseWithDetails;
   if (purchase.purchase_order?.total_amount) {
-    return (
-      Number(purchase.purchase_order.total_amount) +
-      Number(purchase.purchase_order.transport_cost || 0)
-    );
+    return Number(purchase.purchase_order.total_amount);
   }
   return Number(purchase.total_amount || 0);
 }
