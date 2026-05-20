@@ -54,11 +54,22 @@ export default function WalletBalanceCard({
         <Typography
           variant="body1"
           fontWeight={600}
-          color={isInsufficient ? "error.main" : "success.main"}
+          color={isInsufficient ? "warning.main" : "success.main"}
         >
           ₹{balance.toLocaleString("en-IN")}
         </Typography>
       </Box>
+
+      {isInsufficient && (
+        <Box display="flex" justifyContent="space-between" alignItems="center">
+          <Typography variant="body2" color="text.secondary">
+            After this payment
+          </Typography>
+          <Typography variant="body2" fontWeight={600} color="warning.main">
+            ₹{(balance - amount).toLocaleString("en-IN")}
+          </Typography>
+        </Box>
+      )}
 
       {!hasNoDeposit && (
         <Box display="flex" justifyContent="space-between" alignItems="center">
@@ -102,8 +113,8 @@ export default function WalletBalanceCard({
       </Collapse>
 
       {isInsufficient && (
-        <Alert severity="error" sx={{ mt: 1 }}>
-          Insufficient wallet balance
+        <Alert severity="warning" sx={{ mt: 1 }}>
+          Wallet will go negative by ₹{(amount - balance).toLocaleString("en-IN")} — office will owe you this amount until next deposit
         </Alert>
       )}
 

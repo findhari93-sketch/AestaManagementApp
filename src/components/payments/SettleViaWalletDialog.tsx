@@ -117,6 +117,9 @@ export default function SettleViaWalletDialog({
   const amountNum = Number(currentAmount);
   const amountValid = Number.isFinite(amountNum) && amountNum > 0;
   const overMax = typeof maxAmount === "number" && amountNum > maxAmount;
+  // Wallet pool may go negative — the deficit is an IOU the office owes the
+  // engineer (atomic_record_wallet_spend allows it by design). We surface
+  // this as a warning in WalletBalanceCard but do not block the action.
   const isInsufficient = balance < amountNum && !allowPartial;
   const needsCustomName =
     requiresPayerName(payerSource) && !customName.trim();
@@ -132,7 +135,6 @@ export default function SettleViaWalletDialog({
     !isLoading &&
     amountValid &&
     !overMax &&
-    !isInsufficient &&
     !hasNoDeposit &&
     !needsCustomName &&
     (!showPaymentDate || paymentDateValid) &&

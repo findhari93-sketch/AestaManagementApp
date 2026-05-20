@@ -669,11 +669,12 @@ export default function MaterialSettlementDialog({
                   const paying = Number(amountPaid) || purchaseAmount;
                   const remaining = walletBalance - paying;
                   const isShort = walletBalance < paying;
+                  const deficit = paying - walletBalance;
                   return (
                     <>
                       <Box display="flex" justifyContent="space-between">
                         <Typography variant="body2" color="text.secondary">Wallet balance</Typography>
-                        <Typography variant="body2" fontWeight={600} color={isShort ? "error.main" : "success.main"}>
+                        <Typography variant="body2" fontWeight={600} color={isShort ? "warning.main" : "success.main"}>
                           ₹{walletBalance.toLocaleString("en-IN")}
                         </Typography>
                       </Box>
@@ -685,13 +686,13 @@ export default function MaterialSettlementDialog({
                       )}
                       <Box display="flex" justifyContent="space-between">
                         <Typography variant="body2" color="text.secondary">After this payment</Typography>
-                        <Typography variant="body2" fontWeight={600} color={remaining < 0 ? "error.main" : "text.primary"}>
+                        <Typography variant="body2" fontWeight={600} color={remaining < 0 ? "warning.main" : "text.primary"}>
                           ₹{remaining.toLocaleString("en-IN")}
                         </Typography>
                       </Box>
                       {isShort && (
-                        <Alert severity="error" sx={{ mt: 0.5 }}>
-                          Insufficient wallet balance — ask admin to add funds
+                        <Alert severity="warning" sx={{ mt: 0.5 }}>
+                          Wallet will go negative by ₹{deficit.toLocaleString("en-IN")} — office will owe you this amount until next deposit
                         </Alert>
                       )}
                       {!depositSourceQuery.data?.payer_source && !depositSourceQuery.isLoading && (
@@ -822,7 +823,7 @@ export default function MaterialSettlementDialog({
           disabled={
             settleMutation.isPending ||
             advancePaymentMutation.isPending ||
-            (isSiteEngineer && (balanceQuery.isLoading || walletBalance < (Number(amountPaid) || purchaseAmount) || !depositSourceQuery.data?.payer_source))
+            (isSiteEngineer && (balanceQuery.isLoading || !depositSourceQuery.data?.payer_source))
           }
           startIcon={
             (settleMutation.isPending || advancePaymentMutation.isPending) ? (

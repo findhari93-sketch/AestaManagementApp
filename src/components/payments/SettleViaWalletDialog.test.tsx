@@ -77,22 +77,22 @@ describe("SettleViaWalletDialog", () => {
     expect(screen.getByText(/Amma Money/i)).toBeInTheDocument();
   });
 
-  it("disables Confirm when balance < pending amount", () => {
+  it("allows Confirm even when balance < pending amount (wallet may go negative as IOU)", () => {
     vi.mocked(useEngineerWalletBalance).mockReturnValue({
       data: { balance: 500 },
       isLoading: false,
     } as any);
     render(<SettleViaWalletDialog {...defaultProps} />);
-    expect(screen.getByRole("button", { name: /confirm/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /confirm/i })).not.toBeDisabled();
   });
 
-  it("shows insufficient balance message when balance < amount", () => {
+  it("warns about negative wallet balance when balance < amount", () => {
     vi.mocked(useEngineerWalletBalance).mockReturnValue({
       data: { balance: 500 },
       isLoading: false,
     } as any);
     render(<SettleViaWalletDialog {...defaultProps} />);
-    expect(screen.getByText(/insufficient wallet balance/i)).toBeInTheDocument();
+    expect(screen.getByText(/wallet will go negative/i)).toBeInTheDocument();
   });
 
   it("shows no-deposit warning when LIFO source is null", () => {
