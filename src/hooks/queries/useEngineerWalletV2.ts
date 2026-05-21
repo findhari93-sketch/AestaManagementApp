@@ -113,7 +113,10 @@ export function useEngineerWalletPools(
     enabled,
     staleTime: 30_000,
     queryFn: async () => {
-      const { data, error } = await supabase
+      // Cast to any until supabase.generated.ts is regenerated to include
+      // v_engineer_wallet_pools (shipped 2026-05-21 in migration 20260521100000).
+      // Same pattern as MiscellaneousExpensesPage's expense_categories fetch.
+      const { data, error } = await (supabase as any)
         .from("v_engineer_wallet_pools")
         .select("user_id, site_id, payer_source, kind, deposited, spent, available")
         .eq("user_id", userId as string)
