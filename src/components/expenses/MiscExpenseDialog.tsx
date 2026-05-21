@@ -180,13 +180,16 @@ export default function MiscExpenseDialog({
 
   // Site engineers always pay via their own wallet — auto-select, pre-fill, and
   // force the wallet debit so there is no opt-out path to a "company direct" record.
+  // `open` is in the deps so this re-runs every time the dialog opens — otherwise
+  // the form-reset effect above clobbers payerType back to "company_direct" and the
+  // wallet-only view never activates.
   useEffect(() => {
-    if (isSiteEngineer && userProfile?.id && !isEditMode) {
+    if (open && isSiteEngineer && userProfile?.id && !isEditMode) {
       setPayerType("site_engineer");
       setSelectedEngineerId(userProfile.id);
       setCreateWalletTransaction(true);
     }
-  }, [isSiteEngineer, userProfile?.id, isEditMode]);
+  }, [open, isSiteEngineer, userProfile?.id, isEditMode]);
 
   const fetchCategories = async () => {
     try {
