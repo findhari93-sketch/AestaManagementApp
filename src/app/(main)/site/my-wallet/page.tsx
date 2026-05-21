@@ -19,9 +19,11 @@ import { useSelectedSite } from "@/contexts/SiteContext";
 import {
   useEngineerWalletBalance,
   useEngineerWalletLedger,
+  useEngineerWalletPools,
 } from "@/hooks/queries/useEngineerWalletV2";
 import WalletBalanceCard from "@/components/wallet-v2/WalletBalanceCard";
 import WalletLedgerList from "@/components/wallet-v2/WalletLedgerList";
+import WalletSourcePoolsCard from "@/components/wallet-v2/WalletSourcePoolsCard";
 import AddFundsDialog from "@/components/wallet-v2/AddFundsDialog";
 import type { WalletLedgerFilters } from "@/types/engineer-wallet-v2.types";
 
@@ -39,6 +41,7 @@ export default function MyWalletPage() {
   };
 
   const balanceQuery = useEngineerWalletBalance(userProfile?.id, selectedSite?.id);
+  const poolsQuery = useEngineerWalletPools(userProfile?.id, selectedSite?.id);
   const ledgerQuery = useEngineerWalletLedger(userProfile?.id, filters);
 
   if (!userProfile) {
@@ -109,6 +112,8 @@ export default function MyWalletPage() {
       </Box>
 
       <Stack spacing={2} sx={{ mt: 2 }}>
+        <WalletSourcePoolsCard pools={poolsQuery.data} isLoading={poolsQuery.isLoading} />
+
         <Tabs
           value={tab}
           onChange={(_, v: LedgerTab) => setTab(v)}

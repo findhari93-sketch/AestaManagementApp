@@ -40,7 +40,20 @@ export const ENGINEER_WALLET_KEYS = {
     ["engineer-wallet", "ledger", userId, filters] as const,
   enabledEngineers: (companyId: string) =>
     ["engineer-wallet", "enabled-engineers", companyId] as const,
+  pools: (userId: string, siteId: string) =>
+    ["engineer-wallet", "pools", userId, siteId] as const,
 };
+
+/** One row of v_engineer_wallet_pools — per-source pool balance per (engineer, site). */
+export interface WalletPool {
+  user_id: string;
+  site_id: string;
+  payer_source: string;
+  kind: "source" | "overdraft";
+  deposited: number;
+  spent: number;
+  available: number;
+}
 
 export const ENGINEER_WALLET_BROADCAST = "engineer-wallet-changed";
 
@@ -77,6 +90,45 @@ export function useEngineerWalletBalance(
       () => getWalletBalance(supabase, userId as string, siteId as string),
       { operationName: "useEngineerWalletBalance" }
     ),
+  });
+}
+
+/**
+ * Per-source pool balances for an engineer at one site. Drives the
+ * WalletSourcePoolsCard breakdown on /site/my-wallet — one row per
+ * payer_source (amma_money, client_money, trust_account, …) plus an optional
+ * 'overdraft' pseudo-row.
+ */
+export function useEngineerWalletPools(
+  userId: string | undefined,
+  siteId: string | undefined
+) {
+  useCrossTabInvalidate();
+  const supabase = createClient();
+  const enabled = Boolean(userId && siteId);
+  return useQuery<WalletPool[]>({
+    queryKey: enabled
+      ? ENGINEER_WALLET_KEYS.pools(userId as string, siteId as string)
+      : ["engineer-wallet", "pools", "_disabled"],
+    enabled,
+    staleTime: 30_000,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("v_engineer_wallet_pools")
+        .select("user_id, site_id, payer_source, kind, deposited, spent, available")
+        .eq("user_id", userId as string)
+        .eq("site_id", siteId as string);
+      if (error) throw error;
+      return (data ?? []).map((r: Record<string, unknown>) => ({
+        user_id: r.user_id as string,
+        site_id: r.site_id as string,
+        payer_source: r.payer_source as string,
+        kind: r.kind as "source" | "overdraft",
+        deposited: Number(r.deposited ?? 0),
+        spent: Number(r.spent ?? 0),
+        available: Number(r.available ?? 0),
+      }));
+    },
   });
 }
 
